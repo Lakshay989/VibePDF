@@ -1,0 +1,86 @@
+{
+  "_comment": "Copy this to .claude/settings.json and adjust paths. Hooks are deterministic (run 100% of the time); CLAUDE.md is advisory (~80%). Anything that MUST happen every time belongs here, not in CLAUDE.md.",
+
+  "permissions": {
+    "_comment": "Default-deny posture. Allow the safe, frequent commands so the human isn't clicking Allow every few seconds. Keep destructive and network commands gated.",
+    "allow": [
+      "Bash(npm run check)",
+      "Bash(npm run test)",
+      "Bash(npm run test:pdf)",
+      "Bash(npm run dev)",
+      "Bash(cargo check)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo test*)",
+      "Bash(cargo fmt*)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(ls*)",
+      "Bash(grep*)",
+      "Bash(rg*)",
+      "Bash(qpdf --check*)",
+      "Bash(pdftotext*)",
+      "Read(*)"
+    ],
+    "deny": [
+      "Bash(curl*)",
+      "Bash(wget*)",
+      "Bash(rm -rf*)",
+      "Bash(git push*)",
+      "Edit(src-tauri/src/security/**)",
+      "Edit(docs/02_PRODUCT_SPEC.md)",
+      "Edit(tests/fixtures/golden/**)"
+    ]
+  },
+
+  "hooks": {
+    "_comment": "PostToolUse hooks run after a file is written. These keep the tree always-formatted and catch type errors immediately, so Claude sees a clean diff and real errors fast.",
+
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATH\" | grep -qE '\\.(ts|tsx)$'; then npx prettier --write \"$CLAUDE_FILE_PATH\" && npx eslint --fix \"$CLAUDE_FILE_PATH\"; fi"
+          },
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATH\" | grep -qE '\\.rs$'; then cargo fmt -- \"$CLAUDE_FILE_PATH\"; fi"
+          }
+        ]
+      }
+    ],
+
+    "Stop": [
+      {
+        "_comment": "When Claude finishes a turn, run a fast typecheck so type errors never linger silently. Not the full test suite (too slow); just compile-level checks.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm run check --silent || echo 'WARNING: npm run check failed — there are type/lint errors in the tree.'"
+          }
+        ]
+      }
+    ],
+
+    "PreToolUse": [
+      {
+        "_comment": "Block any write that would add a network call into a PDF operation file. A crude guard, but offline-first is a hard constraint.",
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATH\" | grep -qE 'src-tauri/src/(pdf|page|convert)/' && grep -qE '(reqwest|fetch\\(|http://|https://)' \"$CLAUDE_FILE_PATH\" 2>/dev/null; then echo 'BLOCKED: network call detected in a PDF operation file. Offline-first is a hard constraint (see docs/01_VISION.md).' && exit 1; fi"
+          }
+        ]
+      }
+    ]
+  },
+
+  "env": {
+    "_comment": "Project-specific environment. Adjust for your machine.",
+    "PDFIUM_DYNAMIC_LIB_PATH": "./src-tauri/lib"
+  }
+}
