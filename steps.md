@@ -1,231 +1,70 @@
-# Phase 1 — Decoupled execution steps
+# VibePDF — Step index
 
-> Each step in this file is **independently shippable**: it lands on
-> `main` as its own commit, has its own test, and does not require a
-> later step to be merged before it works. Order is *suggested*, not
-> required. Pick any step whose dependencies (if any) are already done.
->
-> Workflow rule for this loop: **after every step, auto-commit and push
-> to `origin/main`.** No batched commits, no "I'll commit later."
+Each phase of `docs/05_ROADMAP.md` is broken into decoupled, independently
+shippable steps. The per-phase plans live under `steps/`.
 
-## Conventions for every step
+| Phase | File | Steps | Status |
+|---|---|---|---|
+| Phase 1 — Open & view | [steps/P1.md](steps/P1.md) | 18 (A1..E5) | bootstrap shipped (`c7a54f5`); rest open |
+| Phase 2 — Page operations | [steps/P2.md](steps/P2.md) | 13 (A1..D1) | not started |
+| Phase 3 — Annotations | [steps/P3.md](steps/P3.md) | 13 (A1..E2) | not started |
+| Phase 4 — Content editing | [steps/P4.md](steps/P4.md) | 14 (A1..D5) | not started |
+| Phase 5 — Forms | [steps/P5.md](steps/P5.md) | 10 (A1..C2) | not started |
+| Phase 6 — Signing & security | [steps/P6.md](steps/P6.md) | 13 (A1..D3) | not started |
+| Phase 7 — OCR & conversion | [steps/P7.md](steps/P7.md) | 10 (A1..C2) | not started |
+| Phase 8 — AI & batch | [steps/P8.md](steps/P8.md) | 10 (A1..C2) | not started |
 
-- One commit per step. Subject: `feat: <one line> (P1-VIEW-NNN)` or `chore:` / `fix:` per `docs/06_CONVENTIONS.md`.
-- Test before commit. If a step has no automated test (some UI work doesn't), the commit body must say `manual: <what was clicked, what was observed>`.
-- Update `steps.md` at the end of the commit: change the step's status from `[ ]` to `[x]`, add the commit SHA in the brackets after the title.
-- Never refactor more than the step requires. Cleanup is its own step.
-- Files listed under **Touches** are the *expected* surface area. Any file outside the list needs a one-line justification in the commit body.
-
-## Status legend
-
-- `[ ]` not started
-- `[~]` in progress (uncommitted local changes)
-- `[x] <sha>` shipped on `main`
+**Total:** 101 steps. Every `P<n>-...` spec line in
+`docs/02_PRODUCT_SPEC.md` is referenced in exactly one step; the
+remainder are cross-cutting infrastructure (save, autosave, undo,
+actor, annotation framework, text engine, signature library, OCR
+pipeline, ONNX runtime).
 
 ---
 
-## Track A — Open & I/O (no shared state with other tracks)
+## Step ID convention
 
-### A1. `[ ]` Drag-and-drop file open
-- **Spec:** P1-VIEW-001
-- **Touches (new):** `src/app/drag-drop.ts`
-- **Touches (modify):** `src/app/App.tsx` (mount the listener)
-- **What:** Subscribe to Tauri's `tauri://drag-drop` window event, validate the dropped path ends in `.pdf`, route it through the existing `openPdfPath` IPC wrapper.
-- **Acceptance:** Drop a PDF onto the running window → it opens as a tab. Drop a non-PDF → toast "Only .pdf files are accepted." Drop multiple → open each.
-- **Test:** `src/app/__tests__/drag-drop.test.ts` — pure unit test on the path-filter function. UI wiring is manual (`manual:` line in commit body).
-- **Depends on:** none.
+Every step has a globally unique ID: **`P<phase>.<track><num>`**.
 
-### A2. `[ ]` CLI-arg file open
-- **Spec:** P1-VIEW-001
-- **Touches (new):** `src-tauri/src/commands/cli.rs`
-- **Touches (modify):** `src-tauri/src/lib.rs` (read `std::env::args` in `setup`, emit `cli-open` event with each `.pdf` path)
-- **What:** When the binary is launched with one or more PDF paths, emit them as `cli-open` events the frontend can subscribe to.
-- **Acceptance:** `./vibepdf foo.pdf bar.pdf` opens two tabs.
-- **Test:** `src-tauri/tests/cli_open.rs` — invoke the arg parser as a pure function and assert filtered list.
-- **Depends on:** none.
+- `P2.A3` = Phase 2, Track A, step 3.
+- Tracks are per-phase groupings (e.g. P2 uses A = Save infra, B = Single-page ops, C = Multi-page ops, D = From-other-PDF).
+- Step IDs are stable. Once published they don't get renumbered. If a step is removed, its ID is left blank, never reused.
 
-### A3. `[ ]` Recents (last 20, clearable, persisted)
-- **Spec:** P1-VIEW-012
-- **Touches (new):** `src-tauri/src/commands/recents.rs`, `src-tauri/src/settings/recents.rs`
-- **Touches (modify):** `src/state/settings-store.ts` (replace localStorage with IPC), `src/app/App.tsx` (empty-state list)
-- **What:** Persist recents to `<app_data_dir>/recents.json` via Tauri. Frontend mirrors the list. Clear-all button on the empty state.
-- **Acceptance:** Open 25 PDFs over time → last 20 listed, oldest pruned. "Clear recents" empties both UI and disk file. Restart → list survives.
-- **Test:** `src-tauri/tests/recents.rs` — round-trip serialize/deserialize, cap-at-20 invariant.
-- **Depends on:** none.
+## Commit convention
 
----
+Every commit that ships a step must reference the step ID **and** the spec ID:
 
-## Track B — Document engine (the actor and PDFium)
+```
+feat: rotate page(s) with persistence (P2.B1 / P2-PAGE-001)
+```
 
-### B1. `[ ]` Real document actor (replace stub)
-- **Spec:** infrastructure for P2-* onward; unblocks B2 and most of Track D
-- **Touches (modify):** `src-tauri/src/pdf/actor.rs`, `src-tauri/src/pdf/document.rs`, `src-tauri/src/commands/pdf.rs`
-- **What:** Replace the `DocumentActorHandle` stub with a dedicated `std::thread` that owns the `PdfDocument`, processes `Message::{GetPageCount, GetMetadata, RenderThumbnail, Close}` via `mpsc`, and emits `tauri::Event::DocumentChanged`.
-- **Acceptance:** Open three PDFs; assert each has its own thread (via `tracing` span) and replying to `GetPageCount` is O(µs).
-- **Test:** `src-tauri/tests/actor_smoke.rs` — spawn an actor on hello.pdf, send `GetPageCount`, assert `1` and clean shutdown on drop.
-- **Depends on:** none. (Replaces a stub.)
+For infrastructure steps that don't map to a `P<phase>-...` spec ID, reference the step ID alone:
 
-### B2. `[ ]` Encrypted-PDF password prompt
-- **Spec:** P1-VIEW-003
-- **Touches (new):** `src/app/PasswordPromptDialog.tsx`
-- **Touches (modify):** `src-tauri/src/pdf/document.rs` (retry up to 3 with caller-supplied password), `src/ipc/pdf.ts` (`openPdfPath` accepts optional `password`), `src/app/App.tsx` (catch `CommandError.code === "PasswordRequired"` and show dialog)
-- **What:** Backend returns `PasswordRequired` on encrypted opens. Frontend shows a modal, retries up to 3 times. Password never written to disk; held in `useState` of the dialog, cleared on unmount.
-- **Acceptance:** Open `tests/fixtures/edge-cases/encrypted-pw-foo.pdf` → prompted → wrong password 3× → "Could not unlock." 4th attempt is blocked.
-- **Test:** `src-tauri/tests/encrypted_open.rs` — open without password → expect error; open with wrong password → expect error; open with right password → success.
-- **Depends on:** B1 (actor must accept a `Password` field on `Open`).
+```
+feat: undo/redo stack with page-level granularity (P2.A3)
+```
 
-### B3. `[ ]` Document actor: render-page-to-bitmap message
-- **Spec:** infrastructure for D1 (thumbnails) and later phases
-- **Touches (modify):** `src-tauri/src/pdf/actor.rs`, `src-tauri/src/commands/pdf.rs`
-- **Touches (new):** `src-tauri/src/pdf/render.rs`
-- **What:** Add `Message::RenderPage { page, dpi, format: Png | Rgba8 }` returning the encoded bytes through the IPC layer.
-- **Acceptance:** Backend can render any page of hello.pdf to a 72 DPI PNG ≤ 50 ms.
-- **Test:** `src-tauri/tests/render_to_png.rs` — render hello.pdf page 1, assert PNG magic bytes and non-zero pixels.
-- **Depends on:** B1.
+This makes back-tracking trivial:
+- **commit → step:** `git log --grep="P2.B1"`
+- **commit → spec:** `git log --grep="P2-PAGE-001"`
+- **step → commits:** look at the `[x] <sha>` annotation in the step doc
+- **spec → step:** every spec line is referenced in exactly one step file
 
----
+## Workflow rule
 
-## Track C — Viewer surface (rendering & navigation)
+After every step's acceptance criteria are met:
+1. Update the step in its phase doc from `[ ]` to `[x] <sha>` in the same commit.
+2. Push to `origin/main` immediately. No batched commits.
+3. If verification couldn't run locally (toolchain missing, etc.), say so in the commit body — don't claim a green check we didn't actually get.
 
-### C1. `[ ]` Virtual-scrolling page list
-- **Spec:** P1-VIEW-005, NFR-PERF-003
-- **Touches (rewrite):** `src/view/PdfViewer.tsx`
-- **Touches (new):** `src/view/PageVirtualizer.tsx`, `src/view/page-cache.ts`
-- **What:** Replace the single-page bootstrap render with an IntersectionObserver-driven virtualizer that mounts only pages within ±2 viewport heights. LRU page-bitmap cache sized to 50 pages.
-- **Acceptance:** Open a 500-page PDF; only ≤7 page canvases exist in the DOM at any scroll position. Scrolling from page 1 → 500 takes <10 s on the dev machine.
-- **Test:** `src/view/__tests__/page-cache.test.ts` — LRU eviction at capacity. UI is `manual:`.
-- **Depends on:** none. (Replaces the bootstrap renderer.)
+Doc-only edits to the step files themselves (rewording, fixing a typo, adding context) **can** be batched. The "one commit per step" rule applies to feature steps, not doc maintenance.
 
-### C2. `[ ]` Zoom + fit modes, persisted per document
-- **Spec:** P1-VIEW-006
-- **Touches (modify):** `src/state/view-store.ts`, `src/view/PdfViewer.tsx`
-- **Touches (new):** `src/app/ZoomToolbar.tsx`, `src/state/view-persistence.ts`
-- **What:** Toolbar with `–`/`+` buttons, fit-mode dropdown (Actual / Fit Page / Fit Width / Fit Height), Cmd/Ctrl+`=`/`-`/`0` shortcuts. Persist per-document via IndexedDB keyed by the document path's SHA-256.
-- **Acceptance:** Set zoom to 175% on doc A, fit-width on doc B, close & reopen both → settings restored.
-- **Test:** `src/state/__tests__/view-persistence.test.ts` — IDB round-trip.
-- **Depends on:** none.
+## Phase gating
 
-### C3. `[ ]` Keyboard navigation
-- **Spec:** P1-VIEW-005
-- **Touches (new):** `src/view/keyboard-nav.ts`
-- **Touches (modify):** `src/view/PdfViewer.tsx`
-- **What:** PageUp/Down → next/prev page. Home/End → first/last. Arrow keys when no input is focused → scroll by one viewport line.
-- **Acceptance:** Manual — all five keys do the right thing on a 100-page doc.
-- **Test:** `src/view/__tests__/keyboard-nav.test.ts` — pure-function key→intent mapping.
-- **Depends on:** C1 (virtualizer exposes `scrollToPage`).
+`docs/05_ROADMAP.md` is sequential by design. Do not start Phase N+1 steps while Phase N still has open `[ ]` items, except for phase-spanning infrastructure that's explicitly called out.
 
-### C4. `[ ]` Text search (Cmd/Ctrl+F)
-- **Spec:** P1-VIEW-007
-- **Touches (new):** `src/app/SearchBar.tsx`, `src/view/search.ts`, `src/state/search-store.ts`
-- **What:** PDF.js text-layer search. Case-sensitive and whole-word toggles. Next/prev navigation. Match-count badge.
-- **Acceptance:** Search "the" in a 100-page PDF → all matches highlighted within 5 s; next/prev cycles through them.
-- **Test:** `src/view/__tests__/search.test.ts` — match `findRanges()` on a fixed string.
-- **Depends on:** C1 (search jumps via `scrollToPage`).
+## How to pick the next step
 
-### C5. `[ ]` Dark mode page invert
-- **Spec:** P1-VIEW-010
-- **Touches (modify):** `src/view/render-page.ts`, `src/view/PdfViewer.tsx`
-- **Touches (new):** `src/view/dark-invert.ts`
-- **What:** When `documentElement.classList.contains("dark")`, post-process each rendered canvas via an offscreen luminance-invert filter that excludes pixels inside the page's image regions (PDF.js exposes them as `Image` ops in the operator list).
-- **Acceptance:** Open a PDF with photos in dark mode → page bg becomes near-black, text inverts, photos look normal.
-- **Test:** `src/view/__tests__/dark-invert.test.ts` — invert a known canvas and check a sampled pixel.
-- **Depends on:** C1.
-
----
-
-## Track D — Sidebars (panels)
-
-### D1. `[ ]` Thumbnails sidebar with lazy generation
-- **Spec:** P1-VIEW-008
-- **Touches (rewrite):** `src/panels/ThumbnailPanel.tsx`
-- **Touches (new):** `src/panels/thumbnail-cache.ts`, `src/ipc/render.ts`
-- **What:** Collapsible left sidebar. As thumbnail tiles enter the viewport, request a 96-px-wide PNG from the backend via the new `pdf_render_page` command. Cache in IndexedDB keyed by `(documentId, page, dpr)`.
-- **Acceptance:** Open a 500-page PDF; first 20 thumbnails appear under 1 s; scrolling reveals more lazily.
-- **Test:** `src/panels/__tests__/thumbnail-cache.test.ts` — IDB hit/miss.
-- **Depends on:** B3.
-
-### D2. `[ ]` Outline sidebar
-- **Spec:** P1-VIEW-009
-- **Touches (rewrite):** `src/panels/OutlinePanel.tsx`
-- **Touches (new):** `src/panels/outline-tree.ts`
-- **What:** Pull `getOutline()` from PDF.js, render as collapsible tree. Clicking an entry calls `scrollToPage` with the resolved page number.
-- **Acceptance:** Open a PDF with bookmarks → tree renders. Click → jumps. Open a PDF without bookmarks → panel shows "No outline."
-- **Test:** `src/panels/__tests__/outline-tree.test.ts` — outline-to-tree normalization on a recorded fixture.
-- **Depends on:** C1 (uses `scrollToPage`).
-
----
-
-## Track E — Polish & verification (no user-visible features)
-
-### E1. `[ ]` Multi-document tab persistence
-- **Spec:** P1-VIEW-011
-- **Touches (modify):** `src/state/document-store.ts`, `src-tauri/src/settings/recents.rs` (reuse)
-- **What:** On startup, re-open the tabs that were open at last quit (file paths only; positions live in C2's per-doc IDB).
-- **Acceptance:** Open 3 PDFs, quit, relaunch → 3 tabs restored, same active tab.
-- **Test:** `src-tauri/tests/session_restore.rs`.
-- **Depends on:** A3 (uses the same persistence file).
-
-### E2. `[ ]` Render-failure log scaffold
-- **Spec:** P1-VIEW-004 (the "match or document" reading)
-- **Touches (new):** `tests/render-failures.md`, `tests/integration/render_compare.rs`
-- **What:** A harness that renders one fixture per row against an expected PNG and writes any divergence into `tests/render-failures.md`. Phase 1's interpretation of P1-VIEW-004 is "match Acrobat OR documented here."
-- **Acceptance:** Running the harness on hello.pdf produces no divergence rows.
-- **Test:** the harness *is* the test.
-- **Depends on:** B3.
-
-### E3. `[ ]` Cold-start benchmark
-- **Spec:** NFR-PERF-001
-- **Touches (new):** `scripts/bench-cold-start.sh`, `tests/perf/cold-start.md`
-- **What:** Shell script that times `vibepdf` from launch to "window visible" (via a sentinel event the app emits on first paint). Median of 5 runs.
-- **Acceptance:** Number recorded; CI fails if it regresses >10% from the committed baseline.
-- **Test:** the script.
-- **Depends on:** none.
-
-### E4. `[ ]` Phase 1 acceptance fixture generator
-- **Spec:** unblocks `docs/05_ROADMAP.md` Phase 1 acceptance demo
-- **Touches (new):** `tests/fixtures/acceptance/generate.py`, `tests/fixtures/acceptance/README.md`
-- **What:** Script that synthesizes `p1-large.pdf` (500MB via page cloning), `p1-encrypted.pdf` (encrypted hello.pdf), and `p1-spec.pdf` (1000-page lorem ipsum). No committed binaries — generated locally + on CI on demand.
-- **Acceptance:** `python3 tests/fixtures/acceptance/generate.py` produces all three; sizes within expected ranges.
-- **Test:** the script.
-- **Depends on:** none.
-
-### E5. `[ ]` E2E harness (tauri-driver + Playwright)
-- **Spec:** infrastructure for every UI step's automated verification
-- **Touches (new):** `tests/e2e/playwright.config.ts`, `tests/e2e/smoke.spec.ts`, CI workflow
-- **What:** One passing test that opens hello.pdf via the file dialog and asserts the page renders. Lays the rails for every later step to add an `e2e/` test.
-- **Acceptance:** `npm run test:e2e` is green.
-- **Depends on:** none. (Doesn't block any feature step, but enables better verification on all of them.)
-
----
-
-## Suggested order (one possible critical path)
-
-1. **B1** Real actor — unblocks B2, B3, D1
-2. **A1** Drag-drop — independent quick win, validates the IPC pattern
-3. **C1** Virtual scrolling — unblocks C3, C4, C5, D2
-4. **B3** Render-to-bitmap — unblocks D1, E2
-5. **D1** Thumbnails — visible payoff
-6. **C2** Zoom + fit modes
-7. **B2** Password prompt
-8. **D2** Outline
-9. **C4** Search
-10. **C3** Keyboard nav
-11. **C5** Dark-mode invert
-12. **A2** CLI-arg open
-13. **A3** Recents
-14. **E1** Tab persistence
-15. **E5** E2E harness — by now we have enough to test end-to-end
-16. **E4** Acceptance fixture generator
-17. **E2** Render-failure log
-18. **E3** Cold-start benchmark
-
-But: **any step whose dependencies are done is fair game.** That's the whole point of the decoupling.
-
----
-
-## What "done with Phase 1" looks like
-
-Every step above is `[x] <sha>`, the Phase 1 acceptance demo in
-`docs/05_ROADMAP.md` runs to completion on a real machine, and
-`docs/02_PRODUCT_SPEC.md` P1-VIEW-001..012 + NFR-PERF-001..003 each
-have at least one passing test referenced in the relevant commit.
+1. Open the current phase's doc (`steps/P<N>.md`).
+2. Find any step whose `Depends on:` line is empty or all-satisfied.
+3. If you have a choice, prefer the lowest track letter, then the lowest step number — that's the suggested critical path.
