@@ -1,17 +1,16 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { PdfViewer } from "@/view/PdfViewer";
 import { useDocumentStore } from "@/state/document-store";
 import { openPdfDialog } from "@/ipc/pdf";
+import { registerDragDrop } from "@/app/drag-drop";
 
 export function App() {
   const docs = useDocumentStore((s) => s.docs);
   const currentId = useDocumentStore((s) => s.currentId);
   const openDoc = useDocumentStore((s) => s.openDoc);
   const setCurrent = useDocumentStore((s) => s.setCurrent);
+  const [toast, setToast] = useState<string | null>(null);
 
-  // Phase 1: drag-and-drop and CLI-arg open are wired through Tauri
-  // listeners in a follow-up commit. For the bootstrap we expose a
-  // single "Open PDF" entry point so the smoke demo is keyboard-only.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const cmd = e.metaKey || e.ctrlKey;
@@ -25,6 +24,32 @@ export function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [openDoc]);
+
+  // SPEC: P1-VIEW-001 (P1.A1) — drag-drop file open.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void registerDragDrop(({ opened, rejected }) => {
+      for (const doc of opened) openDoc(doc);
+      if (rejected.length > 0) {
+        setToast(
+          rejected.length === 1
+            ? "Only .pdf files are accepted."
+            : `${rejected.length} files were ignored — only .pdf is accepted.`,
+        );
+      }
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [openDoc]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 3000);
+    return () => window.clearTimeout(id);
+  }, [toast]);
 
   const current = docs.find((d) => d.id === currentId);
 
@@ -65,6 +90,14 @@ export function App() {
           <EmptyState />
         )}
       </main>
+      {toast ? (
+        <div
+          role="status"
+          className="pointer-events-none fixed bottom-4 left-1/2 -translate-x-1/2 rounded bg-neutral-900/90 px-3 py-2 text-sm text-white shadow-lg dark:bg-neutral-100/90 dark:text-neutral-900"
+        >
+          {toast}
+        </div>
+      ) : null}
     </div>
   );
 }
