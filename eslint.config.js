@@ -24,6 +24,8 @@ export default [
         localStorage: "readonly",
         HTMLElement: "readonly",
         HTMLCanvasElement: "readonly",
+        HTMLDivElement: "readonly",
+        IntersectionObserver: "readonly",
         OffscreenCanvas: "readonly",
         ImageData: "readonly",
         KeyboardEvent: "readonly",
