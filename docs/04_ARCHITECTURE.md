@@ -211,9 +211,18 @@ Tools are independent. They subscribe to `useToolStore` to know if they're activ
 Two save modes:
 
 1. **Explicit save** (Cmd/Ctrl+S): writes the current PDFium document to disk. Backs up the previous version as `<name>.bak` for one save cycle.
-2. **Auto-save**: every 30 seconds, if the document is dirty, write a copy to the app data dir: `~/.vibepdf/autosave/<documentId>.pdf`. On startup, scan this directory and offer recovery for any open-at-crash documents.
+2. **Auto-save**: every 30 seconds, if the document is dirty, write a copy under Tauri's `app_data_dir()` at `autosave/<documentId>.pdf`. On startup, scan this directory and offer recovery for any open-at-crash documents.
 
 Auto-save is invisible to the user — it never touches the user's original file.
+
+**Path policy.** All persistent paths are derived from Tauri's `AppHandle::path()` helpers on every platform — there are **no hardcoded POSIX paths**:
+
+| Concept | API | Typical resolved location |
+|---|---|---|
+| App config (settings) | `app.path().app_config_dir()` | macOS: `~/Library/Application Support/dev.vibepdf/` · Linux: `~/.config/dev.vibepdf/` · Windows: `%APPDATA%\dev.vibepdf\` |
+| App data (autosave, recents, license cache) | `app.path().app_data_dir()` | Same roots, with `data/` substructure on Linux |
+| Logs | `app.path().app_log_dir()` | macOS: `~/Library/Logs/dev.vibepdf/` · Linux: `~/.local/share/dev.vibepdf/logs/` · Windows: `%LOCALAPPDATA%\dev.vibepdf\logs\` |
+| Crash dumps | `app_data_dir()/crashes/` | Same roots |
 
 ---
 
@@ -221,7 +230,7 @@ Auto-save is invisible to the user — it never touches the user's original file
 
 Settings live in two places:
 
-- **App-wide** (theme, language, AI backend, telemetry preference): `~/.config/vibepdf/settings.json` (cross-platform via Tauri's `app_config_dir`).
+- **App-wide** (theme, language, AI backend, telemetry preference): `<app_config_dir>/settings.json`.
 - **Per-document** (last zoom, last page, sidebar state): keyed by the SHA-256 hash of the document path, stored in IndexedDB on the frontend.
 
 The Rust side owns app-wide settings; frontend reads them via a one-shot command on startup. Changes propagate via events.
@@ -231,8 +240,8 @@ The Rust side owns app-wide settings; frontend reads them via a one-shot command
 ## Logging
 
 - Frontend: `console.*` in dev, no-op in prod (no remote logging).
-- Rust: `tracing` crate, JSON output, written to `~/.vibepdf/logs/<date>.log`, rotated weekly, max 30 days.
-- Crash dumps: written to `~/.vibepdf/crashes/`, displayed on next startup with an "open folder" button. **Never uploaded.**
+- Rust: `tracing` crate, JSON output, written to `<app_log_dir>/<date>.log`, rotated weekly, max 30 days.
+- Crash dumps: written to `<app_data_dir>/crashes/`, displayed on next startup with an "open folder" button. **Never uploaded.**
 
 ---
 

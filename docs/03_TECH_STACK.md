@@ -175,38 +175,39 @@ These dependencies are off-limits as quick additions:
 
 ## Versions locked at project start
 
-These are the floors. Update freely; just keep the lock file consistent.
+These are the floors as of the **bootstrap commit (2026-05-22)**. They reflect the live majors on crates.io / npm at that date — the original draft floors (Vite 5, React 18, Tailwind 3, pdfjs-dist 4, Zustand 4, pdfium-render 0.8) were several majors stale. Update freely going forward; just keep the lock file consistent.
 
 ```
 # Tauri
-tauri = "2.x"
-tauri-build = "2.x"
+tauri        = "2.11"
+tauri-build  = "2.11"
 
 # Rust PDF
-pdfium-render = "0.8.x"
+pdfium-render = "0.9"        # current stable as of May 2026
 
 # OCR
-leptess = "0.14.x"
+leptess = "0.14"             # WARNING: last release 2023-02-21. Re-evaluate before Phase 7;
+                             # alternatives: tesseract-rs, custom bindgen wrapper.
 
 # Crypto
-rsa = "0.9.x"
-x509-cert = "0.2.x"
-cms = "0.2.x"
-aes = "0.8.x"
-aes-gcm = "0.10.x"
+rsa       = "0.9"
+x509-cert = "0.2"
+cms       = "0.2"
+aes       = "0.8"
+aes-gcm   = "0.10"
 
 # AI
-ort = "2.x"
-reqwest = "0.12.x"  # for Ollama HTTP
+ort     = "2.0.0-rc"          # only RC releases exist as of May 2026; stable 2.x not yet out
+reqwest = "0.12"              # for Ollama HTTP
 
-# Frontend
-react = "18.x"
-typescript = "5.x"
-vite = "5.x"
-tailwindcss = "3.x"
+# Frontend (current majors as of 2026-05-22)
+react        = "19.2"
+typescript   = "6.0"
+vite         = "8.0"
+tailwindcss  = "4.3"          # v4 is a rewrite; uses the @tailwindcss/vite plugin
 @radix-ui/react-* = latest
-zustand = "4.x"
-pdfjs-dist = "4.x"
+zustand      = "5.0"
+pdfjs-dist   = "5.7"          # v5 changes worker loader API; see src/view/pdfjs-worker.ts
 ```
 
 When Claude runs `cargo add` or `npm install`, it must look up the latest patch within these majors. It should NOT guess versions.

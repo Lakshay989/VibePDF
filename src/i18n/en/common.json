@@ -1,0 +1,7 @@
+{
+  "app.name": "VibePDF",
+  "open.button": "Open PDF",
+  "empty.title": "No document open",
+  "empty.hint": "Press ⌘O / Ctrl+O to open a PDF.",
+  "error.invalidPdf": "This file does not appear to be a valid PDF."
+}

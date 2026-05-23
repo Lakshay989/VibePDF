@@ -1,0 +1,31 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Vite
+.vite/
+
+# Rust / Tauri
+src-tauri/target/
+
+# PDFium prebuilt binary (fetched by scripts/fetch-pdfium.sh)
+src-tauri/resources/pdfium/*
+!src-tauri/resources/pdfium/.gitkeep
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+
+# Test output
+coverage/
+
+# Tauri build artifacts
+*.dmg
+*.app
+*.msi
+*.deb
+*.AppImage

@@ -1,0 +1,57 @@
+#![warn(clippy::unwrap_used, clippy::expect_used)]
+#![warn(clippy::pedantic)]
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc
+)]
+
+pub mod commands;
+pub mod error;
+pub mod pdf;
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use tauri::Manager;
+use tracing_subscriber::EnvFilter;
+
+use crate::pdf::actor::DocumentActorHandle;
+
+/// Process-wide state held by Tauri. Each open document is reachable
+/// through its actor; the dispatcher routes IPC messages by id.
+pub struct AppState {
+    pub actors: Mutex<HashMap<uuid::Uuid, DocumentActorHandle>>,
+}
+
+impl AppState {
+    fn new() -> Self {
+        Self {
+            actors: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// Entry point invoked from `main.rs`. Lives in `lib` so we can also
+/// instantiate the runtime from integration tests if we want to.
+pub fn run() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_target(false)
+        .json()
+        .try_init();
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            app.manage(AppState::new());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::pdf::pdf_open,
+            commands::pdf::pdfium_version,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

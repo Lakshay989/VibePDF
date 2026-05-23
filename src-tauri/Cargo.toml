@@ -1,0 +1,40 @@
+[package]
+name = "vibepdf"
+version = "0.0.1"
+description = "VibePDF — offline open-source PDF editor"
+authors = ["VibePDF contributors"]
+edition = "2021"
+rust-version = "1.78"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "vibepdf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.11", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+pdfium-render = "0.9"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+pdfium-render = "0.9"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
