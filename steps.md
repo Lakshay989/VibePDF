@@ -53,11 +53,12 @@ This makes back-tracking trivial:
 ## Workflow rule
 
 After every step's acceptance criteria are met:
-1. Update the step in its phase doc from `[ ]` to `[x] <sha>` in the same commit.
-2. Push to `origin/main` immediately. No batched commits.
-3. If verification couldn't run locally (toolchain missing, etc.), say so in the commit body — don't claim a green check we didn't actually get.
+1. Update the step in its phase doc from `[ ]` to `[x]` in the same commit.
+2. **Append a section to `Learning.md`** explaining the concepts/tech the step exercised, why we chose them, and what's worth knowing for next time. See `Learning.md` § "How this file evolves" for the template.
+3. Push to `origin/main` immediately. No batched commits.
+4. If verification couldn't run locally (toolchain missing, etc.), say so in the commit body — don't claim a green check we didn't actually get.
 
-Doc-only edits to the step files themselves (rewording, fixing a typo, adding context) **can** be batched. The "one commit per step" rule applies to feature steps, not doc maintenance.
+Doc-only edits to the step files or to Learning.md itself (rewording, fixing a typo, adding context) **can** be batched. The "one commit per step" rule applies to feature steps, not doc maintenance.
 
 ## Phase gating
 
