@@ -1,9 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { loadDocument } from "@/view/render-page";
-import { PageVirtualizer } from "@/view/PageVirtualizer";
+import {
+  PageVirtualizer,
+  type PageVirtualizerHandle,
+} from "@/view/PageVirtualizer";
+import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import type { DocumentId } from "@/ipc/pdf";
 
 interface Props {
@@ -13,12 +17,14 @@ interface Props {
 
 // SPEC: P1-VIEW-001, P1-VIEW-005, NFR-PERF-003.
 //
-// PdfViewer now owns the document lifecycle: load once, hand the proxy
-// to the virtualizer for the lifetime of the open tab, destroy on
-// unmount. All per-page rendering is the virtualizer's responsibility.
+// PdfViewer owns the document lifecycle: load once, hand the proxy to
+// the virtualizer for the lifetime of the open tab, destroy on unmount.
+// Per-page rendering and scrolling live in PageVirtualizer; this
+// component wires the keyboard listener that drives it.
 export function PdfViewer({ documentId, path }: Props) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const virtRef = useRef<PageVirtualizerHandle>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +40,6 @@ export function PdfViewer({ documentId, path }: Props) {
         }
         setDoc(loaded);
       } catch (e) {
-        // SPEC: P1-VIEW-002 — invalid file → user-visible message, no crash.
         const msg =
           e instanceof Error ? e.message : "Failed to open this file as a PDF.";
         if (!cancelled) setError(msg);
@@ -42,22 +47,57 @@ export function PdfViewer({ documentId, path }: Props) {
     })();
     return () => {
       cancelled = true;
-      // Destroy is async but we don't await — React's cleanup is sync.
-      // The promise is fire-and-forget; PDF.js handles late cleanup.
       void loaded?.destroy();
       setDoc(null);
     };
   }, [path]);
 
+  // SPEC: P1-VIEW-005 (P1.C3) — PageUp/Down, Home/End, Arrow keys.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const intent = keyToIntent(
+        {
+          key: e.key,
+          shiftKey: e.shiftKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+        },
+        { inputFocused: isInputFocused(document.activeElement) },
+      );
+      if (!intent) return;
+      const v = virtRef.current;
+      if (!v) return;
+      e.preventDefault();
+      switch (intent.kind) {
+        case "page-delta":
+          v.scrollByPages(intent.delta);
+          break;
+        case "page-target":
+          v.scrollToPage(intent.page === "first" ? 1 : Number.MAX_SAFE_INTEGER);
+          break;
+        case "line-delta":
+          v.scrollByLine(intent.delta);
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [doc]);
+
   return (
-    <div className="h-full overflow-auto bg-neutral-100 dark:bg-neutral-900">
+    <div className="h-full">
       {error ? (
         <div className="mx-auto mt-8 max-w-lg rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
           This file does not appear to be a valid PDF.
           <div className="mt-1 text-xs opacity-70">{error}</div>
         </div>
       ) : doc ? (
-        <PageVirtualizer doc={doc} documentId={documentId} />
+        <PageVirtualizer
+          ref={virtRef}
+          doc={doc}
+          documentId={documentId}
+        />
       ) : (
         <div className="p-4 text-sm text-neutral-500">Opening…</div>
       )}

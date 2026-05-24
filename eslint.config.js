@@ -22,6 +22,7 @@ export default [
         URL: "readonly",
         fetch: "readonly",
         localStorage: "readonly",
+        Element: "readonly",
         HTMLElement: "readonly",
         HTMLCanvasElement: "readonly",
         HTMLDivElement: "readonly",
