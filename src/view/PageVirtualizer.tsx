@@ -10,40 +10,39 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPageOnDoc } from "@/view/render-page";
 import { LruCache } from "@/view/page-cache";
+import type { FitMode } from "@/state/view-store";
 
-// SPEC: P1-VIEW-005, NFR-PERF-003.
+// SPEC: P1-VIEW-005, P1-VIEW-006, NFR-PERF-003.
 //
 // Strategy:
-//  1. On mount, fetch every page's viewport (cheap; PDF.js does not
-//     rasterize) so we know each slot's exact height up-front. That
-//     lets the scrollbar sit at the right absolute position from the
-//     first frame, before any page has rendered.
-//  2. Each page gets a fixed-height <div> slot in a tall stack. The
-//     virtualizer only mounts a <canvas> into a slot when its
-//     IntersectionObserver entry crosses the +/- 200 % rootMargin
-//     band (≈ two viewport heights either side). Pages outside the
-//     band are placeholders → no canvas in the DOM, no GPU memory.
-//  3. Recently-rendered canvases are kept in an LRU keyed by
-//     `${page}:${scale}:${dpr}` so rapid scroll-back is instant.
-//     Capacity 50 = roughly ten viewports of warm cache at A4 zoom.
-//
-// The component owns its own scroll container (it's the
-// `overflow-auto` root) and exposes an imperative API via ref so
-// PdfViewer can wire keyboard nav into it without prop-drilling.
+//  1. Fetch each page's NATURAL (scale = 1) dimensions on mount. The
+//     effective scale is computed from `zoom` (when fitMode is null)
+//     or from `fitMode` + the live container size (otherwise).
+//  2. A ResizeObserver on the scroll container recomputes the
+//     effective scale on resize when fitMode is active. No-op when
+//     fitMode is null.
+//  3. Each page gets a fixed-height <div> sized at natural × scale.
+//     Canvases are mounted only when the slot enters the +/-200%
+//     IntersectionObserver band.
+//  4. Recently-rendered canvases are kept in an LRU (capacity 50)
+//     keyed on `${doc}:${page}:${scale}:${dpr}` so rapid scroll-back
+//     is instant.
 
 const PRE_RENDER_MARGIN = "200% 0% 200% 0%";
 const CACHE_CAPACITY = 50;
+const PAGE_GAP_PX = 16;
 
-interface PageInfo {
+interface NaturalPage {
   pageNumber: number;
-  cssWidth: number;
-  cssHeight: number;
+  width: number;
+  height: number;
 }
 
 interface Props {
   doc: PDFDocumentProxy;
   documentId: string;
-  scale?: number;
+  zoom: number;
+  fitMode: FitMode | null;
 }
 
 export interface PageVirtualizerHandle {
@@ -53,10 +52,36 @@ export interface PageVirtualizerHandle {
   getCurrentPage: () => number;
 }
 
+function computeFitScale(
+  mode: FitMode,
+  containerW: number,
+  containerH: number,
+  pageW: number,
+  pageH: number,
+): number {
+  // Subtract some chrome so the page doesn't kiss the scrollbar.
+  const w = Math.max(1, containerW - PAGE_GAP_PX * 2);
+  const h = Math.max(1, containerH - PAGE_GAP_PX * 2);
+  switch (mode) {
+    case "actual":
+      return 1;
+    case "fit-width":
+      return w / pageW;
+    case "fit-height":
+      return h / pageH;
+    case "fit-page":
+      return Math.min(w / pageW, h / pageH);
+  }
+}
+
 export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
-  function PageVirtualizer({ doc, documentId, scale = 1.5 }, ref) {
-    const [pages, setPages] = useState<PageInfo[] | null>(null);
+  function PageVirtualizer({ doc, documentId, zoom, fitMode }, ref) {
+    const [pages, setPages] = useState<NaturalPage[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [containerSize, setContainerSize] = useState<{
+      w: number;
+      h: number;
+    } | null>(null);
 
     const cacheRef = useRef<LruCache<HTMLCanvasElement>>(
       new LruCache<HTMLCanvasElement>(CACHE_CAPACITY),
@@ -69,14 +94,14 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       let cancelled = false;
       (async () => {
         try {
-          const out: PageInfo[] = [];
+          const out: NaturalPage[] = [];
           for (let i = 1; i <= doc.numPages; i += 1) {
             const page = await doc.getPage(i);
-            const v = page.getViewport({ scale });
+            const v = page.getViewport({ scale: 1 });
             out.push({
               pageNumber: i,
-              cssWidth: Math.floor(v.width),
-              cssHeight: Math.floor(v.height),
+              width: v.width,
+              height: v.height,
             });
           }
           if (!cancelled) setPages(out);
@@ -93,16 +118,48 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       return () => {
         cancelled = true;
       };
-    }, [doc, scale]);
+    }, [doc]);
 
     useEffect(() => {
       cacheRef.current.clear();
       slotsRef.current.clear();
       currentPageRef.current = 1;
-    }, [documentId, scale]);
+    }, [documentId]);
+
+    // Observe container size for fit-mode recomputation.
+    useEffect(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const update = () =>
+        setContainerSize({ w: el.clientWidth, h: el.clientHeight });
+      update();
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, []);
+
+    const effectiveScale = useMemo(() => {
+      if (!pages || pages.length === 0) return zoom;
+      if (!fitMode) return zoom;
+      if (!containerSize) return zoom;
+      const first = pages[0];
+      return computeFitScale(
+        fitMode,
+        containerSize.w,
+        containerSize.h,
+        first.width,
+        first.height,
+      );
+    }, [pages, zoom, fitMode, containerSize]);
+
+    // Drop bitmap cache whenever the effective scale changes — the
+    // cache keys include scale, so stale bitmaps would never be
+    // re-used anyway, but clearing also frees the memory.
+    useEffect(() => {
+      cacheRef.current.clear();
+    }, [effectiveScale]);
 
     // Track which page is currently at (or just below) the viewport top.
-    // Used by PageDown/PageUp navigation. Recomputed on scroll.
     useEffect(() => {
       const scroller = scrollRef.current;
       if (!scroller || !pages) return;
@@ -131,10 +188,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
           const el = slotsRef.current.get(clamped);
           const scroller = scrollRef.current;
           if (!el || !scroller) return;
-          scroller.scrollTo({
-            top: el.offsetTop - 8,
-            behavior: "smooth",
-          });
+          scroller.scrollTo({ top: el.offsetTop - 8, behavior: "smooth" });
           currentPageRef.current = clamped;
         },
         scrollByPages: (delta: number) => {
@@ -144,10 +198,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
           const el = slotsRef.current.get(clamped);
           const scroller = scrollRef.current;
           if (!el || !scroller) return;
-          scroller.scrollTo({
-            top: el.offsetTop - 8,
-            behavior: "smooth",
-          });
+          scroller.scrollTo({ top: el.offsetTop - 8, behavior: "smooth" });
           currentPageRef.current = clamped;
         },
         scrollByLine: (deltaPx: number) => {
@@ -180,9 +231,9 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
             {pages.map((info) => (
               <PageSlot
                 key={info.pageNumber}
-                info={info}
+                natural={info}
                 doc={doc}
-                scale={scale}
+                scale={effectiveScale}
                 documentId={documentId}
                 cache={cacheRef.current}
                 onMount={(el) => registerSlot(info.pageNumber, el)}
@@ -196,7 +247,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
 );
 
 interface SlotProps {
-  info: PageInfo;
+  natural: NaturalPage;
   doc: PDFDocumentProxy;
   scale: number;
   documentId: string;
@@ -205,7 +256,7 @@ interface SlotProps {
 }
 
 function PageSlot({
-  info,
+  natural,
   doc,
   scale,
   documentId,
@@ -218,8 +269,8 @@ function PageSlot({
   const cacheKey = useMemo(() => {
     const dpr =
       typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    return `${documentId}:${info.pageNumber}:${scale}:${dpr}`;
-  }, [documentId, info.pageNumber, scale]);
+    return `${documentId}:${natural.pageNumber}:${scale}:${dpr}`;
+  }, [documentId, natural.pageNumber, scale]);
 
   useEffect(() => {
     onMount(containerRef.current);
@@ -261,7 +312,7 @@ function PageSlot({
 
     void renderPageOnDoc({
       doc,
-      pageNumber: info.pageNumber,
+      pageNumber: natural.pageNumber,
       scale,
       canvas,
     })
@@ -270,7 +321,7 @@ function PageSlot({
       })
       .catch((err) => {
         console.warn(
-          `page ${info.pageNumber} render failed:`,
+          `page ${natural.pageNumber} render failed:`,
           err instanceof Error ? err.message : err,
         );
       });
@@ -278,13 +329,16 @@ function PageSlot({
     return () => {
       cancelled = true;
     };
-  }, [visible, cacheKey, cache, doc, info.pageNumber, scale]);
+  }, [visible, cacheKey, cache, doc, natural.pageNumber, scale]);
 
   return (
     <div
       ref={containerRef}
-      data-page={info.pageNumber}
-      style={{ width: info.cssWidth, height: info.cssHeight }}
+      data-page={natural.pageNumber}
+      style={{
+        width: Math.floor(natural.width * scale),
+        height: Math.floor(natural.height * scale),
+      }}
       className="relative bg-white dark:bg-neutral-100"
     />
   );
