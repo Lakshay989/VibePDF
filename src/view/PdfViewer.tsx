@@ -9,6 +9,7 @@ import {
 } from "@/view/PageVirtualizer";
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
+import { useDarkMode } from "@/app/use-dark-mode";
 import { useViewStore } from "@/state/view-store";
 import {
   loadViewSettings,
@@ -40,6 +41,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const setView = useViewStore((s) => s.setView);
   const setZoom = useViewStore((s) => s.setZoom);
   const setFitMode = useViewStore((s) => s.setFitMode);
+  const darkMode = useDarkMode();
 
   // Load document bytes + parse PDF.
   useEffect(() => {
@@ -178,6 +180,7 @@ export function PdfViewer({ documentId, path }: Props) {
             documentId={documentId}
             zoom={zoom}
             fitMode={fitMode}
+            darkMode={darkMode}
           />
         ) : (
           <div className="p-4 text-sm text-neutral-500">Opening…</div>

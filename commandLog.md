@@ -183,6 +183,16 @@ $ npx eslint src --max-warnings=0                                           # pa
 $ npx vitest run src/state/__tests__/view-persistence.test.ts               # blocked on Node 18
 ```
 
+### P1.C5 — Dark-mode page invert (this commit)
+
+```bash
+$ npx tsc --noEmit                                            # pass
+$ npx eslint src --max-warnings=0                             # pass (added MutationObserver, Uint8ClampedArray to globals)
+$ npx vitest run src/view/__tests__/dark-invert.test.ts       # blocked on Node 18
+```
+
+No new dependencies.
+
 ---
 
 ## How this file evolves

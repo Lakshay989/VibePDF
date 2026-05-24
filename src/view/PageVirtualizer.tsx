@@ -10,6 +10,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPageOnDoc } from "@/view/render-page";
 import { LruCache } from "@/view/page-cache";
+import { invertCanvasForDarkMode } from "@/view/dark-invert";
 import type { FitMode } from "@/state/view-store";
 
 // SPEC: P1-VIEW-005, P1-VIEW-006, NFR-PERF-003.
@@ -43,6 +44,7 @@ interface Props {
   documentId: string;
   zoom: number;
   fitMode: FitMode | null;
+  darkMode: boolean;
 }
 
 export interface PageVirtualizerHandle {
@@ -75,7 +77,10 @@ function computeFitScale(
 }
 
 export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
-  function PageVirtualizer({ doc, documentId, zoom, fitMode }, ref) {
+  function PageVirtualizer(
+    { doc, documentId, zoom, fitMode, darkMode },
+    ref,
+  ) {
     const [pages, setPages] = useState<NaturalPage[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [containerSize, setContainerSize] = useState<{
@@ -152,12 +157,12 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       );
     }, [pages, zoom, fitMode, containerSize]);
 
-    // Drop bitmap cache whenever the effective scale changes — the
-    // cache keys include scale, so stale bitmaps would never be
-    // re-used anyway, but clearing also frees the memory.
+    // Drop bitmap cache whenever the effective scale or theme
+    // changes. Both are in the per-slot cache key, so stale entries
+    // would never be re-used; clearing also frees memory promptly.
     useEffect(() => {
       cacheRef.current.clear();
-    }, [effectiveScale]);
+    }, [effectiveScale, darkMode]);
 
     // Track which page is currently at (or just below) the viewport top.
     useEffect(() => {
@@ -235,6 +240,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
                 doc={doc}
                 scale={effectiveScale}
                 documentId={documentId}
+                darkMode={darkMode}
                 cache={cacheRef.current}
                 onMount={(el) => registerSlot(info.pageNumber, el)}
               />
@@ -251,6 +257,7 @@ interface SlotProps {
   doc: PDFDocumentProxy;
   scale: number;
   documentId: string;
+  darkMode: boolean;
   cache: LruCache<HTMLCanvasElement>;
   onMount: (el: HTMLDivElement | null) => void;
 }
@@ -260,6 +267,7 @@ function PageSlot({
   doc,
   scale,
   documentId,
+  darkMode,
   cache,
   onMount,
 }: SlotProps) {
@@ -269,8 +277,8 @@ function PageSlot({
   const cacheKey = useMemo(() => {
     const dpr =
       typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    return `${documentId}:${natural.pageNumber}:${scale}:${dpr}`;
-  }, [documentId, natural.pageNumber, scale]);
+    return `${documentId}:${natural.pageNumber}:${scale}:${dpr}:${darkMode ? "d" : "l"}`;
+  }, [documentId, natural.pageNumber, scale, darkMode]);
 
   useEffect(() => {
     onMount(containerRef.current);
@@ -293,10 +301,14 @@ function PageSlot({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    if (!visible) {
-      while (el.firstChild) el.removeChild(el.firstChild);
-      return;
-    }
+
+    // Always clear before re-populating. Earlier versions only cleared
+    // on the !visible branch, which leaked canvases on cacheKey change
+    // (theme flip, scale change) because the cleanup ran *after* the
+    // next effect populated.
+    while (el.firstChild) el.removeChild(el.firstChild);
+
+    if (!visible) return;
 
     const cached = cache.get(cacheKey);
     if (cached) {
@@ -317,7 +329,9 @@ function PageSlot({
       canvas,
     })
       .then(() => {
-        if (!cancelled) cache.set(cacheKey, canvas);
+        if (cancelled) return;
+        if (darkMode) invertCanvasForDarkMode(canvas);
+        cache.set(cacheKey, canvas);
       })
       .catch((err) => {
         console.warn(
@@ -329,7 +343,7 @@ function PageSlot({
     return () => {
       cancelled = true;
     };
-  }, [visible, cacheKey, cache, doc, natural.pageNumber, scale]);
+  }, [visible, cacheKey, cache, doc, natural.pageNumber, scale, darkMode]);
 
   return (
     <div

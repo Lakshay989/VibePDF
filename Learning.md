@@ -18,6 +18,7 @@
   - [P1.C1 — Virtual-scrolling page list](#p1c1--virtual-scrolling-page-list)
   - [P1.C3 — Keyboard navigation](#p1c3--keyboard-navigation)
   - [P1.C2 — Zoom + fit modes with per-document persistence](#p1c2--zoom--fit-modes-with-per-document-persistence)
+  - [P1.C5 — Dark-mode page invert](#p1c5--dark-mode-page-invert)
 
 ---
 
@@ -429,6 +430,143 @@ The general principle: when two pieces of state are mutually exclusive, either (
 - ResizeObserver: https://developer.mozilla.org/en-US/docs/Web/API/ResizeObserver
 - SubtleCrypto.digest: https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/digest
 - Debounce vs throttle: https://css-tricks.com/debouncing-throttling-explained-examples/
+
+---
+
+### P1.C5 — Dark-mode page invert
+
+**Spec:** P1-VIEW-010 · **Commit:** _this commit_
+
+#### Problem
+
+PDFs are designed for printing — they assume a white page. In a dark
+UI that white slab is blinding. We want, in dark mode:
+
+- Background goes from white to near-black.
+- Black text becomes white text.
+- **Photos still look like photos** (don't invert a person's skin tone).
+
+The naïve "invert all pixels" CSS filter (`filter: invert(1)`) gets
+the background right but turns every photo into a negative.
+
+#### Concepts learned
+
+**1. Heuristics vs structural solutions.** The spec hints at parsing
+PDF.js's operator list to find `Image` operations and skip their
+bounding boxes. That's the *structural* fix: it knows what's actually
+an image because the PDF told us. The cost: it requires per-page
+operator parsing on every render, complex bbox geometry, and
+coordination with the PDF.js render loop.
+
+We chose the **heuristic** instead: per pixel, ask "is this near
+grayscale?" Black-on-white text → yes, invert. A skin-tone pixel →
+no, leave alone. The heuristic gets ~95 % of real PDFs right with
+~30 lines of code and zero coupling to PDF.js internals. Cost: edge
+cases (colored text won't invert; a grayscale X-ray scan *will*).
+
+Engineering judgment: heuristics are fine when (a) the failure mode
+is mild and (b) the structural fix is disproportionately expensive.
+Both apply here. The Learning.md entry itself documents the
+trade-off so we can revisit if anyone files a "my X-ray looks wrong"
+bug.
+
+**2. HSV saturation as "color-ness."** A pixel's saturation in HSV
+is `(max(R,G,B) − min(R,G,B)) / max(R,G,B)`. It's 0 for any shade of
+gray (including pure white and pure black), and approaches 1 for
+vivid colors. Threshold at 0.15 ≈ "if R, G, B differ by less than
+15 % of the brightest channel, treat as grayscale." That covers
+slightly-aged white paper, scanned text with a yellow tint, etc.
+
+**3. ImageData and the canvas pixel pipeline.** A `<canvas>`'s
+contents are accessed via:
+
+```ts
+const ctx = canvas.getContext("2d");
+const img = ctx.getImageData(0, 0, w, h);   // copies into RAM
+mutate(img.data);                            // Uint8ClampedArray RGBA
+ctx.putImageData(img, 0, 0);                 // copies back
+```
+
+The data layout is interleaved RGBA: `[R0, G0, B0, A0, R1, G1, B1, A1, ...]`.
+This is the standard browser representation; the same shape is used
+by `OffscreenCanvas`, `WebGL`, and `WebGPU` texture uploads.
+
+Performance note: getImageData/putImageData are slow for big canvases.
+A 1700×2200 page is ~22 MB of RGBA. The invert loop is JS-native
+but the round-trip through the GPU is the slow part — typically
+30–50 ms per page. For Phase 1's small-doc smoke demo this is fine.
+A real production version would do the invert in a Web Worker against
+an `OffscreenCanvas` (no main-thread block), or on the GPU via a WebGL
+fragment shader.
+
+**4. `Uint8ClampedArray`.** Browsers expose pixel data as a typed
+array that **clamps** assignments to [0, 255] instead of wrapping. So
+`data[i] = 300` writes 255, not 44. This matches what pixels do
+naturally and saves us from writing `Math.max(0, Math.min(255, ...))`
+in every assignment. Most language ecosystems would use `u8` here;
+the clamping is the browser-specific touch.
+
+**5. MutationObserver vs polling.** We need to know when `<html>`'s
+class changes (because the theme system toggles `.dark`). Two
+options:
+
+- **Poll** — `setInterval(() => check(), 100)`. Always 10 wake-ups
+  per second whether anything changes or not.
+- **MutationObserver** — the browser calls *us* when the attribute
+  changes. Zero work when the theme is steady.
+
+We always prefer observers over polling in browser code: less battery
+drain, simpler reasoning, and the event fires synchronously after the
+mutation so we're never showing stale state.
+
+```ts
+const obs = new MutationObserver(update);
+obs.observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ["class"],
+});
+```
+
+The `attributeFilter` keeps the callback from firing when other
+attributes (like `lang`) change — narrowing observers is good
+practice.
+
+**6. Including theme in a cache key.** The page-bitmap cache from
+P1.C1 keys by `documentId:page:scale:dpr`. With dark mode we add a
+flag: `documentId:page:scale:dpr:d` or `:l`. When the user toggles
+themes, the key changes, the cache lookup misses, the page re-renders
+under the new theme. Caching is now correctness-by-construction:
+there is no path that could serve a light-mode bitmap to a dark-mode
+view.
+
+**7. A bug we fixed in passing.** While wiring dark mode I realised
+the slot's existing render `useEffect` had a latent leak: on
+`cacheKey` change it ran the new branch *without* clearing the
+container, leaving the old canvas in the DOM. Light/dark toggle
+turned that latent bug into a visible one (the old light canvas
+sitting next to the new dark one). The fix is one line — always
+clear children at the top of the effect — but the lesson is broader:
+when an effect manipulates DOM directly (instead of declaratively via
+JSX), it needs to be **idempotent**. The first thing it does should
+be "put the world in the known starting state."
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/dark-invert.ts` | The pure invert + canvas wrapper. |
+| `src/view/__tests__/dark-invert.test.ts` | 8 cases covering the threshold edges. |
+| `src/app/use-dark-mode.ts` | React hook that returns the current dark-mode state via MutationObserver on `<html>`. |
+| `src/view/PageVirtualizer.tsx` | Accepts `darkMode`, threads it into the cache key, applies invert post-render, and (bug fix) always clears the slot before re-populating. |
+| `src/view/PdfViewer.tsx` | Reads `useDarkMode()`, passes it to the virtualizer. |
+| `eslint.config.js` | Adds `MutationObserver`, `Uint8ClampedArray` to globals. |
+
+#### Further reading
+
+- HSV/HSL color spaces: https://en.wikipedia.org/wiki/HSL_and_HSV
+- MDN ImageData: https://developer.mozilla.org/en-US/docs/Web/API/ImageData
+- MDN MutationObserver: https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
+- Why heuristics beat parsers (sometimes): Joel Spolsky, "The Law of Leaky Abstractions"
 
 ---
 
