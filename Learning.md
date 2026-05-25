@@ -20,6 +20,7 @@
   - [P1.C2 — Zoom + fit modes with per-document persistence](#p1c2--zoom--fit-modes-with-per-document-persistence)
   - [P1.C5 — Dark-mode page invert](#p1c5--dark-mode-page-invert)
   - [P1.D2 — Outline sidebar](#p1d2--outline-sidebar)
+  - [P1.C4 — Text search (Cmd/Ctrl+F)](#p1c4--text-search-cmdctrlf)
 
 ---
 
@@ -718,6 +719,194 @@ source. Internalise it.
 - WAI-ARIA `aria-pressed` vs `aria-expanded`: https://www.w3.org/WAI/ARIA/apg/patterns/button/#wai-ariaroles,states,andpropertiesforatogglebutton
 - Dependency injection (mentally): "Constructor injection in five minutes" — search any DI primer; the same principle scales from a single function to a whole framework.
 - PDF destinations: ISO 32000-1 § 12.3.2 (named destinations) — the spec is dense but the relevant section is two pages.
+
+---
+
+### P1.C4 — Text search (Cmd/Ctrl+F)
+
+**Spec:** P1-VIEW-007 · **Commit:** _this commit_
+
+#### Problem
+
+Cmd/Ctrl+F should pop up a search bar that finds the query across
+**every** page of the open PDF, with case-sensitive and whole-word
+toggles, a match-count badge, and next/previous navigation that
+scrolls the viewer to each match.
+
+Bootstrap-scope cut: we **scroll to** each match's page but don't
+highlight the run of pixels yet. Inline highlights require rendering
+PDF.js's text layer over the canvas (a sibling DOM tree of `<span>`
+elements per text run) and wrapping matching ranges. That's a
+~1 KLOC follow-up; the infrastructure for it lands here.
+
+#### Concepts learned
+
+**1. Splitting "find" from "search."** Two distinct things look the
+same to a user but are different in code:
+
+- **find** — a pure function on a string: "where in this text does
+  the query occur?" Inputs: text, query, options. Output: ranges.
+  No I/O, no Promise, no state.
+- **search** — orchestration: walk every page, call find, collect
+  results, manage cancellation.
+
+We export them as `findRanges` (pure) and `searchDoc` (async). All
+the interesting edge cases — case sensitivity, whole-word boundaries,
+regex-metacharacter escaping, overlapping potential matches —
+live in `findRanges`, which has 10 vitest cases. `searchDoc` just
+calls `findRanges` per page.
+
+Same `pure-core / impure-shell` pattern as P1.A1 and P1.C3.
+
+**2. Regex as an implementation detail.** Our matching uses a regex
+under the hood (`new RegExp(escaped, flags)`), but you'd never know
+from the API. Callers pass a literal string and options; we escape
+metacharacters internally with:
+
+```ts
+function escapeForRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+```
+
+This matters because `findRanges("axb a.b", "a.b")` should match
+the *literal* "a.b" (one position), not the regex `a.b` (would
+also match "axb"). The escape table is the standard list of regex
+metacharacters; it's worth memorising the regex you can paste into
+any project: `/[.*+?^${}()|[\]\\]/g`.
+
+**3. Word boundaries (`\b`).** The "whole word" toggle adds `\b`
+before and after the (escaped) query. `\b` is the zero-width assertion
+that matches *between* a word character and a non-word character.
+"the" matches "the cat" but not "then" because in the second, `\b`
+fails between `e` and `n` — both are word characters.
+
+This is one of the few times regex zero-width assertions earn their
+keep over a hand-rolled char-by-char check.
+
+**4. The infinite-loop trap with `g`-flag regexes.** When you use
+`re.exec` in a loop, you can get into trouble with **zero-width
+matches** (a regex like `(?:)` matches the empty string anywhere).
+Each iteration matches at the same position; `lastIndex` doesn't
+advance; loop runs forever. Defensive line:
+
+```ts
+while ((m = re.exec(text)) !== null) {
+  if (m[0].length === 0) { re.lastIndex += 1; continue; }
+  // …
+}
+```
+
+We don't *currently* allow user queries that match the empty string
+(empty queries return `[]` early), but the guard costs nothing and
+prevents future-us from regressing into the bug.
+
+**5. Debounced effects.** When the user types "the", the input fires
+`onChange` three times. Each one would kick off a 100-page document
+walk. We debounce by 200 ms inside the effect:
+
+```ts
+useEffect(() => {
+  const timer = setTimeout(() => { runSearch(); }, 200);
+  return () => clearTimeout(timer);
+}, [query, ...]);
+```
+
+If `query` changes before 200 ms pass, the cleanup clears the pending
+timer and the next effect schedules a new one. Result: at most one
+search per quiet period, no matter how fast the user types.
+
+We saw this pattern in P1.C2 (debounced IDB writes). It's the same
+shape every time — `setTimeout` in the effect body, `clearTimeout`
+in the cleanup.
+
+**6. Cancellation via a mutable signal object.** Async iteration over
+N pages can't be aborted by simply returning from the effect — the
+`for` loop inside `searchDoc` is already running. The standard
+workaround: pass a small `{ cancelled: false }` object and have the
+worker check it between iterations.
+
+```ts
+const signal = { cancelled: false };
+void searchDoc(doc, q, opts, signal).then(/* … */);
+return () => { signal.cancelled = true; };
+```
+
+When the user types another letter and a new effect run starts, the
+old signal flips. The in-flight search sees `signal.cancelled` on
+its next page boundary and returns early. Cheap and effective.
+
+(This is the manual version of the browser's `AbortController` /
+`AbortSignal`. We'd use that when interacting with `fetch` or any
+API that natively accepts an `AbortSignal`. Our search worker is
+homegrown, so the homegrown signal is fine.)
+
+**7. Narrow selectors with Zustand.** The viewer subscribes to ten
+slices of the search store: `isOpen`, `query`, `caseSensitive`,
+`wholeWord`, `flat`, `currentIndex`, plus several actions. We
+deliberately use one `useSearchStore(s => s.field)` call per slice
+instead of one big destructure:
+
+```ts
+// good
+const query = useSearchStore((s) => s.query);
+const caseSensitive = useSearchStore((s) => s.caseSensitive);
+
+// bad
+const { query, caseSensitive, ... } = useSearchStore();
+```
+
+The narrow version only re-renders the component when **its**
+slices change. The bad version re-renders on any change to the
+store. Same idea as `React.memo`-ing a prop selector. Zustand's
+default equality check is `Object.is`, so narrow selectors fall
+through unchanged when their slice didn't change.
+
+**8. Discriminated unions hiding in plain sight.** PDF.js's
+`getTextContent()` returns `Array<TextItem | TextMarkedContent>` —
+some entries have `str: string`, others don't. TypeScript's strict
+mode caught us trying to use a type guard that lied about the
+narrowed type.
+
+The clean fix is `flatMap` with a narrowed return type:
+
+```ts
+content.items.flatMap((it) => {
+  const s = (it as { str?: unknown }).str;
+  return typeof s === "string" ? [s] : [];
+})
+```
+
+`flatMap` lets each element produce 0-or-1 elements without an
+intermediate `filter`. The single-`as`-cast is the controlled
+type-system escape: we're saying "trust me, treat this as an object
+with a maybe-`str` field." Doing the same with a type predicate
+would have required asserting the full TextItem shape, which we
+don't actually rely on.
+
+**9. `aria-pressed` (revisited from P1.D2).** Both toggles on the
+search bar — case-sensitive and whole-word — use the same
+`aria-pressed={state}` we introduced for the outline toggle. The
+pattern repeats wherever a button represents a binary on/off state
+rather than a momentary action.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/search.ts` | `findRanges` (pure), `searchDoc` (async per-page), `totalMatches`. |
+| `src/view/__tests__/search.test.ts` | 10 cases on `findRanges` + 2 on `totalMatches`. Covers regex-metacharacter escaping, `\b` word boundaries, overlapping potential matches, ordering. |
+| `src/state/search-store.ts` | Zustand store: query, options, matches, currentIndex, open/close. Flattens per-page matches into a single list for next/prev navigation. |
+| `src/app/SearchBar.tsx` | The UI. Auto-focus + select-all on open, Enter / Shift+Enter for next/prev, Escape to close. |
+| `src/view/PdfViewer.tsx` | Mounts the bar, wires Cmd+F into `openSearch()`, runs the debounced + cancellable search effect, scrolls the virtualizer to the current match's page on index change. |
+| `eslint.config.js` | Adds `HTMLInputElement`, `RegExpExecArray` to globals. |
+
+#### Further reading
+
+- MDN regex escape table: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Cheatsheet
+- Word boundary `\b`: https://www.regular-expressions.info/wordboundaries.html
+- Zustand selector best practices: https://zustand.docs.pmnd.rs/guides/slices-pattern
+- AbortController / AbortSignal (for when you graduate from the manual `{cancelled}` pattern): https://developer.mozilla.org/en-US/docs/Web/API/AbortController
 
 ---
 

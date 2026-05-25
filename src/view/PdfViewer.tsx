@@ -9,9 +9,12 @@ import {
 } from "@/view/PageVirtualizer";
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
+import { SearchBar } from "@/app/SearchBar";
 import { useDarkMode } from "@/app/use-dark-mode";
 import { OutlinePanel } from "@/panels/OutlinePanel";
 import { useViewStore } from "@/state/view-store";
+import { useSearchStore } from "@/state/search-store";
+import { searchDoc } from "@/view/search";
 import {
   loadViewSettings,
   pathHash,
@@ -44,6 +47,18 @@ export function PdfViewer({ documentId, path }: Props) {
   const setFitMode = useViewStore((s) => s.setFitMode);
   const showOutline = useViewStore((s) => s.showOutline);
   const darkMode = useDarkMode();
+
+  // Search state subscriptions (kept narrow to avoid extra renders).
+  const searchOpen = useSearchStore((s) => s.isOpen);
+  const searchQuery = useSearchStore((s) => s.query);
+  const searchCase = useSearchStore((s) => s.caseSensitive);
+  const searchWhole = useSearchStore((s) => s.wholeWord);
+  const searchFlat = useSearchStore((s) => s.flat);
+  const searchIndex = useSearchStore((s) => s.currentIndex);
+  const openSearch = useSearchStore((s) => s.open);
+  const closeSearch = useSearchStore((s) => s.close);
+  const setMatches = useSearchStore((s) => s.setMatches);
+  const setSearching = useSearchStore((s) => s.setSearching);
 
   // Load document bytes + parse PDF.
   useEffect(() => {
@@ -111,11 +126,20 @@ export function PdfViewer({ documentId, path }: Props) {
     };
   }, [path, zoom, fitMode]);
 
-  // SPEC: P1-VIEW-005 (P1.C3) + P1-VIEW-006 (P1.C2) — keyboard router.
+  // SPEC: P1-VIEW-005 (P1.C3) + P1-VIEW-006 (P1.C2) + P1-VIEW-007 (P1.C4)
+  // — keyboard router.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const cmd = e.metaKey || e.ctrlKey;
       const inputFocused = isInputFocused(document.activeElement);
+
+      // Cmd/Ctrl+F → open the search bar (always honored, even if an
+      // input is focused — Cmd+F should escape any text field).
+      if (cmd && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        openSearch();
+        return;
+      }
 
       // Zoom shortcuts: Cmd/Ctrl + = / + → zoom in; − → out; 0 → fit page.
       if (cmd && !inputFocused) {
@@ -164,11 +188,68 @@ export function PdfViewer({ documentId, path }: Props) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [doc, zoom, setZoom, setFitMode]);
+  }, [doc, zoom, setZoom, setFitMode, openSearch]);
+
+  // SPEC: P1-VIEW-007 — run the search whenever query/options change.
+  // Debounced 200 ms so typing doesn't fire one search per keystroke.
+  useEffect(() => {
+    if (!doc) return;
+    if (!searchQuery) {
+      setMatches([]);
+      setSearching(false);
+      return;
+    }
+    const signal = { cancelled: false };
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void searchDoc(doc, searchQuery, {
+        caseSensitive: searchCase,
+        wholeWord: searchWhole,
+      }, signal)
+        .then((matches) => {
+          if (signal.cancelled) return;
+          setMatches(matches);
+        })
+        .catch((err) => {
+          console.warn("search failed:", err);
+        })
+        .finally(() => {
+          if (!signal.cancelled) setSearching(false);
+        });
+    }, 200);
+    return () => {
+      signal.cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [doc, searchQuery, searchCase, searchWhole, setMatches, setSearching]);
+
+  // SPEC: P1-VIEW-007 — scroll to the page of the current match.
+  useEffect(() => {
+    if (searchIndex < 0) return;
+    const match = searchFlat[searchIndex];
+    if (!match) return;
+    virtRef.current?.scrollToPage(match.pageNumber);
+  }, [searchIndex, searchFlat]);
+
+  // Closing the search bar (via the X or Escape inside the input) is
+  // handled by the store. We additionally close on Escape pressed
+  // outside the input — same handler tree:
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSearch();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searchOpen, closeSearch]);
 
   return (
     <div className="flex h-full flex-col">
       <ZoomToolbar />
+      <SearchBar />
       <div className="flex flex-1 overflow-hidden">
         {showOutline && doc ? (
           <OutlinePanel

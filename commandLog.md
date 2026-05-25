@@ -193,12 +193,22 @@ $ npx vitest run src/view/__tests__/dark-invert.test.ts       # blocked on Node 
 
 No new dependencies.
 
-### P1.D2 — Outline sidebar (this commit)
+### P1.D2 — Outline sidebar (commit `6021941`)
 
 ```bash
 $ npx tsc --noEmit                                            # pass
 $ npx eslint src --max-warnings=0                             # pass
 $ npx vitest run src/panels/__tests__/outline-tree.test.ts    # blocked on Node 18
+```
+
+No new dependencies.
+
+### P1.C4 — Text search Cmd/Ctrl+F (this commit)
+
+```bash
+$ npx tsc --noEmit                                            # pass (after switching the PDF.js text-item filter from a type-predicate to flatMap)
+$ npx eslint src --max-warnings=0                             # pass (added HTMLInputElement, RegExpExecArray to globals)
+$ npx vitest run src/view/__tests__/search.test.ts            # blocked on Node 18
 ```
 
 No new dependencies.

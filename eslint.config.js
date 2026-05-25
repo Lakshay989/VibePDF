@@ -26,6 +26,8 @@ export default [
         HTMLElement: "readonly",
         HTMLCanvasElement: "readonly",
         HTMLDivElement: "readonly",
+        HTMLInputElement: "readonly",
+        RegExpExecArray: "readonly",
         IntersectionObserver: "readonly",
         ResizeObserver: "readonly",
         MutationObserver: "readonly",
