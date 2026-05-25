@@ -1,0 +1,5 @@
+# Used only by generate.py for the encrypted fixture (PDF encryption is
+# non-trivial to implement from scratch; pypdf is MIT-licensed pure
+# Python). The other two fixtures (spec, large) are built without any
+# external libraries.
+pypdf>=5.0

@@ -21,6 +21,7 @@
   - [P1.C5 — Dark-mode page invert](#p1c5--dark-mode-page-invert)
   - [P1.D2 — Outline sidebar](#p1d2--outline-sidebar)
   - [P1.C4 — Text search (Cmd/Ctrl+F)](#p1c4--text-search-cmdctrlf)
+  - [P1.E4 — Acceptance fixture generator](#p1e4--acceptance-fixture-generator)
 
 ---
 
@@ -907,6 +908,196 @@ rather than a momentary action.
 - Word boundary `\b`: https://www.regular-expressions.info/wordboundaries.html
 - Zustand selector best practices: https://zustand.docs.pmnd.rs/guides/slices-pattern
 - AbortController / AbortSignal (for when you graduate from the manual `{cancelled}` pattern): https://developer.mozilla.org/en-US/docs/Web/API/AbortController
+
+---
+
+### P1.E4 — Acceptance fixture generator
+
+**Spec:** unblocks `docs/05_ROADMAP.md` Phase 1 acceptance demo · **Commit:** _this commit_
+
+#### Problem
+
+Three large PDFs (a 1000-page text doc, an encrypted PDF, and a
+~500 MB stress PDF) are needed to actually *run* the Phase 1
+roadmap acceptance demo. Committing them is silly (the large one
+alone is half a gigabyte). We want a script that regenerates them
+deterministically on demand.
+
+#### Concepts learned
+
+**1. Generated fixtures vs committed fixtures.** The default instinct
+is "commit the test data so anyone can run the tests offline." That
+works for `hello.pdf` (596 bytes). It does not work for `p1-large.pdf`
+(500 MB). The threshold isn't fixed; rules of thumb:
+
+- Under ~100 KB and human-meaningful → commit it. Reviewable in a diff.
+- Reproducibly derivable from code → generate it. Smaller repo, no LFS
+  bills, no merge conflicts on binary blobs.
+- Genuinely human-curated and big (a sample contract, a customer PDF
+  someone reported a bug on) → Git LFS or an out-of-band store.
+
+`hello.pdf` is in the first bucket. `p1-spec.pdf`, `p1-encrypted.pdf`,
+`p1-large.pdf` are in the second. The `tests/fixtures/acceptance/`
+directory is gitignored for `*.pdf` with a README + script committed.
+
+**2. The PDF file structure, hands-on.** Writing the minimal builder
+forced us to internalize PDF's object graph:
+
+```
+%PDF-1.4
+%<binary marker>
+
+1 0 obj                       ← object 1, generation 0
+<< /Type /Catalog /Pages 2 0 R >>  ← references object 2
+endobj
+
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+
+...
+
+xref                          ← cross-reference table
+0 N
+0000000000 65535 f            ← free object 0
+0000000017 00000 n            ← byte offset of object 1
+...
+
+trailer
+<< /Size N /Root 1 0 R >>
+startxref
+<offset of xref table>
+%%EOF
+```
+
+Three things to notice:
+
+- **Indirect references** (`2 0 R` = object 2, generation 0,
+  reference). PDFs are graphs, not trees. Objects refer to each
+  other by number, which lets the same object be referenced from
+  multiple places (one font shared across all pages).
+- **The xref table** lists the byte offset of every object so a
+  reader can seek directly to it. This is what makes PDF random-
+  access: you don't have to scan the whole file to find page 743.
+- **The trailer's `startxref`** points to where the xref table
+  starts. The reader opens at the end, reads `startxref`, jumps to
+  the xref, walks it, and *then* loads the objects it needs.
+
+The structure looks weird until you realize PDF was designed for
+streaming + random access on machines with very little memory. The
+indirection is the price.
+
+**3. Subcommands with `argparse`.** Multi-mode CLIs use `add_subparsers`:
+
+```python
+sub = parser.add_subparsers(dest="cmd", required=True)
+sp_spec = sub.add_parser("spec")
+sp_spec.add_argument("--pages", type=int, default=1000)
+sp_large = sub.add_parser("large")
+sp_large.add_argument("--size-mb", type=int, default=500)
+```
+
+Each subcommand gets its own argument set. `args.cmd` tells you which
+was invoked. Same shape as `git <subcommand>`, `docker <subcommand>`,
+`npm <subcommand>`. Standard library, no dependencies.
+
+**4. Conditional dependencies, surfaced clearly.** The script's
+encryption path needs `pypdf`. The spec/large paths don't. We could
+have made `pypdf` a hard requirement of the whole file. Instead:
+
+```python
+def generate_encrypted() -> Path:
+    try:
+        import pypdf
+    except ImportError:
+        print("error: pypdf is required ...\n"
+              "  pip install -r tests/fixtures/acceptance/requirements.txt",
+              file=sys.stderr)
+        sys.exit(2)
+    ...
+```
+
+The import is **inside the function that needs it**, and the error
+message is **actionable** (it tells you the exact pip command).
+Lazy imports like this are the right call when:
+
+- One feature of a tool needs a heavy dep
+- Other features don't
+- You want the no-dep paths to work on a stock Python install
+
+Cost: the import is re-attempted on every call. Negligible here
+(one call per script invocation). Don't do this inside a hot loop.
+
+**5. `from __future__ import annotations`.** The line at the top of
+the file. Tells Python to lazily evaluate all type annotations —
+they live as strings until something asks. Two reasons we use it:
+
+- **Forward references work without quoting.** `def foo() -> list[Path]`
+  on Python 3.8 would fail at runtime ("list is not subscriptable");
+  with `__future__ annotations`, it's a deferred string and only
+  evaluated by tools that ask for the resolved type.
+- **Cheaper imports.** Annotations never get evaluated unless
+  something (e.g. `inspect.get_type_hints`) demands it.
+
+In Python 3.13+ this becomes the default. Until then it's a one-line
+upgrade that pays off in any script that uses generic types.
+
+**6. Byte-accurate output via `bytearray`.** We build the PDF in a
+`bytearray` (mutable, efficient appends) and convert to `bytes`
+once at the end. Concatenating `bytes` (`b"foo" + b"bar"`) makes a
+new object each time — O(N²) for N appends. `bytearray.extend` is
+O(amortised 1).
+
+This is the same idea as `StringBuilder` in Java, `String::push_str`
+on a `String` in Rust, `[]string` joined with `strings.Builder` in
+Go. Whenever you're concatenating many things into one big buffer,
+reach for the mutable builder.
+
+**7. Escaping inside PDF string literals.** PDF strings live between
+parentheses: `(Hello, world)`. So a string containing parens needs
+escaping: `(He said \(yes\) loudly)`. And a backslash needs
+escaping: `(C:\\Users\\…)`. Our `_escape_pdf_text` handles both.
+
+Every text format has its own escape table. JSON: `"`, `\`, control
+chars. SQL: `'`. Shell: a small encyclopedia. Always escape on the
+*write* side, never trust the input side. The bug class is "string
+injection," and the only defense is centralised escaping that the
+write path can't bypass.
+
+**8. The Python-version-multiplicity trap.** The smoke test caught
+that `pip install pypdf` had used `python3.11` from Homebrew, but
+the script was running with `/usr/bin/python3` (Apple's system
+Python). They have separate `site-packages`. The fix:
+
+```bash
+$ python3 -m pip install pypdf
+```
+
+— always use the **same interpreter** to install that you'll use to
+run. The `python -m pip` invocation forces them to match. The bare
+`pip` command is shorthand for "whatever `pip` is on the PATH,"
+which can drift.
+
+Generalises beyond Python: any tool with a per-interpreter / per-
+environment package set (npm + Node, gem + Ruby, cargo + Rust
+toolchain) has the same trap. Invoke the package manager via the
+tool you're going to run, not directly.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `tests/fixtures/acceptance/generate.py` | The script. Subcommands: `spec`, `encrypted`, `large`, `all`. |
+| `tests/fixtures/acceptance/requirements.txt` | One line: `pypdf>=5.0`. Only needed for the encrypted fixture. |
+| `tests/fixtures/acceptance/README.md` | Documents each fixture, the password, and the regeneration commands. |
+| `.gitignore` | Ignores `tests/fixtures/acceptance/*.pdf` so generated outputs don't get committed. |
+
+#### Further reading
+
+- PDF 1.7 spec, § 7.5 "File structure" — the canonical reference for the layout above. Free PDF on Adobe's site.
+- Python `argparse` tutorial: https://docs.python.org/3/howto/argparse.html
+- `from __future__ import annotations` rationale: PEP 563.
+- Python interpreter-vs-package-manager pitfalls: "Why you should use `python -m pip`": https://snarky.ca/why-you-should-use-python-m-pip/
 
 ---
 

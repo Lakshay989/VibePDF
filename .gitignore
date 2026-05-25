@@ -29,3 +29,6 @@ coverage/
 *.msi
 *.deb
 *.AppImage
+
+# Generated Phase 1 acceptance fixtures (rebuild via the script)
+tests/fixtures/acceptance/*.pdf

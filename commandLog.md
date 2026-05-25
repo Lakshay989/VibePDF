@@ -203,7 +203,7 @@ $ npx vitest run src/panels/__tests__/outline-tree.test.ts    # blocked on Node 
 
 No new dependencies.
 
-### P1.C4 — Text search Cmd/Ctrl+F (this commit)
+### P1.C4 — Text search Cmd/Ctrl+F (commit `5f436ab`)
 
 ```bash
 $ npx tsc --noEmit                                            # pass (after switching the PDF.js text-item filter from a type-predicate to flatMap)
@@ -212,6 +212,45 @@ $ npx vitest run src/view/__tests__/search.test.ts            # blocked on Node 
 ```
 
 No new dependencies.
+
+### P1.E4 — Acceptance fixture generator (this commit)
+
+```bash
+$ python3 -m pip install pypdf
+# Encryption library for the p1-encrypted.pdf fixture only.
+# Pinned via tests/fixtures/acceptance/requirements.txt (pypdf>=5.0).
+# Use `python3 -m pip` so the install lands in the same interpreter
+# that runs the script (avoids the homebrew-vs-system-python split).
+
+# Smoke verification (small sizes — the real ones are 500 MB):
+$ python3 tests/fixtures/acceptance/generate.py spec --pages 3     # writes p1-spec.pdf,    6.5 KB
+$ python3 tests/fixtures/acceptance/generate.py large --size-mb 1  # writes p1-large.pdf,   1.0 MB
+$ python3 tests/fixtures/acceptance/generate.py encrypted           # writes p1-encrypted.pdf, 1.0 KB
+$ file tests/fixtures/acceptance/*.pdf
+# Confirms all three are valid PDF 1.4.
+
+$ python3 -c "
+import pypdf
+r = pypdf.PdfReader('tests/fixtures/acceptance/p1-encrypted.pdf')
+assert r.is_encrypted
+assert r.decrypt('wrong').name == 'NOT_DECRYPTED'
+r.decrypt('vibepdf'); assert len(r.pages) == 1
+"
+# Confirms password round-trip works end-to-end.
+
+# After verification, the generated PDFs are deleted — they're
+# gitignored in tests/fixtures/acceptance/*.pdf and rebuilt on demand:
+$ rm -f tests/fixtures/acceptance/p1-{spec,large,encrypted}.pdf
+```
+
+For the *real* roadmap acceptance run later:
+
+```bash
+$ pip install -r tests/fixtures/acceptance/requirements.txt
+$ python3 tests/fixtures/acceptance/generate.py all
+# Defaults: 1000-page spec, 500 MB large, encrypted hello.pdf.
+# Takes a couple of minutes on the large one.
+```
 
 ---
 
