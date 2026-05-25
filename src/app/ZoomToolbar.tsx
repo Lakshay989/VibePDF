@@ -22,6 +22,8 @@ export function ZoomToolbar() {
   const fitMode = useViewStore((s) => s.fitMode);
   const setZoom = useViewStore((s) => s.setZoom);
   const setFitMode = useViewStore((s) => s.setFitMode);
+  const showOutline = useViewStore((s) => s.showOutline);
+  const toggleOutline = useViewStore((s) => s.toggleOutline);
 
   const fitOptions: { value: FitMode | "manual"; label: string }[] = [
     { value: "manual", label: "Manual" },
@@ -35,6 +37,20 @@ export function ZoomToolbar() {
 
   return (
     <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-800">
+      <button
+        type="button"
+        onClick={toggleOutline}
+        aria-label="Toggle outline sidebar"
+        aria-pressed={showOutline}
+        title="Toggle outline"
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (showOutline ? "bg-neutral-200 dark:bg-neutral-800" : "")
+        }
+      >
+        Outline
+      </button>
+      <span className="text-neutral-300 dark:text-neutral-700">|</span>
       <button
         type="button"
         onClick={() => setZoom(nextZoom(zoom, -1))}

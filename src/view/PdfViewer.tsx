@@ -10,6 +10,7 @@ import {
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { useDarkMode } from "@/app/use-dark-mode";
+import { OutlinePanel } from "@/panels/OutlinePanel";
 import { useViewStore } from "@/state/view-store";
 import {
   loadViewSettings,
@@ -41,6 +42,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const setView = useViewStore((s) => s.setView);
   const setZoom = useViewStore((s) => s.setZoom);
   const setFitMode = useViewStore((s) => s.setFitMode);
+  const showOutline = useViewStore((s) => s.showOutline);
   const darkMode = useDarkMode();
 
   // Load document bytes + parse PDF.
@@ -167,24 +169,32 @@ export function PdfViewer({ documentId, path }: Props) {
   return (
     <div className="flex h-full flex-col">
       <ZoomToolbar />
-      <div className="flex-1 overflow-hidden">
-        {error ? (
-          <div className="mx-auto mt-8 max-w-lg rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-            This file does not appear to be a valid PDF.
-            <div className="mt-1 text-xs opacity-70">{error}</div>
-          </div>
-        ) : doc ? (
-          <PageVirtualizer
-            ref={virtRef}
+      <div className="flex flex-1 overflow-hidden">
+        {showOutline && doc ? (
+          <OutlinePanel
             doc={doc}
-            documentId={documentId}
-            zoom={zoom}
-            fitMode={fitMode}
-            darkMode={darkMode}
+            onJump={(page) => virtRef.current?.scrollToPage(page)}
           />
-        ) : (
-          <div className="p-4 text-sm text-neutral-500">Opening…</div>
-        )}
+        ) : null}
+        <div className="flex-1 overflow-hidden">
+          {error ? (
+            <div className="mx-auto mt-8 max-w-lg rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+              This file does not appear to be a valid PDF.
+              <div className="mt-1 text-xs opacity-70">{error}</div>
+            </div>
+          ) : doc ? (
+            <PageVirtualizer
+              ref={virtRef}
+              doc={doc}
+              documentId={documentId}
+              zoom={zoom}
+              fitMode={fitMode}
+              darkMode={darkMode}
+            />
+          ) : (
+            <div className="p-4 text-sm text-neutral-500">Opening…</div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -19,6 +19,7 @@
   - [P1.C3 — Keyboard navigation](#p1c3--keyboard-navigation)
   - [P1.C2 — Zoom + fit modes with per-document persistence](#p1c2--zoom--fit-modes-with-per-document-persistence)
   - [P1.C5 — Dark-mode page invert](#p1c5--dark-mode-page-invert)
+  - [P1.D2 — Outline sidebar](#p1d2--outline-sidebar)
 
 ---
 
@@ -567,6 +568,156 @@ be "put the world in the known starting state."
 - MDN ImageData: https://developer.mozilla.org/en-US/docs/Web/API/ImageData
 - MDN MutationObserver: https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver
 - Why heuristics beat parsers (sometimes): Joel Spolsky, "The Law of Leaky Abstractions"
+
+---
+
+### P1.D2 — Outline sidebar
+
+**Spec:** P1-VIEW-009 · **Commit:** _this commit_
+
+#### Problem
+
+A PDF's outline (the "bookmarks" panel in Acrobat) is a tree of named
+entries pointing to specific pages. We want to surface it as a
+collapsible sidebar; clicking an entry should call into the
+virtualizer's `scrollToPage` from P1.C1.
+
+#### Concepts learned
+
+**1. Tree data structures.** A tree is a node with `children`, each of
+which is also a node. Recursive by construction. Most non-trivial UI
+data structures are trees: filesystems, the DOM itself, this outline,
+React component trees, even the JSX you write.
+
+Two things you do with trees constantly:
+
+- **Traversal.** Walk every node. Our `countOutlineEntries` is a
+  textbook recursive sum: `count = 1 + sum(count(child) for child)`.
+  This shape — base case + recursion — is how you reason about any
+  tree operation.
+- **Normalisation.** Take the upstream tree's shape and convert to
+  the one your code wants. `normalizeOutline` does this: PDF.js gives
+  us `{ title, dest, items? }`; we return `{ title, page, children }`
+  with destinations already resolved.
+
+**2. Dependency injection for testability.** PDF.js's outline contains
+**destinations** (refs into the PDF) that have to be resolved to page
+numbers by calling back into the document. If `normalizeOutline`
+called `doc.getPageIndex` directly, we couldn't test it without a
+real PDFDocumentProxy. Instead the resolver is a parameter:
+
+```ts
+export type DestinationResolver =
+  (dest: RawDestination) => Promise<number | null>;
+
+export async function normalizeOutline(
+  raw: RawOutlineNode[] | null,
+  resolvePage: DestinationResolver,   // ← injected
+): Promise<NormalizedOutlineNode[]>
+```
+
+In tests, we pass a one-line fake (`async (d) => 5`). In production,
+we pass a closure that wraps PDF.js. This is **dependency injection**
+in its smallest form: hand the dependency *in* rather than letting
+the function reach *out* for it.
+
+Same idea applies broadly: keep your pure logic ignorant of how the
+outside world gets it the data it needs. The outside world is for
+the caller to assemble.
+
+**3. PDF destinations.** A PDF "destination" can be:
+
+- A direct array: `[pageRef, "/XYZ", 0, 700, null]` — points to a
+  specific page (by indirect reference) and a position on it.
+- A named string: `"my-named-destination"` — looked up in the
+  document's name tree to get an array.
+
+Both reach a page through `doc.getPageIndex(arr[0])` which returns
+the 0-based index; we add 1 to display 1-based page numbers. The
+resolver in `OutlinePanel.tsx` handles both shapes inside a single
+try/catch (broken PDFs in the wild routinely have outline entries
+pointing to deleted pages — we return `null` and disable the
+button).
+
+**4. Recursive components.** `OutlineEntry` renders a single node and
+then maps over `node.children` rendering *itself* for each. This is
+fine in React — components are just functions. The only thing to
+watch is unbounded recursion (would blow the stack); a sane PDF
+outline is a few levels deep.
+
+The natural alternative is to flatten the tree into a list with
+depth annotations and render with iteration. Both work; the
+recursive version is closer to the data's shape and was clearer
+here.
+
+**5. The `aria-pressed` toggle button.** The "Outline" button on the
+toolbar is a *toggle*, not a momentary action. We mark it with
+`aria-pressed={showOutline}` so screen readers announce "pressed" /
+"not pressed" instead of just "button." This is the right pattern
+for any binary toolbar state (bold/italic, panel show/hide, mute/
+unmute). Comparison points:
+
+- `<button>` without `aria-pressed` → "button" (no state info)
+- `<button aria-pressed="true|false">` → "toggle button, pressed"
+- `<input type="checkbox" role="switch">` → "switch, on/off"
+- `<button aria-expanded="true|false">` → "expandable section,
+  expanded/collapsed" (for things that open *adjacent* content)
+
+We used `aria-pressed` here because the toolbar button *is* the
+state; the panel it controls is somewhere else on the page.
+`aria-expanded` would have been right if the button were sitting
+*directly above* the panel as a disclosure widget.
+
+**6. A pattern about async useEffect.** Our outline panel does this:
+
+```ts
+useEffect(() => {
+  let cancelled = false;
+  setTree(null);
+  setError(null);
+  (async () => {
+    try {
+      const data = await loadAndNormalize();
+      if (!cancelled) setTree(data);
+    } catch (e) {
+      if (!cancelled) setError(/* … */);
+    }
+  })();
+  return () => { cancelled = true; };
+}, [doc]);
+```
+
+Three things to notice:
+
+- We **immediately** reset `tree` and `error` to their loading state
+  on dependency change — so when the user switches docs, they don't
+  briefly see the old document's outline.
+- The async work is wrapped in an IIFE (`(async () => { … })()`)
+  because `useEffect` can't take an async callback (it'd return a
+  promise instead of a cleanup function).
+- The `cancelled` flag is the standard race-condition guard. If the
+  user switches docs faster than the previous outline resolves,
+  the stale resolution must not overwrite the new state.
+
+This three-part pattern (`cancelled` flag + IIFE + reset on entry)
+shows up in almost every component that loads data from an async
+source. Internalise it.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/panels/outline-tree.ts` | Pure `normalizeOutline` + `countOutlineEntries`. The dependency-injected resolver lives here. |
+| `src/panels/__tests__/outline-tree.test.ts` | 9 cases on the normaliser (empty input, single level, deeply nested, null dest, broken resolver, named dest) plus the counter. |
+| `src/panels/OutlinePanel.tsx` | The component: loads outline, resolves dests via PDF.js, renders the recursive tree with collapse/expand. |
+| `src/app/ZoomToolbar.tsx` | New "Outline" toggle button with `aria-pressed`. |
+| `src/view/PdfViewer.tsx` | Mounts the panel beside the virtualizer when `showOutline` is on; passes `scrollToPage` as the `onJump` callback. |
+
+#### Further reading
+
+- WAI-ARIA `aria-pressed` vs `aria-expanded`: https://www.w3.org/WAI/ARIA/apg/patterns/button/#wai-ariaroles,states,andpropertiesforatogglebutton
+- Dependency injection (mentally): "Constructor injection in five minutes" — search any DI primer; the same principle scales from a single function to a whole framework.
+- PDF destinations: ISO 32000-1 § 12.3.2 (named destinations) — the spec is dense but the relevant section is two pages.
 
 ---
 
