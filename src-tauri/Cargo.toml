@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "VibePDF — offline open-source PDF editor"
 authors = ["VibePDF contributors"]
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.80"
 license = "MIT OR Apache-2.0"
 publish = false
 
@@ -13,7 +13,7 @@ name = "vibepdf_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.11", features = [] }
+tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
 tauri = { version = "2.11", features = [] }

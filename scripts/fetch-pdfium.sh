@@ -17,7 +17,11 @@ mkdir -p "$DEST"
 # Pinned PDFium build. bblanchon/pdfium-binaries cuts a release roughly
 # weekly; we pin one to keep CI deterministic. Update by bumping this
 # value and verifying with the PDFium smoke test.
-PDFIUM_RELEASE="${PDFIUM_RELEASE:-chromium/6996}"
+#
+# 2026-05-25: bumped from chromium/6996 → chromium/7857. The previous
+# pin pre-dated pdfium-render 0.9.1, which calls symbols
+# (e.g. FPDF_StructElement_GetExpansion) that landed in PDFium >=7000.
+PDFIUM_RELEASE="${PDFIUM_RELEASE:-chromium/7857}"
 
 uname_s="$(uname -s)"
 uname_m="$(uname -m)"

@@ -10,8 +10,7 @@ use pdfium_render::prelude::*;
 
 #[test]
 fn pdfium_can_open_hello_pdf() {
-    let bindings = Pdfium::bind_to_statically_linked_library()
-        .or_else(|_| Pdfium::bind_to_system_library())
+    let bindings = Pdfium::bind_to_system_library()
         .expect("could not load PDFium native library — run `npm run fetch-pdfium`");
     let pdfium = Pdfium::new(bindings);
 

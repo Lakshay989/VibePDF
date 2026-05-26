@@ -34,6 +34,12 @@ impl AppState {
 
 /// Entry point invoked from `main.rs`. Lives in `lib` so we can also
 /// instantiate the runtime from integration tests if we want to.
+///
+/// `expect()` is allowed here: this function is the de-facto `main` —
+/// any failure to start the Tauri runtime is fatal and the user will
+/// see the panic message in `stderr`. Convention (`docs/06_CONVENTIONS.md`)
+/// permits `expect` in `main.rs`-equivalent code paths.
+#[allow(clippy::expect_used)]
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
@@ -50,6 +56,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::pdf::pdf_open,
+            commands::pdf::pdf_close,
             commands::pdf::pdfium_version,
         ])
         .run(tauri::generate_context!())

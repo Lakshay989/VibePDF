@@ -252,6 +252,66 @@ $ python3 tests/fixtures/acceptance/generate.py all
 # Takes a couple of minutes on the large one.
 ```
 
+### P1.B1 — Real document actor (this commit)
+
+```bash
+# Toolchain bootstrap — first Rust-touching step since project start.
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile default
+# Installed rustc 1.95.0 + cargo 1.95.0 + rustup 1.29.0 for
+# aarch64-apple-darwin. Cargo bin dir lives at ~/.cargo/bin; not on
+# the default zsh PATH, so cargo invocations below all start with
+# `. "$HOME/.cargo/env" && ...`.
+$ . "$HOME/.cargo/env" && cargo --version && rustc --version
+
+# PDFium prebuilt binary — needed for `cargo test` to bind to the
+# native lib. Re-fetched after bumping PDFIUM_RELEASE to chromium/7857
+# (the previous pin lacked symbols that pdfium-render 0.9 requires).
+$ rm -f src-tauri/resources/pdfium/libpdfium.dylib
+$ bash scripts/fetch-pdfium.sh
+# Drops libpdfium.dylib (7.0 MB) into src-tauri/resources/pdfium/.
+# Path is gitignored; every developer fetches their own.
+
+# Placeholder Tauri icons so `tauri::generate_context!` validates.
+# The bootstrap committed an empty icons/ dir; the macro reads each
+# referenced PNG at compile-time and requires RGBA (color type 6).
+$ python3 -c "<inline script that writes 32x32.png, 128x128.png, 128x128@2x.png as 8-bit RGBA>"
+# Plus tiny stub icon.icns / icon.ico just to satisfy the existence
+# check; bundle stage will reject those — that's expected (we're not
+# bundling, and real icons are a separate concern).
+
+# Node deps — clean reinstall because Node was bumped 18.15 → 22.4.0
+# since the last commit, and rolldown's native binding optionally
+# installs based on the active platform.
+$ rm -rf node_modules package-lock.json
+$ npm install
+$ npm install --no-save @rolldown/binding-darwin-arm64@1.0.2
+# Workaround for npm not installing optionalDependencies on the first
+# pass; without this, vitest can't load rolldown's WASM/native shim.
+
+# Verification gates (in the order the workflow expects them):
+$ . "$HOME/.cargo/env" && npm run check
+#   tsc --noEmit ✓
+#   eslint src --max-warnings=0 ✓
+#   cargo clippy --all-targets -- -D warnings ✓
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+#   tests/actor_smoke.rs ............ 4 passed (B1 acceptance)
+#   tests/pdfium_init.rs ............ 1 passed (pre-existing smoke)
+
+$ npm run test
+#   52 passed, 4 failed — failures pre-date this commit:
+#     src/state/__tests__/view-persistence.test.ts — IDB hook
+#     timeouts with fake-indexeddb under Node 22 (3 tests)
+#     src/view/__tests__/render-page.test.ts — DOMMatrix undefined
+#     under jsdom (1 test)
+#   Neither file is touched by B1. Tracked as environment drift from
+#   the Node upgrade, not a B1 regression. Do not "fix" by editing
+#   the failing tests (workflow rule: no test deletion to pass CI).
+```
+
 ---
 
 ## How this file evolves

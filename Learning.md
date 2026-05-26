@@ -22,6 +22,7 @@
   - [P1.D2 — Outline sidebar](#p1d2--outline-sidebar)
   - [P1.C4 — Text search (Cmd/Ctrl+F)](#p1c4--text-search-cmdctrlf)
   - [P1.E4 — Acceptance fixture generator](#p1e4--acceptance-fixture-generator)
+  - [P1.B1 — Real document actor (per-document thread, mpsc + oneshot)](#p1b1--real-document-actor-per-document-thread-mpsc--oneshot)
 
 ---
 
@@ -1098,6 +1099,112 @@ tool you're going to run, not directly.
 - Python `argparse` tutorial: https://docs.python.org/3/howto/argparse.html
 - `from __future__ import annotations` rationale: PEP 563.
 - Python interpreter-vs-package-manager pitfalls: "Why you should use `python -m pip`": https://snarky.ca/why-you-should-use-python-m-pip/
+
+---
+
+### P1.B1 — Real document actor (per-document thread, mpsc + oneshot)
+
+#### Problem
+
+The bootstrap left a stub `DocumentActorHandle` that owned only a path
+and a `tokio::sync::mpsc` channel feeding a no-op consumer. Every
+`pdf_open` call still re-opened the file via PDFium directly to read
+metadata, then dropped the document — so the actor map held nothing
+useful and concurrent reads serialised on a `Mutex<PdfDocument>` that
+didn't exist yet. Phase 2 onward (rotate, delete, redact, sign) all
+need a single owner per document; B1 is the step that puts a real
+owner in place.
+
+#### Concepts learned
+
+- **Actor pattern, applied to non-thread-safe libraries.** PDFium is
+  single-threaded *per document*. A `Mutex<PdfDocument>` held across
+  IPC awaits would block the whole runtime. The actor pattern instead
+  gives each document its own OS thread and a mailbox; callers post
+  messages and `await` replies. The lock is implicit (only one thread
+  ever touches the PDF) and never crosses an `await`.
+- **Std mpsc for the mailbox, tokio oneshot for the reply.** The
+  worker is sync — it does `for msg in rx { ... }`. `std::sync::mpsc`
+  is the right shape: synchronous, cheap `recv`. But the IPC command
+  is `async`; if it `recv`'d a sync channel for the reply it would
+  block a tokio worker thread. `tokio::sync::oneshot::Sender::send`
+  is sync (callable from the worker), and the matching receiver's
+  `await` suspends the caller — clean sync→async bridge.
+- **Embedding the reply channel in the message.** Instead of pairing
+  every send with a separate receiver, each variant carries its own
+  `oneshot::Sender<T>`. This is the "Bastion / Ractor / Actix"
+  pattern and is the canonical Rust translation of Erlang's
+  `gen_server:call`.
+- **`OnceLock` is not enough for fallible singletons.** Our first
+  attempt used `OnceLock<Pdfium>` with the "check, then set" pattern.
+  Two threads can both observe an empty `OnceLock`, both call
+  `Pdfium::bind_to_system_library` (which calls `FPDF_InitLibrary`),
+  both try to `set`, and the loser's `Pdfium` runs `Drop` — which
+  unloads the library while the winner is still using it. Result:
+  SIGTRAP under `cargo test`'s default parallel runner. The fix is
+  `LazyLock<Result<Pdfium, String>>`: the initializer runs at most
+  once, atomically, and the cached error string is re-wrapped per
+  caller (because `PdfiumError` isn't `Clone`).
+- **`generate_context!` is a build-time validator.** Tauri's
+  `tauri::generate_context!()` macro reads `tauri.conf.json` and
+  *opens* every referenced icon at compile time to validate format
+  (RGBA-required for PNGs). Missing or RGB-only icons fail the build,
+  not the bundle step. Bootstrapping a Tauri app therefore needs at
+  least placeholder RGBA icons before any `cargo check` will pass.
+- **`#[must_use]` and pedantic clippy.** With `clippy::pedantic` on,
+  every public getter that returns a value (not `&Self`) wants
+  `#[must_use]` so callers don't silently discard the answer.
+  `Result<T, E>` is already `#[must_use]` by definition, so the lint
+  only fires on functions returning non-`Result` values like `Uuid`
+  or `&DocumentMetadata`.
+- **`needless_pass_by_value` vs `std::thread::spawn`.** Clippy
+  pedantic flags every owned argument that isn't consumed inside the
+  function body. But thread closures own their environment — they
+  can't borrow from the caller frame — so functions called from
+  inside `move ||` closures have to take by value. The right move is
+  `#[allow(clippy::needless_pass_by_value)]` on the worker function
+  with a comment explaining why.
+- **Drop = teardown.** The handle is intentionally non-`Clone`. When
+  it drops, the mailbox `Sender` drops with it; the worker's
+  `rx.recv()` returns `Err(Closed)` and the `for msg in rx` loop
+  exits. No `Drop` impl is needed on the handle itself; we get the
+  shutdown for free by structuring ownership correctly.
+- **`expect_err` requires `Debug` on the Ok type.** When a test asserts
+  "this Result should be Err", `Result::expect_err` formats the
+  unexpected Ok value if it pops out — so the Ok type has to impl
+  `Debug`. Deriving `Debug` on `DocumentActorHandle` is free because
+  every field already does (`Uuid`, `PathBuf`, `mpsc::Sender<T>`,
+  `DocumentMetadata`).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/actor.rs` | Full rewrite. Public façade: `DocumentActorHandle`, `Message`, `Thumbnail`, `DocumentChange`, `DOCUMENT_CHANGED_EVENT`. Spawns the worker thread, owns the mailbox sender, exposes `page_count() / metadata_live() / render_thumbnail() / close()`. |
+| `src-tauri/src/pdf/document.rs` | Extended `DocumentMetadata` (title, author, pdf_version). New `open_pdf(path, password)` returning the live `PdfDocument<'_>` for the actor to keep. `pdfium()` swapped from `OnceLock` to `LazyLock<Result<Pdfium, String>>`. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_open` now spawns the actor (which opens the file inside the worker thread) and returns the cached metadata. New `pdf_close` drops the actor handle, triggering worker shutdown. |
+| `src-tauri/src/lib.rs` | Registered `pdf_close` in `invoke_handler!`. Added `#[allow(clippy::expect_used)]` justification on the de-facto-main `run()` fn. |
+| `src/ipc/pdf.ts` | `closePdf(id)` wrapper. Extended `OpenedDocument` with optional `title / author / pdfVersion`. New exported `DocumentChange` discriminated union. |
+| `src-tauri/tests/actor_smoke.rs` | Four integration tests against `hello.pdf`: page count, three independent actors, drop-then-respawn, typed error on bad path. |
+| `src-tauri/Cargo.toml` | MSRV bumped 1.78 → 1.80 (for `LazyLock`), `tauri-build` constraint 2.11 → 2.6 (the only one that didn't resolve on crates.io). |
+| `scripts/fetch-pdfium.sh` | `PDFIUM_RELEASE` bumped chromium/6996 → chromium/7857 (pdfium-render 0.9 needs symbols that landed in PDFium ≥7000). |
+| `src-tauri/icons/*.png` | Placeholder RGBA PNGs so `tauri::generate_context!` validates. Real icons are a separate concern. |
+| `.gitignore` | Added `src-tauri/gen/` (Tauri build artifacts, regenerated per machine). |
+
+#### Further reading
+
+- "Actors with Tokio" — https://ryhl.io/blog/actors-with-tokio/ — the
+  canonical short read on this exact pattern (Alice Ryhl, Tokio
+  maintainer).
+- `std::sync::LazyLock` stabilisation notes (Rust 1.80) —
+  https://blog.rust-lang.org/2024/07/25/Rust-1.80.0/#lazycell-and-lazylock
+- pdfium-render guide on PDFium lifetimes —
+  https://docs.rs/pdfium-render/latest/pdfium_render/
+- Tauri 2 docs on `generate_context!` and icon validation —
+  https://v2.tauri.app/develop/configuration-files/#tauri-config
+- "Why `OnceLock` isn't enough for fallible singletons" — written up
+  in this file because nobody else has, but the underlying pattern
+  is in the stdlib docs example for `LazyLock`.
 
 ---
 
