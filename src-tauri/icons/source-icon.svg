@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F1F5F9"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="12" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded-square background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="220" ry="220" fill="url(#bg)"/>
+
+  <!-- Page with folded top-right corner -->
+  <g filter="url(#shadow)">
+    <!-- Main page body: corner-fold cut out -->
+    <path d="
+      M 264 200
+      L 680 200
+      L 800 320
+      L 800 824
+      Q 800 856 768 856
+      L 264 856
+      Q 232 856 232 824
+      L 232 232
+      Q 232 200 264 200 Z"
+      fill="url(#page)"/>
+
+    <!-- Folded corner triangle -->
+    <path d="
+      M 680 200
+      L 800 320
+      L 700 320
+      Q 680 320 680 300
+      Z"
+      fill="#CBD5E1"/>
+  </g>
+
+  <!-- "PDF" wordmark -->
+  <text x="516" y="640"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif"
+    font-weight="800"
+    font-size="200"
+    fill="#4F46E5"
+    letter-spacing="-6">PDF</text>
+
+  <!-- Accent line under wordmark -->
+  <rect x="356" y="688" width="320" height="14" rx="7" fill="#A78BFA"/>
+</svg>
