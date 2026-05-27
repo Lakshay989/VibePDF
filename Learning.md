@@ -1208,6 +1208,96 @@ owner in place.
 
 ---
 
+### Env fix — restore vitest green on Node 22
+
+#### Problem
+
+The Node 18.15 → 22.4.0 upgrade in P1.B1 left four vitest cases red
+(`render-page.test.ts` × 1, `view-persistence.test.ts` × 3). The tests
+themselves had not changed; the failures were drift in the test
+*environment* after the clean `npm install` re-resolved devDependencies.
+Per the workflow rule we cannot "fix" failing tests by editing
+assertions, so the entire fix had to land as configuration, polyfills,
+or dependency-version changes.
+
+#### Concepts learned
+
+- **Layered failures hide each other.** The user-supplied diagnosis
+  listed two issues (DOMMatrix + IDB hook timeout) and was correct
+  about those, but stubbing DOMMatrix unmasked three more failures in
+  sequence on the same test: missing `GlobalWorkerOptions.workerSrc`,
+  missing `Promise.try`, missing `Uint8Array.prototype.toHex`. Every
+  fix has to be re-verified end-to-end; the symptom you see is just
+  the first error V8 threw, not the only one waiting.
+- **PDF.js's `legacy` build is the official Node escape hatch.** Modern
+  `pdfjs-dist@5.7.x` declares `engines: { node: ">=22.13.0" }` and on
+  older 22.x relies on `Promise.try` (V8 13.0, Node 22.10) and
+  `Uint8Array.prototype.toHex` (V8 14.0, Node 22.13). The `legacy/`
+  subpath ships a core-js-bundled build that polyfills both at module
+  load. The library even prints a runtime warning ("Please use the
+  `legacy` build in Node.js environments.") that we were ignoring.
+  Aliasing in vitest costs nothing because production still uses the
+  modern build.
+- **Vite alias forms: prefix vs exact.** `resolve.alias` as an object
+  matches prefix-first, so `{ "pdfjs-dist": ".../legacy/build/pdf.mjs" }`
+  also rewrites `"pdfjs-dist/legacy/build/pdf.worker.mjs"` to
+  `".../legacy/build/pdf.mjs/legacy/build/pdf.worker.mjs"` and fails
+  resolution. The array form `{ find: /^pdfjs-dist$/, replacement: ... }`
+  anchors the match so subpath imports still resolve normally — a
+  must-know whenever you alias a package root.
+- **PDF.js fake-worker short-circuit.** In jsdom there is no
+  `Worker`, so PDF.js falls back to a "fake worker" that dynamically
+  imports `GlobalWorkerOptions.workerSrc`. The render-page test sets
+  `workerSrc = ""` — a leftover from when that disabled the worker —
+  which in 5.x throws `"No GlobalWorkerOptions.workerSrc specified"`.
+  PDF.js also honours `globalThis.pdfjsWorker.WorkerMessageHandler`
+  as a short-circuit (checked *before* the workerSrc lookup), so
+  preloading the worker module into `globalThis.pdfjsWorker` from
+  the test setup keeps the test's source untouched.
+- **`fake-indexeddb` 6.x tightened block semantics.** The IDB tests
+  do `indexedDB.deleteDatabase()` in `beforeEach` without first
+  closing the connection cached from the previous test (the
+  module's `dbPromise` keeps it open across tests, intentionally,
+  so production code paths don't have to). In 5.x this resolved
+  fast enough that the next `open` raced through; in 6.x the spec-
+  correct "blocked while a connection is open" path triggers and the
+  follow-up `open` deadlocks forever (verified: a 30 s timeout did
+  not help). Pinning to `^5.0.2` is a one-line workaround that does
+  not require touching the test's open-DB pattern. If we ever want
+  to move back to 6.x, the test setup needs to `db.close()` before
+  `deleteDatabase()`.
+- **TypeScript treats top-level `await` as needing module context.**
+  Adding `await import(...)` to a `.ts` file that has no other
+  `import`/`export` makes `tsc` fail with TS1375. A trailing
+  `export {};` is the standard one-liner to mark the file as a
+  module without changing runtime behaviour.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `package.json` | `fake-indexeddb` pinned `^6.2.5` → `^5.0.2`. |
+| `package-lock.json` | Re-keyed after the pin; semantically only the fake-indexeddb subtree changes. |
+| `src/test-setup.ts` | Added a minimal `DOMMatrix` constructor stub (legacy build still touches it at module load), preloaded the legacy worker into `globalThis.pdfjsWorker`, and added `export {}` so top-level `await` typechecks. |
+| `vite.config.ts` | New `test.alias` entry aliasing the bare `pdfjs-dist` import (regex `^pdfjs-dist$`) to the legacy build. Subpath imports are intentionally not aliased. |
+
+#### Further reading
+
+- PDF.js "legacy build" rationale —
+  https://github.com/mozilla/pdf.js/blob/master/README.md#legacy-build
+- `Promise.try` TC39 proposal (Stage 4, V8 13.0) —
+  https://github.com/tc39/proposal-promise-try
+- `Uint8Array.prototype.toHex` TC39 proposal (Stage 4, V8 14.0) —
+  https://github.com/tc39/proposal-arraybuffer-base64
+- Vite `resolve.alias` array form —
+  https://vitejs.dev/config/shared-options.html#resolve-alias
+- fake-indexeddb 6.0 release notes (block semantics change) —
+  https://github.com/dumbmatter/fakeIndexedDB/releases
+- W3C IndexedDB spec — `deleteDatabase` while connections are open —
+  https://www.w3.org/TR/IndexedDB/#dom-idbfactory-deletedatabase
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

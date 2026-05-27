@@ -314,6 +314,49 @@ $ npm run test
 
 ---
 
+### Env fix — restore vitest green on Node 22 (this commit)
+
+```bash
+# Diagnosis: reproduce the 4 failures the previous commit (P1.B1)
+# noted as deferred env drift.
+$ npm run test
+#   52 passed, 4 failed — exactly as expected:
+#     src/view/__tests__/render-page.test.ts — DOMMatrix undefined.
+#     src/state/__tests__/view-persistence.test.ts — 3 × IDB timeouts.
+
+# Probe: is the IDB failure a slow test or a real deadlock?
+$ npx vitest run src/state/__tests__/view-persistence.test.ts \
+    --testTimeout=30000 --hookTimeout=30000
+#   Still red after 30 s — genuine deadlock, not slowness.
+#   Caused by deleteDatabase() racing an already-open connection
+#   under fake-indexeddb 6.x's stricter block semantics.
+
+# Fix 1 — pin fake-indexeddb to the last 5.x:
+$ npm install --save-dev fake-indexeddb@5.0.2 --no-audit --no-fund
+# package.json:          ^6.2.5 → ^5.0.2
+# package-lock.json:      6.2.5 →  5.0.2 (plus normal re-keying)
+
+# Fix 2 — DOMMatrix stub + legacy-build alias + worker preload, all
+# in src/test-setup.ts and vite.config.ts. No new npm deps; the
+# `pdfjs-dist/legacy/build/*` files already ship in the package.
+
+# Verification gates:
+$ npx tsc --noEmit
+#   ✓ (after adding `export {};` to test-setup.ts so the top-level
+#     `await import("pdfjs-dist/legacy/build/pdf.worker.mjs")` is in
+#     module context; the worker subpath has no .d.ts in the package
+#     so it's silenced with a one-line @ts-expect-error.)
+
+$ npx eslint src --max-warnings=0
+#   ✓
+
+$ npm run test
+#   56 passed, 0 failed (was 52 / 4 on Node 22.4 + Node-18-era deps).
+#   Re-ran twice to confirm no flakes — both ~1.3 s wall.
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

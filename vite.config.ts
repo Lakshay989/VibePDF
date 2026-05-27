@@ -33,5 +33,17 @@ export default defineConfig(async () => ({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // PDF.js explicitly tells you to use the `legacy` build in Node-ish
+    // environments (jsdom counts). The default ESM build assumes a
+    // browser runtime with DOMMatrix, `Uint8Array.prototype.toHex`,
+    // `Promise.try`, etc. — none of which are guaranteed on Node 22.4
+    // (pdfjs-dist@5.7.284 declares `engines: { node: ">=22.13.0" }`).
+    // The legacy bundle self-polyfills the lot via core-js, so we
+    // redirect bare `pdfjs-dist` imports to it. Regex `find` matches
+    // exactly so explicit subpath imports (e.g. the worker preload in
+    // src/test-setup.ts) still resolve normally.
+    alias: [
+      { find: /^pdfjs-dist$/, replacement: "pdfjs-dist/legacy/build/pdf.mjs" },
+    ],
   },
 }));
