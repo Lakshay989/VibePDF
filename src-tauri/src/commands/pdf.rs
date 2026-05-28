@@ -5,6 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
+use crate::pdf::render::{ImageFormat, RenderedPage};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -86,6 +87,40 @@ pub async fn pdf_close(
         drop(handle);
     }
     Ok(())
+}
+
+/// SPEC: P1-VIEW-008 + NFR-PERF-003 — render a page to either PNG or
+/// raw RGBA8 bytes. The thumbnail sidebar (D1), full-page viewer
+/// (future), export-to-image (P3), and render-failure log (E2) all
+/// route through this single command.
+#[tauri::command]
+pub async fn pdf_render_page(
+    state: State<'_, AppState>,
+    id: String,
+    page: u32,
+    dpi: f32,
+    format: ImageFormat,
+) -> Result<RenderedPage, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    // Send the request while holding the map lock, then drop the
+    // lock before awaiting the reply — otherwise the actor map is
+    // held across an `.await`, which blocks every other command on
+    // every other document for the duration of the render.
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.render_page_request(page, dpi, format)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
 /// Diagnostic: returns the `PDFium` version string. Used by the smoke test

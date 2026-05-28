@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::error::CommandError;
 use crate::pdf::document::{collect_metadata, open_pdf, DocumentMetadata};
+use crate::pdf::render::{self, ImageFormat, RenderedPage};
 
 /// Event name on the wire. The frontend listens for this via
 /// `tauri::event::listen("document-changed", ...)`.
@@ -43,17 +44,13 @@ pub enum DocumentChange {
     Closed { id: String },
 }
 
-/// RGBA8 thumbnail; PNG encoding happens in the frontend / D1.
-#[derive(Clone, Debug)]
-pub struct Thumbnail {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-}
-
 /// Messages the worker thread accepts. Each variant carries its own
 /// reply channel so the worker can answer one message at a time
 /// without head-of-line blocking on the mailbox.
+///
+/// `RenderThumbnail` and `RenderPage` both return a `RenderedPage`
+/// from `pdf::render`; the difference is the size selector
+/// (pixel-width vs DPI) and whether the bytes come back PNG-encoded.
 pub enum Message {
     GetPageCount {
         reply: oneshot::Sender<u32>,
@@ -64,7 +61,13 @@ pub enum Message {
     RenderThumbnail {
         page: u32,
         max_width: u32,
-        reply: oneshot::Sender<Result<Thumbnail, CommandError>>,
+        reply: oneshot::Sender<Result<RenderedPage, CommandError>>,
+    },
+    RenderPage {
+        page: u32,
+        dpi: f32,
+        format: ImageFormat,
+        reply: oneshot::Sender<Result<RenderedPage, CommandError>>,
     },
     Close,
 }
@@ -161,7 +164,7 @@ impl DocumentActorHandle {
         &self,
         page: u32,
         max_width: u32,
-    ) -> Result<Thumbnail, CommandError> {
+    ) -> Result<RenderedPage, CommandError> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::RenderThumbnail {
@@ -172,6 +175,47 @@ impl DocumentActorHandle {
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P1-VIEW-008 + NFR-PERF-003 — thumbnail and viewer
+    /// pipelines both consume this. PNG path is encoded inside the
+    /// actor thread (read-side; no contention with writes). RGBA8
+    /// path skips encoding for canvas consumers.
+    ///
+    /// Convenience version that holds `&self` across the await; fine
+    /// for tests, **not** fine for IPC handlers that pulled the
+    /// handle out of `Mutex<HashMap<…>>`. Those should call
+    /// `render_page_request` instead.
+    pub async fn render_page(
+        &self,
+        page: u32,
+        dpi: f32,
+        format: ImageFormat,
+    ) -> Result<RenderedPage, CommandError> {
+        let rx = self.render_page_request(page, dpi, format)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// Send-only sibling of `render_page`. Returns the reply receiver
+    /// without borrowing `&self` across the await — lets the caller
+    /// release the actor-map lock before awaiting.
+    pub fn render_page_request(
+        &self,
+        page: u32,
+        dpi: f32,
+        format: ImageFormat,
+    ) -> Result<oneshot::Receiver<Result<RenderedPage, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RenderPage {
+                page,
+                dpi,
+                format,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
     }
 
     /// Best-effort graceful close. Sends `Close`; the worker exits on
@@ -256,7 +300,15 @@ fn run_worker(
                 max_width,
                 reply,
             } => {
-                let _ = reply.send(render_thumbnail(&doc, page, max_width));
+                let _ = reply.send(render::render_thumbnail(&doc, page, max_width));
+            }
+            Message::RenderPage {
+                page,
+                dpi,
+                format,
+                reply,
+            } => {
+                let _ = reply.send(render::render_page(&doc, page, dpi, format));
             }
             Message::Close => {
                 tracing::info!("doc-actor closing (Close received)");
@@ -270,40 +322,6 @@ fn run_worker(
         &DocumentChange::Closed { id: id.to_string() },
     );
     tracing::info!("doc-actor exited");
-}
-
-/// Render one page to RGBA8 at `max_width` pixels wide, preserving
-/// aspect ratio. Used by the thumbnail sidebar (D1) and any future
-/// preview surface that wants a small bitmap without paying the cost
-/// of PNG encoding inside the actor.
-fn render_thumbnail(
-    doc: &pdfium_render::prelude::PdfDocument<'_>,
-    page: u32,
-    max_width: u32,
-) -> Result<Thumbnail, CommandError> {
-    use pdfium_render::prelude::*;
-
-    let pages = doc.pages();
-    // pdfium-render 0.9 uses `PdfPageIndex` (= i32) for page lookup;
-    // we reject obvious overflow but otherwise let PDFium return the
-    // typed "page out of range" error.
-    let page_idx = i32::try_from(page)
-        .map_err(|_| CommandError::InvalidInput(format!("page {page} out of range")))?;
-    let pdf_page = pages.get(page_idx).map_err(CommandError::from)?;
-
-    let target_w = i32::try_from(max_width.max(1)).unwrap_or(96);
-    let config = PdfRenderConfig::new().set_target_width(target_w);
-
-    let bitmap = pdf_page.render_with_config(&config).map_err(CommandError::from)?;
-    let width = u32::try_from(bitmap.width()).unwrap_or(0);
-    let height = u32::try_from(bitmap.height()).unwrap_or(0);
-    let rgba = bitmap.as_rgba_bytes();
-
-    Ok(Thumbnail {
-        width,
-        height,
-        rgba,
-    })
 }
 
 fn emit_change(app: Option<&AppHandle>, change: &DocumentChange) {

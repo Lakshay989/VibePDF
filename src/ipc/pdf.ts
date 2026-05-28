@@ -43,6 +43,41 @@ export async function closePdf(id: DocumentId): Promise<void> {
   return invoke<void>("pdf_close", { id });
 }
 
+/**
+ * Wire-format selector for {@link renderPage}.
+ *
+ * - `"png"` — PNG bytes, decode via `<img src="data:...">` or `Blob`.
+ * - `"rgba8"` — raw 8-bit RGBA pixels, drop straight onto a canvas
+ *   via `new ImageData(...)`.
+ *
+ * Mirrors `pdf::render::ImageFormat` in Rust.
+ */
+export type ImageFormat = "png" | "rgba8";
+
+/**
+ * Reply payload of {@link renderPage}. `bytes` is whichever format
+ * was requested; Tauri base64-decodes it automatically into a
+ * Uint8Array via the `serde_bytes` shape on the Rust side.
+ *
+ * Mirrors `pdf::render::RenderedPage` in Rust.
+ */
+export interface RenderedPage {
+  width: number;
+  height: number;
+  format: ImageFormat;
+  bytes: Uint8Array;
+}
+
+/** SPEC: P1-VIEW-008 + NFR-PERF-003. Routed through the actor. */
+export async function renderPage(
+  id: DocumentId,
+  page: number,
+  dpi: number,
+  format: ImageFormat,
+): Promise<RenderedPage> {
+  return invoke<RenderedPage>("pdf_render_page", { id, page, dpi, format });
+}
+
 export async function pdfiumVersion(): Promise<string> {
   return invoke<string>("pdfium_version");
 }

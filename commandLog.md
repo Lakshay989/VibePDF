@@ -355,6 +355,53 @@ $ npm run test
 #   Re-ran twice to confirm no flakes — both ~1.3 s wall.
 ```
 
+### P1.B3 — Render-page-to-bitmap message (this commit)
+
+```bash
+# No toolchain changes — Rust + PDFium dylib already installed
+# during B1, vitest env stable since the Node-22 fix commit.
+
+# Verification gates (in the order the workflow expects them):
+$ . "$HOME/.cargo/env" && npm run check
+#   tsc --noEmit ✓
+#   eslint src --max-warnings=0 ✓
+#   cargo clippy --all-targets -- -D warnings ✓  (after iterating
+#     on cast-truncation, doc-backtick, and unwrap_used lints in
+#     pdf/render.rs)
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+#   actor_smoke.rs ............ 4 passed (unchanged from B1)
+#   pdfium_init.rs ............ 1 passed (unchanged)
+#   render_to_png.rs .......... 5 passed, 1 ignored (release-only
+#     perf sentinel)
+#   render_verification_artifact.rs ... 1 ignored (on-demand)
+
+# Verification artifact for human eyeball:
+$ cd src-tauri && DYLD_LIBRARY_PATH="$PWD/resources/pdfium" \
+    cargo test --test render_verification_artifact -- \
+      --include-ignored --nocapture
+#   wrote /tmp/vibepdf-verify-72dpi.png (612x792, 20042 bytes)
+#   wrote /tmp/vibepdf-verify-144dpi.png (1224x1584, 59970 bytes)
+#
+# `file` confirms both are 8-bit RGBA PNGs, non-interlaced.
+# Open in Preview: hello.pdf glyph centred on white, 144 DPI is
+# visibly sharper at the same display size. Both written ~140 ms
+# end-to-end including PDFium init.
+
+$ npm run test
+#   56 passed, 0 failed (unchanged from B1 follow-up).
+
+# Discovery: SIGTRAP/SIGABRT under parallel `cargo test` when
+# multiple actors render simultaneously. Fix is `RENDER_LOCK:
+# Mutex<()>` in pdf/render.rs wrapping all PDFium calls (page
+# lookup, metadata read, render). PDFium's `FX_GE` render subsystem
+# has process-global state; the per-document actor pattern is not
+# enough on its own. Test verifies fix passes under default parallel
+# runner.
+```
+
 ---
 
 ## How this file evolves

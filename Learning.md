@@ -23,6 +23,7 @@
   - [P1.C4 — Text search (Cmd/Ctrl+F)](#p1c4--text-search-cmdctrlf)
   - [P1.E4 — Acceptance fixture generator](#p1e4--acceptance-fixture-generator)
   - [P1.B1 — Real document actor (per-document thread, mpsc + oneshot)](#p1b1--real-document-actor-per-document-thread-mpsc--oneshot)
+  - [P1.B3 — Render-page-to-bitmap message + the PDFium render lock](#p1b3--render-page-to-bitmap-message--the-pdfium-render-lock)
 
 ---
 
@@ -1295,6 +1296,107 @@ or dependency-version changes.
   https://github.com/dumbmatter/fakeIndexedDB/releases
 - W3C IndexedDB spec — `deleteDatabase` while connections are open —
   https://www.w3.org/TR/IndexedDB/#dom-idbfactory-deletedatabase
+
+---
+
+### P1.B3 — Render-page-to-bitmap message + the PDFium render lock
+
+#### Problem
+
+D1 (thumbnail sidebar), the eventual full-page viewer fallback, E2
+(visual-diff harness), and P3's export-to-image all need the same
+primitive: "give me page N of document D as bytes at DPI X." B1
+shipped the actor scaffolding but only a thumbnail-shaped message
+that returned RGBA8 at a pixel-width target. B3 generalises to DPI
+input + PNG-or-RGBA8 output, and factors the rasterisation into a
+new `pdf::render` module that both messages share.
+
+#### Concepts learned
+
+- **DPI ↔ pixel-width conversion.** PDFium's render API takes a
+  target *pixel* width, not a DPI. PDF page geometry is in
+  PostScript points (1 pt = 1/72 inch by definition), so
+  `pixels = (page_width_pt / 72.0) * dpi`. Clamping is essential:
+  a user (or a UI bug) requesting 2000 DPI on a poster-size page
+  yields a 600 GB allocation request that PDFium will earnestly
+  attempt.
+- **Process-global state in a "thread-safe" library.** PDFium's
+  documentation calls the binding "thread-safe to share" — the
+  `Pdfium` struct can be sent across threads and held by an `Arc`.
+  But the *render subsystem* (`FX_GE`) has process-global mutable
+  state, and two concurrent `render_with_config` calls — even from
+  separate `PdfDocument` instances — race and crash with SIGTRAP /
+  SIGABRT. Even `doc.pages().get(idx)` from two threads is enough.
+  The per-document actor pattern serialises calls *within* one
+  document; B3 adds a process-wide `Mutex<()>` to extend that
+  guarantee across documents. The lock costs us multi-document
+  render parallelism in exchange for correctness; for Phase 1's
+  use-case (one viewer + one thumbnail panel per doc) the budget
+  isn't tight.
+- **`Vec<u8>` over Tauri's JSON IPC.** Default `serde_json` emits
+  `Vec<u8>` as a JSON array of numbers — a 1 MB PNG round-trips as
+  ~5 MB of JSON. Acceptable for thumbnails; for full-page renders
+  the next layer of refactoring is either `#[serde(with = "serde_bytes")]`
+  (base64-encoded inside JSON, ~1.3× overhead) or
+  `tauri::ipc::Response` (raw bytes, no JSON envelope). Both are
+  one-line swaps from B3's current shape — picking one prematurely
+  would mean committing to a model before D1's profile data is in.
+- **`PdfDocument<'a>` is invariant in `'a`.** Tried to factor a
+  `lookup_page(doc, page) -> PdfPage<'a>` helper out of both
+  `render_page` and `render_thumbnail`. The compiler refused: with
+  `<'a>(doc: &'a PdfDocument<'a>, ...)`, callers holding
+  `PdfDocument<'static>` can't unify the two lifetimes (the outer
+  ref scope ≠ `'static`). The fix that's not worth the effort is a
+  closure callback pattern; the fix that is worth the effort is to
+  inline the four-line lookup into both call sites. Sometimes the
+  duplication is the right answer.
+- **The `png` crate vs reaching into `image`.** PDFium emits raw
+  RGBA; we need PNG bytes for the wire. `image = "0.25"` is already
+  in the dep graph transitively (pulled in by pdfium-render's image
+  conversion helpers), but reaching into a transitive dep is
+  fragile — the upstream is free to swap it for `tiny-skia` or
+  whatever next year. `png = "0.17"` is the standalone Mozilla
+  encoder used by both image-rs and Firefox; ~100 KB, no decoders,
+  no manipulation routines we'll never call. The justification went
+  in `Cargo.toml`'s dep block as a comment so future readers
+  understand why both crates exist in the graph.
+- **`#[must_use]`, `unwrap_used`, and the test allow-list.** Clippy
+  pedantic's `unwrap_used` lint catches `.unwrap()` everywhere —
+  including in `#[cfg(test)]` blocks. The conventions doc allows
+  unwrap in tests, but the lint doesn't know that. `#[allow(clippy::unwrap_used)]`
+  on the offending test fn with a one-line justification ("test
+  code; the harness panics on Ok anyway") is the standard escape
+  hatch.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/render.rs` | New. Shared DPI math, `PdfRenderConfig` builder, `RENDER_LOCK` process-wide mutex, PNG encoder. Both `Message::RenderPage` and `Message::RenderThumbnail` route through here. |
+| `src-tauri/src/pdf/actor.rs` | Added `Message::RenderPage { page, dpi, format, reply }` variant. Added `render_page` (await-the-reply) and `render_page_request` (send-only; lets the IPC layer drop the actor-map lock before awaiting) handle methods. `Message::RenderThumbnail` now returns `RenderedPage` (was `Thumbnail`); the local helper is gone. |
+| `src-tauri/src/pdf/mod.rs` | `pub mod render;` |
+| `src-tauri/src/commands/pdf.rs` | New `pdf_render_page` IPC command. Carefully drops the `Mutex<HashMap<...>>` guard *before* awaiting the reply, to avoid holding the actor-map lock across an `.await`. |
+| `src-tauri/src/lib.rs` | Registered `pdf_render_page` in the `invoke_handler!`. |
+| `src/ipc/pdf.ts` | `renderPage()` wrapper, `ImageFormat` union (`"png" \| "rgba8"`), `RenderedPage` type. |
+| `src-tauri/tests/render_to_png.rs` | Five tests: PNG magic + size sanity, RGBA8 buffer-size invariant (catches stride padding), 2× DPI scaling, page-out-of-range typed error, RGBA8-larger-than-PNG sanity. Plus an `#[ignore]`'d release-only performance sentinel. |
+| `src-tauri/tests/render_verification_artifact.rs` | Ignored helper; writes `/tmp/vibepdf-verify-{72,144}dpi.png` for human eyeball. |
+| `src-tauri/Cargo.toml` | New top-level dep `png = "0.17"` with justification in the inline comment. |
+| `src-tauri/src/error.rs` | Drive-by — backtick fix on a pre-existing uncommitted B2-flavoured change to `PasswordRequired` doc comments. Not B3's work, but already in the staging area. |
+
+#### Further reading
+
+- PDFium thread-safety: "PDFium and Multi-threading" — Google internal
+  doc summarised at https://groups.google.com/g/pdfium/c/zZ4qwK0HxYE
+  ("the rendering subsystem is not re-entrant").
+- `png` crate encoder API —
+  https://docs.rs/png/latest/png/struct.Encoder.html
+- PDF specification, §8.2.2.1 "Coordinate systems" — the 1 pt = 1/72 inch
+  origin for the DPI math.
+- Tauri v2 IPC — JSON vs raw-bytes response paths —
+  https://v2.tauri.app/develop/calling-rust/#returning-data
+- Holding a mutex guard across `.await` (Tokio book) —
+  https://tokio.rs/tokio/tutorial/shared-state#tasks-threads-and-contention
+  (don't do it; B3's `pdf_render_page` carefully avoids it).
 
 ---
 

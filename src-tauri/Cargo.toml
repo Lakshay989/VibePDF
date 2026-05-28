@@ -27,6 +27,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 pdfium-render = "0.9"
+# Encoder-only PNG library; written by the image-rs maintainers.
+# Justification: PDFium emits raw RGBA; we need PNG bytes for the
+# RenderPage IPC reply (B3). Using `png` directly instead of going
+# through `image = "0.25"` (transitive via pdfium-render) keeps the
+# surface area minimal — we don't want decoders or manipulation
+# routines we'll never call.
+png = "0.17"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]

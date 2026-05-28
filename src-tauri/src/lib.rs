@@ -57,6 +57,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::pdf::pdf_open,
             commands::pdf::pdf_close,
+            commands::pdf::pdf_render_page,
             commands::pdf::pdfium_version,
         ])
         .run(tauri::generate_context!())

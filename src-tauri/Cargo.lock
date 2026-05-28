@@ -4001,6 +4001,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "pdfium-render",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "tauri",
