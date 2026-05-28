@@ -1400,6 +1400,106 @@ new `pdf::render` module that both messages share.
 
 ---
 
+### P1.B2 — Encrypted-PDF password prompt
+
+#### Problem
+
+`docs/02_PRODUCT_SPEC.md` P1-VIEW-003 says the editor must prompt for a
+password on encrypted PDFs, retry up to three times, and never persist
+the password. Before B2 the actor already accepted `Option<String>` for
+the password (B1 plumbed it through), but every IPC call hard-coded
+`None`, and any wrong/missing password came back as a generic `PdfError`
+toast with no way to recover. B2 is the UI + error-shape change that
+turns "encrypted PDFs silently fail" into the spec'd interactive flow.
+
+#### Concepts learned
+
+- **Typed errors as a UI signal, not just a debug aid.** PDFium reports
+  both "encrypted file, no password supplied" and "encrypted file,
+  wrong password" with the same `FPDF_ERR_PASSWORD` code. The frontend
+  doesn't need to distinguish them — both mean "show the prompt and
+  ask again" — so the right design is **one** typed
+  `CommandError::PasswordRequired` variant, carrying the absolute path
+  so the dialog can label which file it's prompting for. The variant
+  is the single boundary signal that swaps the UI affordance from
+  "toast and give up" to "modal and retry."
+- **Why the retry policy lives on the frontend, not the backend.** The
+  backend stays stateless w.r.t. attempt counts: it returns
+  `PasswordRequired` every time, no memory of how many times you've
+  asked. That keeps the backend memorylesss and means the dialog can
+  freely reset the counter when the user re-triggers the open later.
+  If the policy lived on the backend you'd either need a session
+  identifier (more IPC surface) or a global rate-limit that affects
+  every document equally — both worse.
+- **Promise-of-string for modal dialogs.** The retry loop in
+  `src/app/open-with-password.ts` is a plain `async function` that
+  calls `askForPassword(...)` and awaits a `Promise<string | null>`.
+  The bridge from React state ("dialog is mounted with these props")
+  to that promise is a `useRef` that stores the resolver — set when
+  the dialog mounts, called from `onSubmit` / `onCancel`. This is the
+  standard pattern for "convert a modal into an async function call"
+  and works without any side libraries. Key subtlety: the dialog
+  stays mounted across retries (we don't unmount/remount the modal on
+  each wrong-password attempt) so the password input doesn't
+  flash-empty — instead a `useEffect` keyed on the `request` prop
+  clears the local input value when `attemptsLeft` decrements.
+- **Password hygiene in practice.** The password string lives in three
+  places only: (1) the dialog's `useState` (cleared on unmount and on
+  every prompt-args change via the same `useEffect`), (2) the
+  `askForPassword` resolver value (in scope for one microtask), (3)
+  the `pdf_open` IPC arg → `DocumentActorHandle::spawn` → `open_pdf`
+  → PDFium. The actor's `tracing::info_span!` was deliberately not
+  extended with a password field (would be a real footgun); the
+  worker drops the `Option<String>` immediately after the open call.
+  No keychain, no localStorage, no autofill.
+- **Drive-by-coordination hazard with parallel agents.** During the
+  B2 implementation a second Claude session was concurrently shipping
+  B3 in the same worktree. The B3 commit (`5303612`) folded my early
+  `error.rs` edits into its own changeset as "drive-by ... B2 prep,
+  not B3 work." The error variant wound up on `main` ascribed to B3,
+  so this commit doesn't own that hunk in `git blame`. Future cross-
+  instance work: either an explicit lock file convention or (better)
+  per-instance worktrees would avoid this. For one-step overlap it
+  was recoverable; for anything larger it would be painful.
+- **`Promise<string | null>` vs an event emitter.** I considered an
+  alternative design where the modal emits a `"submit"` event on a
+  store and the retry loop subscribes. That's worse: it spreads
+  state across two stores, requires unsubscribe-on-unmount
+  bookkeeping, and produces a less obvious data flow. The async
+  function pattern (with the resolver-ref) keeps the retry loop
+  linear and locally readable, at the cost of one `useRef`.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/error.rs` | Drive-by'd into B3's commit (`5303612`): adds `CommandError::PasswordRequired(String)` variant + Serialize arm + a smarter `From<PdfiumError>` that maps `PdfiumInternalError::PasswordError` to the new variant (every other PDFium error stays `PdfError`). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_open` signature gains `password: Option<String>`; threads it to `DocumentActorHandle::spawn`. Catches a bare `PasswordRequired("")` from the actor and enriches it with the absolute path before propagating, so the dialog can label which file it's prompting for. |
+| `src-tauri/tests/encrypted_open.rs` | New integration test. Three cases: no password → `PasswordRequired`, wrong password → `PasswordRequired`, correct password → success + page-count round-trip. Skips with a clear regenerate instruction when the fixture is absent. |
+| `src/ipc/invoke.ts` | Adds `"PasswordRequired"` to `CommandErrorPayload['code']`. Type-only change. |
+| `src/ipc/pdf.ts` | `openPdfPath(path, password?)`; threads through to the IPC payload. |
+| `src/app/open-with-password.ts` | New. The retry loop. Pure async glue, no React. 1 silent open attempt + up to 3 password attempts. Returns a discriminated union (`opened` / `cancelled` / `failed`). |
+| `src/app/PasswordPromptDialog.tsx` | New. Radix Dialog (already in deps; first modal in the project). Pure controlled component — parent owns the prompt args, this owns only the in-input string. Effect-clears the input on every prompt-args change. |
+| `src/app/App.tsx` | Manages the dialog state and the in-flight `Promise<string\|null>` resolver via a `useRef`. New `openByPath` is the single entry point for any path-driven open (Cmd/Ctrl+O, header button, drag-drop callback). Removes the old `openPdfDialog` indirection — file-dialog code is now inline so the same prompt path covers it. |
+| `src/app/drag-drop.ts` | `handleDroppedPaths` and `registerDragDrop` gain an optional `askForPassword` callback. When supplied (production), encrypted drops route through the prompt; when omitted (test), behaviour matches pre-B2 exactly. |
+| `tests/fixtures/PROVENANCE.md` | Notes that `p1-encrypted.pdf` is now also consumed by `encrypted_open.rs`, and that the Rust test skips with a regenerate hint when the fixture is missing. |
+
+#### Further reading
+
+- TC39 EARS syntax overview — https://alistairmavin.com/ears/
+- PDFium error codes — `FPDF_ERR_PASSWORD` and friends —
+  https://pdfium.googlesource.com/pdfium/+/HEAD/public/fpdfview.h
+- Radix UI `Dialog` (modal best practices, focus management) —
+  https://www.radix-ui.com/primitives/docs/components/dialog
+- "Async wait for a React modal" (canonical resolver-ref pattern,
+  Kent C. Dodds writeup) —
+  https://kentcdodds.com/blog/the-imperative-prompt-component
+- PEP 668 (`EXTERNALLY-MANAGED` and why a venv is now mandatory for
+  the fixture generator on Homebrew Python) —
+  https://peps.python.org/pep-0668/
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -35,8 +35,18 @@ export async function openPdfDialog(): Promise<OpenedDocument | null> {
   return openPdfPath(selected);
 }
 
-export async function openPdfPath(path: string): Promise<OpenedDocument> {
-  return invoke<OpenedDocument>("pdf_open", { path });
+/**
+ * SPEC: P1-VIEW-003 — the optional `password` is sent on retry after a
+ * `PasswordRequired` error from a previous attempt. Callers that don't
+ * care about encryption pass nothing; PDFium treats an absent password
+ * as "no password supplied" and rejects encrypted documents with the
+ * same code as a wrong password, which the dialog flow handles.
+ */
+export async function openPdfPath(
+  path: string,
+  password?: string,
+): Promise<OpenedDocument> {
+  return invoke<OpenedDocument>("pdf_open", { path, password: password ?? null });
 }
 
 export async function closePdf(id: DocumentId): Promise<void> {

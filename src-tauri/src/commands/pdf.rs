@@ -22,6 +22,11 @@ pub struct OpenedDocument {
 
 /// SPEC: P1-VIEW-001 — open a PDF by absolute path.
 /// SPEC: P1-VIEW-002 — invalid files return a typed `PdfError`, never panic.
+/// SPEC: P1-VIEW-003 — encrypted files surface as `PasswordRequired`
+/// (rather than the generic `PdfError`) so the frontend can mount the
+/// prompt dialog. The `password` arg is `None` for the first attempt and
+/// `Some(...)` for every retry; `PDFium` does not distinguish "no password
+/// supplied" from "wrong password", so both flow through the same arm.
 ///
 /// The document is opened *inside* the per-document actor thread, not in
 /// this async handler. We wait on the actor's ready-channel for either
@@ -31,6 +36,7 @@ pub async fn pdf_open(
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
+    password: Option<String>,
 ) -> Result<OpenedDocument, CommandError> {
     let path_buf = PathBuf::from(&path);
     if !path_buf.is_file() {
@@ -38,7 +44,17 @@ pub async fn pdf_open(
     }
 
     let id = uuid::Uuid::new_v4();
-    let handle = DocumentActorHandle::spawn(Some(app), id, path_buf.clone(), None)?;
+    let handle =
+        DocumentActorHandle::spawn(Some(app), id, path_buf.clone(), password).map_err(|e| {
+            // The From<PdfiumError> impl in error.rs leaves the
+            // PasswordRequired payload empty (the conversion site
+            // doesn't know the path). Enrich it here so the frontend
+            // dialog can label which file it's prompting for.
+            match e {
+                CommandError::PasswordRequired(_) => CommandError::PasswordRequired(path.clone()),
+                other => other,
+            }
+        })?;
     let meta = handle.metadata().clone();
 
     {

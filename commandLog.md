@@ -402,6 +402,46 @@ $ npm run test
 # runner.
 ```
 
+### P1.B2 — Encrypted-PDF password prompt (this commit)
+
+```bash
+# Regenerate the encrypted fixture if it's missing on the host. The
+# acceptance generator dep (pypdf) is the only Python lib we need.
+# Homebrew Python is PEP 668 EXTERNALLY-MANAGED, so a venv is now
+# the only sanctioned install path — system pip refuses without
+# --break-system-packages.
+$ python3 -m venv .venv-fixtures
+$ .venv-fixtures/bin/pip install -q -r tests/fixtures/acceptance/requirements.txt
+$ .venv-fixtures/bin/python tests/fixtures/acceptance/generate.py encrypted
+# Writes tests/fixtures/acceptance/p1-encrypted.pdf (~1 KB) with
+# user_password=vibepdf / owner_password=vibepdf-owner. Gitignored.
+
+# Verification gates:
+$ npx tsc --noEmit                                                # pass
+$ npx eslint src --max-warnings=0                                 # pass
+$ . "$HOME/.cargo/env" && \
+    cd src-tauri && cargo clippy --all-targets -- -D warnings     # pass
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --test encrypted_open
+#   3 passed (no password → PasswordRequired, wrong → PasswordRequired,
+#   correct → opens with page_count = 1).
+
+$ npm run test
+#   56 passed, 0 failed (unchanged from a7184d5 — vitest tests are
+#   unaffected; the manual UI verification is in the commit body).
+```
+
+No new npm or cargo dependencies. `.venv-fixtures/` added to `.gitignore`
+so it survives across runs without polluting `git status`.
+
+**Pre-existing test failure noted (not B2):** `cargo test --lib`
+fails on `pdf::render::tests::dpi_target_width_math` — a B3-era
+assertion that disagrees with the actual DPI clamp. Spawned a separate
+task chip; tracked under "Fix dpi_target_width_math test mismatch."
+The B2 commit explicitly does **not** touch `src-tauri/src/pdf/render.rs`.
+
 ---
 
 ## How this file evolves

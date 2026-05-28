@@ -10,6 +10,11 @@ export interface CommandErrorPayload {
   code:
     | "NotFound"
     | "InvalidInput"
+    // SPEC: P1-VIEW-003 — emitted by `pdf_open` when the file is
+    // encrypted and the supplied password (or its absence) does not
+    // unlock it. `message` carries the absolute path so the dialog
+    // can show which file is being prompted for.
+    | "PasswordRequired"
     | "PdfError"
     | "IoError"
     | "PermissionDenied"

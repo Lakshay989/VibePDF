@@ -35,3 +35,7 @@ coverage/
 
 # Generated Phase 1 acceptance fixtures (rebuild via the script)
 tests/fixtures/acceptance/*.pdf
+
+# Python virtualenv for the fixture generator (PEP 668 forces a venv
+# on system Python installs; the venv itself is a per-machine artifact).
+.venv*/
