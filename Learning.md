@@ -1776,6 +1776,59 @@ two tabs. With A2 shipped, Track A is fully done (A1 ✓ A2 ✓ A3 ✓).
 
 ---
 
+### Review follow-up — shared `basename` + password-loop tests
+
+#### Problem
+
+A review pass after the A2 ship found two quality issues worth closing
+before they compounded: (1) `basename` was implemented twice — in
+`App.tsx` and `PasswordPromptDialog.tsx` — with *different* logic, and
+(2) the password retry loop (`open-with-password.ts`), which implements
+the literal P1-VIEW-003 "retry up to 3 times" clause, had no automated
+test despite being trivially unit-testable.
+
+#### Concepts learned
+
+- **Duplicated helpers drift in *behaviour*, not just bytes.** The two
+  `basename`s weren't copy-paste twins: `App.tsx` used
+  `Math.max(lastIndexOf("/"), lastIndexOf("\\"))` (rightmost separator
+  wins, correct for mixed paths), while `PasswordPromptDialog.tsx` used
+  `lastIndexOf("/") + 1 || lastIndexOf("\\") + 1` (prefers `/`
+  entirely, weaker on a path containing both). Consolidating forced a
+  decision about which is correct — that's the hidden value of
+  de-duplication beyond line count. Landed the rightmost-wins version
+  in `src/app/paths.ts` (kept in `app/` next to its consumers rather
+  than a new top-level dir, avoiding an architecture-doc change).
+- **"Pure-ish" orchestration is unit-testable if you inject its
+  effects.** `openWithPasswordPrompt` looks like UI glue but takes an
+  injected `askForPassword` callback and only otherwise depends on
+  `openPdfPath`. Mock that one import (`vi.mock("@/ipc/pdf")`) and the
+  whole "1 silent attempt + up to 3 prompted" state machine is testable
+  with no DOM — the kind of logic (off-by-one on the attempt count)
+  that most rewards a test. 7 cases now pin the contract: silent open,
+  prompt-then-correct, three-wrong→failed (with the ticking
+  attemptsLeft / lastError), cancel, and non-password errors
+  propagating from both the silent and the retry path.
+- **Mind the vitest version's matcher surface.** `toHaveBeenCalled-
+  ExactlyOnceWith` doesn't exist in vitest 2.1.9 (it's newer); the
+  portable form is `toHaveBeenCalledTimes(1)` + `toHaveBeenCalledWith`.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/app/paths.ts` | New. Single `basename` (rightmost-separator-wins). |
+| `src/app/App.tsx` | Dropped its local `basename`; imports the shared one. |
+| `src/app/PasswordPromptDialog.tsx` | Dropped its (weaker) local `basename`; imports the shared one. |
+| `src/app/__tests__/open-with-password.test.ts` | New. 7 tests over the retry loop (P1-VIEW-003). |
+
+#### Further reading
+
+- vitest mocking (`vi.mock` factory + `vi.mocked`) —
+  https://vitest.dev/api/vi.html#vi-mock
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

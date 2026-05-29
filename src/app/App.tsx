@@ -8,6 +8,7 @@ import {
   type AskForPassword,
   type PasswordPromptRequest,
 } from "@/app/open-with-password";
+import { basename } from "@/app/paths";
 import { takePendingCliOpens } from "@/ipc/cli";
 import { openPdfPath } from "@/ipc/pdf";
 import { loadSession, saveSession } from "@/ipc/session";
@@ -303,11 +304,6 @@ interface EmptyStateProps {
   recents: string[];
   onOpenRecent: (path: string) => void;
   onClearRecents: () => void;
-}
-
-function basename(path: string): string {
-  const sep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return sep >= 0 ? path.slice(sep + 1) : path;
 }
 
 // SPEC: P1-VIEW-012 — recents surface on the start screen, clearable.

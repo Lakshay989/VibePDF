@@ -556,6 +556,24 @@ No new npm or cargo dependencies. CLI args buffer in `AppState.cli_pending`
 during `setup`; the frontend drains via `cli_take_pending_opens` at the
 tail of the session-restore IIFE.
 
+### Review follow-up — shared basename + password-loop tests (this commit)
+
+```bash
+# Quality fixes from a post-A2 review pass (no spec step):
+#   - consolidate duplicated basename → src/app/paths.ts
+#   - add src/app/__tests__/open-with-password.test.ts (P1-VIEW-003)
+
+$ npx tsc --noEmit                                                # pass
+$ npx eslint src --max-warnings=0                                 # pass
+$ . "$HOME/.cargo/env" && \
+    (cd src-tauri && cargo clippy --all-targets -- -D warnings)   # pass (no Rust change)
+
+$ npm run test
+#   63/63 (was 56 — +7 open-with-password cases).
+```
+
+No dependency or production-behaviour change beyond unifying `basename`.
+
 ---
 
 ## How this file evolves

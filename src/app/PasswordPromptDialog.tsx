@@ -12,6 +12,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useRef, useState } from "react";
 
+import { basename } from "@/app/paths";
 import type { PasswordPromptRequest } from "@/app/open-with-password";
 
 export interface PasswordPromptDialogProps {
@@ -23,11 +24,6 @@ export interface PasswordPromptDialogProps {
   request: PasswordPromptRequest | null;
   onSubmit: (password: string) => void;
   onCancel: () => void;
-}
-
-function basename(path: string): string {
-  const sep = path.lastIndexOf("/") + 1 || path.lastIndexOf("\\") + 1;
-  return sep > 0 ? path.slice(sep) : path;
 }
 
 export function PasswordPromptDialog({
