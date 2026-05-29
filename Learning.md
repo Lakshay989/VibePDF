@@ -1697,6 +1697,85 @@ hinges on React effect *ordering*, not just logic.
 
 ---
 
+### P1.A2 — CLI-arg file open
+
+#### Problem
+
+P1-VIEW-001 specifies that the user can open a PDF "via menu, drag-drop,
+or command-line argument." The first two were already covered (existing
+dialog + A1); A2 implements the third — `./vibepdf foo.pdf bar.pdf` →
+two tabs. With A2 shipped, Track A is fully done (A1 ✓ A2 ✓ A3 ✓).
+
+#### Concepts learned
+
+- **`tauri::setup` runs before the webview / React mount.** The step
+  doc floated emitting a `cli-open` event in `setup`, but at that
+  point there is no listener registered yet, so the event is silently
+  dropped — a classic emit-before-subscribe race. The fix is to invert
+  the channel: parse argv in `setup`, **buffer** the paths in a
+  `Mutex<Vec<String>>` on `AppState`, and let the frontend **pull** via
+  a command on mount. The pull model has no timing dependency, is
+  testable, and `mem::take`-drains so a redundant call is naturally a
+  no-op. General lesson: anything raised during process bootstrap that
+  must reach the frontend should be buffered, not emitted.
+- **Closures captured at `useEffect` setup time can't see later
+  hooks — refs bridge the gap.** The session-restore IIFE is created
+  inside the first big `useEffect`, but the CLI drain needed to call
+  `openByPath`, a `useCallback` declared later in the component body.
+  Closing over `openByPath` directly is impossible (temporal dead zone
+  + the IIFE pre-dates its definition). The standard pattern is a ref
+  declared *early* (`useRef<typeof openByPath | null>(null)`) and
+  **assigned during render** further down (`openByPathRef.current =
+  openByPath`). Render-time ref writes are a documented React pattern
+  for "always read the latest closure" without re-triggering effects.
+  The restore IIFE awaits an IPC call first, so by the time it reaches
+  the CLI drain phase the render has long since committed and the ref
+  is populated.
+- **Gate ordering inside an async IIFE matters.** I had to flip
+  `sessionRestoreFinished = true` **before** the CLI drain (not in the
+  `finally`), otherwise each CLI-opened tab would hit the persist
+  effect, see the gate closed, and not be saved — leaving session.json
+  in disagreement with what's actually on screen. The `catch` arm
+  still sets the flag too, so user actions are saved even if restore
+  fails.
+- **Pull-drain is naturally StrictMode-safe.** E1's restore IIFE has a
+  module-level `sessionRestoreStarted` guard, so it runs once even on
+  StrictMode's dev mount/unmount/remount. The CLI drain lives inside
+  that same IIFE → guarded for free. And even if some bug *did*
+  re-trigger it, `mem::take` returned `Vec::new()` the second time.
+  Defense in depth without a dedicated flag.
+- **Reuse existing flow rather than duplicating policy.** Routing the
+  CLI drain through `openByPath` (not raw `openPdfPath` + `openDoc`)
+  means CLI-opened files automatically get the same password prompt
+  (B2), recents push (A3), session-persist (E1), and dedup behaviour
+  as any other open. Every later feature wired into `openByPath`
+  comes along for free. Anti-pattern would have been re-implementing
+  pieces of it inside the IIFE.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/commands/cli.rs` | Pure `pdf_paths_from_args<I, S>` (skip argv0, keep `.pdf` case-insensitively, preserve order). `#[tauri::command] cli_take_pending_opens` `mem::take`s the buffer. |
+| `src-tauri/src/commands/mod.rs` | `pub mod cli;`. |
+| `src-tauri/src/lib.rs` | `cli_pending: Mutex<Vec<String>>` on `AppState`. In `setup`: parse argv, retain `is_file()`, populate buffer. Command registered. |
+| `src-tauri/tests/cli_open.rs` | 6 parser tests: case-insensitive `.pdf`, drop argv0 + non-pdf, preserve order, empty input, only-argv0, `.pdf` boundary. |
+| `src/ipc/cli.ts` | `takePendingCliOpens()` wrapper. |
+| `src/app/App.tsx` | New `openByPathRef` (declared early, assigned at render after `openByPath`). CLI drain runs at the tail of the restore IIFE, calling `openByPathRef.current(p)` per path. Persist gate is opened *before* the drain so CLI tabs are saved. |
+
+#### Further reading
+
+- React refs for "latest closure" / render-time assignment —
+  https://react.dev/reference/react/useRef#manipulating-the-dom-with-a-ref
+  (and the wider "you can read/write refs during render if it's
+  deterministic" pattern).
+- Tauri 2 lifecycle (`setup` runs before the webview is ready) —
+  https://v2.tauri.app/develop/state-management/#initialize-state
+- `std::mem::take` for atomic drain-and-reset —
+  https://doc.rust-lang.org/std/mem/fn.take.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

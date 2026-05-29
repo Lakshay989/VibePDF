@@ -8,6 +8,7 @@ import {
   type AskForPassword,
   type PasswordPromptRequest,
 } from "@/app/open-with-password";
+import { takePendingCliOpens } from "@/ipc/cli";
 import { openPdfPath } from "@/ipc/pdf";
 import { loadSession, saveSession } from "@/ipc/session";
 import { useDocumentStore } from "@/state/document-store";
@@ -47,6 +48,14 @@ export function App() {
     void hydrateRecents();
   }, [hydrateRecents]);
 
+  // SPEC: P1-VIEW-001 (CLI-arg clause) — `openByPath` is defined later
+  // in the body but the session-restore IIFE below needs to call it
+  // when draining pending CLI paths. The render-time ref assignment
+  // (further down) always points at the current useCallback, so the
+  // closure here gets the latest `openByPath` without retriggering the
+  // IIFE on identity changes.
+  const openByPathRef = useRef<((path: string) => Promise<void>) | null>(null);
+
   // SPEC: P1-VIEW-011 — session restore on mount. See the module-level
   // flags above for why the gate lives outside the component.
   useEffect(() => {
@@ -69,9 +78,24 @@ export function App() {
         );
         const restored = opened.filter((d) => d !== null);
         restoreDocs(restored, session.active);
+        // Open the persistence gate before the CLI drain so each CLI
+        // open is captured by the persist effect (otherwise the gate
+        // would still be closed and we'd save a session missing the
+        // CLI-added tabs).
+        sessionRestoreFinished = true;
+
+        // SPEC: P1-VIEW-001 (CLI-arg clause) — drain the buffer Rust
+        // parsed from argv in `setup`. Route through `openByPath` (via
+        // the ref) so CLI files get the same password prompt + recents
+        // + session-persist treatment as any other open. The backend
+        // mem::takes the buffer on first call, so this is naturally
+        // once-only even if something retriggered it.
+        const cliPaths = await takePendingCliOpens();
+        for (const path of cliPaths) {
+          await openByPathRef.current?.(path);
+        }
       } catch (err) {
         console.warn("session restore failed", err);
-      } finally {
         // Open the persistence gate even if restore failed — from here
         // on, user actions should be saved.
         sessionRestoreFinished = true;
@@ -155,6 +179,11 @@ export function App() {
     },
     [askForPassword, openDoc, pushRecent],
   );
+
+  // Keep the restore-IIFE's CLI drain hook (see ref declaration above)
+  // pointed at the latest `openByPath`. Render-time ref assignment is
+  // the standard "latest closure" pattern and doesn't need a useEffect.
+  openByPathRef.current = openByPath;
 
   const pickAndOpen = useCallback(async () => {
     const selected = await openFileDialog({

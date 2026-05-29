@@ -528,6 +528,34 @@ No new npm or cargo dependencies. Session persists to
 `<app_data_dir>/session.json`; reuses the atomic-write + defensive-read
 helpers lifted into `settings/mod.rs` from A3's recents.
 
+### P1.A2 — CLI-arg file open (this commit)
+
+```bash
+# Verification gates:
+$ npx tsc --noEmit                                                # pass
+$ npx eslint src --max-warnings=0                                 # pass
+$ . "$HOME/.cargo/env" && \
+    (cd src-tauri && cargo clippy --all-targets -- -D warnings)   # pass
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --test cli_open
+#   6 passed: case-insensitive .pdf, drop-argv0-and-non-pdf, order
+#   preservation, empty input, only-argv0, .pdf boundary.
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+#   32 passed, 2 ignored (added 6 cli_open to the prior 26).
+
+$ npm run test
+#   56/56 (unchanged).
+```
+
+No new npm or cargo dependencies. CLI args buffer in `AppState.cli_pending`
+during `setup`; the frontend drains via `cli_take_pending_opens` at the
+tail of the session-restore IIFE.
+
 ---
 
 ## How this file evolves

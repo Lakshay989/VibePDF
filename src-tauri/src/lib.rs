@@ -30,6 +30,11 @@ pub struct AppState {
     pub recents_lock: Mutex<()>,
     /// SPEC: P1-VIEW-011 — guards `session.json` writes the same way.
     pub session_lock: Mutex<()>,
+    /// SPEC: P1-VIEW-001 (CLI-arg clause) — PDF paths parsed from
+    /// `argv` at startup, drained once by the frontend on mount via
+    /// `cli_take_pending_opens`. See `commands/cli.rs` for the
+    /// emit-before-listener race this sidesteps.
+    pub cli_pending: Mutex<Vec<String>>,
 }
 
 impl AppState {
@@ -38,6 +43,7 @@ impl AppState {
             actors: Mutex::new(HashMap::new()),
             recents_lock: Mutex::new(()),
             session_lock: Mutex::new(()),
+            cli_pending: Mutex::new(Vec::new()),
         }
     }
 }
@@ -61,7 +67,23 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            app.manage(AppState::new());
+            let state = AppState::new();
+            // SPEC: P1-VIEW-001 (CLI-arg clause) — parse argv into the
+            // pending-opens buffer here, while we still have the
+            // process startup context. The frontend drains it on
+            // mount; see commands/cli.rs for the design rationale.
+            let cli_paths: Vec<String> =
+                commands::cli::pdf_paths_from_args(std::env::args())
+                    .into_iter()
+                    .filter(|p| std::path::Path::new(p).is_file())
+                    .collect();
+            if !cli_paths.is_empty() {
+                tracing::info!(count = cli_paths.len(), "buffered CLI-pending opens");
+                if let Ok(mut guard) = state.cli_pending.lock() {
+                    *guard = cli_paths;
+                }
+            }
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -74,6 +96,7 @@ pub fn run() {
             commands::recents::recents_clear,
             commands::session::session_load,
             commands::session::session_save,
+            commands::cli::cli_take_pending_opens,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
