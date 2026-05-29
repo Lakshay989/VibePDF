@@ -402,6 +402,32 @@ $ npm run test
 # runner.
 ```
 
+### Fix — dpi_target_width_math test assertion (this commit)
+
+```bash
+# Reproduced the failing B3-era unit test:
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --lib \
+       pdf::render::tests::dpi_target_width_math
+#   FAILED: left 17000, right 200000. The test asserted the 200k-px
+#   output clamp fires at 99_999 DPI, but the function clamps DPI to
+#   2000 *first* (612/72*2000 = 17000), so MAX_PX never triggers for a
+#   letter page. Code matches its doc comment; the test arithmetic was
+#   wrong. Corrected the assertion to 17_000 and added a real MAX_PX
+#   case via a 10_000 pt page width.
+
+# Gates after the fix:
+$ . "$HOME/.cargo/env" && cd src-tauri && cargo clippy --all-targets -- -D warnings  # pass
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+#   15 passed, 2 ignored (was 14 passed / 1 failed / 2 ignored).
+```
+
+No dependency or behavior change — test-only correction in
+`src-tauri/src/pdf/render.rs`.
+
 ### P1.B2 — Encrypted-PDF password prompt (this commit)
 
 ```bash

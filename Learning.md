@@ -1500,6 +1500,48 @@ turns "encrypted PDFs silently fail" into the spec'd interactive flow.
 
 ---
 
+### Fix — `dpi_target_width_math` test assertion (B3 follow-up)
+
+#### Problem
+
+The B3 commit (`5303612`) shipped with a failing unit test:
+`pdf::render::tests::dpi_target_width_math` asserted
+`target_width_from_dpi(612.0, 99_999.0) == 200_000`, but the function
+returns `17_000`. The B3 commit body claimed "cargo test: 10/10 green"
+— it counted the *integration* tests and missed this *lib* unit test
+under the default runner.
+
+#### Concept learned
+
+- **A clamp can silently mask a later clamp — watch the ordering.**
+  `target_width_from_dpi` clamps the DPI input to `[1.0, 2000.0]`
+  **before** computing pixels, then clamps the pixel output to
+  `MAX_PX = 200_000`. Because the DPI ceiling (2000) caps the result
+  at `page_width/72 * 2000`, the output clamp is unreachable for any
+  normal page size — a US-letter page tops out at `612/72*2000 =
+  17_000` px. The test author reasoned "99_999 DPI → ~850k px → cap at
+  200k" and forgot their own DPI clamp fires first. The lesson: when
+  two guards stack, the **tighter, earlier** one wins, and a test that
+  targets the looser later guard has to construct an input that
+  actually reaches it. Fix kept both assertions meaningful: 99_999 DPI
+  now asserts `17_000` (exercises the DPI clamp), and a separate
+  `10_000` pt page width asserts `200_000` (genuinely exercises
+  `MAX_PX`).
+- **This was a wrong test, not a weakened one.** The "don't rewrite
+  tests to pass" rule guards against gutting a *correct* test to hide
+  a code bug. Here the code matched its own doc comment exactly; the
+  test encoded wrong arithmetic. Correcting it (and *adding* coverage
+  for the path it thought it was testing) is the opposite of
+  weakening.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/render.rs` | Test-only: corrected the `99_999` DPI assertion `200_000 → 17_000`, fixed its misleading comment, added a `10_000` pt page-width case that genuinely reaches the `MAX_PX` output clamp. No production code change. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

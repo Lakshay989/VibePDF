@@ -235,9 +235,16 @@ mod tests {
         assert_eq!(target_width_from_dpi(612.0, 144.0), 1224);
         // Defensive clamp on a nonsense DPI: 0.0 → 1.0 floor → 612 / 72 = 8.5 → 9.
         assert_eq!(target_width_from_dpi(612.0, 0.0), 9);
-        // High-DPI clamp: 99_999 DPI on a letter page would be ~850k
-        // px; we cap at 200k.
-        assert_eq!(target_width_from_dpi(612.0, 99_999.0), 200_000);
+        // High-DPI clamp: DPI is clamped to 2000 *first* (see the
+        // function's doc comment), so 99_999 DPI on a 612 pt letter page
+        // is 612 / 72 * 2000 = 17_000 px — well under the 200_000 px
+        // output ceiling, which never fires for letter-sized pages.
+        assert_eq!(target_width_from_dpi(612.0, 99_999.0), 17_000);
+        // Output ceiling (MAX_PX = 200_000): the only way to reach it is
+        // an enormous page width, not a high DPI. A 10_000 pt page
+        // (~139 inches) at the 2000 DPI ceiling is 10_000 / 72 * 2000 ≈
+        // 277_778 px, which clamps down to 200_000.
+        assert_eq!(target_width_from_dpi(10_000.0, 99_999.0), 200_000);
         // NaN / inf go to the safe floor.
         assert_eq!(target_width_from_dpi(612.0, f32::NAN), 1);
     }
