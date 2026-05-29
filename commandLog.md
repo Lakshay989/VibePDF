@@ -499,6 +499,35 @@ crate for temp paths instead of pulling in `tempfile`). Recents persist
 to `<app_data_dir>/recents.json`; on macOS that's
 `~/Library/Application Support/<bundle-id>/recents.json`.
 
+### P1.E1 — Multi-document tab/session restore (this commit)
+
+```bash
+# Verification gates:
+$ npx tsc --noEmit                                                # pass
+$ npx eslint src --max-warnings=0                                 # pass
+$ . "$HOME/.cargo/env" && \
+    (cd src-tauri && cargo clippy --all-targets -- -D warnings)   # pass
+#   (one fix: backtick `IndexedDB` in a session.rs doc comment.)
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --test session_restore --test recents
+#   session_restore: 5 passed. recents: 6 passed (regression guard for
+#   the settings:: shared-helper refactor).
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+#   26 passed, 2 ignored (added 5 session_restore to the prior 21).
+
+$ npm run test
+#   56/56 (unchanged — restore/persist UI is verified manually).
+```
+
+No new npm or cargo dependencies. Session persists to
+`<app_data_dir>/session.json`; reuses the atomic-write + defensive-read
+helpers lifted into `settings/mod.rs` from A3's recents.
+
 ---
 
 ## How this file evolves

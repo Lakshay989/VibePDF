@@ -1619,6 +1619,84 @@ settings" rule, wires opens to record recents, and renders the list.
 
 ---
 
+### P1.E1 — Multi-document tab/session restore
+
+#### Problem
+
+P1-VIEW-011 ("support multiple PDFs as tabs") was already met by the tab
+strip. E1 is the step doc's elaboration: re-open at launch the tabs that
+were open at last quit, with the same active tab. It builds directly on
+A3's `settings/` persistence and is the first feature whose correctness
+hinges on React effect *ordering*, not just logic.
+
+#### Concepts learned
+
+- **Two module-level booleans beat a `useRef` under StrictMode.** React
+  18 StrictMode (dev) mounts → unmounts → remounts the tree with a
+  *fresh* component instance. A per-instance `useRef` gate is reset to
+  its initial value on the remount and never re-set, so an effect that
+  flips it once would gate forever-closed. The fix is module scope:
+  `sessionRestoreStarted` (the restore IIFE runs at most once — no
+  double-open / orphaned backend actors) and `sessionRestoreFinished`
+  (the persist gate). Both survive the remount because module state
+  isn't tied to a component instance. This is the non-obvious failure
+  mode the implementation surfaced that the plan hadn't called out.
+- **Gate the auto-save effect or it eats the thing you're restoring.**
+  The persist effect keys on `[docs, currentId]`. On first mount that
+  fires with `docs = []` — *before* the async restore has loaded the
+  session — and would `saveSession([])`, wiping the file you're about
+  to read. The `finished` gate makes the persist effect early-return
+  until restore completes. The ordering works out because `restoreDocs`
+  schedules a re-render while the IIFE's `finally` sets the flag
+  synchronously in the same microtask, so by the time the persist
+  effect actually runs (post-render) the flag is already true and the
+  restored set gets persisted (idempotently).
+- **Restore opens *silently*, on purpose.** Routing restore through the
+  normal `openByPath` would (a) fire password prompts for every
+  encrypted tab at launch (a prompt-storm) and (b) bump recents order.
+  Restore instead calls `openPdfPath(path)` with no password inside a
+  per-file `try/catch`: encrypted / missing / moved files are skipped,
+  not surfaced. The user re-opens them from recents to get the prompt.
+  "Skip, don't block" is the right posture for best-effort restore.
+- **Share the durability primitive, not the data shape.** A3 hard-coded
+  its atomic-write + defensive-read inside `recents.rs`. E1 lifted those
+  into `settings::{write_atomic, read_json}` so `session.rs` reuses them
+  — each concrete module is now just *its data shape* (`RecentsFile` /
+  `SessionFile`, both versioned) plus a thin load/save. The 6 existing
+  recents tests were the regression guard that the refactor preserved
+  behaviour.
+- **Coerce dangling references at the trust boundary.** `session.load`
+  drops `active` to `None` if it isn't in the surviving `open` set (the
+  active file was deleted and pruned). Doing it in `load` — not in the
+  UI — means every consumer gets a consistent invariant for free, and
+  it's unit-tested (`active_not_in_open_coerces_to_none`).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/settings/mod.rs` | New shared helpers: `read_json<T>` (None on missing/corrupt) and `write_atomic` (temp-sibling + rename, parent-dir create). `pub mod session;`. |
+| `src-tauri/src/settings/recents.rs` | Re-pointed `load`/`save` at the shared helpers; behaviour identical (its 6 tests unchanged). |
+| `src-tauri/src/settings/session.rs` | `Session { open, active }` + versioned `SessionFile`; `load` (defensive + active-coercion) / `save`. AppHandle-free. |
+| `src-tauri/src/commands/session.rs` | `session_load` / `session_save` — resolve `app_data_dir()/session.json`, take `AppState.session_lock`, delegate. |
+| `src-tauri/src/commands/mod.rs` | `pub mod session;`. |
+| `src-tauri/src/lib.rs` | `session_lock: Mutex<()>` on `AppState`; two commands registered. |
+| `src-tauri/tests/session_restore.rs` | 5 tests: round-trip, missing→empty, corrupt→empty, active-not-in-open→None, empty round-trip. |
+| `src/ipc/session.ts` | Typed `loadSession` / `saveSession` + `SessionState`. |
+| `src/state/document-store.ts` | New `restoreDocs(docs, activePath)` bulk action — one `set()` so restore renders once; falls back to first doc when `activePath` is absent. |
+| `src/app/App.tsx` | Module-level `sessionRestoreStarted` / `sessionRestoreFinished` flags; restore-on-mount effect (silent per-file open + `restoreDocs`); persist effect keyed on `[docs, currentId]`, gated on `finished`. |
+
+#### Further reading
+
+- React StrictMode — intentional double-invocation of effects in dev —
+  https://react.dev/reference/react/StrictMode#fixing-bugs-found-by-double-rendering-in-development
+- "Running an effect only once" / module-scope guards —
+  https://react.dev/learn/you-might-not-need-an-effect
+- Atomic file replace via rename (shared with A3) —
+  https://doc.rust-lang.org/std/fs/fn.rename.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

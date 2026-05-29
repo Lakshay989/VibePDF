@@ -28,6 +28,8 @@ pub struct AppState {
     /// The mutex protects the *file*, not in-memory data, so it holds
     /// `()`.
     pub recents_lock: Mutex<()>,
+    /// SPEC: P1-VIEW-011 — guards `session.json` writes the same way.
+    pub session_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -35,6 +37,7 @@ impl AppState {
         Self {
             actors: Mutex::new(HashMap::new()),
             recents_lock: Mutex::new(()),
+            session_lock: Mutex::new(()),
         }
     }
 }
@@ -69,6 +72,8 @@ pub fn run() {
             commands::recents::recents_list,
             commands::recents::recents_push,
             commands::recents::recents_clear,
+            commands::session::session_load,
+            commands::session::session_save,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

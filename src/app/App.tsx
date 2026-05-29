@@ -8,15 +8,33 @@ import {
   type AskForPassword,
   type PasswordPromptRequest,
 } from "@/app/open-with-password";
+import { openPdfPath } from "@/ipc/pdf";
+import { loadSession, saveSession } from "@/ipc/session";
 import { useDocumentStore } from "@/state/document-store";
 import { useSettingsStore } from "@/state/settings-store";
 import { PdfViewer } from "@/view/PdfViewer";
+
+// SPEC: P1-VIEW-011 — session restore must happen exactly once per app
+// launch, and the persist gate must outlive a StrictMode remount.
+//
+// React 18 StrictMode double-invokes effects in dev (mount → unmount →
+// remount with a *fresh* component instance). A per-instance `useRef`
+// gate would be reset to `false` on the remount and never set back, so
+// the persist effect would early-return forever. Both flags therefore
+// live at module scope:
+//   - `started`  — the restore IIFE runs at most once (no double-open /
+//     orphaned actors).
+//   - `finished` — gates the persist effect so it can't fire with the
+//     initial empty `docs` and wipe session.json before restore loads.
+let sessionRestoreStarted = false;
+let sessionRestoreFinished = false;
 
 export function App() {
   const docs = useDocumentStore((s) => s.docs);
   const currentId = useDocumentStore((s) => s.currentId);
   const openDoc = useDocumentStore((s) => s.openDoc);
   const setCurrent = useDocumentStore((s) => s.setCurrent);
+  const restoreDocs = useDocumentStore((s) => s.restoreDocs);
   const [toast, setToast] = useState<string | null>(null);
 
   // SPEC: P1-VIEW-012 — recents, owned by Rust and mirrored here.
@@ -28,6 +46,49 @@ export function App() {
   useEffect(() => {
     void hydrateRecents();
   }, [hydrateRecents]);
+
+  // SPEC: P1-VIEW-011 — session restore on mount. See the module-level
+  // flags above for why the gate lives outside the component.
+  useEffect(() => {
+    if (sessionRestoreStarted) return;
+    sessionRestoreStarted = true;
+    void (async () => {
+      try {
+        const session = await loadSession();
+        // Open each saved path silently (no password prompt at launch —
+        // see the plan's risk #2). Encrypted / missing / moved files are
+        // skipped; the user re-opens them from recents to get the prompt.
+        const opened = await Promise.all(
+          session.open.map(async (path) => {
+            try {
+              return await openPdfPath(path);
+            } catch {
+              return null;
+            }
+          }),
+        );
+        const restored = opened.filter((d) => d !== null);
+        restoreDocs(restored, session.active);
+      } catch (err) {
+        console.warn("session restore failed", err);
+      } finally {
+        // Open the persistence gate even if restore failed — from here
+        // on, user actions should be saved.
+        sessionRestoreFinished = true;
+      }
+    })();
+  }, [restoreDocs]);
+
+  // SPEC: P1-VIEW-011 — persist the open tabs + active tab on every
+  // change, once restore has run. Backend write is atomic.
+  useEffect(() => {
+    if (!sessionRestoreFinished) return;
+    const activePath = docs.find((d) => d.id === currentId)?.path ?? null;
+    void saveSession(
+      docs.map((d) => d.path),
+      activePath,
+    );
+  }, [docs, currentId]);
 
   // SPEC: P1-VIEW-003 — password-prompt state.
   // `prompt` non-null means the dialog is mounted with these args.

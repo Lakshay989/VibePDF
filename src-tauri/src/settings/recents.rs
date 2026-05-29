@@ -12,14 +12,16 @@
 //!
 //! Defensive posture: a missing or corrupt `recents.json` reads as an
 //! empty list rather than erroring — recents are a convenience, never a
-//! reason to block the start screen. Writes are atomic (temp file +
-//! rename) so an interrupted write can't truncate the real file.
+//! reason to block the start screen. The atomic write + defensive read
+//! live in `settings` (shared with `session`); this module is just the
+//! list shape and the cap/dedup rule.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
+use crate::settings::{read_json, write_atomic};
 
 /// Maximum number of remembered files. Oldest entries beyond this are
 /// pruned on every push.
@@ -51,11 +53,8 @@ pub fn push_front(list: &mut Vec<String>, path: String) {
 /// empty list rather than an error — see the module docs.
 #[must_use]
 pub fn load(file: &Path) -> Vec<String> {
-    let Ok(bytes) = std::fs::read(file) else {
-        return Vec::new();
-    };
-    match serde_json::from_slice::<RecentsFile>(&bytes) {
-        Ok(parsed) if parsed.version == CURRENT_VERSION => {
+    match read_json::<RecentsFile>(file) {
+        Some(parsed) if parsed.version == CURRENT_VERSION => {
             let mut paths = parsed.paths;
             // Defend against a hand-edited file that exceeds the cap.
             paths.truncate(MAX_RECENTS);
@@ -65,27 +64,15 @@ pub fn load(file: &Path) -> Vec<String> {
     }
 }
 
-/// Atomically persist `list` to `file`. Creates the parent directory if
-/// it does not yet exist (first run, before Tauri has touched
-/// `app_data_dir`). Writes to a sibling temp file then renames, so a
-/// crash mid-write leaves the previous `recents.json` intact.
+/// Atomically persist `list` to `file`. See `settings::write_atomic`
+/// for the durability guarantee (temp sibling + rename, parent dir
+/// created on first run).
 pub fn save(file: &Path, list: &[String]) -> Result<(), CommandError> {
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
     let payload = RecentsFile {
         version: CURRENT_VERSION,
         paths: list.iter().take(MAX_RECENTS).cloned().collect(),
     };
     let json = serde_json::to_vec_pretty(&payload)
         .map_err(|e| CommandError::Internal(format!("serialize recents: {e}")))?;
-
-    // Unique temp sibling so two concurrent saves can't clobber each
-    // other's temp file before the rename. The caller already holds the
-    // recents mutex, but the unique suffix is cheap insurance.
-    let tmp = file.with_extension(format!("json.tmp-{}", uuid::Uuid::new_v4()));
-    std::fs::write(&tmp, &json)?;
-    std::fs::rename(&tmp, file)?;
-    Ok(())
+    write_atomic(file, &json)
 }
