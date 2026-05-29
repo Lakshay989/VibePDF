@@ -468,6 +468,37 @@ assertion that disagrees with the actual DPI clamp. Spawned a separate
 task chip; tracked under "Fix dpi_target_width_math test mismatch."
 The B2 commit explicitly does **not** touch `src-tauri/src/pdf/render.rs`.
 
+### P1.A3 — Recents (last 20, clearable, persisted) (this commit)
+
+```bash
+# Verification gates:
+$ npx tsc --noEmit                                                # pass
+$ npx eslint src --max-warnings=0                                 # pass
+$ . "$HOME/.cargo/env" && \
+    (cd src-tauri && cargo clippy --all-targets -- -D warnings)   # pass
+#   (one fix: #[must_use] on settings::recents::load)
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --test recents
+#   6 passed: dedup-to-front, cap-at-20, disk round-trip,
+#   missing-file→empty, corrupt-file→empty, save-then-clear.
+
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+#   21 passed, 2 ignored (added 6 recents to the prior 15).
+
+$ npm run test
+#   56/56 (unchanged — recents store rewrite has no vitest yet; UI is
+#   verified manually per the commit body).
+```
+
+No new npm or cargo dependencies (tests reuse the existing `uuid`
+crate for temp paths instead of pulling in `tempfile`). Recents persist
+to `<app_data_dir>/recents.json`; on macOS that's
+`~/Library/Application Support/<bundle-id>/recents.json`.
+
 ---
 
 ## How this file evolves

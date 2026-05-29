@@ -1542,6 +1542,83 @@ under the default runner.
 
 ---
 
+### P1.A3 — Recents (last 20, clearable, persisted)
+
+#### Problem
+
+P1-VIEW-012 wants the last 20 opened files surfaced on the start screen
+and clearable. A `settings-store.ts` already had the cap/dedup logic but
+backed it with `localStorage` and — critically — nothing in the app
+called it (no UI, and `openByPath` didn't record opens). A3 moves
+persistence to the Rust side per the architecture's "Rust owns app-wide
+settings" rule, wires opens to record recents, and renders the list.
+
+#### Concepts learned
+
+- **The architecture already told us where this goes.**
+  `docs/04_ARCHITECTURE.md` reserves a top-level `settings/` Rust module
+  and states "the Rust side owns app-wide settings; frontend reads them
+  via a one-shot command on startup." So no architecture-doc edit was
+  needed — the module was pre-blessed. Worth re-reading the arch doc
+  before inventing a home for persisted state.
+- **Split the IO layer from the path-resolution layer for testability.**
+  `settings::recents` has two strata: pure list logic (`push_front`) +
+  disk IO against an explicit `&Path` (`load`/`save`), and *neither*
+  knows about `AppHandle`. Only the thin `commands/recents.rs` wrappers
+  resolve `app_data_dir()`. That split is what lets `tests/recents.rs`
+  exercise everything against a temp file with no Tauri app — same
+  pattern B1/B2 use to keep `cargo test` app-free. If `load`/`save` had
+  taken an `AppHandle`, none of it would be unit-testable.
+- **Atomic write = temp file + rename.** `save` writes to a uuid-suffixed
+  sibling then `std::fs::rename`s over the target. `rename` within a
+  filesystem is atomic on every platform we target, so a crash mid-write
+  leaves the previous `recents.json` intact rather than a truncated file.
+  Pairs with the defensive `load` (any read/parse error → empty list) so
+  recents can never wedge the start screen.
+- **Backend returns the post-mutation list; frontend never re-derives.**
+  `recents_push` / `recents_clear` return the new `Vec<String>` and the
+  zustand store sets state directly from it. The cap-at-20 + dedup +
+  ordering live in exactly one place (Rust). The store is a pure mirror.
+  This avoids the classic bug where frontend and backend both implement
+  "the rules" and drift.
+- **A `Mutex<()>` to guard a *file*, not data.** Two quick opens could
+  race the read-modify-write of `recents.json`. `AppState.recents_lock`
+  is a `Mutex<()>` — it owns no data; holding it just serialises the
+  file transaction. Cheap, and opens aren't a hot path. (The actor map
+  has its own separate mutex; we didn't reuse it because the scopes are
+  unrelated and that would create false contention.)
+- **Avoided a new dependency by reusing `uuid`.** The plan floated
+  `tempfile` for tests; instead the tests build a unique temp path from
+  the already-present `uuid` crate (`temp_dir().join(format!("…-{uuid}")`).
+  No new dep, same isolation. CLAUDE.md treats new deps as a cost worth
+  dodging when an existing one does the job.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/settings/mod.rs` | New top-level module (`pub mod recents;`). |
+| `src-tauri/src/settings/recents.rs` | Pure list logic (`push_front`, `MAX_RECENTS = 20`) + disk IO (`load`/`save`, atomic, defensive) against an explicit path. Versioned `{ version, paths }` on-disk format. |
+| `src-tauri/src/commands/recents.rs` | `recents_list` / `recents_push` / `recents_clear` — resolve `app_data_dir()/recents.json`, take `AppState.recents_lock`, delegate to `settings::recents`, return the new list. |
+| `src-tauri/src/commands/mod.rs` | `pub mod recents;`. |
+| `src-tauri/src/lib.rs` | `pub mod settings;`, `recents_lock` field on `AppState`, three commands registered in `invoke_handler!`. |
+| `src-tauri/tests/recents.rs` | 6 integration tests: dedup-to-front, cap-at-20, disk round-trip, missing-file→empty, corrupt-file→empty, save-then-clear. App-free (explicit temp paths). |
+| `src/ipc/recents.ts` | Typed wrappers `listRecents` / `pushRecent` / `clearRecents`. |
+| `src/state/settings-store.ts` | Recents half rewritten: localStorage → IPC. Hydrate on mount; mutations re-sync from the backend's returned list. Theme handling untouched. |
+| `src/app/App.tsx` | Hydrate recents on mount; record successful opens (both `openByPath` and the drag-drop callback); render the recents list + "Clear recents" in `EmptyState`; clicking a recent re-opens via `openByPath`. |
+
+#### Further reading
+
+- Atomic file replace via rename — https://doc.rust-lang.org/std/fs/fn.rename.html
+  (and why temp-write-then-rename is the standard durable-write idiom).
+- Tauri v2 path APIs (`app_data_dir` and friends) —
+  https://v2.tauri.app/reference/javascript/api/namespacepath/ (mirror
+  of the Rust `AppHandle::path()` helpers).
+- zustand "single source of truth" pattern for server-owned state —
+  https://github.com/pmndrs/zustand#readingwriting-state-and-reacting-to-changes
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

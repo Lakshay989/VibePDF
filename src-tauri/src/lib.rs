@@ -9,6 +9,7 @@
 pub mod commands;
 pub mod error;
 pub mod pdf;
+pub mod settings;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -22,12 +23,18 @@ use crate::pdf::actor::DocumentActorHandle;
 /// through its actor; the dispatcher routes IPC messages by id.
 pub struct AppState {
     pub actors: Mutex<HashMap<uuid::Uuid, DocumentActorHandle>>,
+    /// SPEC: P1-VIEW-012 — guards the read-modify-write of
+    /// `recents.json` so two quick opens can't race and drop an entry.
+    /// The mutex protects the *file*, not in-memory data, so it holds
+    /// `()`.
+    pub recents_lock: Mutex<()>,
 }
 
 impl AppState {
     fn new() -> Self {
         Self {
             actors: Mutex::new(HashMap::new()),
+            recents_lock: Mutex::new(()),
         }
     }
 }
@@ -59,6 +66,9 @@ pub fn run() {
             commands::pdf::pdf_close,
             commands::pdf::pdf_render_page,
             commands::pdf::pdfium_version,
+            commands::recents::recents_list,
+            commands::recents::recents_push,
+            commands::recents::recents_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,6 +9,7 @@ import {
   type PasswordPromptRequest,
 } from "@/app/open-with-password";
 import { useDocumentStore } from "@/state/document-store";
+import { useSettingsStore } from "@/state/settings-store";
 import { PdfViewer } from "@/view/PdfViewer";
 
 export function App() {
@@ -17,6 +18,16 @@ export function App() {
   const openDoc = useDocumentStore((s) => s.openDoc);
   const setCurrent = useDocumentStore((s) => s.setCurrent);
   const [toast, setToast] = useState<string | null>(null);
+
+  // SPEC: P1-VIEW-012 — recents, owned by Rust and mirrored here.
+  const recents = useSettingsStore((s) => s.recents);
+  const hydrateRecents = useSettingsStore((s) => s.hydrateRecents);
+  const pushRecent = useSettingsStore((s) => s.pushRecent);
+  const clearRecents = useSettingsStore((s) => s.clearRecents);
+
+  useEffect(() => {
+    void hydrateRecents();
+  }, [hydrateRecents]);
 
   // SPEC: P1-VIEW-003 — password-prompt state.
   // `prompt` non-null means the dialog is mounted with these args.
@@ -61,6 +72,8 @@ export function App() {
           case "opened":
             openDoc(result.doc);
             setPrompt(null);
+            // SPEC: P1-VIEW-012 — only successful opens count as recent.
+            void pushRecent(result.doc.path);
             break;
           case "cancelled":
             // User dismissed the dialog. handleDialogCancel already
@@ -79,7 +92,7 @@ export function App() {
         setToast(err instanceof Error ? err.message : "Could not open file.");
       }
     },
-    [askForPassword, openDoc],
+    [askForPassword, openDoc, pushRecent],
   );
 
   const pickAndOpen = useCallback(async () => {
@@ -110,7 +123,11 @@ export function App() {
     let unlisten: (() => void) | null = null;
     void registerDragDrop(
       ({ opened, rejected }) => {
-        for (const doc of opened) openDoc(doc);
+        for (const doc of opened) {
+          openDoc(doc);
+          // SPEC: P1-VIEW-012 — dropped opens count as recent too.
+          void pushRecent(doc.path);
+        }
         if (rejected.length > 0) {
           setToast(
             rejected.length === 1
@@ -126,7 +143,7 @@ export function App() {
     return () => {
       unlisten?.();
     };
-  }, [openDoc, askForPassword]);
+  }, [openDoc, askForPassword, pushRecent]);
 
   useEffect(() => {
     if (!toast) return;
@@ -168,7 +185,11 @@ export function App() {
         {current ? (
           <PdfViewer documentId={current.id} path={current.path} />
         ) : (
-          <EmptyState />
+          <EmptyState
+            recents={recents}
+            onOpenRecent={(path) => void openByPath(path)}
+            onClearRecents={() => void clearRecents()}
+          />
         )}
       </main>
       {toast ? (
@@ -188,12 +209,58 @@ export function App() {
   );
 }
 
-function EmptyState() {
+interface EmptyStateProps {
+  recents: string[];
+  onOpenRecent: (path: string) => void;
+  onClearRecents: () => void;
+}
+
+function basename(path: string): string {
+  const sep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return sep >= 0 ? path.slice(sep + 1) : path;
+}
+
+// SPEC: P1-VIEW-012 — recents surface on the start screen, clearable.
+function EmptyState({ recents, onOpenRecent, onClearRecents }: EmptyStateProps) {
   return (
     <div className="flex h-full items-center justify-center text-neutral-500">
-      <div className="text-center">
+      <div className="w-[420px] max-w-[90%] text-center">
         <div className="text-lg">No document open</div>
         <div className="mt-1 text-sm">Press ⌘O / Ctrl+O to open a PDF.</div>
+
+        {recents.length > 0 ? (
+          <div className="mt-6 text-left">
+            <div className="mb-1 flex items-center justify-between px-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                Recent
+              </span>
+              <button
+                onClick={onClearRecents}
+                className="text-xs text-neutral-400 hover:text-neutral-600 hover:underline dark:hover:text-neutral-300"
+              >
+                Clear recents
+              </button>
+            </div>
+            <ul className="overflow-hidden rounded border border-neutral-200 dark:border-neutral-800">
+              {recents.map((path) => (
+                <li key={path}>
+                  <button
+                    onClick={() => onOpenRecent(path)}
+                    title={path}
+                    className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-900"
+                  >
+                    <span className="text-neutral-700 dark:text-neutral-200">
+                      {basename(path)}
+                    </span>
+                    <span className="ml-2 truncate text-xs text-neutral-400">
+                      {path}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </div>
   );
