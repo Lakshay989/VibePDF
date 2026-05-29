@@ -574,6 +574,25 @@ $ npm run test
 
 No dependency or production-behaviour change beyond unifying `basename`.
 
+### Review follow-up — split App.tsx into hooks (this commit)
+
+```bash
+# Behaviour-preserving refactor (no spec step): extract useFileOpen +
+# useSessionRestore from App.tsx (354 → 128 lines).
+
+$ npx tsc --noEmit                                                # pass
+$ npx eslint src --max-warnings=0                                 # pass
+#   (react-hooks/exhaustive-deps re-validates every moved effect)
+$ . "$HOME/.cargo/env" && \
+    (cd src-tauri && cargo clippy --all-targets -- -D warnings)   # pass (no Rust change)
+
+$ npm run test
+#   63/63 (unchanged — logic moved verbatim).
+```
+
+No dependency or behaviour change. App.tsx wiring remains
+manually-verified (no vitest for it yet; that's E5's job).
+
 ---
 
 ## How this file evolves

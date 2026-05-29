@@ -1829,6 +1829,69 @@ test despite being trivially unit-testable.
 
 ---
 
+### Review follow-up — split `App.tsx` into hooks
+
+#### Problem
+
+Four consecutive features (B2, A3, E1, A2) each bolted orchestration
+onto `App.tsx`, growing it to 354 lines carrying six unrelated
+concerns: recents, session restore, CLI drain, the password-prompt
+state machine, drag-drop, and keyboard. The component had become the
+place new wiring went by default — a god-component in the making. The
+review pulled it apart before D1 and Phase 2 piled on more.
+
+#### Concepts learned
+
+- **Custom hooks are the unit of concern-extraction in React.** The
+  fix wasn't more components (the JSX was fine) — it was moving the
+  *stateful logic* into two hooks: `useFileOpen` (everything that turns
+  a path or gesture into an open tab — password prompt, toast, the
+  `openByPath` orchestrator, the file dialog, drag-drop, recents
+  hydration) and `useSessionRestore` (the startup load + CLI drain +
+  persist lifecycle). `App.tsx` dropped to 128 lines and now contains
+  *zero* `useEffect`/`useState`/`useCallback` — it's composition +
+  layout. A hook owns related state + effects + the callbacks that
+  mutate them; that cohesion is exactly what was tangled in the
+  component body.
+- **Pass cross-hook dependencies as arguments, not shared module
+  state.** `useSessionRestore` needs `openByPath`, which `useFileOpen`
+  produces. Rather than hoist `openByPath` to a context or module
+  global, `App` threads it: `const { openByPath } = useFileOpen();
+  useSessionRestore(openByPath);`. The hook stashes it in a
+  render-assigned ref (the same "latest closure" trick the inline code
+  already used) so its once-only restore IIFE always calls the current
+  function without depending on its identity.
+- **Module-scope flags travel with the logic that needs them.** E1's
+  `sessionRestoreStarted`/`sessionRestoreFinished` (the StrictMode-safe
+  gates) moved into `use-session-restore.ts` alongside the effects they
+  guard — they were always conceptually part of that lifecycle, not the
+  component's. Their semantics are unchanged.
+- **`tsc` + `eslint-plugin-react-hooks` are the safety net for an
+  untested refactor.** `App.tsx` has no automated test, so the
+  guarantee that this behaviour-preserving move didn't break a
+  dependency array or drop a closure came from the type-checker plus
+  the exhaustive-deps lint — both of which re-validate every moved
+  effect. The new `open-with-password.test.ts` independently covers the
+  one piece of pulled-apart logic with real branching. Manual
+  verification of the full open/restore/CLI/drag flows still applies.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/app/use-file-open.ts` | New hook. Owns toast + password-prompt state, `openByPath`, `pickAndOpen`, the Cmd/Ctrl+O + drag-drop effects, and recents hydration. Returns `{ openByPath, pickAndOpen, toast, passwordDialogProps }`. |
+| `src/app/use-session-restore.ts` | New hook. Owns the module-level StrictMode gates, the restore-on-mount IIFE + CLI drain, and the persist effect. Takes `openByPath` as an arg. |
+| `src/app/App.tsx` | 354 → 128 lines. Composition + layout only; zero raw effects/state/callbacks. `EmptyState` unchanged. |
+
+#### Further reading
+
+- "Reusing logic with custom hooks" —
+  https://react.dev/learn/reusing-logic-with-custom-hooks
+- "You might not need an effect" (when state belongs in a hook vs not) —
+  https://react.dev/learn/you-might-not-need-an-effect
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
