@@ -649,6 +649,36 @@ $ npm run test                                                    # 67/67 (uncha
 Manual: opened tests/fixtures/golden/hello-p0-72dpi.png — renders
 "Hello, VibePDF." (confirms the golden is a real render, not noise).
 
+### Infra — CI + Rust test scripts (this commit)
+
+```bash
+# Discovered npm run test:rust was broken (no PDFium on the loader
+# path → LoadLibraryError):
+$ npm run test:rust          # before: actor/encrypted/render tests FAILED
+
+# Fix: scripts/cargo-test.mjs sets DYLD_/LD_LIBRARY_PATH (or PATH on
+# win) to src-tauri/resources/pdfium, then runs cargo test. Wired into
+# both test:rust and the new test:pdf.
+$ npm run test:pdf
+#   render_compare + render_to_png + actor_smoke + encrypted_open:
+#   13 passed.
+$ npm run test:rust
+#   33 passed total (full Rust suite, was failing before).
+
+# Added .github/workflows/ci.yml (macos-latest — matches the E2 render
+# golden's platform; no webkit apt deps needed). Verified its commands
+# locally:
+$ npm run check              # clean (tsc + eslint + clippy)
+$ npm run test               # 67/67 (vitest)
+# YAML structure validated via js-yaml.
+
+# NOTE: GitHub Actions itself was not run here — the workflow gets its
+# first real run on push/PR. Commands within it are all green locally.
+```
+
+No new dependencies. CLAUDE.md command table + "done" criteria
+corrected to match the real scripts.
+
 ---
 
 ## How this file evolves

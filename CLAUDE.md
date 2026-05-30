@@ -62,7 +62,7 @@ Full conventions live in `docs/06_CONVENTIONS.md`.
 A feature is done when:
 1. The behavior matches its EARS-syntax spec in `docs/02_PRODUCT_SPEC.md`
 2. There is at least one passing test in `tests/` that exercises the new code path on a real PDF
-3. `npm run check` (typecheck + lint + test + cargo clippy) is green
+3. `npm run check` (typecheck + lint + cargo clippy) **and** the test suites (`npm run test` + `npm run test:rust`) are green
 4. The change has been demoed against the phase's acceptance PDFs in `tests/fixtures/acceptance/`
 
 ## Things Claude should never do without asking
@@ -87,9 +87,10 @@ A feature is done when:
 | Command | What it does |
 |---|---|
 | `npm run dev` | Tauri dev server with hot reload |
-| `npm run check` | Typecheck + lint + Rust check, no tests |
-| `npm run test` | Full test suite (Vitest + cargo test) |
-| `npm run test:pdf` | PDF regression suite (slow, 30+ fixtures) |
+| `npm run check` | Typecheck + lint + `cargo clippy` (no tests) |
+| `npm run test` | Frontend tests (Vitest) |
+| `npm run test:rust` | All Rust tests (`cargo test`, PDFium on the loader path) |
+| `npm run test:pdf` | The PDF-touching Rust tests (render + actor + encrypted) |
 | `/plan <feature>` | Draft spec + plan for a feature, then wait |
 | `/ship <feature>` | Implement the most recent plan |
 | `/review` | Self-review pass on the working tree |

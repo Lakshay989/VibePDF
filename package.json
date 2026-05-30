@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "check": "tsc --noEmit && eslint src --max-warnings=0 && cd src-tauri && cargo clippy --all-targets -- -D warnings",
     "test": "vitest run",
-    "test:rust": "cd src-tauri && cargo test",
+    "test:rust": "node scripts/cargo-test.mjs",
+    "test:pdf": "node scripts/cargo-test.mjs --test render_compare --test render_to_png --test actor_smoke --test encrypted_open",
     "fetch-pdfium": "bash scripts/fetch-pdfium.sh"
   },
   "dependencies": {

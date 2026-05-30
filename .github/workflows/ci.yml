@@ -1,0 +1,69 @@
+name: CI
+
+# Runs the project's gates on every push to main and every PR:
+#   npm run check   — tsc + eslint + cargo clippy (pedantic, -D warnings)
+#   npm run test    — vitest (frontend)
+#   npm run test:rust — cargo test (Rust + PDF, via the PDFium wrapper)
+#
+# Runner: macos-latest (Apple Silicon). Two reasons over the usual
+# ubuntu:
+#   1. The E2 render golden (tests/fixtures/golden/) was generated on
+#      macOS arm64 with the pinned PDFium build. `render_compare` does a
+#      tolerance pixel-diff against it; a Linux render would diverge
+#      (different PDFium build → anti-aliasing differences — the
+#      cross-platform fragility E2's docs call out). macOS keeps the
+#      comparison apples-to-apples.
+#   2. macOS needs no apt/webkit system-dep install (those are for the
+#      Linux WebView), so the job is simpler. It also mirrors the dev
+#      environment.
+# If Linux CI is wanted later, regenerate the golden on Linux
+# (`npm run test:pdf -- --ignored bless_goldens`) or exclude
+# render_compare there.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch PDFium
+        run: npm run fetch-pdfium
+
+      - name: Check (tsc + eslint + clippy)
+        run: npm run check
+
+      - name: Frontend tests (vitest)
+        run: npm run test
+
+      - name: Rust tests (cargo)
+        run: npm run test:rust

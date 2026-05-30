@@ -2054,6 +2054,68 @@ conformance work later just plugs into it.
 
 ---
 
+### Infra — CI workflow + fix the Rust test scripts
+
+#### Problem
+
+A whole-project audit turned up infra gaps: there was **no CI at all**
+(`.github/workflows/` didn't exist), yet the "done" definition and
+E3/E5's acceptance both assume it. And `npm run test:pdf` was
+referenced in CLAUDE.md but didn't exist — and probing that exposed a
+latent bug: `npm run test:rust` (`cd src-tauri && cargo test`) was
+**broken**, because nothing put the fetched PDFium dylib on the
+loader's search path (every green Rust run in this project had used an
+explicit `DYLD_LIBRARY_PATH`).
+
+#### Concepts learned
+
+- **A dynamically-loaded native lib needs help at *run* time, not link
+  time.** `pdfium-render` `dlopen`s `libpdfium` via
+  `bind_to_system_library`, which walks the OS loader path —
+  `target/debug/deps/`, `/usr/lib`, etc. — none of which contain our
+  fetched `src-tauri/resources/pdfium/libpdfium.{dylib,so}`. There's no
+  `build.rs` rpath or `.cargo/config` to bridge it, so the test binary
+  must be launched with the lib dir on `DYLD_LIBRARY_PATH` (macOS) /
+  `LD_LIBRARY_PATH` (Linux) / `PATH` (Windows). The fix is a tiny
+  cross-platform Node wrapper (`scripts/cargo-test.mjs`) that picks the
+  right var by `process.platform` and `spawnSync`s cargo with it — so
+  `test:rust` and `test:pdf` work without the caller remembering the
+  env dance.
+- **CI runner choice can be a *correctness* decision, not just cost.**
+  The obvious default is `ubuntu-latest`, but E2's render golden was
+  generated on macOS arm64 with a pinned PDFium build; `render_compare`
+  pixel-diffs against it. A Linux render would use a different PDFium
+  build → anti-aliasing drift → likely a red run (the exact
+  cross-platform fragility E2 documented). Running CI on
+  `macos-latest` keeps the comparison apples-to-apples, needs no
+  webkit apt deps, and mirrors dev. Cost is higher, but a green-on-the-
+  facts pipeline beats a cheap-but-spuriously-red one. (Linux CI is
+  viable later by regenerating the golden there.)
+- **Doc drift is a real defect.** CLAUDE.md claimed `npm run test` runs
+  "Vitest + cargo test" (it's Vitest-only) and `test:pdf` was "30+
+  fixtures" (it didn't exist). An always-loaded instructions file that
+  lies about its own commands quietly misleads every future session;
+  fixing it to match reality is as real as a code fix.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `scripts/cargo-test.mjs` | New. Cross-platform `cargo test` wrapper that prepends the PDFium dir to the platform's loader-path var. Forwards extra args. |
+| `package.json` | `test:rust` → routes through the wrapper (was broken); new `test:pdf` runs the PDF-touching tests (render_compare, render_to_png, actor_smoke, encrypted_open). |
+| `.github/workflows/ci.yml` | New. macos-latest job: npm ci → fetch-pdfium → `npm run check` + `npm run test` + `npm run test:rust`. Concurrency-cancel on superseded pushes. |
+| `CLAUDE.md` | Command table + "done" criteria corrected to match the real scripts. |
+
+#### Caveat
+
+The workflow's individual commands are all verified green locally, but
+GitHub Actions itself can't be run here — the orchestration (action
+versions, macOS-runner specifics, `npm ci` rolldown native binding on
+the runner) gets its first real exercise on the first push/PR. Flagged
+per the project's "don't claim a check you didn't get" rule.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
