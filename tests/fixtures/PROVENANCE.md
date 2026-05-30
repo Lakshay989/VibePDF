@@ -6,6 +6,7 @@ documented provenance. No mystery PDFs.
 | File | Origin | Why it's here |
 |---|---|---|
 | `basic/hello.pdf` | Hand-constructed in `tests/fixtures/basic/generate-hello.py` (run once, committed). Minimal valid PDF 1.4, US Letter, single page rendering "Hello, VibePDF." in built-in Helvetica. ~400 bytes. | Smoke-test fixture: proves PDFium and PDF.js can each open *something*. No fonts to embed, no encryption, no annotations. |
+| `golden/hello-p0-72dpi.png` | **Self-generated** render of `basic/hello.pdf` page 0 at 72 DPI (612×792, 8-bit RGBA), produced by *our own* PDFium pipeline via the `bless_goldens` test in `src-tauri/tests/render_compare.rs`. **Not** an Adobe Acrobat reference. | Regression baseline for the P1.E2 render-fidelity scaffold (P1-VIEW-004). The gate test `renders_match_goldens` compares fresh renders against it within tolerance and logs divergences to `tests/render-failures.md`. Regenerate after an intentional renderer change with `cargo test ... -- --ignored bless_goldens`. |
 
 Acceptance fixtures (`acceptance/p1-spec.pdf`, `p1-encrypted.pdf`,
 `p1-large.pdf`) referenced in `docs/05_ROADMAP.md` are not yet checked

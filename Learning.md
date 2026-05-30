@@ -1979,6 +1979,81 @@ collaborate on the same surface.
 
 ---
 
+### P1.E2 — Render-failure log scaffold
+
+#### Problem
+
+P1-VIEW-004 sets a high bar — "same pixel-fidelity as Adobe Acrobat for
+the W3C conformance suite, failures documented in
+`tests/render-failures.md`." We have neither Acrobat output nor that
+suite checked in. E2's job (per its title) is the *scaffold*: stand up
+the comparison machinery + the failures log now, so the real
+conformance work later just plugs into it.
+
+#### Concepts learned
+
+- **A scaffold reinterprets an unreachable spec into a reachable
+  invariant.** The literal spec needs Acrobat; the Phase-1 reading is
+  "match a committed golden produced by our own pipeline" — i.e. a
+  **regression** baseline, not a fidelity reference. That's an honest
+  narrowing: it catches *our renderer changing unexpectedly* (real
+  value) without pretending to verify Acrobat-equivalence (which we
+  can't yet). The distinction is documented in the log header and
+  PROVENANCE so nobody mistakes the golden for an Acrobat truth.
+- **Compare decoded pixels, not encoded bytes.** Goldens are stored as
+  PNG (human-viewable — you can open it and see "Hello, VibePDF."), but
+  the comparison renders to **RGBA8** and decodes the golden to RGBA8,
+  comparing pixels. Comparing raw PNG bytes would couple the test to
+  the `png` encoder's version/settings — a zlib bump would "fail" with
+  identical pixels. Pixel comparison is robust to that.
+- **Tolerance is the price of cross-platform rasterisation.** Text
+  anti-aliasing can differ across PDFium builds / OSes, so an exact
+  golden is a CI hair-trigger. The harness allows a per-channel
+  |Δ| ≤ 16 and up to 2% mismatched pixels. On the same machine the
+  self-render vs its golden is *exact* (PNG is lossless), so the
+  tolerance only ever absorbs genuine cross-platform drift. The true
+  fix (perceptual diff / normalized goldens) is future work.
+- **A test that writes a tracked file must write deterministically.**
+  The gate rewrites `tests/render-failures.md` every run — but on an
+  all-match run the content is byte-identical (no timestamps, no
+  fractions), so `git status` stays clean. Verified by hashing the file
+  across two runs. The file only changes when a real divergence appears
+  — which is exactly the signal you want in a diff. (If I'd embedded a
+  timestamp, every `cargo test` would dirty the tree.)
+- **`png` ships a decoder in default features.** B3 added `png = "0.17"`
+  and used only the *encoder*; the *decoder* (`png::Decoder`) is
+  available with no feature change, so E2 needed no new dependency. The
+  `bless_goldens` test reuses the encoder path (`ImageFormat::Png`) to
+  (re)write goldens.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/tests/render_compare.rs` | The harness/test. `CASES` table → render to RGBA8 → decode golden → compare within tolerance → rewrite the log. Gate test `renders_match_goldens` (fails on divergence); `#[ignore] bless_goldens` regenerates goldens. |
+| `tests/render-failures.md` | The committed log in its clean "no failures" state. Header documents the Phase-1 interpretation + tolerance + regen command. |
+| `tests/fixtures/golden/hello-p0-72dpi.png` | Committed golden (612×792 RGBA, self-generated). |
+| `tests/fixtures/PROVENANCE.md` | Golden provenance row (self-baseline, not Acrobat). |
+
+#### Deviations from the step doc
+
+- **Harness at `src-tauri/tests/render_compare.rs`, not
+  `tests/integration/render_compare.rs`.** Cargo only compiles
+  integration tests under the crate's `tests/` dir; every existing one
+  lives in `src-tauri/tests/`. (`docs/04`'s `tests/integration/` is
+  aspirational/unused.) The log stays at the spec-mandated
+  `tests/render-failures.md`.
+- **Golden is a self-render, not Acrobat output** (see above).
+
+#### Further reading
+
+- Visual regression testing tradeoffs (golden/snapshot fragility) —
+  https://martinfowler.com/articles/nonDeterminism.html#LackOfIsolation
+- `png` crate decoder (`Decoder::read_info` / `next_frame`) —
+  https://docs.rs/png/latest/png/struct.Decoder.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

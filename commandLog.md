@@ -615,6 +615,40 @@ $ npm run test
 
 cargo test unchanged at 32/2 (no Rust touched).
 
+### P1.E2 — Render-failure log scaffold (this commit)
+
+```bash
+# No new deps (png decoder already present; no Cargo change). No
+# frontend change.
+
+# Generate the committed golden once (and after any intentional
+# renderer change):
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --test render_compare \
+       -- --ignored bless_goldens
+# Wrote tests/fixtures/golden/hello-p0-72dpi.png (612×792 RGBA, ~20 KB).
+
+# Gate (renders match goldens; writes tests/render-failures.md):
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml --test render_compare
+# renders_match_goldens ... ok (no divergences). Re-running produces a
+# byte-identical render-failures.md (verified by shasum) → git stays
+# clean on a passing run.
+
+# Verification gates:
+$ npm run check                                                   # clean (tsc+eslint+clippy)
+$ . "$HOME/.cargo/env" \
+    && DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium" \
+       cargo test --manifest-path src-tauri/Cargo.toml
+# 33 passed, 3 ignored (added render_compare's gate; bless is ignored).
+$ npm run test                                                    # 67/67 (unchanged)
+```
+
+Manual: opened tests/fixtures/golden/hello-p0-72dpi.png — renders
+"Hello, VibePDF." (confirms the golden is a real render, not noise).
+
 ---
 
 ## How this file evolves
