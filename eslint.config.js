@@ -20,6 +20,7 @@ export default [
         navigator: "readonly",
         console: "readonly",
         URL: "readonly",
+        Blob: "readonly",
         fetch: "readonly",
         localStorage: "readonly",
         Element: "readonly",

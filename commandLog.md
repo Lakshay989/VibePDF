@@ -593,6 +593,28 @@ $ npm run test
 No dependency or behaviour change. App.tsx wiring remains
 manually-verified (no vitest for it yet; that's E5's job).
 
+### P1.D1 — Thumbnails sidebar (this commit)
+
+```bash
+# No new deps (reuses B3's renderPage wrapper + the existing
+# fake-indexeddb test dep). No Rust change.
+
+# Verification gates:
+$ npx tsc --noEmit                                                # pass
+#   (one fix: copy Uint8Array into a fresh ArrayBuffer for Blob —
+#    TS 5.7 won't widen Uint8Array<ArrayBufferLike> to BlobPart.)
+$ npx eslint src --max-warnings=0                                 # pass
+#   (added `Blob` to eslint.config.js globals — Web API, not an ES
+#    builtin, so no-undef flagged it.)
+$ . "$HOME/.cargo/env" && \
+    (cd src-tauri && cargo clippy --all-targets -- -D warnings)   # pass (no Rust change)
+
+$ npm run test
+#   67/67 (was 63 — +4 thumbnail-cache IDB tests).
+```
+
+cargo test unchanged at 32/2 (no Rust touched).
+
 ---
 
 ## How this file evolves

@@ -12,6 +12,7 @@ import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { SearchBar } from "@/app/SearchBar";
 import { useDarkMode } from "@/app/use-dark-mode";
 import { OutlinePanel } from "@/panels/OutlinePanel";
+import { ThumbnailPanel } from "@/panels/ThumbnailPanel";
 import { useViewStore } from "@/state/view-store";
 import { useSearchStore } from "@/state/search-store";
 import { searchDoc } from "@/view/search";
@@ -46,6 +47,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const setZoom = useViewStore((s) => s.setZoom);
   const setFitMode = useViewStore((s) => s.setFitMode);
   const showOutline = useViewStore((s) => s.showOutline);
+  const showThumbnails = useViewStore((s) => s.showThumbnails);
   const darkMode = useDarkMode();
 
   // Search state subscriptions (kept narrow to avoid extra renders).
@@ -251,6 +253,14 @@ export function PdfViewer({ documentId, path }: Props) {
       <ZoomToolbar />
       <SearchBar />
       <div className="flex flex-1 overflow-hidden">
+        {showThumbnails && doc ? (
+          <ThumbnailPanel
+            key={documentId}
+            doc={doc}
+            documentId={documentId}
+            onJump={(page) => virtRef.current?.scrollToPage(page)}
+          />
+        ) : null}
         {showOutline && doc ? (
           <OutlinePanel
             doc={doc}

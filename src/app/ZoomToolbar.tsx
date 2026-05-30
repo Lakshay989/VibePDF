@@ -24,6 +24,8 @@ export function ZoomToolbar() {
   const setFitMode = useViewStore((s) => s.setFitMode);
   const showOutline = useViewStore((s) => s.showOutline);
   const toggleOutline = useViewStore((s) => s.toggleOutline);
+  const showThumbnails = useViewStore((s) => s.showThumbnails);
+  const toggleThumbnails = useViewStore((s) => s.toggleThumbnails);
 
   const fitOptions: { value: FitMode | "manual"; label: string }[] = [
     { value: "manual", label: "Manual" },
@@ -37,6 +39,19 @@ export function ZoomToolbar() {
 
   return (
     <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-800">
+      <button
+        type="button"
+        onClick={toggleThumbnails}
+        aria-label="Toggle thumbnails sidebar"
+        aria-pressed={showThumbnails}
+        title="Toggle thumbnails"
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (showThumbnails ? "bg-neutral-200 dark:bg-neutral-800" : "")
+        }
+      >
+        Pages
+      </button>
       <button
         type="button"
         onClick={toggleOutline}

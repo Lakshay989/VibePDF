@@ -1892,6 +1892,93 @@ review pulled it apart before D1 and Phase 2 piled on more.
 
 ---
 
+### P1.D1 — Thumbnails sidebar with lazy generation
+
+#### Problem
+
+P1-VIEW-008 wants a collapsible thumbnails sidebar whose tiles are
+generated lazily as they scroll into view. This is the first frontend
+consumer of B3's `pdf_render_page`, and the first feature where the
+backend (PDFium rasterisation) and the frontend (PDF.js view layer)
+collaborate on the same surface.
+
+#### Concepts learned
+
+- **Two render engines, one thumbnail.** Per `docs/04`, PDFium owns
+  thumbnail rasterisation (it already renders for export/OCR), so the
+  PNG bytes come from the Rust side via `pdf_render_page`. But that
+  command renders by **DPI**, and the spec wants a **96px-wide** tile.
+  The DPI is computed frontend-side from the page's point-width, which
+  the PDF.js `doc` already knows: `dpi = targetPx·72 / widthPt`. So the
+  view-layer engine (PDF.js) supplies the geometry and the mutate-layer
+  engine (PDFium) supplies the pixels — a clean division that needed no
+  backend change (zero collision with the render module).
+- **IntersectionObserver + ref-callback timing is a trap.** First
+  attempt registered each tile with the shared observer via a callback
+  ref. But callback refs run during commit *before* the `useEffect`
+  that creates the observer — so `observerRef.current` was still null
+  when the initial tiles registered, and they were never observed (→
+  never loaded). Because all tiles mount at once (fixed `pageCount`, no
+  virtualization), the robust fix was to drop the per-tile refs
+  entirely: stamp each tile with `data-thumb-page` and, in the observer
+  effect (which runs *after* commit, when every tile is in the DOM),
+  `root.querySelectorAll("[data-thumb-page]").forEach(observe)`. One
+  source of truth (the DOM), no ordering dance.
+- **A `useEffect` that sets state it also depends on revokes its own
+  work.** The tile load effect set `url`, and `url` was in its deps —
+  so setting it re-ran the effect, whose cleanup called
+  `URL.revokeObjectURL` on the blob URL just handed to `<img>` (a
+  revoke-after-set race). Fix: a `startedRef` load-once guard so the
+  effect's deps are all stable for the tile's lifetime; cleanup then
+  runs only on real unmount, when revoking is correct. General rule:
+  if an effect's cleanup frees a resource, that resource's identity
+  must not be in the deps.
+- **Key the stateful panel by document.** A tab switch reuses the
+  `PdfViewer`/`ThumbnailPanel` instance with new props. With per-tile
+  `url`/`failed`/`startedRef` state, that would show stale thumbnails.
+  `<ThumbnailPanel key={documentId} … />` forces a clean remount —
+  fresh observer, empty `visible` set, fresh tiles — which is simpler
+  and more correct than threading `documentId` through every reset.
+- **ESLint flat-config globals are curated, ES-builtins are free.**
+  `no-undef` flagged `Blob` (a Web API) but not `WeakMap`/`ArrayBuffer`
+  (ES builtins, recognised via `ecmaVersion`). The project lists Web
+  APIs explicitly as they're first used; `Blob` joined `URL`,
+  `IntersectionObserver`, etc.
+- **TS 5.7's `Uint8Array<ArrayBufferLike>` ≠ `BlobPart`.** The backing
+  buffer could in principle be a `SharedArrayBuffer`, which `BlobPart`
+  excludes. A one-line copy into a fresh `ArrayBuffer`
+  (`new Uint8Array(ab).set(png)`) sidesteps the variance without an
+  unsafe cast — cheap for small thumbnails.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/panels/thumbnail-cache.ts` | New. IndexedDB get/put for PNG bytes keyed `${documentId}:${page}:${dpr}`, mirroring C2's `view-persistence.ts` (separate DB `vibepdf-thumbnails`, `_resetForTests`). |
+| `src/panels/__tests__/thumbnail-cache.test.ts` | New. 4 tests: miss→null, round-trip, key independence by (doc,page,dpr), overwrite. |
+| `src/panels/ThumbnailPanel.tsx` | Rewrote the stub: one shared IntersectionObserver over `data-thumb-page` tiles; on first-visible → cache-get → render+cache → blob-URL `<img>`. Load-once ref guard; active-tile highlight; click → `onJump`. |
+| `src/view/PdfViewer.tsx` | Mount `<ThumbnailPanel key={documentId} …>` gated on `showThumbnails && doc`. |
+| `src/app/ZoomToolbar.tsx` | "Pages" toggle button (mirrors the Outline toggle; store flag already existed). |
+| `eslint.config.js` | Added `Blob` to the browser globals. |
+
+#### Deviations from the step doc
+
+- **No new `src/ipc/render.ts`.** B3 already shipped the render wrapper
+  as `renderPage` in `src/ipc/pdf.ts`; D1 reuses it rather than
+  duplicate. (`ipc/` wrappers are pure `invoke`s; the thumbnail DPI
+  math needs the PDF.js `doc` and lives in the panel.)
+- **"96-px-wide" is computed as a DPI frontend-side** (above) rather
+  than a backend target-width parameter — avoids touching `render.rs`.
+
+#### Further reading
+
+- IntersectionObserver lazy-loading pattern —
+  https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API
+- `URL.createObjectURL` / `revokeObjectURL` lifecycle —
+  https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
