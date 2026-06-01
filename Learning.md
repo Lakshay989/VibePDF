@@ -2116,6 +2116,64 @@ per the project's "don't claim a check you didn't get" rule.
 
 ---
 
+### Bug — PDF.js worker asset was never placed in public/
+
+#### Problem
+
+Found by the first real GUI test: opening *any* PDF in the Tauri window
+failed with "This file does not appear to be a valid PDF" +
+"Setting up fake worker failed: Importing a module script failed."
+`src/view/pdfjs-worker.ts` sets `GlobalWorkerOptions.workerSrc` to
+`/pdfjs/pdf.worker.min.mjs`, but `public/` was **empty** — the worker
+file was never copied there. So the URL 404'd and PDF.js couldn't
+render a single page. The bootstrap designed the public-hosted-worker
+approach but never completed the "put the file there" half.
+
+#### Concepts learned
+
+- **A whole class of bugs lives only in the real runtime.** Every
+  automated test was green because the render smoke test *mocks*
+  `configurePdfJsWorker` and the vitest config aliases pdfjs-dist to a
+  preloaded legacy worker (the Node-env fix from a7184d5). None of that
+  exercises the actual browser/Tauri worker-load path, so a missing
+  public asset that breaks 100% of rendering sailed through CI. This is
+  the textbook case for an E2E harness (E5): unit tests can't see "the
+  asset 404s in the webview." Until E5 exists, a cheap file-existence
+  test is the stopgap.
+- **PDF.js needs its worker reachable as a URL, and *where* you host it
+  matters under Tauri.** Two options: (a) host under `public/` so it's
+  served verbatim by Vite (dev) and Tauri's asset protocol (prod), or
+  (b) `import workerUrl from "…/pdf.worker.min.mjs?url"` and let Vite
+  emit it. pdfjs-worker.ts deliberately chose (a) — the comment warns
+  that bundling the worker through Vite is fragile inside the Tauri
+  webview. The bug wasn't the *choice*, it was that nothing made the
+  file appear under public/.
+- **Generated assets belong in a copy step, not git.** The worker is a
+  ~1.2 MB artifact owned by the pdfjs-dist version in node_modules.
+  Committing it would rot on every bump. The fix mirrors how PDFium is
+  handled (gitignored + fetched): a `scripts/copy-pdfjs-worker.mjs`
+  copy wired to `postinstall` (fresh clones / CI), `predev` + `prebuild`
+  (running the app), and `pretest` (so the regression test sees it).
+  `public/pdfjs/` is gitignored.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `scripts/copy-pdfjs-worker.mjs` | New. Copies `node_modules/pdfjs-dist/build/pdf.worker.min.mjs` → `public/pdfjs/`. |
+| `package.json` | `postinstall` / `predev` / `prebuild` / `pretest` hooks run the copy. |
+| `src/view/__tests__/pdfjs-worker.test.ts` | New. Asserts the worker exists at the public path workerSrc points to — the regression guard for this exact bug. |
+| `.gitignore` | Ignores the generated `public/pdfjs/`. |
+
+#### Further reading
+
+- PDF.js worker setup / `GlobalWorkerOptions.workerSrc` —
+  https://github.com/mozilla/pdf.js/blob/master/examples/webpack/README.md
+- Vite `public/` directory (served at root, copied to dist) —
+  https://vitejs.dev/guide/assets.html#the-public-directory
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

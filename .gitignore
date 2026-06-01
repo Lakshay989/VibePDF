@@ -39,3 +39,6 @@ tests/fixtures/acceptance/*.pdf
 # Python virtualenv for the fixture generator (PEP 668 forces a venv
 # on system Python installs; the venv itself is a per-machine artifact).
 .venv*/
+
+# Generated: PDF.js worker copied from node_modules by scripts/copy-pdfjs-worker.mjs
+public/pdfjs/

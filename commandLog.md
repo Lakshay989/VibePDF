@@ -679,6 +679,28 @@ $ npm run test               # 67/67 (vitest)
 No new dependencies. CLAUDE.md command table + "done" criteria
 corrected to match the real scripts.
 
+### Bug fix — PDF.js worker asset missing from public/ (this commit)
+
+```bash
+# Symptom (real Tauri window, first GUI test): every PDF →
+# "Setting up fake worker failed: Importing a module script failed."
+# Root cause: workerSrc = /pdfjs/pdf.worker.min.mjs but public/ was empty.
+
+# Fix: copy the worker from node_modules into public/ (gitignored),
+# automated via npm hooks.
+$ node scripts/copy-pdfjs-worker.mjs
+#   → public/pdfjs/pdf.worker.min.mjs (1.2 MB)
+
+# Verification:
+$ npm run check      # clean
+$ npm run test       # 68/68 — incl. new pdfjs-worker asset-presence guard.
+#   (pretest hook runs the copy, so the test sees the file in CI too.)
+```
+
+No new dependencies. Generated `public/pdfjs/` gitignored. Full GUI
+verification (does a PDF actually render now) is on the human — re-run
+`npm run dev` and open a PDF via the in-app ⌘O button.
+
 ---
 
 ## How this file evolves
