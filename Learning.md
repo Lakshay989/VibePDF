@@ -2227,6 +2227,37 @@ the test suite.
 - Tauri IPC + binary data (`tauri::ipc::Response`) —
   https://v2.tauri.app/develop/calling-rust/#returning-data
 
+### Gap — theme toggle UI was never wired (P1-VIEW-010)
+
+#### Problem
+
+C5 shipped the *machinery* for light/dark/system themes (`theme.ts`,
+`useDarkMode`, the page invert) but nothing in the UI let the user
+*choose* — the theme defaulted to "system", so a Mac in dark mode
+forced the page invert with no escape. A user on a dark-mode Mac saw an
+inverted (black) page and had no way to switch. Same "infra built, UI
+not connected" shape as the missing PDF.js worker.
+
+#### Concepts learned
+
+- **"Feature shipped" ≠ "feature reachable."** C5's step was marked
+  done with passing tests (the invert is unit-tested, the theme
+  resolution works), yet the capability was unreachable because the
+  control was never added. Tests on the *logic* don't catch a missing
+  *entry point*. The fix was pure wiring: a `<select>` bound to the
+  already-present `useSettingsStore.theme` / `setTheme`.
+- **The chain was already complete behind the toggle.** `setTheme` →
+  `setStoredTheme` (persist) → `applyTheme` (toggle the `.dark` class on
+  `<html>`) → `useDarkMode`'s MutationObserver → `PageVirtualizer`'s
+  cache key includes `darkMode`, so pages re-render with/without the
+  invert. Adding the select was the only missing link.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/app/ZoomToolbar.tsx` | Added a Light / Dark / System `<select>` bound to `useSettingsStore` theme state. |
+
 ---
 
 ## How this file evolves

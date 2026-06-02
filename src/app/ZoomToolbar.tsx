@@ -1,3 +1,5 @@
+import type { Theme } from "@/app/theme";
+import { useSettingsStore } from "@/state/settings-store";
 import { MIN_ZOOM, MAX_ZOOM, useViewStore, type FitMode } from "@/state/view-store";
 
 // SPEC: P1-VIEW-006 (P1.C2).
@@ -27,12 +29,24 @@ export function ZoomToolbar() {
   const showThumbnails = useViewStore((s) => s.showThumbnails);
   const toggleThumbnails = useViewStore((s) => s.toggleThumbnails);
 
+  // SPEC: P1-VIEW-010 — light / dark / system theme. "Dark" inverts the
+  // page for night reading; this control lets the user choose instead of
+  // being forced to follow the OS.
+  const theme = useSettingsStore((s) => s.theme);
+  const setTheme = useSettingsStore((s) => s.setTheme);
+
   const fitOptions: { value: FitMode | "manual"; label: string }[] = [
     { value: "manual", label: "Manual" },
     { value: "actual", label: "Actual size" },
     { value: "fit-page", label: "Fit page" },
     { value: "fit-width", label: "Fit width" },
     { value: "fit-height", label: "Fit height" },
+  ];
+
+  const themeOptions: { value: Theme; label: string }[] = [
+    { value: "system", label: "System" },
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
   ];
 
   const selectValue: FitMode | "manual" = fitMode ?? "manual";
@@ -103,6 +117,23 @@ export function ZoomToolbar() {
           </option>
         ))}
       </select>
+
+      <span className="ml-auto text-neutral-300 dark:text-neutral-700">|</span>
+      <label className="flex items-center gap-1" title="Theme">
+        <span className="text-neutral-500 dark:text-neutral-400">Theme</span>
+        <select
+          value={theme}
+          onChange={(e) => setTheme(e.target.value as Theme)}
+          className="rounded border border-neutral-300 bg-transparent px-1 py-0.5 dark:border-neutral-700"
+          aria-label="Theme"
+        >
+          {themeOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

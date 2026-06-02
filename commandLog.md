@@ -721,6 +721,19 @@ $ npm run test      # 68/68
 No new dependencies. GUI verification (thumbnails render, text is
 crisp) is on the human — re-run `npm run dev`, open a PDF.
 
+### Theme toggle UI (this commit)
+
+```bash
+# Wires a Light/Dark/System <select> in the toolbar to the existing
+# theme machinery (P1-VIEW-010). Lets the user turn off the dark-mode
+# page invert instead of being forced by the OS.
+$ npm run check     # clean
+$ npm run test      # 68/68
+```
+
+No new dependencies. Frontend-only. GUI verification (switching to Light
+gives a white page + crisp text) is on the human.
+
 ---
 
 ## How this file evolves
