@@ -2258,6 +2258,59 @@ not connected" shape as the missing PDF.js worker.
 |---|---|
 | `src/app/ZoomToolbar.tsx` | Added a Light / Dark / System `<select>` bound to `useSettingsStore` theme state. |
 
+### Bug — dark-mode invert mangled text (pixel invert → CSS filter)
+
+#### Problem
+
+With the HiDPI fix in, light mode rendered crisply but dark mode looked
+"pixelated / black on black." C5 inverted the page by rewriting canvas
+pixels (`getImageData` → invert near-grayscale pixels → `putImageData`).
+That heuristic produced rough, low-contrast text: edge/colored pixels
+that missed the saturation threshold stayed dark on the now-black
+background.
+
+#### Concepts learned
+
+- **Invert at the compositor, not in the bitmap.** A per-pixel invert
+  bakes a lossy transform into the rasterised page. Replacing it with a
+  CSS `filter: invert(1) hue-rotate(180deg)` on the canvas element lets
+  the GPU compositor invert at *native* resolution at display time — so
+  dark-mode text is exactly as crisp as light mode (the user confirmed
+  light was perfect; now dark matches). It's also simpler and faster
+  (no `getImageData` round-trip, which also forces a slow software
+  read-back path).
+- **`invert(1) hue-rotate(180deg)` ≈ "lightness invert, hue keep."**
+  Pure `invert(1)` turns a photo into a colour negative; following it
+  with `hue-rotate(180deg)` rotates hues back, so colours read as a
+  darkened version rather than a negative. Bonus: colored text now
+  inverts sensibly too (the old heuristic left it un-inverted —
+  e.g. dark-red on black).
+- **Trade-off made explicit.** The old heuristic *tried* to leave
+  photos untouched (only inverting near-grayscale regions); the CSS
+  filter inverts everything. Crisp text for every PDF beat
+  photo-preservation for the rare image-heavy one. True
+  photo-preservation needs the PDF operator-list approach C5's comments
+  mention — a later refinement.
+- **Deleting a feature's code means deleting its tests.** Removing
+  `dark-invert.ts` made its 8 unit tests dead (they tested the now-gone
+  pixel function). Deleting them (68 → 60 tests) is correct cleanup, not
+  "removing tests to pass" — the behaviour they covered no longer
+  exists.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/PageVirtualizer.tsx` | Dark mode sets `canvas.style.filter = "invert(1) hue-rotate(180deg)"` instead of calling the pixel invert. |
+| `src/view/dark-invert.ts` | **Deleted** (pixel-invert heuristic, superseded). |
+| `src/view/__tests__/dark-invert.test.ts` | **Deleted** (tested the removed function). |
+
+#### Further reading
+
+- CSS `filter` / `invert()` / `hue-rotate()` —
+  https://developer.mozilla.org/en-US/docs/Web/CSS/filter
+- "Dark mode for PDFs / images via invert + hue-rotate" (common technique)
+
 ---
 
 ## How this file evolves

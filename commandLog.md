@@ -734,6 +734,21 @@ $ npm run test      # 68/68
 No new dependencies. Frontend-only. GUI verification (switching to Light
 gives a white page + crisp text) is on the human.
 
+### Bug fix — dark-mode invert: pixel → CSS filter (this commit)
+
+```bash
+# Light mode crisp (HiDPI fix), dark mode "pixelated / black on black"
+# — the per-pixel invert heuristic mangled text. Swapped to a CSS
+# filter on the canvas (compositor invert at native resolution).
+# Removed the dead dark-invert.ts + its 8 tests.
+
+$ npm run check     # clean
+$ npm run test      # 60/60 (was 68; -8 dead pixel-invert tests)
+```
+
+No new dependencies. GUI verification (dark mode crisp now) is on the
+human.
+
 ---
 
 ## How this file evolves
