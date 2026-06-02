@@ -701,6 +701,26 @@ No new dependencies. Generated `public/pdfjs/` gitignored. Full GUI
 verification (does a PDF actually render now) is on the human — re-run
 `npm run dev` and open a PDF via the in-app ⌘O button.
 
+### Bug fix — thumbnail bytes + HiDPI rendering (this commit)
+
+```bash
+# Found in GUI testing (after the worker fix let PDFs render):
+#   - thumbnail sidebar: ⚠ on every page
+#   - main view: blurry text
+#
+# Causes:
+#   - pdf_render_page's Vec<u8> arrives over IPC as number[] (not
+#     Uint8Array); thumbnail code read .byteLength (undefined) → throw.
+#   - renderPageOnDoc ignored devicePixelRatio → 1× bitmap on a 2×
+#     screen → blur.
+
+$ npm run check     # clean (tsc + eslint + clippy)
+$ npm run test      # 68/68
+```
+
+No new dependencies. GUI verification (thumbnails render, text is
+crisp) is on the human — re-run `npm run dev`, open a PDF.
+
 ---
 
 ## How this file evolves

@@ -155,16 +155,21 @@ function ThumbTile({
           const dpi = (targetPx * 72) / widthPt;
           const rendered = await renderPage(documentId, page, dpi, "png");
           if (cancelled) return;
-          png = rendered.bytes;
+          // IPC hands `bytes` back as a plain number[]; make a real
+          // Uint8Array before caching/using it.
+          png = Uint8Array.from(rendered.bytes);
           void putThumb({ documentId, page, dpr }, png);
         }
         if (cancelled) return;
-        // Copy into a plain ArrayBuffer-backed buffer: `renderPage`
-        // returns `Uint8Array<ArrayBufferLike>`, which TS won't widen to
-        // `BlobPart` (the backing buffer could in principle be a
-        // SharedArrayBuffer). A small copy sidesteps the variance.
-        const ab = new ArrayBuffer(png.byteLength);
-        new Uint8Array(ab).set(png);
+        // Normalise: a cache hit is a Uint8Array, but a stale entry from
+        // the pre-fix build (or any structured-clone quirk) could be a
+        // plain array — coerce so `.byteLength` is always defined.
+        const u8 = png instanceof Uint8Array ? png : Uint8Array.from(png);
+        // Copy into a plain ArrayBuffer-backed buffer so the Blob part
+        // is unambiguously `ArrayBuffer` (TS won't widen
+        // `Uint8Array<ArrayBufferLike>` to `BlobPart`).
+        const ab = new ArrayBuffer(u8.byteLength);
+        new Uint8Array(ab).set(u8);
         objectUrl = URL.createObjectURL(new Blob([ab], { type: "image/png" }));
         setUrl(objectUrl);
       } catch (err) {

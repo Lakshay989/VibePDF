@@ -12,6 +12,13 @@ export interface RenderPageOnDocInput {
   pageNumber: number;
   scale: number;
   canvas: HTMLCanvasElement | OffscreenCanvas;
+  /**
+   * Device pixel ratio. The canvas *backing store* is rendered at
+   * `scale × dpr` physical pixels and displayed at `scale` CSS pixels,
+   * so text stays crisp on HiDPI (retina) screens. Defaults to
+   * `window.devicePixelRatio`.
+   */
+  dpr?: number;
 }
 
 export async function loadDocument(
@@ -30,10 +37,21 @@ export async function loadDocument(
 export async function renderPageOnDoc(
   input: RenderPageOnDocInput,
 ): Promise<RenderOutput> {
+  const dpr =
+    input.dpr ??
+    (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
   const page = await input.doc.getPage(input.pageNumber);
-  const viewport = page.getViewport({ scale: input.scale });
+  // Render the backing store at the physical resolution (scale × dpr)…
+  const viewport = page.getViewport({ scale: input.scale * dpr });
   input.canvas.width = Math.floor(viewport.width);
   input.canvas.height = Math.floor(viewport.height);
+  // …but display it at the logical (CSS) size, so the browser
+  // downscales the oversized bitmap → crisp text on HiDPI screens.
+  // OffscreenCanvas has no `style`; guard for it.
+  if ("style" in input.canvas) {
+    input.canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
+    input.canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
+  }
   // PDF.js v5 expects `canvas`; the legacy `canvasContext` field is
   // deprecated. We pass the canvas and let PDF.js manage the 2d
   // context lifecycle.
@@ -43,8 +61,8 @@ export async function renderPageOnDoc(
   }).promise;
   return {
     pageNumber: input.pageNumber,
-    width: viewport.width,
-    height: viewport.height,
+    width: viewport.width / dpr,
+    height: viewport.height / dpr,
   };
 }
 

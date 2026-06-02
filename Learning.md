@@ -2174,6 +2174,61 @@ approach but never completed the "put the file there" half.
 
 ---
 
+### Bugs — thumbnail bytes + HiDPI page rendering
+
+#### Problem
+
+Two rendering defects surfaced once a PDF actually rendered in the
+window (after the worker fix): the thumbnail sidebar showed a ⚠ on
+*every* page, and the main-view text was blurry. Both were invisible to
+the test suite.
+
+#### Concepts learned
+
+- **Tauri serializes `Vec<u8>` as a JSON number array, not bytes.** The
+  `pdf_render_page` command returns `RenderedPage { bytes: Vec<u8> }`;
+  over `invoke` that arrives in JS as a plain `number[]`. B3's frontend
+  wrapper *typed* it `Uint8Array` (a runtime lie — never executed,
+  since D1 was the first consumer and was never GUI-tested). The
+  thumbnail code did `new ArrayBuffer(png.byteLength)` — `number[]` has
+  no `.byteLength`, so it became `ArrayBuffer(0)` → `Uint8Array.set`
+  threw `RangeError` → caught → ⚠ on every tile. Fix: type `bytes` as
+  `number[]` (honest) and `Uint8Array.from(bytes)` at the boundary. The
+  perf upgrade (raw bytes via `tauri::ipc::Response`, avoiding the
+  ~5×-JSON blowup) is still noted in `render.rs` as future work.
+- **HiDPI needs the canvas backing store scaled by devicePixelRatio.**
+  `renderPageOnDoc` sized the canvas at `scale` logical pixels; on a
+  2× retina display the browser stretched that 1× bitmap to 2× physical
+  pixels → blurry text. The fix is the standard pattern: render the
+  backing store at `scale × dpr` *physical* pixels, then display it at
+  `scale` *CSS* pixels (`canvas.style.width/height`) so the browser
+  *down*-samples a too-big bitmap (crisp) instead of *up*-sampling a
+  too-small one (blur). Tell: `PageVirtualizer`'s LRU key already
+  included `dpr` — the intent was there, but the renderer never used it.
+- **These are precisely the bugs unit tests can't see.** Both depend on
+  the real browser canvas + the real Tauri IPC byte path. The render
+  smoke test mocks the worker and never rasterises; vitest's jsdom has
+  no real devicePixelRatio rendering. This trio (worker-missing,
+  thumbnail-bytes, HiDPI) is the strongest argument yet for E5 (E2E) —
+  three app-breaking/UX-breaking bugs, zero red tests.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/render-page.ts` | `renderPageOnDoc` renders the backing store at `scale × dpr` and displays at logical size (HiDPI fix). New optional `dpr` input. |
+| `src/ipc/pdf.ts` | `RenderedPage.bytes` retyped `Uint8Array` → `number[]` (matches what Tauri actually returns). |
+| `src/panels/ThumbnailPanel.tsx` | `Uint8Array.from(rendered.bytes)` at the IPC boundary; defensive coerce on cache hits. |
+
+#### Further reading
+
+- HiDPI canvas (scale backing store by devicePixelRatio) —
+  https://developer.mozilla.org/en-US/docs/Web/API/Window/devicePixelRatio#correcting_resolution_in_a_canvas
+- Tauri IPC + binary data (`tauri::ipc::Response`) —
+  https://v2.tauri.app/develop/calling-rust/#returning-data
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -65,9 +65,14 @@ export async function closePdf(id: DocumentId): Promise<void> {
 export type ImageFormat = "png" | "rgba8";
 
 /**
- * Reply payload of {@link renderPage}. `bytes` is whichever format
- * was requested; Tauri base64-decodes it automatically into a
- * Uint8Array via the `serde_bytes` shape on the Rust side.
+ * Reply payload of {@link renderPage}.
+ *
+ * `bytes` arrives as a plain `number[]`: the Rust side returns
+ * `Vec<u8>`, which serde serializes as a JSON array of numbers, so
+ * Tauri's `invoke` hands back a `number[]` (NOT a `Uint8Array` — that
+ * was an earlier mislabel). Wrap it with `Uint8Array.from(bytes)` before
+ * use. (The raw-bytes upgrade path — `tauri::ipc::Response` — is noted
+ * in `pdf::render::RenderedPage`.)
  *
  * Mirrors `pdf::render::RenderedPage` in Rust.
  */
@@ -75,7 +80,7 @@ export interface RenderedPage {
   width: number;
   height: number;
   format: ImageFormat;
-  bytes: Uint8Array;
+  bytes: number[];
 }
 
 /** SPEC: P1-VIEW-008 + NFR-PERF-003. Routed through the actor. */
