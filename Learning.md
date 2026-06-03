@@ -2439,6 +2439,89 @@ CI run is the real test.
 
 ---
 
+### P2.A1 — Save (explicit Cmd/Ctrl+S)
+
+The first feature in the project that **writes PDF bytes to disk**. Phase 1
+was all read-only (open, render, thumbnails). This sets the template every
+later mutation (rotate, delete, merge…) will reuse.
+
+#### Problem
+
+Give the user a Save button that writes the open document back to disk —
+without ever corrupting their file. Two non-obvious sub-problems:
+
+1. A *no-op save* (saving a document you haven't edited) must leave the file
+   **byte-for-byte identical** — same SHA-256. But PDFium re-serializes a
+   document differently from how it was written originally (different xref
+   layout, object order, compression), so "just re-save it" would change the
+   bytes. The only correct no-op is to **not write at all**.
+2. A write must never destroy the original until the new bytes are proven
+   good. "Open the file, truncate it, stream new bytes" is how editors corrupt
+   documents on a crash or a bad write.
+
+#### Concepts learned
+
+- **Dirty flag.** A boolean per document tracking "are there unsaved
+  changes?" Starts `false`; mutation operations flip it `true`; a successful
+  save resets it. A same-path save of a *clean* (non-dirty) document
+  short-circuits to a true no-op — we never touch the file. In P2.A1 nothing
+  sets it `true` yet (no edit ops exist), so every same-path save is a no-op;
+  the page-op steps (P2.B*) will flip it. Building the flag now means those
+  steps inherit correct no-op semantics for free.
+- **Atomic write via temp + rename.** Write the new bytes to a sibling temp
+  file in the *same directory*, then `rename()` it onto the destination.
+  `rename` within one filesystem is **atomic** at the OS level — a reader sees
+  either the whole old file or the whole new file, never a half-written one. A
+  crash mid-write leaves a stray `.tmp`, not a corrupt PDF.
+- **Why the temp must be a *sibling*.** `rename` is only atomic (and only
+  succeeds without a copy) *within a single filesystem*. A temp in `/tmp` and a
+  destination on another volume would fail with `EXDEV` ("cross-device link").
+  Putting the temp next to the destination guarantees one filesystem.
+- **Round-trip verification.** After writing the temp file, we re-open it in
+  PDFium and confirm it has pages. A write PDFium can't read back is rejected
+  *before* it can replace the original. This is the "no silent breakage" rule
+  from CLAUDE.md made concrete.
+- **`.bak` rotation.** When overwriting the original, the previous version is
+  renamed to `<name>.bak` first — kept for exactly one save cycle (a prior
+  `.bak` is overwritten). One free undo at the filesystem level.
+- **Writes happen on the actor thread.** PDFium isn't thread-safe per
+  document, so the save (and its verify-reopen) run inside the document
+  actor's own thread via a new `Message::Save`, not in the async IPC handler.
+  Same discipline as render: the command sends the message and awaits a
+  one-shot reply, holding no lock across the `.await`.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/document.rs` | `save_document()` — atomic temp+rename, `.bak` rotation, round-trip verify; `SaveOutcome` struct. |
+| `src-tauri/src/pdf/actor.rs` | `Message::Save` + `dirty` flag + `save`/`save_request` handle methods. |
+| `src-tauri/src/commands/save.rs` | `pdf_save` IPC command (thin: look up actor, send, await). |
+| `src-tauri/src/commands/mod.rs`, `lib.rs` | Register the new module + command. |
+| `src/ipc/save.ts` | `savePdf(id, path?)` wrapper + `SaveOutcome` type. |
+| `src/app/use-save.ts` | Cmd/Ctrl+S keydown hook (mirrors `use-file-open.ts`). |
+| `src/app/App.tsx` | Save button + merged status toast. |
+| `src-tauri/tests/save_noop.rs` | save-as round-trip, true-no-op, `.bak` rotation, + on-demand verify artifact. |
+| `src/ipc/__tests__/save.test.ts` | `path ?? null` marshalling for the `Option<String>` arg. |
+
+#### Why no `P2-PAGE-*` spec ID
+
+Save is infrastructure — the step doc carries no `P2-PAGE-*` line. The
+governing text is `NFR-PERF-004` (50 MB in <3 s) plus `docs/04_ARCHITECTURE.md`
+§ "Saving and auto-save". A candidate EARS line (`P2-SAVE-001`) was drafted in
+the plan for the human to optionally add to `02_PRODUCT_SPEC.md`.
+
+#### Further reading
+
+- Atomic file writes / `rename(2)` durability —
+  https://man7.org/linux/man-pages/man2/rename.2.html
+- `EXDEV` and why temp files go next to their target —
+  https://man7.org/linux/man-pages/man2/link.2.html
+- pdfium-render `save_to_bytes` / `save_to_file` —
+  https://docs.rs/pdfium-render/latest/pdfium_render/document/struct.PdfDocument.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

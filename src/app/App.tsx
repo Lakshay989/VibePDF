@@ -1,6 +1,7 @@
 import { PasswordPromptDialog } from "@/app/PasswordPromptDialog";
 import { basename } from "@/app/paths";
 import { useFileOpen } from "@/app/use-file-open";
+import { useSave } from "@/app/use-save";
 import { useSessionRestore } from "@/app/use-session-restore";
 import { useDocumentStore } from "@/state/document-store";
 import { useSettingsStore } from "@/state/settings-store";
@@ -22,6 +23,13 @@ export function App() {
   useSessionRestore(openByPath);
 
   const current = docs.find((d) => d.id === currentId);
+
+  // SPEC: P2-SAVE-001 — Cmd/Ctrl+S saves the active document.
+  const { save, toast: saveToast } = useSave(current?.id);
+
+  // One status line: a save message takes precedence over an open message
+  // when both are live (both auto-dismiss in 3s, so overlap is brief).
+  const statusToast = saveToast ?? toast;
 
   return (
     <div className="flex h-screen flex-col">
@@ -50,6 +58,13 @@ export function App() {
         >
           Open PDF (⌘O)
         </button>
+        <button
+          onClick={() => void save()}
+          disabled={!current}
+          className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          Save (⌘S)
+        </button>
       </header>
       <main className="flex-1 overflow-hidden">
         {current ? (
@@ -62,12 +77,12 @@ export function App() {
           />
         )}
       </main>
-      {toast ? (
+      {statusToast ? (
         <div
           role="status"
           className="pointer-events-none fixed bottom-4 left-1/2 -translate-x-1/2 rounded bg-neutral-900/90 px-3 py-2 text-sm text-white shadow-lg dark:bg-neutral-100/90 dark:text-neutral-900"
         >
-          {toast}
+          {statusToast}
         </div>
       ) : null}
       <PasswordPromptDialog {...passwordDialogProps} />

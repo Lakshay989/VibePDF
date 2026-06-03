@@ -1,7 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use pdfium_render::prelude::*;
+use serde::Serialize;
 
 use crate::error::CommandError;
 
@@ -18,6 +19,19 @@ pub struct DocumentMetadata {
     pub title: Option<String>,
     pub author: Option<String>,
     pub pdf_version: Option<String>,
+}
+
+/// Result of a save. Crosses the IPC boundary as the reply payload of
+/// the `pdf_save` command, so the field names are camelCase on the wire.
+///
+/// `no_op` is `true` only when a same-path save found no unsaved changes
+/// and therefore left the user's file untouched (`bytes_written == 0`).
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveOutcome {
+    pub path: String,
+    pub bytes_written: u64,
+    pub no_op: bool,
 }
 
 /// Shared `PDFium` instance.
@@ -91,6 +105,91 @@ pub fn open_document_metadata(path: &Path) -> Result<DocumentMetadata, CommandEr
     let (doc, meta) = open_pdf(path, None)?;
     drop(doc);
     Ok(meta)
+}
+
+/// Write the live document to `dest`, atomically and verifiably.
+///
+/// SPEC: P2-SAVE-001 (proposed) / NFR-PERF-004 — the explicit-save write
+/// path. Called only on the document actor thread (`PDFium` is not
+/// thread-safe per document); see `pdf::actor`.
+///
+/// The original file is never destroyed until the new bytes are proven
+/// loadable:
+///   1. serialize the document and write it to `<name>.vibepdf-tmp` **in
+///      `dest`'s own directory** (so the final rename never crosses a
+///      filesystem boundary → no `EXDEV`);
+///   2. round-trip: re-open that temp file in `PDFium` and confirm it has
+///      pages — a write that `PDFium` can't read back is rejected here,
+///      before it can clobber anything;
+///   3. when `make_backup`, rotate an existing `dest` to `<name>.bak`
+///      (one save cycle only — a prior `.bak` is overwritten);
+///   4. atomically rename the temp file onto `dest`.
+pub fn save_document(
+    doc: &PdfDocument<'_>,
+    dest: &Path,
+    make_backup: bool,
+) -> Result<SaveOutcome, CommandError> {
+    let dir = dest.parent().ok_or_else(|| {
+        CommandError::InvalidInput(format!("destination has no parent directory: {}", dest.display()))
+    })?;
+    if !dir.is_dir() {
+        return Err(CommandError::NotFound(format!(
+            "destination directory does not exist: {}",
+            dir.display()
+        )));
+    }
+
+    // 1. Serialize, then stage to a sibling temp file.
+    let bytes = doc.save_to_bytes().map_err(CommandError::from)?;
+    let tmp = sibling_with_suffix(dest, ".vibepdf-tmp");
+    std::fs::write(&tmp, &bytes)?;
+
+    // 2. Round-trip verification. A bad temp file is cleaned up and the
+    //    error surfaced; `dest` is still untouched at this point.
+    if let Err(e) = verify_pdf_reopens(&tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    // 3. Back up the previous version for exactly one save cycle.
+    if make_backup && dest.exists() {
+        let bak = sibling_with_suffix(dest, ".bak");
+        std::fs::rename(dest, &bak)?;
+    }
+
+    // 4. Commit.
+    std::fs::rename(&tmp, dest)?;
+
+    Ok(SaveOutcome {
+        path: dest.to_string_lossy().into_owned(),
+        bytes_written: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        no_op: false,
+    })
+}
+
+/// `foo.pdf` + `.bak` → `foo.pdf.bak` (suffix appended to the *whole*
+/// file name, not the stem, so it is unambiguous and reversible).
+fn sibling_with_suffix(dest: &Path, suffix: &str) -> PathBuf {
+    let mut name = dest
+        .file_name()
+        .map_or_else(std::ffi::OsString::new, std::ffi::OsStr::to_os_string);
+    name.push(suffix);
+    dest.with_file_name(name)
+}
+
+/// Confirm a freshly-written file re-opens in `PDFium` with at least one
+/// page. Runs on the actor thread, which already owns the source
+/// document; `PDFium` permits multiple documents open per binding.
+fn verify_pdf_reopens(path: &Path) -> Result<(), CommandError> {
+    let (doc, meta) = open_pdf(path, None)?;
+    let pages = meta.page_count;
+    drop(doc);
+    if pages == 0 {
+        return Err(CommandError::PdfError(
+            "saved file re-opened with zero pages".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[must_use]

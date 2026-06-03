@@ -91,6 +91,7 @@ pub fn run() {
             commands::pdf::pdf_close,
             commands::pdf::pdf_render_page,
             commands::pdf::pdfium_version,
+            commands::save::pdf_save,
             commands::recents::recents_list,
             commands::recents::recents_push,
             commands::recents::recents_clear,

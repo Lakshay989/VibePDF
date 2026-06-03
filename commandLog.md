@@ -800,6 +800,47 @@ green.
 
 ---
 
+### P2.A1 — Save (explicit Cmd/Ctrl+S) (this commit)
+
+```bash
+# No new deps. pdfium-render already exposes save_to_bytes()/save_to_file();
+# the write path uses std::fs only. First byte-writing feature in the repo.
+
+# Verification gates (workflow order):
+npm run check
+#   tsc --noEmit ✓
+#   eslint src --max-warnings=0 ✓
+#   cargo clippy --all-targets -- -D warnings ✓
+#     (one iteration: clippy::pedantic doc_markdown wanted `PDFium`
+#      backticked in 6 new doc comments.)
+
+npm run test
+#   70/70 (was 67 — +3 src/ipc/__tests__/save.test.ts: path?? null
+#   marshalling + SaveOutcome passthrough).
+
+npm run test:rust
+#   save_noop.rs: 3 passed —
+#     save_as_roundtrips_page_count   (write+verify path)
+#     save_same_path_not_dirty_is_true_noop  (byte-identical no-op)
+#     save_document_rotates_bak_when_overwriting  (.bak rotation)
+#   Full Rust suite green; no regressions in touched modules
+#   (actor_smoke, render_*, session_restore).
+
+# PDF write-path verification ritual (ignored test, run on demand):
+node scripts/cargo-test.mjs --test save_noop \
+  save_writes_verification_artifact -- --ignored --nocapture
+#   → /tmp/vibepdf-verify.pdf
+file /tmp/vibepdf-verify.pdf
+#   PDF document, version 1.4, 1 pages (zip deflate encoded), 693 bytes.
+#   (Note: 693 B ≠ original hello.pdf size — PDFium re-serializes, which
+#    is exactly why the same-path no-op must skip the write entirely.)
+```
+
+Awaiting the human cross-reader check (Acrobat / Preview / a third
+reader) before `steps/P2.md` A1 flips `[~]` → `[x]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -28,7 +28,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::error::CommandError;
-use crate::pdf::document::{collect_metadata, open_pdf, DocumentMetadata};
+use crate::pdf::document::{collect_metadata, open_pdf, save_document, DocumentMetadata, SaveOutcome};
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 
 /// Event name on the wire. The frontend listens for this via
@@ -68,6 +68,12 @@ pub enum Message {
         dpi: f32,
         format: ImageFormat,
         reply: oneshot::Sender<Result<RenderedPage, CommandError>>,
+    },
+    /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
+    /// the document's own path; `Some(p)` is a save-as to `p`.
+    Save {
+        path: Option<PathBuf>,
+        reply: oneshot::Sender<Result<SaveOutcome, CommandError>>,
     },
     Close,
 }
@@ -218,6 +224,33 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-SAVE-001 — explicit save. `path = None` saves to the
+    /// document's own path (a no-op when there are no unsaved changes);
+    /// `Some(p)` is a save-as.
+    ///
+    /// Convenience version that holds `&self` across the await; use it
+    /// from tests. IPC handlers should call `save_request` so they can
+    /// drop the actor-map lock before awaiting (see `render_page` vs
+    /// `render_page_request`).
+    pub async fn save(&self, path: Option<PathBuf>) -> Result<SaveOutcome, CommandError> {
+        let rx = self.save_request(path)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// Send-only sibling of `save`. Returns the reply receiver without
+    /// borrowing `&self` across the await.
+    pub fn save_request(
+        &self,
+        path: Option<PathBuf>,
+    ) -> Result<oneshot::Receiver<Result<SaveOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::Save { path, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -284,6 +317,11 @@ fn run_worker(
         },
     );
 
+    // SPEC: P2-SAVE-001 — tracks unsaved changes so a same-path save of
+    // a clean document is a true no-op. Nothing sets it `true` in P2.A1;
+    // the page-op steps (P2.B*) flip it on every mutating message.
+    let mut dirty = false;
+
     while let Ok(msg) = rx.recv() {
         match msg {
             Message::GetPageCount { reply } => {
@@ -309,6 +347,34 @@ fn run_worker(
                 reply,
             } => {
                 let _ = reply.send(render::render_page(&doc, page, dpi, format));
+            }
+            Message::Save {
+                path: dest_arg,
+                reply,
+            } => {
+                // SPEC: P2-SAVE-001 — a same-path save with no unsaved
+                // changes is a *true* no-op: the user's file is never
+                // rewritten, so its bytes (and hash) stay identical. A
+                // save-as (an explicit `dest_arg`) always writes.
+                let dest = dest_arg.unwrap_or_else(|| path.clone());
+                let same_path = dest == path;
+                let result = if same_path && !dirty {
+                    Ok(SaveOutcome {
+                        path: dest.to_string_lossy().into_owned(),
+                        bytes_written: 0,
+                        no_op: true,
+                    })
+                } else {
+                    // make_backup only when overwriting the original; a
+                    // same-path save that reaches here is, by the branch
+                    // above, necessarily dirty.
+                    let outcome = save_document(&doc, &dest, same_path);
+                    if outcome.is_ok() && same_path {
+                        dirty = false;
+                    }
+                    outcome
+                };
+                let _ = reply.send(result);
             }
             Message::Close => {
                 tracing::info!("doc-actor closing (Close received)");
