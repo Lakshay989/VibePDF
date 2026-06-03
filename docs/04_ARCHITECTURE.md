@@ -54,7 +54,7 @@ vibepdf/
 │   │   ├── conformance/          # W3C PDF conformance suite (subset)
 │   │   └── acceptance/           # Per-phase acceptance documents
 │   ├── integration/              # Rust integration tests
-│   └── e2e/                      # Playwright + tauri-driver
+│   └── e2e/                      # WebdriverIO + tauri-driver (Linux/Windows; no macOS)
 │
 ├── docs/                         # The specs you're reading
 ├── .claude/                      # Claude Code config

@@ -1,0 +1,64 @@
+name: E2E
+
+# End-to-end tests run on a SEPARATE Linux job (the main ci.yml is
+# macOS, to match the E2 render golden). tauri-driver has no macOS
+# support, so E2E can only run on Linux. Kept off every-push (slow:
+# builds the app + spins up a webview under xvfb) — PRs and main only.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install WebView + WebDriver + display deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci # postinstall copies the PDF.js worker into public/
+
+      - name: Fetch PDFium (Linux)
+        run: npm run fetch-pdfium
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Build the app (debug, unbundled)
+        run: npx tauri build --debug --no-bundle
+
+      - name: Run E2E
+        run: |
+          export LD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium:$LD_LIBRARY_PATH"
+          xvfb-run -a npm run test:e2e

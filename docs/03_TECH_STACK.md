@@ -138,7 +138,7 @@ Default models suggested: `llama3.1:8b-instruct-q4` for general, `phi4:14b` if t
 | Rust unit/integration | `cargo test` + `insta` for snapshots | Standard. Insta for PDF binary snapshots. |
 | TS unit | `vitest` | Vite-native, fast. |
 | TS component | `vitest` + `@testing-library/react` | Standard. |
-| E2E | `tauri-driver` + Playwright | Drives the actual built app. |
+| E2E | `tauri-driver` + WebdriverIO | Drives the actual built app. (Originally listed as Playwright, but Playwright speaks CDP/its own protocol and can't drive a Tauri webview; `tauri-driver` implements W3C WebDriver, which WebdriverIO/Selenium speak. WebdriverIO is the officially documented Tauri 2 E2E stack. Linux/Windows only — `tauri-driver` has no macOS support.) |
 | PDF regression | Custom harness: open fixture → apply op → compare bytes/visual against golden | The most important test layer. |
 | Visual regression | `pixelmatch` + golden PNG | For rendering correctness. |
 

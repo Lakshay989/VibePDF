@@ -2366,6 +2366,77 @@ component/integration tests, targeting that exact class.
 - "Avoid the `act` warning" (drive via fireEvent) —
   https://testing-library.com/docs/react-testing-library/api#fireevent
 
+### P1.E5 — E2E harness (WebdriverIO + tauri-driver)
+
+#### Problem
+
+This session found five app-breaking bugs by hand that every automated
+test missed — all only reproduce in the real Tauri webview (worker
+loading over `tauri://`, IPC byte serialization, HiDPI canvas). E5 adds
+the one test layer that drives the **real built app**, so that class is
+catchable in CI.
+
+#### Concepts learned
+
+- **"Playwright + tauri-driver" doesn't compose.** The step doc (and
+  `docs/03`/`docs/04`) named Playwright, but Playwright drives browsers
+  over CDP/its own protocol — it can't attach to a Tauri webview.
+  `tauri-driver` implements **W3C WebDriver**, which **WebdriverIO**
+  (or Selenium) speaks. WebdriverIO is the officially documented Tauri 2
+  E2E stack. Corrected the docs as part of the change (CLAUDE.md:
+  architecture/tooling changes update the doc first).
+- **A native file dialog is not webview-automatable.** WebDriver drives
+  the *webview*, not OS chrome. So "open via the file dialog" can't be
+  E2E-tested directly. The harness instead launches the app with the
+  PDF as a **CLI argument** (the A2 path) — which exercises the same
+  open→render pipeline and sidesteps the dialog. General lesson: design
+  the E2E entry point around what the driver can reach.
+- **Some infrastructure can't be verified from where you build it.**
+  `tauri-driver` supports Linux/Windows only (no WKWebView WebDriver on
+  macOS), and the dev machine is macOS. So this is the one step I wrote
+  **blind** — I can only validate that the TS typechecks, the YAML
+  parses, and the deps resolve; the real acceptance (`npm run test:e2e`
+  green) happens on Linux CI and will likely need a fixup pass. Marked
+  the step `[~]` (not `[x]`) and said so plainly — per "don't claim a
+  check you didn't get."
+- **Keep the slow, OS-specific job separate.** E2E gets its own
+  `e2e.yml` on `ubuntu-22.04` (build the app + webkit + xvfb +
+  tauri-driver), kept off the fast macOS `ci.yml` and off every-push
+  (PRs + main only). The macOS `ci.yml` keeps the render-golden
+  comparison apples-to-apples; the Linux E2E job never runs it.
+- **The built app still needs PDFium + the worker.** The unbundled
+  debug binary dlopens `libpdfium.so` (so `LD_LIBRARY_PATH` →
+  `resources/pdfium`, which propagates fine on Linux — no macOS SIP
+  stripping) and serves the worker from the embedded `dist/` (the
+  `postinstall` worker-copy runs on `npm ci`, before `tauri build`'s
+  `vite build`).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `tests/e2e/wdio.conf.ts` | WebdriverIO config: spawns tauri-driver, points at the built binary, passes hello.pdf as argv. |
+| `tests/e2e/specs/smoke.e2e.ts` | Launch → wait for `[data-page="1"] canvas` → assert it rendered. |
+| `tests/e2e/tsconfig.json` | Scoped TS config (wdio + mocha types); isolated from the app's `tsc`. |
+| `tests/e2e/README.md` | How/why Linux-only, the CLI-arg entry rationale. |
+| `.github/workflows/e2e.yml` | Separate Linux job: deps → build → `xvfb-run npm run test:e2e`. |
+| `package.json` | `@wdio/*` + `tsx` devDeps; `test:e2e` script. |
+| `docs/03_TECH_STACK.md`, `docs/04_ARCHITECTURE.md` | Playwright → WebdriverIO correction. |
+
+#### Caveat
+
+Written entirely from macOS, which can't run it. Locally validated:
+e2e TS typechecks, `e2e.yml` is valid YAML, wdio CLI resolves, app
+`check` + vitest unaffected. **Unverified:** the actual E2E run. First
+CI run is the real test.
+
+#### Further reading
+
+- Tauri 2 WebDriver / WebdriverIO guide —
+  https://v2.tauri.app/develop/tests/webdriver/example/webdriverio/
+- `tauri-driver` (platform support) —
+  https://crates.io/crates/tauri-driver
+
 ---
 
 ## How this file evolves

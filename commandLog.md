@@ -770,6 +770,34 @@ $ npm run test      # 67/67 (was 60; +7 component/integration tests)
 
 No new dependencies.
 
+### P1.E5 — E2E harness (this commit)
+
+```bash
+# WebdriverIO + tauri-driver (NOT Playwright — it can't drive a Tauri
+# webview). Linux/Windows only; written blind from macOS.
+
+$ npm install -D @wdio/cli@^9 @wdio/local-runner@^9 \
+    @wdio/mocha-framework@^9 @wdio/spec-reporter@^9 tsx
+# 412 dev-only packages.
+
+# Locally validated (all I can do on macOS):
+$ npx tsc -p tests/e2e/tsconfig.json --noEmit   # e2e sources typecheck
+$ npm run check                                  # app gates unaffected (src only)
+$ npm run test                                   # 67/67 (vitest unaffected)
+$ npx wdio --version                             # 9.27.2
+# e2e.yml validated as YAML (js-yaml).
+
+# NOT run here — needs Linux + tauri-driver + webkit + xvfb + a built
+# app. The real gate is the e2e.yml run on CI:
+#   cargo install tauri-driver --locked
+#   npx tauri build --debug --no-bundle
+#   LD_LIBRARY_PATH=.../resources/pdfium xvfb-run -a npm run test:e2e
+```
+
+No app-code change. New dev deps only (@wdio/*, tsx; tauri-driver is a
+cargo-installed CI binary). Step left `[~]` until the first CI run goes
+green.
+
 ---
 
 ## How this file evolves
