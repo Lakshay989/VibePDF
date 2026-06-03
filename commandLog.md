@@ -749,6 +749,27 @@ $ npm run test      # 60/60 (was 68; -8 dead pixel-invert tests)
 No new dependencies. GUI verification (dark mode crisp now) is on the
 human.
 
+### Test hardening — component/integration tests (this commit)
+
+```bash
+# First use of @testing-library/react (already installed). Adds tests
+# for the GUI-bug class this session surfaced: theme wiring, HiDPI
+# sizing, thumbnail number[] bytes.
+
+# Verified each guard has teeth by reintroducing the bug:
+$ perl -0pi -e 's/scale: input\.scale \* dpr/scale: input.scale/' src/view/render-page.ts
+$ npm run test -- src/view/__tests__/render-page-hidpi.test.ts   # RED (400≠800)
+$ git checkout src/view/render-page.ts
+# (same for ThumbnailPanel: number[]→byteLength bug → "Unable to find img")
+
+# Gates:
+$ npm run check     # clean (after adding HTMLSelectElement +
+#                     IntersectionObserver{Callback,Entry} to eslint globals)
+$ npm run test      # 67/67 (was 60; +7 component/integration tests)
+```
+
+No new dependencies.
+
 ---
 
 ## How this file evolves

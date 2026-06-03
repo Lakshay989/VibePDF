@@ -2311,6 +2311,61 @@ background.
   https://developer.mozilla.org/en-US/docs/Web/CSS/filter
 - "Dark mode for PDFs / images via invert + hue-rotate" (common technique)
 
+### Test hardening — component/integration tests for the GUI-bug class
+
+#### Problem
+
+This session found five app-breaking bugs by hand that the whole green
+test suite missed — all in the frontend (worker asset, thumbnail byte
+type, HiDPI sizing, missing theme wiring, dark invert). Every existing
+vitest was a *pure-function* test; nothing rendered a component or
+exercised the IPC byte path. This adds the first real
+component/integration tests, targeting that exact class.
+
+#### Concepts learned
+
+- **`@testing-library/react` was already installed but unused.** First
+  real use: `render(<Component/>)` + `screen.getByRole/getByLabelText`
+  in jsdom. No new deps, no jest-dom matchers needed — plain queries +
+  vitest `expect`. Reset shared singletons (zustand store, the `.dark`
+  class) in `beforeEach`, `cleanup()` in `afterEach`.
+- **Drive state via the real interaction, not the store, to avoid
+  `act()` warnings.** Setting zustand state directly after render and
+  reading the DOM failed (React hadn't re-rendered). `fireEvent.change`
+  on the `<select>` (a real user action) wraps in `act()` and flushes —
+  the correct way to test the two-way binding.
+- **Stub the browser APIs jsdom lacks.** The thumbnail test needed an
+  `IntersectionObserver` (jsdom has none) that reports tiles visible
+  immediately, plus `URL.createObjectURL` (unimplemented in jsdom) —
+  both via `vi.stubGlobal`. That let the lazy-load path run headless and
+  assert `<img>`s appear (vs the ⚠ failure glyph) when fed the real
+  `number[]` IPC byte shape.
+- **A regression test must be shown to fail on the bug.** Each guard was
+  mutation-tested: reverting `scale × dpr` → `scale` made the HiDPI test
+  red (`400 ≠ 800`); restoring the `number[]`→`byteLength` crash made
+  the thumbnail test red ("Unable to find role=img"). A guard that stays
+  green when you reintroduce the bug is theatre — verify the teeth.
+- **Still a partial net.** These catch ~3 of the 5 (byte type, HiDPI,
+  theme wiring). The worker-missing bug already has a file-existence
+  test; the dark-invert is visual and best left to E5. Component tests
+  narrow the gap but don't replace a real E2E harness.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/app/__tests__/ZoomToolbar.test.tsx` | First component test. Asserts the Theme control exists + is two-way bound (the "UI not wired" gap). |
+| `src/view/__tests__/render-page-hidpi.test.ts` | `renderPageOnDoc` sizes the backing store at `scale × dpr`, CSS box at logical size (blur guard). |
+| `src/panels/__tests__/ThumbnailPanel.test.tsx` | Renders `<img>`s from `number[]` IPC bytes, no ⚠ (the thumbnail-bytes crash). |
+| `eslint.config.js` | Added `HTMLSelectElement`, `IntersectionObserver{Callback,Entry}` DOM globals. |
+
+#### Further reading
+
+- Testing Library queries / guiding principles —
+  https://testing-library.com/docs/queries/about/
+- "Avoid the `act` warning" (drive via fireEvent) —
+  https://testing-library.com/docs/react-testing-library/api#fireevent
+
 ---
 
 ## How this file evolves
