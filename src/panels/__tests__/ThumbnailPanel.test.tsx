@@ -70,7 +70,12 @@ function fakeDoc(pages: number): PDFDocumentProxy {
 describe("ThumbnailPanel render path", () => {
   it("renders an <img> per page from number[] IPC bytes (no ⚠)", async () => {
     render(
-      <ThumbnailPanel doc={fakeDoc(2)} documentId="doc-x" onJump={() => {}} />,
+      <ThumbnailPanel
+        doc={fakeDoc(2)}
+        documentId="doc-x"
+        onJump={() => {}}
+        darkMode={false}
+      />,
     );
 
     // If the byte handling regressed (the original bug), tiles would
@@ -78,5 +83,24 @@ describe("ThumbnailPanel render path", () => {
     const imgs = await screen.findAllByRole("img");
     expect(imgs.length).toBe(2);
     expect(screen.queryByText("⚠")).toBeNull();
+    // Light mode: no invert filter on the thumbnails.
+    expect((imgs[0] as HTMLImageElement).style.filter).toBe("");
+  });
+
+  it("inverts thumbnails in dark mode so the sidebar matches the main view", async () => {
+    // SPEC: P1-VIEW-010 — the thumbnail invert must use the same
+    // DARK_PAGE_FILTER the page canvases use, or the sidebar stays light
+    // while the main view goes dark (the reported mismatch).
+    render(
+      <ThumbnailPanel
+        doc={fakeDoc(1)}
+        documentId="doc-d"
+        onJump={() => {}}
+        darkMode
+      />,
+    );
+
+    const img = (await screen.findByRole("img")) as HTMLImageElement;
+    expect(img.style.filter).toBe("invert(1) hue-rotate(180deg)");
   });
 });

@@ -10,15 +10,14 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPageOnDoc } from "@/view/render-page";
 import { LruCache } from "@/view/page-cache";
+import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
 import type { FitMode } from "@/state/view-store";
 
-// SPEC: P1-VIEW-010 — dark-mode page invert. We apply a CSS filter to
-// the canvas rather than rewriting its pixels: the compositor inverts at
-// native resolution, so text stays exactly as crisp as in light mode
-// (a per-pixel getImageData invert looked rough). `hue-rotate(180deg)`
-// after the invert keeps hues roughly intact, so colored text and
-// photos read as a "dark" version rather than a colour negative.
-const DARK_PAGE_FILTER = "invert(1) hue-rotate(180deg)";
+// SPEC: P1-VIEW-010 — dark-mode page invert. We apply a CSS filter
+// (`DARK_PAGE_FILTER`) to the canvas rather than rewriting its pixels:
+// the compositor inverts at native resolution, so text stays exactly as
+// crisp as in light mode (a per-pixel getImageData invert looked rough).
+// The sidebar thumbnails apply the same filter so the two views agree.
 
 // SPEC: P1-VIEW-005, P1-VIEW-006, NFR-PERF-003.
 //

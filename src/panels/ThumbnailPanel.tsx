@@ -19,11 +19,15 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPage } from "@/ipc/pdf";
 import { getThumb, putThumb } from "@/panels/thumbnail-cache";
+import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
 
 interface Props {
   doc: PDFDocumentProxy;
   documentId: string;
   onJump: (page: number) => void;
+  // SPEC: P1-VIEW-010 — invert thumbnails in dark mode so the sidebar
+  // matches the main page view (same `DARK_PAGE_FILTER`).
+  darkMode: boolean;
 }
 
 /** Target CSS width of a thumbnail. */
@@ -36,7 +40,7 @@ function deviceDpr(): number {
   return (raw ?? 1) >= 2 ? 2 : 1;
 }
 
-export function ThumbnailPanel({ doc, documentId, onJump }: Props) {
+export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   const pageCount = doc.numPages;
   const dpr = useMemo(() => deviceDpr(), []);
 
@@ -95,6 +99,7 @@ export function ThumbnailPanel({ doc, documentId, onJump }: Props) {
               documentId={documentId}
               page={page}
               dpr={dpr}
+              darkMode={darkMode}
               shouldLoad={visible.has(page)}
               isActive={active === page}
               onSelect={() => {
@@ -114,6 +119,7 @@ interface TileProps {
   documentId: string;
   page: number;
   dpr: number;
+  darkMode: boolean;
   shouldLoad: boolean;
   isActive: boolean;
   onSelect: () => void;
@@ -124,6 +130,7 @@ function ThumbTile({
   documentId,
   page,
   dpr,
+  darkMode,
   shouldLoad,
   isActive,
   onSelect,
@@ -210,6 +217,7 @@ function ThumbTile({
               src={url}
               alt={`Page ${page + 1}`}
               className="h-full w-full object-contain"
+              style={darkMode ? { filter: DARK_PAGE_FILTER } : undefined}
             />
           ) : failed ? (
             <span className="text-xs">⚠</span>

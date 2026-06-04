@@ -839,6 +839,31 @@ file /tmp/vibepdf-verify.pdf
 Awaiting the human cross-reader check (Acrobat / Preview / a third
 reader) before `steps/P2.md` A1 flips `[~]` → `[x]`.
 
+(Human verified the artifact in Preview/Acrobat + re-opened it in VibePDF;
+A1 marked `[x]`.)
+
+---
+
+### Bug fix — thumbnail sidebar dark mode (this commit)
+
+```bash
+# Reported in the dev GUI: dark mode inverts the main page view but the
+# thumbnail sidebar stays light. Root: darkMode never reached
+# ThumbnailPanel. Shared DARK_PAGE_FILTER + threaded the prop through.
+# No new deps, no Rust change.
+
+npm run check
+#   tsc ✓  eslint ✓ (added HTMLImageElement to DOM globals for the test
+#   cast)  clippy ✓ (Rust untouched).
+
+npm run test
+#   71/71 (was 70 — +1 ThumbnailPanel dark-mode filter assertion; the
+#   existing light-mode test also now asserts no filter).
+```
+
+Visual confirmation is the human's (re-run `npm run dev`): sidebar
+thumbnails now invert with the page when dark mode is on.
+
 ---
 
 ## How this file evolves

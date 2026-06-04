@@ -2522,6 +2522,50 @@ the plan for the human to optionally add to `02_PRODUCT_SPEC.md`.
 
 ---
 
+### Bug — thumbnail sidebar ignored dark mode (P1-VIEW-010)
+
+#### Problem
+
+In dark mode the main page view inverted (light pages → dark) but the
+thumbnail sidebar stayed bright white. Found by eye in the dev app, not by
+any test — the classic "looks wrong only in the real GUI" class.
+
+#### Cause
+
+Dark mode is a single boolean from `useDarkMode()`. `PdfViewer` passed it
+to `PageVirtualizer` (which set `canvas.style.filter = DARK_PAGE_FILTER`),
+but **never passed it to `ThumbnailPanel`** — the panel had no way to know
+the app was in dark mode, so its `<img>` thumbnails rendered true-colour.
+
+#### Fix
+
+- Lifted `DARK_PAGE_FILTER` out of `PageVirtualizer` into a shared
+  `src/view/dark-page-filter.ts` so both renderers reference one string
+  (they can't drift — the dark-mode test asserts the exact value).
+- Threaded `darkMode` down `PdfViewer → ThumbnailPanel → ThumbTile` and
+  applied the same filter to each thumbnail `<img>`: `style={darkMode ?
+  { filter: DARK_PAGE_FILTER } : undefined}`.
+
+#### Concept — single source of truth for a cross-component constant
+
+When two components must render *identically*, the value they share should
+live in one module, not be copy-pasted. Here the regression test pins the
+literal (`"invert(1) hue-rotate(180deg)"`) so a future edit to one renderer
+that forgets the other fails CI.
+
+#### Files in this fix
+
+| File | Role |
+|---|---|
+| `src/view/dark-page-filter.ts` | New — the shared `DARK_PAGE_FILTER` constant. |
+| `src/view/PageVirtualizer.tsx` | Imports the constant instead of a local copy. |
+| `src/panels/ThumbnailPanel.tsx` | New `darkMode` prop; applies the filter to each thumbnail. |
+| `src/view/PdfViewer.tsx` | Passes `darkMode` to `ThumbnailPanel`. |
+| `src/panels/__tests__/ThumbnailPanel.test.tsx` | +1 test: dark mode applies the filter; light mode does not. |
+| `eslint.config.js` | Added `HTMLImageElement` to DOM globals (test cast). |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

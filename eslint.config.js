@@ -27,6 +27,7 @@ export default [
         HTMLElement: "readonly",
         HTMLCanvasElement: "readonly",
         HTMLDivElement: "readonly",
+        HTMLImageElement: "readonly",
         HTMLInputElement: "readonly",
         HTMLSelectElement: "readonly",
         RegExpExecArray: "readonly",

@@ -258,6 +258,7 @@ export function PdfViewer({ documentId, path }: Props) {
             key={documentId}
             doc={doc}
             documentId={documentId}
+            darkMode={darkMode}
             onJump={(page) => virtRef.current?.scrollToPage(page)}
           />
         ) : null}
