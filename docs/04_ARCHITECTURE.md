@@ -211,9 +211,9 @@ Tools are independent. They subscribe to `useToolStore` to know if they're activ
 Two save modes:
 
 1. **Explicit save** (Cmd/Ctrl+S): writes the current PDFium document to disk. Backs up the previous version as `<name>.bak` for one save cycle.
-2. **Auto-save**: every 30 seconds, if the document is dirty, write a copy under Tauri's `app_data_dir()` at `autosave/<documentId>.pdf`. On startup, scan this directory and offer recovery for any open-at-crash documents.
+2. **Auto-save**: every 30 seconds, if the document is dirty, write a copy under Tauri's `app_data_dir()` at `autosave/<documentId>.pdf`, plus a `<documentId>.json` sidecar recording the original path + timestamp. On startup, scan this directory and offer recovery for any open-at-crash documents.
 
-Auto-save is invisible to the user — it never touches the user's original file.
+Auto-save is invisible to the user — it never touches the user's original file. The tick is a dedicated std thread (so no `tokio` `time` feature is needed) that pokes each document actor; a *dirty* actor writes its copy (atomic temp+rename) and clears it again on a clean save or a graceful close. A real crash never runs that cleanup, so the copy survives to be offered next launch (`recovery_list` / `recovery_discard`). Implemented in `pdf/autosave.rs`; the actor owns the write because PDFium is single-threaded per document.
 
 **Path policy.** All persistent paths are derived from Tauri's `AppHandle::path()` helpers on every platform — there are **no hardcoded POSIX paths**:
 

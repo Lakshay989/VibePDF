@@ -1,7 +1,9 @@
 import { PasswordPromptDialog } from "@/app/PasswordPromptDialog";
+import { RecoveryDialog } from "@/app/RecoveryDialog";
 import { basename } from "@/app/paths";
 import { useFileOpen } from "@/app/use-file-open";
 import { useHistory } from "@/app/use-history";
+import { useRecovery } from "@/app/use-recovery";
 import { useSave } from "@/app/use-save";
 import { useSessionRestore } from "@/app/use-session-restore";
 import { useDocumentStore } from "@/state/document-store";
@@ -22,6 +24,13 @@ export function App() {
   // lifecycle live in dedicated hooks; App is composition + layout.
   const { openByPath, pickAndOpen, toast, passwordDialogProps } = useFileOpen();
   useSessionRestore(openByPath);
+
+  // SPEC: P2.A2 — offer to recover unsaved changes from a previous run.
+  const {
+    entries: recoveryEntries,
+    recover,
+    discard: discardRecovery,
+  } = useRecovery(openByPath);
 
   const current = docs.find((d) => d.id === currentId);
 
@@ -108,6 +117,11 @@ export function App() {
         </div>
       ) : null}
       <PasswordPromptDialog {...passwordDialogProps} />
+      <RecoveryDialog
+        entries={recoveryEntries}
+        onRecover={(e) => void recover(e)}
+        onDiscard={(e) => void discardRecovery(e)}
+      />
     </div>
   );
 }

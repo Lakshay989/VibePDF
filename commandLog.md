@@ -897,6 +897,38 @@ real Edit<PdfDocument>, which lands with P2.B2 (delete).
 
 ---
 
+### P2.A2 — Auto-save + crash recovery (this commit)
+
+```bash
+# No new deps (no tokio "time" feature added — the 30s tick is a std
+# thread). Autosave bytes go through doc.save_to_bytes() — the SAME
+# serialization A1's save uses, already cross-reader-verified — so no
+# separate /tmp artifact this step.
+
+npm run check
+#   tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (two fixes: unix_now map().unwrap_or() -> map_or(); run_worker grew
+#    past the 100-line lint with the new arm -> #[allow(too_many_lines)]
+#    on the worker, which is just one big message-dispatch match.)
+
+npm run test
+#   77/77 (was 76 — +1 use-recovery hook test: surfaces entries, recover
+#   opens+drops, discard drops only).
+
+npm run test:rust
+#   tests/autosave.rs: 4 passed —
+#     write_then_scan_round_trips (copy re-opens in PDFium; sidecar keeps
+#       the original path), discard idempotent, scan skips orphaned/
+#       malformed, scan of a missing dir is empty.
+#   Full Rust suite green; no regressions.
+```
+
+Step left `[~]`: the live write only fires for a *dirty* doc, and the
+"force-kill → relaunch → recover" demo needs a real edit — both land with
+P2.B2 (delete).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

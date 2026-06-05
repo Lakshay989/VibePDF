@@ -2636,6 +2636,69 @@ undo/redo are verified no-ops.
 
 ---
 
+### P2.A2 — Auto-save + crash recovery
+
+#### Problem
+
+If the app crashes with unsaved edits, the user shouldn't lose them. Every
+30s, write a recovery copy of each *dirty* document somewhere private; on
+the next launch, offer to reopen any copy a crash left behind.
+
+#### Concepts learned
+
+- **Side-copy, never the original.** Autosave writes to
+  `<app_data_dir>/autosave/<id>.pdf` — Tauri-resolved, never a hardcoded
+  path, and **never the user's file**. The user's document is only ever
+  touched by an explicit Save.
+- **The sidecar pattern.** The `.pdf` alone doesn't say where it came from,
+  so each copy gets a `<id>.json` sidecar: `{ documentId, originalPath,
+  savedAt }`. Recovery reads sidecars, not PDFs. A `.pdf` with no sidecar
+  (or vice-versa) is skipped — robust against partial/orphaned state.
+- **Crash detection by *absence of cleanup*.** There's no "am I a crash?"
+  flag. Instead: a graceful exit (explicit close, or the mailbox closing
+  when the last handle drops) *deletes* the recovery copy; a clean save
+  deletes it too. A hard crash runs none of that cleanup, so the copy
+  *survives* — and surviving copies are exactly what we offer to recover.
+  Recovery = "what cleanup didn't get to."
+- **A timer without `tokio::time`.** Our tokio build doesn't enable the
+  `time` feature, and rather than add it, the 30s tick is a dedicated std
+  thread that `sleep`s and pokes each actor. The poke is **fire-and-forget**
+  (a `Message::Autosave` with no reply) — the actor writes its copy as a
+  side effect and logs; the tick never waits.
+- **The actor owns the write.** PDFium is single-threaded per document, so
+  the autosave (like the save and the render) happens on the actor's own
+  thread, not in the tick thread or an async handler. The tick only *pokes*.
+- **Dormant rails again.** Nothing dirties a document in A2 (edits are
+  B-steps), so the live loop writes nothing yet. Same pattern as A1's dirty
+  flag and A3's empty stack: build + unit-test the mechanism now, let B2
+  light it up. The functions (write/scan/discard) are tested directly.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/autosave.rs` | `write_autosave` / `scan_autosaves` / `discard_autosave`, `RecoveryEntry`, the sidecar, `spawn_autosave_tick`. |
+| `src-tauri/src/pdf/actor.rs` | `Message::Autosave` (write iff dirty); discard on clean save + graceful exit; `poke_autosave`. |
+| `src-tauri/src/commands/recovery.rs` | `recovery_list` / `recovery_discard`. |
+| `src-tauri/src/lib.rs` | Spawn the tick in `setup`; register the commands. |
+| `src/ipc/recovery.ts` | Wrappers + `RecoveryEntry`. |
+| `src/app/use-recovery.ts` | Once-per-launch scan (module-guarded); recover/discard. |
+| `src/app/RecoveryDialog.tsx` | Startup "Recover unsaved changes?" prompt. |
+| `src/app/App.tsx` | Mounts the hook + dialog. |
+| `src-tauri/tests/autosave.rs` | write→scan round-trip, discard idempotent, skip orphaned/malformed, missing-dir empty. |
+| `src/app/__tests__/use-recovery.test.tsx` | Hook surfaces entries; recover opens+drops; discard drops only. |
+| `docs/04_ARCHITECTURE.md` | Expanded the auto-save section (sidecar, tick thread, cleanup). |
+
+#### Further reading
+
+- Tauri path resolver (`app_data_dir`) —
+  https://v2.tauri.app/reference/javascript/api/namespacepath/
+- Crash-only software (the cleanup-vs-crash idea) —
+  https://en.wikipedia.org/wiki/Crash-only_software
+- Atomic file replacement via rename — https://man7.org/linux/man-pages/man2/rename.2.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

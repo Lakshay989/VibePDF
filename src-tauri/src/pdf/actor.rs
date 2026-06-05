@@ -28,6 +28,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::error::CommandError;
+use crate::pdf::autosave;
 use crate::pdf::document::{collect_metadata, open_pdf, save_document, DocumentMetadata, SaveOutcome};
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::undo::{HistoryState, UndoStack};
@@ -89,6 +90,9 @@ pub enum Message {
     GetHistoryState {
         reply: oneshot::Sender<HistoryState>,
     },
+    /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
+    /// recovery copy iff the document is dirty; no reply (best-effort).
+    Autosave,
     Close,
 }
 
@@ -319,6 +323,13 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2.A2 — fire-and-forget autosave poke from the tick thread.
+    /// The actor writes a recovery copy iff dirty; a closed mailbox (the
+    /// worker already exited) is silently ignored.
+    pub fn poke_autosave(&self) {
+        let _ = self.tx.send(Message::Autosave);
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -345,7 +356,11 @@ impl Drop for DocumentActorHandle {
 /// Args are passed by value because this function is called from
 /// inside a `move` closure on a freshly spawned `std::thread`, which
 /// requires owned values — there is no caller frame to borrow from.
-#[allow(clippy::needless_pass_by_value)]
+// The worker is one big message-dispatch loop; its length is the sum of
+// the per-message arms, not incidental complexity. Splitting the arms
+// into free functions would mean threading `doc`/`dirty`/`history`/
+// `autosave_dir` through each — more noise than the lint saves.
+#[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 fn run_worker(
     app: Option<AppHandle>,
     id: Uuid,
@@ -396,6 +411,12 @@ fn run_worker(
     // pins the target type to `doc`'s on first `undo`/`redo` call.
     let mut history = UndoStack::new();
 
+    // SPEC: P2.A2 — where this document's autosave/recovery copy lives.
+    // Derived from the AppHandle, so it is `None` under `cargo test`
+    // (app = None) → autosave and its cleanup are no-ops there.
+    let id_str = id.to_string();
+    let autosave_dir = app.as_ref().and_then(|a| autosave::autosave_dir(a).ok());
+
     while let Ok(msg) = rx.recv() {
         match msg {
             Message::GetPageCount { reply } => {
@@ -445,6 +466,11 @@ fn run_worker(
                     let outcome = save_document(&doc, &dest, same_path);
                     if outcome.is_ok() && same_path {
                         dirty = false;
+                        // SPEC: P2.A2 — a clean same-path save supersedes
+                        // any recovery copy for this document.
+                        if let Some(dir) = autosave_dir.as_deref() {
+                            let _ = autosave::discard_autosave(dir, &id_str);
+                        }
                     }
                     outcome
                 };
@@ -472,11 +498,39 @@ fn run_worker(
             Message::GetHistoryState { reply } => {
                 let _ = reply.send(history.state());
             }
+            Message::Autosave => {
+                // SPEC: P2.A2 — write a recovery copy only when dirty.
+                // Best-effort: failures are logged, never fatal. Always a
+                // no-op in P2.A2 (nothing sets `dirty` yet).
+                if dirty {
+                    if let Some(dir) = autosave_dir.as_deref() {
+                        match autosave::write_autosave(
+                            &doc,
+                            dir,
+                            &id_str,
+                            &path.to_string_lossy(),
+                        ) {
+                            Ok(p) => {
+                                tracing::info!(autosave = %p.display(), "autosaved dirty document");
+                            }
+                            Err(e) => tracing::warn!(error = %e, "autosave failed"),
+                        }
+                    }
+                }
+            }
             Message::Close => {
                 tracing::info!("doc-actor closing (Close received)");
                 break;
             }
         }
+    }
+
+    // SPEC: P2.A2 — a graceful exit (an explicit `Close`, or the mailbox
+    // closing once every handle drops) means there was no crash, so no
+    // recovery copy should linger. A real crash never reaches here, so
+    // its autosave survives to be offered on the next launch.
+    if let Some(dir) = autosave_dir.as_deref() {
+        let _ = autosave::discard_autosave(dir, &id_str);
     }
 
     emit_change(

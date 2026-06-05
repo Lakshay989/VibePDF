@@ -84,6 +84,10 @@ pub fn run() {
                 }
             }
             app.manage(state);
+            // SPEC: P2.A2 — start the 30s autosave tick. Pokes each open
+            // actor to write a recovery copy if dirty. Dedicated std
+            // thread (no tokio "time" feature); runs for the app's life.
+            pdf::autosave::spawn_autosave_tick(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -95,6 +99,8 @@ pub fn run() {
             commands::history::pdf_undo,
             commands::history::pdf_redo,
             commands::history::pdf_history_state,
+            commands::recovery::recovery_list,
+            commands::recovery::recovery_discard,
             commands::recents::recents_list,
             commands::recents::recents_push,
             commands::recents::recents_clear,

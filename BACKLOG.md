@@ -36,3 +36,14 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **IPC byte-size perf for renders** — `pdf_render_page` returns `Vec<u8>`
   as a JSON `number[]`; large pages would benefit from
   `tauri::ipc::Response` (raw bytes). Noted in `pdf::render::RenderedPage`.
+- **Recovery: adopt the original path (P2.A2).** "Recover" currently opens
+  the autosave file directly, so a subsequent ⌘S targets the autosave copy,
+  not the user's original. The recovered document should adopt its
+  `originalPath` (from the sidecar) so Save writes back to the real file.
+  Needs a small `spawn` variant that loads bytes from file X while
+  reporting path Y. Safe today (never clobbers the original); just a UX
+  sharpening.
+- **Autosave cleanup on hard-exit (P2.A2).** Graceful close discards the
+  recovery copy; a `std::process::exit` that skips actor `Drop` could leave
+  a stale copy, causing a spurious recovery offer after a *clean* quit.
+  Moot until edits create copies (B-steps); revisit then.
