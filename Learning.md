@@ -2566,6 +2566,76 @@ that forgets the other fails CI.
 
 ---
 
+### P2.A3 — Undo/redo stack (session history)
+
+#### Problem
+
+Give every document an undo/redo history (Cmd+Z / Cmd+Shift+Z). The twist:
+this is the *infrastructure* step — it lands **before** any actual page
+operation exists (rotate/delete are P2.B*). So the challenge is building a
+stack that's complete and testable now, with nothing yet to put on it.
+
+#### Concepts learned
+
+- **Command pattern with inverses.** Each edit is an object that knows how
+  to *do* itself and returns the edit that *undoes* itself. `apply(target)
+  -> inverse`. Undo = apply the inverse (which returns the original, for
+  redo). Undo and redo are literally the same code running against opposite
+  stacks. No "snapshot the whole document" needed — the inverse of "rotate
+  +90°" is "rotate −90°", the inverse of "delete page 3" is "insert <saved
+  page> at 3".
+- **Generic over the target = testable without the hard dependency.** The
+  stack is `UndoStack<T>` and the trait is `Edit<T>`, generic over what's
+  being edited. The actor uses `UndoStack<PdfDocument>`, but the tests use
+  `UndoStack<i32>` with a trivial "add N / subtract N" edit. This is the
+  key trick that let A3 land fully tested before any PdfDocument mutation
+  API was touched — the same move as A1's dirty flag and A2's autosave-
+  later design. Build the rails now, let later steps lay track on them.
+- **Redo is cleared on a new edit.** History is linear, not a tree: once
+  you undo and then do something new, the old "redo" future is gone. One
+  `self.redo.clear()` in `record()`.
+- **Bounded history.** Inverses can hold data (a deleted page's content),
+  so the undo stack is a `VecDeque` capped at `MAX_UNDO_DEPTH` — oldest
+  actions fall off the front. Redo never needs its own cap (it only ever
+  holds what undo already bounded).
+- **State lives where the data lives.** The stacks live in the actor's
+  worker thread (next to the `PdfDocument` and the dirty flag), because
+  PDFium is single-threaded per document. The frontend mirrors only two
+  booleans (`canUndo`, `canRedo`) to grey out buttons — it never holds the
+  history itself.
+
+#### Why `[~]` and not `[x]`
+
+The step's acceptance ("delete pages 3,5,7 → undo three times → restored")
+needs a real `Edit<PdfDocument>`, which arrives with **P2.B2 (delete)**.
+A3 ships the machinery; the end-to-end PDF round-trip is proven when the
+first concrete edit plugs in. Until then the stack is always empty and
+undo/redo are verified no-ops.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/undo.rs` | `UndoStack<T>` + `Edit<T>` + `HistoryState` + `MAX_UNDO_DEPTH`; 4 mechanics unit tests. |
+| `src-tauri/src/pdf/actor.rs` | Holds the stack; `Undo`/`Redo`/`GetHistoryState` messages + handle methods; `doc` is now `mut`. |
+| `src-tauri/src/commands/history.rs` | `pdf_undo` / `pdf_redo` / `pdf_history_state` commands. |
+| `src/ipc/history.ts` | Wrappers + `HistoryState` type. |
+| `src/state/history-store.ts` | Per-document availability mirror + `useDocHistory` selector. |
+| `src/app/use-history.ts` | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z hook. |
+| `src/app/App.tsx` | Undo/Redo toolbar buttons (disabled-state from the store). |
+| `src-tauri/tests/undo_redo.rs` | Actor-level: empty history, no-op undo/redo. |
+| `src/state/__tests__/history-store.test.ts` | Store action transitions. |
+| `docs/04_ARCHITECTURE.md` | New "Undo/redo (session history)" section (pattern doc). |
+
+#### Further reading
+
+- Command pattern (do/undo) — https://refactoring.guru/design-patterns/command
+- Memento vs. command for undo — https://refactoring.guru/design-patterns/memento
+- `VecDeque` (ring buffer for the capped stack) —
+  https://doc.rust-lang.org/std/collections/struct.VecDeque.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

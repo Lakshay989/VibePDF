@@ -30,6 +30,7 @@ use uuid::Uuid;
 use crate::error::CommandError;
 use crate::pdf::document::{collect_metadata, open_pdf, save_document, DocumentMetadata, SaveOutcome};
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
+use crate::pdf::undo::{HistoryState, UndoStack};
 
 /// Event name on the wire. The frontend listens for this via
 /// `tauri::event::listen("document-changed", ...)`.
@@ -74,6 +75,19 @@ pub enum Message {
     Save {
         path: Option<PathBuf>,
         reply: oneshot::Sender<Result<SaveOutcome, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-003 / session history — undo the most recent edit.
+    /// No-op (returns the unchanged state) when nothing is undoable.
+    Undo {
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// Redo the most recently undone edit. No-op when nothing is redoable.
+    Redo {
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// Query current undo/redo availability (for UI button state).
+    GetHistoryState {
+        reply: oneshot::Sender<HistoryState>,
     },
     Close,
 }
@@ -251,6 +265,60 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-003 / session history — undo the most recent edit.
+    /// Await-holding convenience for tests; IPC handlers use
+    /// `undo_request` so they can drop the actor-map lock before awaiting.
+    pub async fn undo(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.undo_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn undo_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::Undo { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// Redo the most recently undone edit. See `undo` for the await note.
+    pub async fn redo(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.redo_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn redo_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::Redo { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// Current undo/redo availability. Await-holding convenience for
+    /// tests; IPC uses `history_state_request`.
+    pub async fn history_state(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.history_state_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))
+    }
+
+    pub fn history_state_request(
+        &self,
+    ) -> Result<oneshot::Receiver<HistoryState>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::GetHistoryState { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -290,7 +358,7 @@ fn run_worker(
     let _enter = span.enter();
 
     let pwd_ref = password.as_deref();
-    let (doc, metadata) = match open_pdf(&path, pwd_ref) {
+    let (mut doc, metadata) = match open_pdf(&path, pwd_ref) {
         Ok(pair) => pair,
         Err(e) => {
             // Tell `spawn()` that open failed; it surfaces the typed
@@ -321,6 +389,12 @@ fn run_worker(
     // a clean document is a true no-op. Nothing sets it `true` in P2.A1;
     // the page-op steps (P2.B*) flip it on every mutating message.
     let mut dirty = false;
+
+    // SPEC: P2-PAGE-003 / session history — per-document undo/redo. Empty
+    // in P2.A3 (no page operations exist yet to record onto it); the
+    // P2.B* steps push an inverse on every mutating message. Inference
+    // pins the target type to `doc`'s on first `undo`/`redo` call.
+    let mut history = UndoStack::new();
 
     while let Ok(msg) = rx.recv() {
         match msg {
@@ -375,6 +449,28 @@ fn run_worker(
                     outcome
                 };
                 let _ = reply.send(result);
+            }
+            Message::Undo { reply } => {
+                // Only a real undo (work actually done) dirties the doc;
+                // an empty-stack undo is a harmless no-op. In P2.A3 the
+                // stack is always empty, so `had` is always false.
+                let had = history.state().can_undo;
+                let result = history.undo(&mut doc);
+                if had && result.is_ok() {
+                    dirty = true;
+                }
+                let _ = reply.send(result);
+            }
+            Message::Redo { reply } => {
+                let had = history.state().can_redo;
+                let result = history.redo(&mut doc);
+                if had && result.is_ok() {
+                    dirty = true;
+                }
+                let _ = reply.send(result);
+            }
+            Message::GetHistoryState { reply } => {
+                let _ = reply.send(history.state());
             }
             Message::Close => {
                 tracing::info!("doc-actor closing (Close received)");

@@ -866,6 +866,37 @@ thumbnails now invert with the page when dark mode is on.
 
 ---
 
+### P2.A3 — Undo/redo stack (this commit)
+
+```bash
+# No new deps. Generic UndoStack<T> + Edit<T> command pattern; the actor
+# holds UndoStack<PdfDocument>, empty until P2.B* adds real edits.
+# NOT a PDF write path (undo/redo on an empty stack are no-ops; nothing is
+# saved), so no /tmp verification artifact this step.
+
+npm run check
+#   tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (one fix: the in-lib #[cfg(test)] module is the first in src/, so it
+#    trips the crate-level clippy::unwrap_used / expect_used warns —
+#    added #[allow(clippy::unwrap_used, clippy::expect_used)] on mod tests,
+#    the idiomatic exemption for test code.)
+
+npm run test
+#   76/76 (was 71 — +5 history-store action tests).
+
+npm run test:rust
+#   pdf::undo unit tests: 4 passed (undo/redo round-trip, redo-cleared-on-
+#     new-edit, empty-stack no-op, depth cap drops oldest).
+#   tests/undo_redo.rs: 2 passed (fresh doc empty history; no-op undo/redo
+#     leave page count untouched).
+#   Full Rust suite green; no regressions (actor_smoke, save_noop, render_*).
+```
+
+Step left `[~]`: the acceptance ("delete pages → undo → restored") needs a
+real Edit<PdfDocument>, which lands with P2.B2 (delete).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

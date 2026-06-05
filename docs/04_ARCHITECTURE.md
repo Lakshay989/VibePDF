@@ -226,6 +226,33 @@ Auto-save is invisible to the user — it never touches the user's original file
 
 ---
 
+## Undo/redo (session history)
+
+Each document carries its own undo/redo history, living in the **document
+actor's worker state** (alongside the dirty flag) — never on the frontend.
+PDFium is single-threaded per document, so the edits that undo/redo apply
+run on the one thread that owns the `PdfDocument`.
+
+The mechanism is a **command pattern**: every mutating operation
+(`rotate`, `delete`, `insert`, …) is an `Edit<T>` whose `apply` performs
+the change *and returns the inverse edit*. Undo pops the undo stack,
+applies the inverse, and pushes the result onto the redo stack; redo is
+the mirror. A new edit clears the redo stack (history forks). The stack is
+generic over the target `T` so its invariants are unit-testable without a
+live document; the actor instantiates `UndoStack<PdfDocument>`. Depth is
+capped (`MAX_UNDO_DEPTH`) because an inverse can retain page content (a
+deleted page must be remembered to restore it). See `pdf/undo.rs`.
+
+Granularity is **page-level**: move, insert, delete, rotate, crop, resize
+are each one undoable action. The frontend mirrors only `{canUndo,
+canRedo}` (per document, in `history-store.ts`) to drive button state; it
+learns the new availability from each `pdf_undo`/`pdf_redo` (and, later,
+each mutating command's) return value. This is "session history" — it is
+**not** persisted across restarts and is independent of what is saved to
+disk (cf. flatten in `docs/02`, line 126).
+
+---
+
 ## Settings storage
 
 Settings live in two places:

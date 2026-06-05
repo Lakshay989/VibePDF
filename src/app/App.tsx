@@ -1,6 +1,7 @@
 import { PasswordPromptDialog } from "@/app/PasswordPromptDialog";
 import { basename } from "@/app/paths";
 import { useFileOpen } from "@/app/use-file-open";
+import { useHistory } from "@/app/use-history";
 import { useSave } from "@/app/use-save";
 import { useSessionRestore } from "@/app/use-session-restore";
 import { useDocumentStore } from "@/state/document-store";
@@ -26,6 +27,9 @@ export function App() {
 
   // SPEC: P2-SAVE-001 — Cmd/Ctrl+S saves the active document.
   const { save, toast: saveToast } = useSave(current?.id);
+
+  // SPEC: P2-PAGE-003 / session history — Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z.
+  const { canUndo, canRedo, undo, redo } = useHistory(current?.id);
 
   // One status line: a save message takes precedence over an open message
   // when both are live (both auto-dismiss in 3s, so overlap is brief).
@@ -64,6 +68,24 @@ export function App() {
           className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-900"
         >
           Save (⌘S)
+        </button>
+        <button
+          onClick={() => void undo()}
+          disabled={!canUndo}
+          title="Undo (⌘Z)"
+          aria-label="Undo"
+          className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          ↶
+        </button>
+        <button
+          onClick={() => void redo()}
+          disabled={!canRedo}
+          title="Redo (⌘⇧Z)"
+          aria-label="Redo"
+          className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          ↷
         </button>
       </header>
       <main className="flex-1 overflow-hidden">
