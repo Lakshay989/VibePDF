@@ -1,3 +1,5 @@
+import { useCallback } from "react";
+
 import { PasswordPromptDialog } from "@/app/PasswordPromptDialog";
 import { RecoveryDialog } from "@/app/RecoveryDialog";
 import { basename } from "@/app/paths";
@@ -6,6 +8,7 @@ import { useHistory } from "@/app/use-history";
 import { useRecovery } from "@/app/use-recovery";
 import { useSave } from "@/app/use-save";
 import { useSessionRestore } from "@/app/use-session-restore";
+import { closePdf, type DocumentId } from "@/ipc/pdf";
 import { useDocumentStore } from "@/state/document-store";
 import { useSettingsStore } from "@/state/settings-store";
 import { PdfViewer } from "@/view/PdfViewer";
@@ -14,6 +17,21 @@ export function App() {
   const docs = useDocumentStore((s) => s.docs);
   const currentId = useDocumentStore((s) => s.currentId);
   const setCurrent = useDocumentStore((s) => s.setCurrent);
+  const closeDoc = useDocumentStore((s) => s.closeDoc);
+
+  // Close a tab: drop it from the UI, then tell the backend to drop the
+  // actor (free the document). Idempotent on the backend.
+  const closeTab = useCallback(
+    async (id: DocumentId) => {
+      closeDoc(id);
+      try {
+        await closePdf(id);
+      } catch (err) {
+        console.warn("close failed", id, err);
+      }
+    },
+    [closeDoc],
+  );
 
   // SPEC: P1-VIEW-012 — recents for the start screen.
   const recents = useSettingsStore((s) => s.recents);
@@ -50,19 +68,31 @@ export function App() {
         <div className="font-semibold">VibePDF</div>
         <div className="flex gap-1 overflow-x-auto">
           {docs.map((d) => (
-            <button
+            <div
               key={d.id}
-              onClick={() => setCurrent(d.id)}
               className={
-                "max-w-[200px] truncate rounded px-2 py-1 text-sm " +
+                "flex items-center rounded text-sm " +
                 (d.id === currentId
                   ? "bg-neutral-200 dark:bg-neutral-800"
                   : "hover:bg-neutral-100 dark:hover:bg-neutral-900")
               }
               title={d.path}
             >
-              {d.name}
-            </button>
+              <button
+                onClick={() => setCurrent(d.id)}
+                className="max-w-[180px] truncate py-1 pl-2 pr-1"
+              >
+                {d.name}
+              </button>
+              <button
+                onClick={() => void closeTab(d.id)}
+                aria-label={`Close ${d.name}`}
+                title="Close"
+                className="rounded-r px-1.5 py-1 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
         <button

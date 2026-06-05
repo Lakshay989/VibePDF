@@ -1052,6 +1052,30 @@ GUI-verified by the human after re-running `npm run dev`.
 
 ---
 
+### Bug fixes round 2 — reliable reload, zoom, close tabs (this commit)
+
+```bash
+# More GUI bugs from real use. Common thread for the "stale view / invalid
+# pdf / switch-tab-fixes-it" class: the no-blank in-place doc swap was
+# unreliable under StrictMode. Reverted to a clean reload (clear `doc` →
+# remount the virtualizer) on EVERY (re)load; each effect owns one doc and
+# destroys it on cleanup (no shared-ref destroy races). Page position
+# restored via an `initialPage` prop the virtualizer scrolls to once
+# measured (replaces the racy rAF). Measurement now parallel (Promise.all).
+#
+#   - zoom crawled: the scale ref went stale between renders during a pinch
+#     burst → accumulate immediately in the wheel handler + clamp deltaY.
+#   - no way to close a tab → × button on each tab (closeDoc + closePdf).
+#
+# Deferred (BACKLOG): external-edit/file-watch reload; the no-blank +
+# incremental-preview perf pass (big docs now blank+reparse per edit).
+
+npm run check    # tsc ✓  eslint ✓  clippy ✓
+npm run test     # 85/85 (viewer still has no unit coverage)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

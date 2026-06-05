@@ -50,6 +50,8 @@ interface Props {
   documentId: string;
   /** Edit epoch; bumped on each edit so cached page renders invalidate. */
   epoch: number;
+  /** Page to scroll to once measured (restores position after an edit reload). */
+  initialPage: number;
   zoom: number;
   fitMode: FitMode | null;
   darkMode: boolean;
@@ -88,7 +90,7 @@ function computeFitScale(
 
 export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
   function PageVirtualizer(
-    { doc, documentId, epoch, zoom, fitMode, darkMode, onZoom },
+    { doc, documentId, epoch, initialPage, zoom, fitMode, darkMode, onZoom },
     ref,
   ) {
     const [pages, setPages] = useState<NaturalPage[] | null>(null);
@@ -105,20 +107,24 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
     const slotsRef = useRef<Map<number, HTMLDivElement>>(new Map());
     const currentPageRef = useRef(1);
 
+    // Page to restore once pages are measured. A ref (not a dep) so a late
+    // prop change doesn't re-trigger the scroll.
+    const initialPageRef = useRef(initialPage);
+    initialPageRef.current = initialPage;
+
     useEffect(() => {
       let cancelled = false;
       (async () => {
         try {
-          const out: NaturalPage[] = [];
-          for (let i = 1; i <= doc.numPages; i += 1) {
-            const page = await doc.getPage(i);
-            const v = page.getViewport({ scale: 1 });
-            out.push({
-              pageNumber: i,
-              width: v.width,
-              height: v.height,
-            });
-          }
+          // Measure in parallel — sequential awaits are O(numPages) round
+          // trips, which is painful on large documents.
+          const out = await Promise.all(
+            Array.from({ length: doc.numPages }, async (_, i) => {
+              const page = await doc.getPage(i + 1);
+              const v = page.getViewport({ scale: 1 });
+              return { pageNumber: i + 1, width: v.width, height: v.height };
+            }),
+          );
           if (!cancelled) setPages(out);
         } catch (e) {
           if (!cancelled) {
@@ -134,6 +140,22 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
         cancelled = true;
       };
     }, [doc]);
+
+    // Restore the page once the slots exist (after `pages` commits). Used to
+    // keep the user's position across an edit reload, which remounts us.
+    useEffect(() => {
+      if (!pages) return;
+      const target = Math.min(Math.max(1, initialPageRef.current), pages.length);
+      if (target <= 1) return;
+      requestAnimationFrame(() => {
+        const el = slotsRef.current.get(target);
+        const scroller = scrollRef.current;
+        if (el && scroller) {
+          scroller.scrollTo({ top: el.offsetTop - 8, behavior: "auto" });
+          currentPageRef.current = target;
+        }
+      });
+    }, [pages]);
 
     useEffect(() => {
       cacheRef.current.clear();
@@ -188,9 +210,15 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       const onWheel = (e: WheelEvent) => {
         if (!(e.ctrlKey || e.metaKey)) return;
         e.preventDefault();
-        // Exponential so symmetric in/out steps round-trip to the same scale.
-        const factor = Math.exp(-e.deltaY * 0.01);
-        onZoom(effectiveScaleRef.current * factor);
+        // Clamp the per-event delta so a mouse-wheel notch (deltaY ~100)
+        // doesn't lurch, while a trackpad pinch (small deltas, many events)
+        // stays smooth. Update the ref *immediately* so a rapid burst of
+        // events accumulates instead of all reading the same pre-render
+        // scale (that staleness made zooming crawl).
+        const d = Math.max(-40, Math.min(40, e.deltaY));
+        const next = effectiveScaleRef.current * Math.exp(-d * 0.01);
+        effectiveScaleRef.current = next;
+        onZoom(next);
       };
       el.addEventListener("wheel", onWheel, { passive: false });
       return () => el.removeEventListener("wheel", onWheel);

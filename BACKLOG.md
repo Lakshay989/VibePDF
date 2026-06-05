@@ -58,9 +58,17 @@ the current roadmap phase. When one is picked up, move it into the relevant
   recovery copy; a `std::process::exit` that skips actor `Drop` could leave
   a stale copy, causing a spurious recovery offer after a *clean* quit.
   Moot until edits create copies (B-steps); revisit then.
-- **Edit-preview is a full re-parse per edit.** The pipeline reloads PDF.js
-  from the whole document on every edit/undo/redo (correct + uniform, but
-  re-parses + re-renders everything, and ships the full bytes over IPC as a
-  `number[]`). Optimizations: only re-render the affected page(s); a
-  rotate-only PDF.js viewport-rotation fast path; and the `tauri::ipc::Response`
-  raw-bytes upgrade (also listed above). Do when a large PDF feels slow.
+- **Edit-preview is a full re-parse + remount per edit.** The pipeline
+  reloads PDF.js from the whole document on every edit/undo/redo *and*
+  remounts the page virtualizer (the no-blank in-place swap was reverted —
+  it was unreliable under StrictMode: stale pages, "invalid pdf"). Correct
+  and uniform, but a large doc (e.g. a 1300-page book) blanks and re-parses
+  on each edit. Optimizations: re-render only the affected page(s); a
+  rotate-only PDF.js viewport-rotation fast path; reuse measured page
+  dimensions across reloads; and the `tauri::ipc::Response` raw-bytes
+  upgrade (also above). Do when a large PDF feels slow.
+- **External-edit reload / file watching.** If the user edits an open PDF in
+  another app (Preview, etc.), VibePDF doesn't notice — the preview is stale
+  and re-opening just focuses the existing tab. Watch the file's mtime (or a
+  Tauri fs watcher) and offer to reload when it changes on disk. Also: an
+  explicit "Reload from disk" action.

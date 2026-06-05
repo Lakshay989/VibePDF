@@ -67,70 +67,57 @@ export function PdfViewer({ documentId, path }: Props) {
   const setMatches = useSearchStore((s) => s.setMatches);
   const setSearching = useSearchStore((s) => s.setSearching);
 
-  // SPEC: edit-preview pipeline — load + parse the PDF. At epoch 0 the
-  // bytes come from disk; after an edit (epoch > 0) they come from the
-  // actor's live in-memory document, so the main view reflects edits
-  // without a save/reopen. We load the new doc *before* swapping it in (no
-  // blank flash) and, for a same-document reload, restore the page the
-  // user was on. The previous proxy is destroyed only after the swap.
-  const docRef = useRef<PDFDocumentProxy | null>(null);
+  // SPEC: edit-preview pipeline — (re)load + parse the PDF. At epoch 0 the
+  // bytes come from disk; after an edit (epoch > 0) from the actor's live
+  // in-memory document, so the view reflects edits without a save/reopen.
+  //
+  // We clear `doc` first on *every* (re)load so PageVirtualizer unmounts
+  // and remounts cleanly. An in-place doc swap proved unreliable under
+  // StrictMode (stale pages, destroyed-doc-still-shown → "invalid pdf").
+  // Each effect run owns exactly one document and destroys it on cleanup —
+  // no shared ref, no cross-run destroy races. For an edit reload of the
+  // *same* document we remember the page to restore (PageVirtualizer
+  // scrolls there once measured). The full re-parse per edit is a known
+  // cost — incremental preview is tracked in BACKLOG.
   const lastDocIdRef = useRef<string | null>(null);
+  const initialPageRef = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
-    const sameDocReload = lastDocIdRef.current === documentId;
-    const restorePage = sameDocReload
-      ? (virtRef.current?.getCurrentPage() ?? 0)
-      : 0;
-    lastDocIdRef.current = documentId;
+    let localDoc: PDFDocumentProxy | null = null;
 
-    // On a document *switch* (not an in-place edit reload), clear the view
-    // first so PageVirtualizer unmounts and remounts cleanly on the new
-    // document — otherwise it keeps the previous document's pages mounted
-    // (StrictMode makes the in-place swap unreliable). Edit reloads
-    // (same documentId, bumped epoch) skip this to stay blank-free.
-    if (!sameDocReload) setDoc(null);
+    const sameDoc = lastDocIdRef.current === documentId;
+    initialPageRef.current = sameDoc
+      ? (virtRef.current?.getCurrentPage() ?? 1)
+      : 1;
+    lastDocIdRef.current = documentId;
+    setDoc(null);
 
     (async () => {
       try {
         const bytes =
           epoch === 0 ? await readFile(path) : await getPdfBytes(documentId);
         if (cancelled) return;
-        const loaded = await loadDocument(bytes);
+        localDoc = await loadDocument(bytes);
         if (cancelled) {
-          await loaded.destroy();
+          await localDoc.destroy();
           return;
         }
-        const prev = docRef.current;
-        docRef.current = loaded;
-        setDoc(loaded);
+        setDoc(localDoc);
         setError(null);
-        if (prev) void prev.destroy();
-        if (restorePage > 0) {
-          // Defer until the swapped-in virtualizer has measured its pages.
-          requestAnimationFrame(() =>
-            virtRef.current?.scrollToPage(restorePage),
-          );
-        }
       } catch (e) {
         const msg =
           e instanceof Error ? e.message : "Failed to open this file as a PDF.";
         if (!cancelled) setError(msg);
       }
     })();
+
     return () => {
       cancelled = true;
+      void localDoc?.destroy();
+      setDoc(null);
     };
   }, [path, epoch, documentId]);
-
-  // Destroy the live document on unmount.
-  useEffect(
-    () => () => {
-      void docRef.current?.destroy();
-      docRef.current = null;
-    },
-    [],
-  );
 
   // SPEC: P1-VIEW-006 — restore persisted zoom + fit-mode on open.
   useEffect(() => {
@@ -323,6 +310,7 @@ export function PdfViewer({ documentId, path }: Props) {
               doc={doc}
               documentId={documentId}
               epoch={epoch}
+              initialPage={initialPageRef.current}
               zoom={zoom}
               fitMode={fitMode}
               darkMode={darkMode}
