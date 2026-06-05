@@ -1,0 +1,75 @@
+# Manual testing — your verification checklist
+
+Things only a human can confirm: cross-reader PDF validity, real-GUI
+behavior (the Tauri webview, not jsdom), and CI runs. Automated tests
+(`npm run check` / `test` / `test:rust`) are all green; this is the rest.
+
+Tick a box when done. When a step's checks pass, flip its status in
+`steps/P2.md` (or `steps/P1.md`) from `[~]` to `[x]`.
+
+---
+
+## A. Cross-reader PDF checks
+
+Open each in **Adobe Acrobat + macOS Preview + a third reader** (Chrome
+works as the third). A passing unit test does *not* prove cross-reader
+validity.
+
+- [ ] **`~/Desktop/vibepdf-verify-rotated.pdf`** (B1 rotate) — page 1 should
+  render **rotated 90°** and the file must not be flagged corrupt.
+  → on pass, flip **P2.B1** to `[x]`.
+- [x] `~/Desktop/vibepdf-verify.pdf` (A1 save) — already verified.
+
+## B. In-app checks (`npm run dev`)
+
+Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
+
+- [ ] **Rotate (B1):** right-click a page thumbnail → Rotate right / left /
+  180. The thumbnail updates immediately.
+- [ ] **Live preview (pipeline):** scroll to ~page 3, then rotate that page.
+  The **main view** should rotate *in place at page 3* — no blank flash, no
+  scroll jump. (If it jumps to page 1, tell me — page-restore timing.)
+- [ ] **Undo/redo (A3):** after a rotate, **⌘Z** reverts both views and
+  **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable correctly.
+  → on pass, flip **P2.A3** to `[x]`.
+- [ ] **Persist on save (B1):** rotate → **⌘S** → reopen the file in Preview
+  externally → still rotated. Reopen in VibePDF → rotation persisted.
+- [ ] **Save no-op (A1):** ⌘S on an *unedited* doc → toast **"No changes to
+  save"**; the file is left untouched.
+- [ ] **Dark mode:** toggle theme in the toolbar → main view **and**
+  thumbnails both invert and stay readable.
+
+## C. Crash recovery (A2) — now demoable thanks to B1
+
+This one is finicky; follow the order exactly:
+
+- [ ] Open a PDF and **rotate a page** (this makes it "dirty"). **Do not save.**
+- [ ] **Wait ~30 seconds** — the autosave tick runs every 30 s, so give it one
+  tick to write the recovery copy.
+- [ ] **Force-kill** the app (Activity Monitor → Force Quit, or `kill -9`).
+  A normal Quit *discards* the recovery copy on purpose — you must hard-kill.
+- [ ] Relaunch → a **"Recover unsaved changes?"** dialog should list the file.
+  **Recover** reopens the unsaved version; **Discard** drops it.
+  → on pass, flip **P2.A2** to `[x]`.
+  - Known limitation (BACKLOG): the recovered tab opens from the *autosave*
+    path, so ⌘S targets that copy, not the original. Recovering then Save-As
+    to the original is the workaround for now.
+
+## D. CI (GitHub → Actions tab)
+
+- [ ] **`ci.yml`** (macOS) — green on the latest push to `main`.
+- [ ] **`e2e.yml`** (E5, Linux) — the **first real E2E run**. It was written
+  blind from macOS and likely needs a fixup pass (webkit / tauri-driver /
+  xvfb). If green → flip **P1.E5** to `[x]`. If red → paste me the failing
+  step's log and I'll iterate.
+
+---
+
+## Status flips waiting on the above
+
+| Step | Flips to `[x]` when |
+|---|---|
+| P2.B1 — Rotate | A (rotated PDF) + B (rotate/persist) pass |
+| P2.A3 — Undo/redo | B (undo/redo) passes |
+| P2.A2 — Auto-save | C (crash recovery) passes |
+| P1.E5 — E2E harness | D (`e2e.yml`) goes green |
