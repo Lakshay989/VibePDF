@@ -185,3 +185,30 @@ pub async fn pdf_rotate_pages(
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
+
+/// Serialize the live in-memory document to bytes (returned as a
+/// `number[]` over IPC). The edit-preview pipeline reloads PDF.js from
+/// these so the main view reflects in-memory edits (rotate, …) without a
+/// save/reopen. Read-only — no mutation, no dirty change.
+#[tauri::command]
+pub async fn pdf_get_bytes(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<u8>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}

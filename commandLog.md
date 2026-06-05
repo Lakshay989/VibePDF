@@ -969,6 +969,32 @@ a third reader) of the rotated artifact.
 
 ---
 
+### Edit-preview pipeline (this commit)
+
+```bash
+# No new deps. Makes edits show live in the main view + thumbnails via a
+# per-doc "edit epoch" signal + reload-from-actor-bytes (pdf_get_bytes).
+# NOT a new write path — get_bytes is read-only (same save_to_bytes the
+# already-verified save uses); persistence is still B1's save.
+
+npm run check
+#   tsc ✓  eslint ✓ (added requestAnimationFrame to DOM globals)  clippy ✓
+
+npm run test
+#   83/83 (was 81 — +2 edit-epoch-store).
+
+npm run test:rust
+#   get_bytes.rs: 2 passed — live bytes reopen, and reflect an UNSAVED
+#   in-memory rotation (the whole point). Full suite green.
+```
+
+GUI-heavy: the live reload + no-blank swap + page restore can only be
+confirmed in the real app (npm run dev). Not a steps/P2 item — implements
+the BACKLOG "live edit-preview pipeline"; that item removed, a perf-
+optimization item added in its place.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

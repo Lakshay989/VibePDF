@@ -96,3 +96,14 @@ export async function renderPage(
 export async function pdfiumVersion(): Promise<string> {
   return invoke<string>("pdfium_version");
 }
+
+/**
+ * Edit-preview pipeline: the actor's *live* in-memory document serialized
+ * to bytes. The Rust side returns `Vec<u8>` (a JSON `number[]` over IPC);
+ * wrap it as a `Uint8Array` for PDF.js `getDocument({ data })`. Reflects
+ * unsaved edits (rotate, …) so the main view can update without a reopen.
+ */
+export async function getPdfBytes(id: DocumentId): Promise<Uint8Array> {
+  const bytes = await invoke<number[]>("pdf_get_bytes", { id });
+  return Uint8Array.from(bytes);
+}

@@ -20,6 +20,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { renderPage } from "@/ipc/pdf";
 import { rotatePages } from "@/ipc/rotate";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
+import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { RotateMenu } from "@/tools/rotate/RotateMenu";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
@@ -53,29 +54,32 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   const [active, setActive] = useState<number | null>(null);
 
   // SPEC: P2-PAGE-001 — rotate control state. `menu` is the open context
-  // menu (page + screen position); `versions` bumps a page's render token
-  // after it's edited so its tile invalidates its cache and re-renders.
+  // menu (page + screen position). Thumbnail refresh is driven by the
+  // shared edit epoch (bumped on any edit/undo/redo), so the sidebar stays
+  // in sync with the main view and with undo/redo — not just direct edits.
   const [menu, setMenu] = useState<{ page: number; x: number; y: number } | null>(
     null,
   );
-  const [versions, setVersions] = useState<Record<number, number>>({});
+  const epoch = useDocEpoch(documentId);
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // SPEC: P2-PAGE-001 — rotate one page, refresh its thumbnail, and sync
-  // the Undo button state from the returned history.
+  // SPEC: P2-PAGE-001 — rotate one page, then bump the edit epoch (which
+  // refreshes the thumbnails + reloads the main view) and sync the Undo
+  // button state from the returned history.
   const rotate = useCallback(
     async (page: number, degrees: number) => {
       try {
         const history = await rotatePages(documentId, [page], degrees);
-        setVersions((prev) => ({ ...prev, [page]: (prev[page] ?? 0) + 1 }));
+        bumpEpoch(documentId);
         setHistory(documentId, history);
       } catch (err) {
         console.warn("rotate failed", documentId, page, err);
       }
     },
-    [documentId, setHistory],
+    [documentId, bumpEpoch, setHistory],
   );
 
   // One shared observer for all tiles. All tiles mount at once (fixed
@@ -127,7 +131,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
               page={page}
               dpr={dpr}
               darkMode={darkMode}
-              version={versions[page] ?? 0}
+              version={epoch}
               shouldLoad={visible.has(page)}
               isActive={active === page}
               onSelect={() => {

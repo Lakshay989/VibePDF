@@ -2776,6 +2776,77 @@ Lesson: a "thread-safe per X" library often still has global state; assume
 
 ---
 
+### Edit-preview pipeline (live view refresh on edits)
+
+#### Problem
+
+We have *two* PDF engines: PDFium (the actor, owns edits) and PDF.js (the
+view, renders from a separate copy of the bytes). After B1, rotating
+mutated the PDFium document but the main view kept showing the old PDF.js
+copy — the edit only appeared after save + reopen. Needed: any edit (and
+undo/redo) shows live, in both the main view and the thumbnails, for *all*
+current and future edit types.
+
+#### Concepts learned
+
+- **A signal, not a data flow.** Rather than plumbing edit details to the
+  view, there's one per-document **edit epoch** (a counter). Every
+  successful edit/undo/redo bumps it; the view and thumbnails subscribe and
+  react. Decoupled: the view doesn't care *what* changed, only *that*
+  something did. (And because edits are frontend-initiated, no backend
+  event is needed — the caller bumps the epoch.)
+- **Reload from the live source, not the disk.** The view used to load
+  bytes from the file on disk. Now: epoch 0 → load from disk; epoch > 0 →
+  load from `pdf_get_bytes` (the actor's in-memory document via
+  `save_to_bytes`). So the view reflects *unsaved* edits. The actor still
+  owns every byte — the frontend only *reads* the current state, keeping
+  the "PDF.js never writes" rule intact.
+- **Swap without a blank.** Naively, reloading sets `doc = null` (blank) then
+  loads the new one. Instead: load the new document fully, *then* swap it in
+  and destroy the old one. The user never sees an empty frame. Same idea as
+  the atomic temp+rename save: stage the new thing, commit, discard the old.
+- **Preserve the cursor.** A reload would jump scroll to page 1. We capture
+  `getCurrentPage()` before and `scrollToPage()` after, but only for a
+  *same-document* reload (an edit), not a tab switch — tracked with a
+  "last documentId" ref.
+- **One signal, two consumers, free generality.** The thumbnails dropped
+  their B1 per-page refresh token and now key off the same epoch. Bonus:
+  undo/redo refresh thumbnails too (a B1 gap), and delete/insert (which
+  shift every page index) will Just Work — a doc-level signal is the right
+  granularity for them.
+
+#### Cost (and the deferred fix)
+
+This re-parses + re-renders the *whole* document on every edit, and ships
+the full bytes over IPC as a `number[]`. Correct and uniform, but not
+cheap for large PDFs. The optimization (re-render only affected pages; a
+rotate-only viewport-rotation fast path; raw-bytes IPC) is deferred to
+BACKLOG — build the correct rail first, make it fast when a real PDF feels
+slow.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/state/edit-epoch-store.ts` | The per-doc epoch + `bumpEpoch` + `useDocEpoch`. |
+| `src-tauri/src/pdf/actor.rs` | `Message::GetBytes` (serialize live doc under the lock). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_get_bytes`. |
+| `src/ipc/pdf.ts` | `getPdfBytes` wrapper. |
+| `src/view/PdfViewer.tsx` | Reload-from-actor-bytes on epoch bump; no-blank swap; page restore. |
+| `src/panels/ThumbnailPanel.tsx` | Thumbnails key off the epoch; rotate bumps it. |
+| `src/app/use-history.ts` | undo/redo bump the epoch. |
+| `src-tauri/tests/get_bytes.rs` | The live bytes carry an unsaved rotation. |
+| `src/state/__tests__/edit-epoch-store.test.ts` | Bump/independence. |
+| `docs/04_ARCHITECTURE.md` | The pipeline. |
+
+#### Further reading
+
+- PDF.js `getDocument({ data })` — https://mozilla.github.io/pdf.js/api/
+- Double-buffering / atomic swap (the no-blank idea) —
+  https://en.wikipedia.org/wiki/Multiple_buffering
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

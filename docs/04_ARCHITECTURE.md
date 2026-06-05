@@ -189,6 +189,8 @@ PDF.js handles rendering in the WebView for the interactive canvas. PDFium handl
 
 **Important:** PDF.js never writes. It is purely the view layer. This is non-negotiable; sharing write capability between two PDF engines causes drift.
 
+**Edit-preview pipeline.** Edits mutate the actor's in-memory PDFium document, but PDF.js renders from a separate copy — so an edit wouldn't show until reload. The bridge is a per-document **edit epoch** (`state/edit-epoch-store.ts`): every successful edit / undo / redo bumps it. The main view (`PdfViewer`) and the thumbnails subscribe; on a bump the view reloads PDF.js from the actor's *live* bytes via `pdf_get_bytes` (a read-only `save_to_bytes`), and the thumbnails invalidate + re-render. The reload swaps the new document in before destroying the old (no blank) and restores the current page. This is a full re-parse per edit for now — correct and uniform across all edit types; an incremental/single-page fast path is deferred (BACKLOG). It keeps the "PDF.js never writes" rule intact: the actor still owns every byte; the frontend only *reads* the current state.
+
 ---
 
 ## Edit tools

@@ -93,6 +93,12 @@ pub enum Message {
     GetHistoryState {
         reply: oneshot::Sender<HistoryState>,
     },
+    /// Serialize the live document to bytes — the edit-preview pipeline
+    /// reloads PDF.js from these so the view reflects in-memory edits
+    /// without a save/reopen.
+    GetBytes {
+        reply: oneshot::Sender<Result<Vec<u8>, CommandError>>,
+    },
     /// SPEC: P2-PAGE-001 — rotate `pages` by `quarter_turns` × 90°.
     /// Applies the edit, records its inverse on the undo stack, and marks
     /// the document dirty; replies with the new history availability.
@@ -334,6 +340,24 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// Serialize the live document to bytes (edit-preview pipeline).
+    /// Await-holding convenience for tests; IPC uses `get_bytes_request`.
+    pub async fn get_bytes(&self) -> Result<Vec<u8>, CommandError> {
+        let rx = self.get_bytes_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn get_bytes_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<Vec<u8>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::GetBytes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P2.A2 — fire-and-forget autosave poke from the tick thread.
     /// The actor writes a recovery copy iff dirty; a closed mailbox (the
     /// worker already exited) is silently ignored.
@@ -536,6 +560,14 @@ fn run_worker(
             }
             Message::GetHistoryState { reply } => {
                 let _ = reply.send(history.state());
+            }
+            Message::GetBytes { reply } => {
+                // Serialize under the shared PDFium lock (FX_GE global
+                // state); same path the explicit save uses.
+                let result = pdfium_lock().and_then(|_guard| {
+                    doc.save_to_bytes().map_err(CommandError::from)
+                });
+                let _ = reply.send(result);
             }
             Message::RotatePages {
                 pages,

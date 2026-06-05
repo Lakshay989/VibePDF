@@ -31,6 +31,7 @@ export default [
         HTMLInputElement: "readonly",
         HTMLSelectElement: "readonly",
         RegExpExecArray: "readonly",
+        requestAnimationFrame: "readonly",
         IntersectionObserver: "readonly",
         IntersectionObserverCallback: "readonly",
         IntersectionObserverEntry: "readonly",

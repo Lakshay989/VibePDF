@@ -21,7 +21,8 @@ import {
   pathHash,
   saveViewSettings,
 } from "@/state/view-persistence";
-import type { DocumentId } from "@/ipc/pdf";
+import { useDocEpoch } from "@/state/edit-epoch-store";
+import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
 
 interface Props {
   documentId: DocumentId;
@@ -50,6 +51,10 @@ export function PdfViewer({ documentId, path }: Props) {
   const showThumbnails = useViewStore((s) => s.showThumbnails);
   const darkMode = useDarkMode();
 
+  // SPEC: edit-preview pipeline — bumped on every edit/undo/redo; drives
+  // the reload-from-actor-bytes effect below.
+  const epoch = useDocEpoch(documentId);
+
   // Search state subscriptions (kept narrow to avoid extra renders).
   const searchOpen = useSearchStore((s) => s.isOpen);
   const searchQuery = useSearchStore((s) => s.query);
@@ -62,20 +67,44 @@ export function PdfViewer({ documentId, path }: Props) {
   const setMatches = useSearchStore((s) => s.setMatches);
   const setSearching = useSearchStore((s) => s.setSearching);
 
-  // Load document bytes + parse PDF.
+  // SPEC: edit-preview pipeline — load + parse the PDF. At epoch 0 the
+  // bytes come from disk; after an edit (epoch > 0) they come from the
+  // actor's live in-memory document, so the main view reflects edits
+  // without a save/reopen. We load the new doc *before* swapping it in (no
+  // blank flash) and, for a same-document reload, restore the page the
+  // user was on. The previous proxy is destroyed only after the swap.
+  const docRef = useRef<PDFDocumentProxy | null>(null);
+  const lastDocIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    let loaded: PDFDocumentProxy | null = null;
+    const sameDocReload = lastDocIdRef.current === documentId;
+    const restorePage = sameDocReload
+      ? (virtRef.current?.getCurrentPage() ?? 0)
+      : 0;
+    lastDocIdRef.current = documentId;
+
     (async () => {
       try {
-        const bytes = await readFile(path);
+        const bytes =
+          epoch === 0 ? await readFile(path) : await getPdfBytes(documentId);
         if (cancelled) return;
-        loaded = await loadDocument(bytes);
+        const loaded = await loadDocument(bytes);
         if (cancelled) {
           await loaded.destroy();
           return;
         }
+        const prev = docRef.current;
+        docRef.current = loaded;
         setDoc(loaded);
+        setError(null);
+        if (prev) void prev.destroy();
+        if (restorePage > 0) {
+          // Defer until the swapped-in virtualizer has measured its pages.
+          requestAnimationFrame(() =>
+            virtRef.current?.scrollToPage(restorePage),
+          );
+        }
       } catch (e) {
         const msg =
           e instanceof Error ? e.message : "Failed to open this file as a PDF.";
@@ -84,10 +113,17 @@ export function PdfViewer({ documentId, path }: Props) {
     })();
     return () => {
       cancelled = true;
-      void loaded?.destroy();
-      setDoc(null);
     };
-  }, [path]);
+  }, [path, epoch, documentId]);
+
+  // Destroy the live document on unmount.
+  useEffect(
+    () => () => {
+      void docRef.current?.destroy();
+      docRef.current = null;
+    },
+    [],
+  );
 
   // SPEC: P1-VIEW-006 — restore persisted zoom + fit-mode on open.
   useEffect(() => {

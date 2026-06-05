@@ -11,6 +11,7 @@ import {
   undo as undoCmd,
 } from "@/ipc/history";
 import type { DocumentId } from "@/ipc/pdf";
+import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useDocHistory, useHistoryStore } from "@/state/history-store";
 
 export interface UseHistory {
@@ -22,6 +23,7 @@ export interface UseHistory {
 
 export function useHistory(documentId: DocumentId | undefined): UseHistory {
   const setHistory = useHistoryStore((s) => s.setHistory);
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const { canUndo, canRedo } = useDocHistory(documentId);
 
   // Hydrate availability when the active document changes. For a freshly
@@ -44,19 +46,22 @@ export function useHistory(documentId: DocumentId | undefined): UseHistory {
     if (!documentId) return;
     try {
       setHistory(documentId, await undoCmd(documentId));
+      // Bump the edit epoch so the main view + thumbnails reflect the undo.
+      bumpEpoch(documentId);
     } catch (err) {
       console.warn("undo failed", documentId, err);
     }
-  }, [documentId, setHistory]);
+  }, [documentId, setHistory, bumpEpoch]);
 
   const redo = useCallback(async () => {
     if (!documentId) return;
     try {
       setHistory(documentId, await redoCmd(documentId));
+      bumpEpoch(documentId);
     } catch (err) {
       console.warn("redo failed", documentId, err);
     }
-  }, [documentId, setHistory]);
+  }, [documentId, setHistory, bumpEpoch]);
 
   // Cmd/Ctrl+Z undo; Cmd/Ctrl+Shift+Z redo.
   useEffect(() => {
