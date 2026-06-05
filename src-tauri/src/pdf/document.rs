@@ -1,10 +1,35 @@
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use pdfium_render::prelude::*;
 use serde::Serialize;
 
 use crate::error::CommandError;
+
+/// Process-global lock serializing **every** call into `PDFium` that
+/// touches its shared mutable state: document load/save, metadata reads,
+/// page lookups, page mutation (rotate, …), and rendering.
+///
+/// `PDFium` is documented as per-document-safe but NOT process-safe — two
+/// threads each operating on their *own* document still race on global
+/// subsystems (`FX_GE`, the page-state cache) and SIGABRT; even
+/// `pages().get(idx)` reproduces it. The per-document actor serializes
+/// *within* a document; this lock extends that across documents (the
+/// autosave tick, or two open documents, can otherwise call in at once).
+///
+/// **Reentrancy:** the `Mutex` is not reentrant. Hold it around the
+/// minimal FFI span and never across a call that re-locks — e.g.
+/// `open_pdf` and `save_document` release before paths
+/// (`verify_pdf_reopens`, the standalone `collect_metadata`) that re-lock.
+pub(crate) static PDFIUM_LOCK: Mutex<()> = Mutex::new(());
+
+/// Acquire [`PDFIUM_LOCK`]. A poisoned lock (a previous holder panicked)
+/// surfaces as a typed error rather than a second panic.
+pub(crate) fn pdfium_lock() -> Result<MutexGuard<'static, ()>, CommandError> {
+    PDFIUM_LOCK
+        .lock()
+        .map_err(|_| CommandError::Internal("PDFium lock poisoned".into()))
+}
 
 /// Metadata snapshot taken once when the document is opened. The actor
 /// caches this so cheap queries (page count, title) don't have to round-
@@ -75,15 +100,30 @@ pub fn open_pdf<'a>(
     password: Option<&str>,
 ) -> Result<(PdfDocument<'a>, DocumentMetadata), CommandError> {
     let p = pdfium()?;
+    // Hold the lock across load + metadata as a single FFI span (calling
+    // the unlocked `_inner` so we don't re-lock and deadlock).
+    let _guard = pdfium_lock()?;
     let doc = p.load_pdf_from_file(path, password).map_err(CommandError::from)?;
-    let metadata = collect_metadata(&doc);
+    let metadata = collect_metadata_inner(&doc);
     Ok((doc, metadata))
 }
 
 /// Read the metadata fields we surface to the frontend. Errors during
 /// metadata extraction are non-fatal — the user can still view the doc.
+/// Acquires [`PDFIUM_LOCK`]; on a poisoned lock returns default metadata.
 #[must_use]
 pub fn collect_metadata(doc: &PdfDocument<'_>) -> DocumentMetadata {
+    let Ok(_guard) = pdfium_lock() else {
+        return DocumentMetadata::default();
+    };
+    collect_metadata_inner(doc)
+}
+
+/// Body of [`collect_metadata`], assuming [`PDFIUM_LOCK`] is already held
+/// by the caller (so `open_pdf` can read metadata under its own guard
+/// without re-locking).
+#[must_use]
+fn collect_metadata_inner(doc: &PdfDocument<'_>) -> DocumentMetadata {
     let page_count = u32::try_from(doc.pages().len()).unwrap_or(u32::MAX);
     let m = doc.metadata();
     let title = m.get(PdfDocumentMetadataTagType::Title).map(|t| t.value().to_string());
@@ -139,8 +179,13 @@ pub fn save_document(
         )));
     }
 
-    // 1. Serialize, then stage to a sibling temp file.
-    let bytes = doc.save_to_bytes().map_err(CommandError::from)?;
+    // 1. Serialize (under the PDFium lock), then stage to a sibling temp
+    //    file. The lock is released before step 2's `verify_pdf_reopens`,
+    //    which re-locks via `open_pdf` (the Mutex is not reentrant).
+    let bytes = {
+        let _guard = pdfium_lock()?;
+        doc.save_to_bytes().map_err(CommandError::from)?
+    };
     let tmp = sibling_with_suffix(dest, ".vibepdf-tmp");
     std::fs::write(&tmp, &bytes)?;
 

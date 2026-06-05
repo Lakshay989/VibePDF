@@ -29,9 +29,12 @@ use uuid::Uuid;
 
 use crate::error::CommandError;
 use crate::pdf::autosave;
-use crate::pdf::document::{collect_metadata, open_pdf, save_document, DocumentMetadata, SaveOutcome};
+use crate::pdf::document::{
+    collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
+};
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
-use crate::pdf::undo::{HistoryState, UndoStack};
+use crate::pdf::rotate::RotateEdit;
+use crate::pdf::undo::{Edit, HistoryState, UndoStack};
 
 /// Event name on the wire. The frontend listens for this via
 /// `tauri::event::listen("document-changed", ...)`.
@@ -89,6 +92,14 @@ pub enum Message {
     /// Query current undo/redo availability (for UI button state).
     GetHistoryState {
         reply: oneshot::Sender<HistoryState>,
+    },
+    /// SPEC: P2-PAGE-001 — rotate `pages` by `quarter_turns` × 90°.
+    /// Applies the edit, records its inverse on the undo stack, and marks
+    /// the document dirty; replies with the new history availability.
+    RotatePages {
+        pages: Vec<i32>,
+        quarter_turns: i32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
     /// recovery copy iff the document is dirty; no reply (best-effort).
@@ -330,6 +341,34 @@ impl DocumentActorHandle {
         let _ = self.tx.send(Message::Autosave);
     }
 
+    /// SPEC: P2-PAGE-001 — rotate `pages` by `quarter_turns` × 90°.
+    /// Await-holding convenience for tests; IPC uses `rotate_pages_request`.
+    pub async fn rotate_pages(
+        &self,
+        pages: Vec<i32>,
+        quarter_turns: i32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.rotate_pages_request(pages, quarter_turns)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn rotate_pages_request(
+        &self,
+        pages: Vec<i32>,
+        quarter_turns: i32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RotatePages {
+                pages,
+                quarter_turns,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -498,6 +537,29 @@ fn run_worker(
             Message::GetHistoryState { reply } => {
                 let _ = reply.send(history.state());
             }
+            Message::RotatePages {
+                pages,
+                quarter_turns,
+                reply,
+            } => {
+                // SPEC: P2-PAGE-001 — the first real Edit<PdfDocument>.
+                // apply() mutates the doc and hands back the inverse; on
+                // success record it for undo and mark the doc dirty.
+                let result = match Box::new(RotateEdit {
+                    pages,
+                    quarter_turns,
+                })
+                .apply(&mut doc)
+                {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
             Message::Autosave => {
                 // SPEC: P2.A2 — write a recovery copy only when dirty.
                 // Best-effort: failures are logged, never fatal. Always a
@@ -532,6 +594,14 @@ fn run_worker(
     if let Some(dir) = autosave_dir.as_deref() {
         let _ = autosave::discard_autosave(dir, &id_str);
     }
+
+    // Close the document under the shared PDFium lock — FPDF_CloseDocument
+    // (PdfDocument's Drop) touches global state and must not race another
+    // actor's render/save/rotate. `.ok()` because a poisoned lock is no
+    // reason to leak the document; we still drop it.
+    let close_guard = pdfium_lock().ok();
+    drop(doc);
+    drop(close_guard);
 
     emit_change(
         app.as_ref(),

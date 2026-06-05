@@ -14,11 +14,14 @@
 // ~96 CSS px. The panel is keyed by documentId at the mount site, so a
 // document switch remounts it with a fresh observer + empty state.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPage } from "@/ipc/pdf";
-import { getThumb, putThumb } from "@/panels/thumbnail-cache";
+import { rotatePages } from "@/ipc/rotate";
+import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
+import { useHistoryStore } from "@/state/history-store";
+import { RotateMenu } from "@/tools/rotate/RotateMenu";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
 
 interface Props {
@@ -49,7 +52,31 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   const [visible, setVisible] = useState<ReadonlySet<number>>(new Set());
   const [active, setActive] = useState<number | null>(null);
 
+  // SPEC: P2-PAGE-001 — rotate control state. `menu` is the open context
+  // menu (page + screen position); `versions` bumps a page's render token
+  // after it's edited so its tile invalidates its cache and re-renders.
+  const [menu, setMenu] = useState<{ page: number; x: number; y: number } | null>(
+    null,
+  );
+  const [versions, setVersions] = useState<Record<number, number>>({});
+  const setHistory = useHistoryStore((s) => s.setHistory);
+
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // SPEC: P2-PAGE-001 — rotate one page, refresh its thumbnail, and sync
+  // the Undo button state from the returned history.
+  const rotate = useCallback(
+    async (page: number, degrees: number) => {
+      try {
+        const history = await rotatePages(documentId, [page], degrees);
+        setVersions((prev) => ({ ...prev, [page]: (prev[page] ?? 0) + 1 }));
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("rotate failed", documentId, page, err);
+      }
+    },
+    [documentId, setHistory],
+  );
 
   // One shared observer for all tiles. All tiles mount at once (fixed
   // pageCount, no virtualization), so we can observe them straight from
@@ -100,16 +127,26 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
               page={page}
               dpr={dpr}
               darkMode={darkMode}
+              version={versions[page] ?? 0}
               shouldLoad={visible.has(page)}
               isActive={active === page}
               onSelect={() => {
                 setActive(page);
                 onJump(page + 1);
               }}
+              onContextMenu={(x, y) => setMenu({ page, x, y })}
             />
           ))}
         </ul>
       </div>
+      {menu ? (
+        <RotateMenu
+          x={menu.x}
+          y={menu.y}
+          onRotate={(degrees) => void rotate(menu.page, degrees)}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </aside>
   );
 }
@@ -120,9 +157,12 @@ interface TileProps {
   page: number;
   dpr: number;
   darkMode: boolean;
+  /** Render token; bumped after an edit (rotate) to force a re-render. */
+  version: number;
   shouldLoad: boolean;
   isActive: boolean;
   onSelect: () => void;
+  onContextMenu: (x: number, y: number) => void;
 }
 
 function ThumbTile({
@@ -131,27 +171,31 @@ function ThumbTile({
   page,
   dpr,
   darkMode,
+  version,
   shouldLoad,
   isActive,
   onSelect,
+  onContextMenu,
 }: TileProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  // Load-once guard. Kept in a ref (not the deps) so setting `url`
-  // doesn't re-run this effect — which would fire the cleanup and
-  // revoke the blob URL we just handed to <img>. The effect's deps are
-  // all stable for a tile's lifetime once `shouldLoad` flips true, so
-  // the cleanup runs only on real unmount.
-  const startedRef = useRef(false);
+  // The render token this tile last loaded. Kept in a ref (not deps) so
+  // setting `url` doesn't re-run the effect (which would revoke the blob
+  // URL we just handed to <img>). The effect re-runs only when `version`
+  // changes (an edit) — then we invalidate the cache and re-render.
+  const loadedVersionRef = useRef(-1);
 
   useEffect(() => {
-    if (!shouldLoad || startedRef.current) return;
-    startedRef.current = true;
+    if (!shouldLoad || loadedVersionRef.current === version) return;
+    const isRefresh = version > 0; // 0 is the initial load; >0 is an edit
+    loadedVersionRef.current = version;
     let cancelled = false;
     let objectUrl: string | null = null;
 
     void (async () => {
       try {
+        // After an edit, drop the stale cached thumbnail so we re-render.
+        if (isRefresh) await deleteThumb({ documentId, page, dpr });
         let png = await getThumb({ documentId, page, dpr });
         if (!png) {
           // Compute the DPI that renders this page at ~THUMB_CSS_WIDTH·dpr
@@ -191,13 +235,17 @@ function ThumbTile({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [shouldLoad, doc, documentId, page, dpr]);
+  }, [shouldLoad, version, doc, documentId, page, dpr]);
 
   return (
     <li className="flex flex-col items-center">
       <button
         type="button"
         onClick={onSelect}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onContextMenu(e.clientX, e.clientY);
+        }}
         title={`Page ${page + 1}`}
         aria-label={`Go to page ${page + 1}`}
         aria-current={isActive ? "true" : undefined}

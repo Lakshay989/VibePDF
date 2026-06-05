@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   _resetForTests,
+  deleteThumb,
   getThumb,
   putThumb,
   type ThumbKey,
@@ -60,5 +61,22 @@ describe("thumbnail-cache IDB", () => {
     await putThumb(key(), new Uint8Array([1, 1, 1]));
     await putThumb(key(), new Uint8Array([9, 9]));
     expect(Array.from((await getThumb(key())) as Uint8Array)).toEqual([9, 9]);
+  });
+
+  // SPEC: P2-PAGE-001 — after a rotate, the tile invalidates its cached
+  // thumbnail so the next render reflects the new orientation.
+  it("deleteThumb removes the entry, leaving neighbours intact", async () => {
+    await putThumb(key({ page: 0 }), new Uint8Array([1]));
+    await putThumb(key({ page: 1 }), new Uint8Array([2]));
+
+    await deleteThumb(key({ page: 0 }));
+
+    expect(await getThumb(key({ page: 0 }))).toBeNull();
+    expect(Array.from((await getThumb(key({ page: 1 }))) as Uint8Array)).toEqual([2]);
+  });
+
+  it("deleteThumb on a missing key is a no-op", async () => {
+    await deleteThumb(key({ page: 42 })); // must not throw
+    expect(await getThumb(key({ page: 42 }))).toBeNull();
   });
 });

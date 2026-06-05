@@ -2699,6 +2699,83 @@ the next launch, offer to reopen any copy a crash left behind.
 
 ---
 
+### P2.B1 — Rotate page(s)
+
+#### Problem
+
+Rotate a page by 90/180/270° and have it *persist* in the PDF (not just a
+viewer trick). This is the **first real edit** — the moment the undo stack
+(A3), dirty flag (A1), and autosave (A2) all stop being dormant rails and
+carry real traffic.
+
+#### Concepts learned
+
+- **Rotation is metadata, not pixels.** A PDF page has a `/Rotate` entry
+  (0/90/180/270). Rotating sets that integer; no content stream is
+  rewritten. Every reader honours it. `PdfPage::set_rotation` →
+  `FPDFPage_SetRotation` → `/Rotate`. (Per the spec, this is the *only*
+  correct rotation — a viewer-only transform wouldn't survive save.)
+- **The first `Edit<PdfDocument>`.** `RotateEdit` implements the A3 trait:
+  `apply` rotates and returns its inverse (`-quarter_turns`). Because
+  rotation is additive mod 4, the inverse is exact without remembering each
+  page's prior angle. The actor's `RotatePages` handler does the
+  three-line dance the whole undo system was built for: `apply` → record
+  the inverse → mark dirty.
+- **Atomic-ish edits.** A bad page index is validated *before* any page is
+  mutated, so a failure can't leave the document half-rotated with no undo
+  entry (a partial edit you can't take back is worse than no edit).
+- **PDFium is not thread-safe across documents** (the big one — see below).
+- **Two PDF engines, two refresh stories.** Thumbnails render through
+  PDFium (the actor), so re-rendering one reflects an edit immediately; the
+  main view renders through *PDF.js from disk*, so it only reflects edits
+  after save/reopen. B1 refreshes the thumbnail (cache-invalidate + a
+  per-page "version" token that re-keys the tile's load effect); the
+  main-view live preview is a deferred shared pipeline (BACKLOG).
+
+#### The concurrency bug B1 surfaced
+
+Rotating under `cargo test`'s parallel runner went `SIGABRT`, then
+`SIGSEGV`. Root cause: PDFium has process-global state and is unsafe even
+across *different* documents — page lookup, save, and `FPDF_CloseDocument`
+(a `PdfDocument`'s `Drop`) from two threads corrupt it. A render-only lock
+already existed; B1 forced the generalisation:
+
+- One **process-global `PDFIUM_LOCK`** now serializes *every* PDFium FFI
+  span (load/save/metadata/rotate/render), held around the minimal span and
+  never across a re-locking call (the `Mutex` isn't reentrant — `open_pdf`
+  and `save_document` release before paths that re-lock).
+- The actor **closes its document under the lock** (Drop races too).
+- **Tests run single-threaded** (`--test-threads=1` in the cargo wrapper):
+  they open/drop their own documents, which can't take the crate-private
+  lock. (Test *binaries* are separate processes, so they stay parallel.)
+
+Lesson: a "thread-safe per X" library often still has global state; assume
+*everything* through the FFI needs one lock until proven otherwise.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/rotate.rs` | `RotateEdit: Edit<PdfDocument>` + rotation arithmetic. |
+| `src-tauri/src/pdf/document.rs` | The shared `PDFIUM_LOCK` + `pdfium_lock()`; lock load/save/metadata. |
+| `src-tauri/src/pdf/render.rs` | Use the shared lock (was a private render-only one). |
+| `src-tauri/src/pdf/actor.rs` | `RotatePages` message; close the doc under the lock. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_rotate_pages` (degrees → quarter-turns). |
+| `src/ipc/rotate.ts` | `rotatePages` wrapper. |
+| `src/tools/rotate/RotateMenu.tsx` | The right-click rotate menu. |
+| `src/panels/ThumbnailPanel.tsx` | Context menu + per-page refresh token + Undo sync. |
+| `src/panels/thumbnail-cache.ts` | `deleteThumb` (invalidate on edit). |
+| `scripts/cargo-test.mjs` | Run the PDFium tests single-threaded. |
+| `src-tauri/tests/rotate.rs` | persist/undo/redo/atomic-on-error + a rotated artifact. |
+
+#### Further reading
+
+- PDF `/Rotate` (PDF 32000-1, §7.7.3.3 page object) — any PDF reference.
+- PDFium thread-safety notes — https://pdfium.googlesource.com/pdfium/
+- Command-pattern undo (recap) — https://refactoring.guru/design-patterns/command
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

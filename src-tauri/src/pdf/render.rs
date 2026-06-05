@@ -6,31 +6,16 @@
 //! actor only knows about messages; the rasterisation lives here.
 
 use std::io::Cursor;
-use std::sync::Mutex;
 
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
-
-/// Process-wide lock around the `PDFium` render call.
-///
-/// `PDFium` is documented as per-document-safe but NOT process-safe
-/// for the rendering subsystem: two concurrent `render_with_config`
-/// calls from different documents still race on `FX_GE`'s global
-/// state and crash with SIGTRAP (and `pages().get(idx)` is enough to
-/// reproduce on its own under our `cargo test` runner). The
-/// per-document actor pattern serialises reads *within* one document;
-/// this lock extends that guarantee across documents.
-///
-/// Performance cost: rendering is single-threaded across the whole
-/// process. For Phase 1 (≤ one viewer + one thumbnail panel per
-/// document, modest scroll rates) this is comfortably under the
-/// NFR-PERF-003 budget. If a future profiler shows it bottlenecking
-/// scrolling, the right fix is to make the render call non-blocking
-/// in `PDFium` itself (`FPDF_FFLDraw` with an interrupt callback),
-/// not to remove the lock.
-static RENDER_LOCK: Mutex<()> = Mutex::new(());
+// Rendering shares the one process-global PDFium lock with load/save/
+// metadata/rotate (see `document::PDFIUM_LOCK`): two `render_with_config`
+// calls from different documents still race on `FX_GE`'s global state and
+// SIGABRT, so every PDFium FFI span is serialized through a single Mutex.
+use crate::pdf::document::pdfium_lock;
 
 /// Wire-format selector for `pdf_render_page` / `Message::RenderPage`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -121,9 +106,7 @@ pub fn render_page(
     // page-state subsystems share process-global mutable state; even
     // `pages().get(idx)` from two threads is enough to SIGABRT.
     let (width, height, rgba) = {
-        let _guard = RENDER_LOCK
-            .lock()
-            .map_err(|_| CommandError::Internal("render lock poisoned".into()))?;
+        let _guard = pdfium_lock()?;
         let pdf_page = doc.pages().get(page_idx).map_err(CommandError::from)?;
         let page_width_points = pdf_page.width().value;
         let target_w = target_width_from_dpi(page_width_points, dpi);
@@ -176,9 +159,7 @@ pub fn render_thumbnail(
 
     // Same RENDER_LOCK rationale as `render_page`.
     let (width, height, rgba) = {
-        let _guard = RENDER_LOCK
-            .lock()
-            .map_err(|_| CommandError::Internal("render lock poisoned".into()))?;
+        let _guard = pdfium_lock()?;
         let pdf_page = doc.pages().get(page_idx).map_err(CommandError::from)?;
         let bitmap = pdf_page
             .render_with_config(&config)

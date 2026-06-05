@@ -80,7 +80,10 @@ pub fn write_autosave(
 
     let pdf_path = dir.join(format!("{document_id}.pdf"));
     let pdf_tmp = dir.join(format!("{document_id}.pdf.tmp"));
-    let bytes = doc.save_to_bytes().map_err(CommandError::from)?;
+    let bytes = {
+        let _guard = crate::pdf::document::pdfium_lock()?;
+        doc.save_to_bytes().map_err(CommandError::from)?
+    };
     std::fs::write(&pdf_tmp, &bytes)?;
     std::fs::rename(&pdf_tmp, &pdf_path)?;
 

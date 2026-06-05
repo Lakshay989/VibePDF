@@ -929,6 +929,46 @@ P2.B2 (delete).
 
 ---
 
+### P2.B1 — Rotate page(s) (this commit)
+
+```bash
+# No new deps. First real edit: PDFium /Rotate via RotateEdit<PdfDocument>,
+# wired through undo (A3) + dirty (A1/A2). PDF WRITE PATH.
+
+npm run check
+#   tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (fix: backtick `PDFium` in 4 new doc comments — pedantic doc_markdown.)
+
+npm run test
+#   81/81 (was 77 — +2 ipc/rotate, +2 thumbnail-cache deleteThumb).
+
+npm run test:rust
+#   rotate.rs: 4 passed (+1 ignored artifact) — rotate persists through
+#     save/reopen, rotate→undo restores, redo re-applies, out-of-range is a
+#     typed error that records nothing (atomic). Full suite green.
+
+# --- concurrency bug surfaced + fixed ---
+# Rotating under cargo's parallel runner SIGABRT'd, then SIGSEGV'd: PDFium
+# is unsafe across documents (page-ops/save/FPDF_CloseDocument race global
+# state). Fixes:
+#   - one process-global pdf::document::PDFIUM_LOCK around ALL PDFium FFI
+#     (was a render-only lock); close the actor's doc under it.
+#   - scripts/cargo-test.mjs now runs the harness --test-threads=1 (tests
+#     open/drop their own docs and can't take the pub(crate) lock).
+
+# PDF write-path verification ritual (ignored test, run on demand):
+node scripts/cargo-test.mjs --test rotate \
+  rotate_writes_verification_artifact -- --ignored --nocapture
+#   → /tmp/vibepdf-verify-rotated.pdf (also copied to ~/Desktop)
+file /tmp/vibepdf-verify-rotated.pdf
+#   PDF document, version 1.4, 1 pages — page 0 /Rotate = 90°.
+```
+
+Step left `[~]` pending the human cross-reader check (Acrobat / Preview /
+a third reader) of the rotated artifact.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

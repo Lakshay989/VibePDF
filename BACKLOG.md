@@ -25,6 +25,16 @@ the current roadmap phase. When one is picked up, move it into the relevant
   it to `docs/02_PRODUCT_SPEC.md` (human-owned file) or leave Save as pure
   infrastructure.
 
+## Bigger pieces (own step when picked up)
+
+- **Live edit-preview pipeline (from P2.B1).** Today a rotate updates only the
+  *thumbnail* live; the main PDF.js view reflects edits on save/reopen, and
+  undo/redo don't refresh the view. Every B-step (rotate/delete/insert/crop/
+  resize) needs the same "the doc changed → refresh what's on screen" rail.
+  Design options: reload PDF.js from the mutated in-memory bytes via a new
+  `pdf_get_bytes` IPC, or render the main view through PDFium. Decide and
+  build once, before/with P2.B2, rather than improvising per edit.
+
 ## Deferred polish / tech debt
 
 - **D1 sidebar open/close animation** — the thumbnail panel snaps; a slide

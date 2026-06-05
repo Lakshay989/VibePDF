@@ -66,6 +66,18 @@ export async function putThumb(key: ThumbKey, png: Uint8Array): Promise<void> {
   });
 }
 
+/** Removes the cached entry for `key`. Called when a page is edited
+ *  (e.g. rotated) so the next render regenerates a fresh thumbnail. */
+export async function deleteThumb(key: ThumbKey): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(keyOf(key));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("thumb delete failed"));
+  });
+}
+
 /** Test-only: drop the cached connection so a swapped-in `indexedDB`
  *  global (fake-indexeddb) is picked up on the next open. */
 export function _resetForTests(): void {

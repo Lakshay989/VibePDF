@@ -32,7 +32,29 @@ const varName =
       : "LD_LIBRARY_PATH";
 env[varName] = env[varName] ? `${pdfiumDir}${sep}${env[varName]}` : pdfiumDir;
 
-const args = ["test", "--manifest-path", manifest, ...process.argv.slice(2)];
+// PDFium is not thread-safe across documents — even FPDF_CloseDocument
+// (PdfDocument's Drop) races other threads' PDFium calls. The library
+// code serializes operations through a process-global lock, but the
+// integration tests open and drop their *own* documents, which can't take
+// that pub(crate) lock. So run the test harness single-threaded; without
+// this, the PDF-touching tests SIGSEGV/SIGABRT intermittently under
+// cargo's default parallel runner. (Test binaries are separate processes,
+// each with its own PDFium, so cross-binary parallelism stays safe.)
+const forwarded = process.argv.slice(2);
+const hasThreadFlag = forwarded.some((a) => a.startsWith("--test-threads"));
+let harnessForwarded;
+if (forwarded.includes("--")) {
+  const i = forwarded.indexOf("--");
+  harnessForwarded = hasThreadFlag
+    ? forwarded
+    : [...forwarded.slice(0, i + 1), "--test-threads=1", ...forwarded.slice(i + 1)];
+} else {
+  harnessForwarded = hasThreadFlag
+    ? forwarded
+    : [...forwarded, "--", "--test-threads=1"];
+}
+
+const args = ["test", "--manifest-path", manifest, ...harnessForwarded];
 const result = spawnSync("cargo", args, { stdio: "inherit", env });
 
 if (result.error) {

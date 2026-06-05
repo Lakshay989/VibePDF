@@ -22,6 +22,7 @@ vi.mock("@/ipc/pdf", () => ({
 vi.mock("@/panels/thumbnail-cache", () => ({
   getThumb: vi.fn(async () => null), // force the render path
   putThumb: vi.fn(async () => {}),
+  deleteThumb: vi.fn(async () => {}),
 }));
 
 import { ThumbnailPanel } from "@/panels/ThumbnailPanel";

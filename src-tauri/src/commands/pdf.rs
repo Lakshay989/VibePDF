@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::render::{ImageFormat, RenderedPage};
+use crate::pdf::undo::HistoryState;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -144,4 +145,43 @@ pub async fn pdf_render_page(
 #[tauri::command]
 pub async fn pdfium_version() -> Result<String, CommandError> {
     Ok(crate::pdf::document::pdfium_version_string())
+}
+
+/// SPEC: P2-PAGE-001 — rotate `pages` (0-based indices) by `degrees`
+/// (a multiple of 90°). Persisted as `PDFium` `/Rotate`, recorded on the
+/// undo stack, and marks the document dirty. Returns the new history
+/// availability so the caller can update the Undo/Redo button state.
+#[tauri::command]
+pub async fn pdf_rotate_pages(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    degrees: i32,
+) -> Result<HistoryState, CommandError> {
+    if degrees % 90 != 0 {
+        return Err(CommandError::InvalidInput(format!(
+            "rotation must be a multiple of 90°, got {degrees}"
+        )));
+    }
+    if pages.is_empty() {
+        return Err(CommandError::InvalidInput("no pages specified".into()));
+    }
+    let quarter_turns = degrees / 90;
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.rotate_pages_request(pages, quarter_turns)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }

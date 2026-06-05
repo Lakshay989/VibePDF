@@ -99,6 +99,8 @@ Every open PDF lives behind an actor.
 
 **Why an actor:** PDFium's API is not thread-safe per document. The actor pattern serializes operations cheaply without making us hold a `Mutex<PdfDocument>` across the IPC boundary.
 
+**Why *also* a process-global lock:** PDFium is not thread-safe *across* documents either — two actor threads operating on their own documents still race on PDFium's global subsystems (render cache, page-state, document load/close) and SIGABRT/SIGSEGV. So the actor handles per-document ordering + the async boundary, and a single `pdf::document::PDFIUM_LOCK` serializes **every** PDFium FFI span (load, save, metadata, page lookup, rotate, render, and `FPDF_CloseDocument` on drop) across the whole process. Hold it around the minimal FFI span and never across a call that re-locks (the `Mutex` is not reentrant). Integration tests run single-threaded for the same reason — they open/drop their own documents, which can't take the crate-private lock.
+
 **Identity:** Each opened document gets a `DocumentId` (UUID). All commands take a `DocumentId` and the dispatcher routes the message to that actor's channel.
 
 **Lifetime:** Actors are dropped when the document is closed. If the actor panics, the document is reported as crashed; the user gets a recovery offer from auto-save state.

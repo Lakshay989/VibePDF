@@ -95,6 +95,7 @@ pub fn run() {
             commands::pdf::pdf_close,
             commands::pdf::pdf_render_page,
             commands::pdf::pdfium_version,
+            commands::pdf::pdf_rotate_pages,
             commands::save::pdf_save,
             commands::history::pdf_undo,
             commands::history::pdf_redo,
