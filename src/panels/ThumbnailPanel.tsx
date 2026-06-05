@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import { deletePages } from "@/ipc/delete-pages";
 import { renderPage } from "@/ipc/pdf";
 import { rotatePages } from "@/ipc/rotate";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
@@ -82,6 +83,21 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
     [documentId, bumpEpoch, setHistory],
   );
 
+  // SPEC: P2-PAGE-003 — delete a page, then bump the epoch (refresh both
+  // views) and sync the Undo button. Undoable, so no confirm dialog.
+  const del = useCallback(
+    async (page: number) => {
+      try {
+        const history = await deletePages(documentId, [page]);
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("delete failed", documentId, page, err);
+      }
+    },
+    [documentId, bumpEpoch, setHistory],
+  );
+
   // One shared observer for all tiles. All tiles mount at once (fixed
   // pageCount, no virtualization), so we can observe them straight from
   // the DOM after commit — no per-tile callback refs / timing dance.
@@ -139,6 +155,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
                 onJump(page + 1);
               }}
               onContextMenu={(x, y) => setMenu({ page, x, y })}
+              onDelete={() => void del(page)}
             />
           ))}
         </ul>
@@ -148,6 +165,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
           x={menu.x}
           y={menu.y}
           onRotate={(degrees) => void rotate(menu.page, degrees)}
+          onDelete={() => void del(menu.page)}
           onClose={() => setMenu(null)}
         />
       ) : null}
@@ -167,6 +185,7 @@ interface TileProps {
   isActive: boolean;
   onSelect: () => void;
   onContextMenu: (x: number, y: number) => void;
+  onDelete: () => void;
 }
 
 function ThumbTile({
@@ -180,6 +199,7 @@ function ThumbTile({
   isActive,
   onSelect,
   onContextMenu,
+  onDelete,
 }: TileProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -249,6 +269,15 @@ function ThumbTile({
         onContextMenu={(e) => {
           e.preventDefault();
           onContextMenu(e.clientX, e.clientY);
+        }}
+        onKeyDown={(e) => {
+          // SPEC: P2-PAGE-003 — Delete/Backspace removes the focused page
+          // (undoable). The tile is focusable, so this only fires when a
+          // thumbnail has keyboard focus.
+          if (e.key === "Delete" || e.key === "Backspace") {
+            e.preventDefault();
+            onDelete();
+          }
         }}
         title={`Page ${page + 1}`}
         aria-label={`Go to page ${page + 1}`}

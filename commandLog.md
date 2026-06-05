@@ -995,6 +995,44 @@ optimization item added in its place.
 
 ---
 
+### P2.B2 — Delete page(s) (this commit)
+
+```bash
+# No new deps. DeleteEdit<PdfDocument> + content-preserving inverse
+# (holding doc via create_new_pdf + FPDF_ImportPages). PDF WRITE PATH.
+
+# New fixture for the reference-integrity test (pure stdlib, committed):
+python3 tests/fixtures/basic/generate-links.py
+#   → tests/fixtures/basic/links.pdf (3 pages; page-1 link → page-3 object)
+
+npm run check
+#   tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (fix: backtick `PDFium` in 3 new doc comments.)
+
+npm run test
+#   85/85 (was 83 — +2 ipc/delete-pages).
+
+npm run test:rust
+#   delete_page.rs: 5 passed (+1 ignored artifact) —
+#     count drop+persist, undo restores count+ORDER, redo, OUT-OF-RANGE
+#     atomic error, and the CANARY:
+#       surviving_link_target_stays_correct — delete page 2, the page-1
+#       link still resolves to page 3 (now index 1). Object-refs survive
+#       renumbering → spec's "update internal references" holds for
+#       surviving targets WITHOUT any active rewrite.
+#   delete_page unit tests (range_string / validate): passed in-lib.
+
+# PDF write-path verification artifact (ignored test, run on demand):
+node scripts/cargo-test.mjs --test delete_page \
+  delete_writes_verification_artifact -- --ignored --nocapture
+#   → /tmp/vibepdf-verify-deleted.pdf (2 pages; also copied to ~/Desktop)
+```
+
+Left `[~]` pending the human cross-reader check + GUI flow. Active
+reference rewriting (dangling refs, reorder) deferred → BACKLOG (lopdf).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

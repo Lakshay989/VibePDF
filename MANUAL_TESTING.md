@@ -18,6 +18,9 @@ validity.
 - [ ] **`~/Desktop/vibepdf-verify-rotated.pdf`** (B1 rotate) — page 1 should
   render **rotated 90°** and the file must not be flagged corrupt.
   → on pass, flip **P2.B1** to `[x]`.
+- [ ] **`~/Desktop/vibepdf-verify-deleted.pdf`** (B2 delete) — **2 pages**
+  ("Page 1 (link to page 3)" then "Page 3"); page 2 gone; not corrupt.
+  → on pass, flip **P2.B2** to `[x]`.
 - [x] `~/Desktop/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -29,8 +32,13 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
 - [ ] **Live preview (pipeline):** scroll to ~page 3, then rotate that page.
   The **main view** should rotate *in place at page 3* — no blank flash, no
   scroll jump. (If it jumps to page 1, tell me — page-restore timing.)
-- [ ] **Undo/redo (A3):** after a rotate, **⌘Z** reverts both views and
-  **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable correctly.
+- [ ] **Delete (B2):** right-click a page thumbnail → **Delete page** (or
+  focus a thumbnail and press **Delete/Backspace**). The page vanishes, the
+  count drops, and the main view updates live. **⌘Z** brings it back in the
+  same position. ⌘S → reopen externally → page really gone.
+  → on pass, flip **P2.B2** to `[x]`.
+- [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
+  and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.
 - [ ] **Persist on save (B1):** rotate → **⌘S** → reopen the file in Preview
   externally → still rotated. Reopen in VibePDF → rotation persisted.
@@ -70,6 +78,7 @@ This one is finicky; follow the order exactly:
 | Step | Flips to `[x]` when |
 |---|---|
 | P2.B1 — Rotate | A (rotated PDF) + B (rotate/persist) pass |
+| P2.B2 — Delete | A (deleted PDF) + B (delete) pass |
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |
 | P1.E5 — E2E harness | D (`e2e.yml`) goes green |

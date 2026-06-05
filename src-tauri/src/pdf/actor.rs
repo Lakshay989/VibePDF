@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::error::CommandError;
 use crate::pdf::autosave;
+use crate::pdf::delete_page::DeleteEdit;
 use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
@@ -105,6 +106,12 @@ pub enum Message {
     RotatePages {
         pages: Vec<i32>,
         quarter_turns: i32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). Records a
+    /// content-preserving inverse on the undo stack and marks dirty.
+    DeletePages {
+        pages: Vec<i32>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
@@ -393,6 +400,25 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). Await-holding
+    /// convenience for tests; IPC uses `delete_pages_request`.
+    pub async fn delete_pages(&self, pages: Vec<i32>) -> Result<HistoryState, CommandError> {
+        let rx = self.delete_pages_request(pages)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn delete_pages_request(
+        &self,
+        pages: Vec<i32>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::DeletePages { pages, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -583,6 +609,18 @@ fn run_worker(
                 })
                 .apply(&mut doc)
                 {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::DeletePages { pages, reply } => {
+                // SPEC: P2-PAGE-003 — same edit/undo dance as rotate.
+                let result = match Box::new(DeleteEdit { pages }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

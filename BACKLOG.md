@@ -9,6 +9,17 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## Decisions to make (need a human call)
 
+- **Active reference rewriting needs a dict-level library (from P2.B2).**
+  pdfium-render's outline/link/destination API is read-only. So we can't
+  remove/rewrite references *to* a deleted page (they dangle) or fix
+  *index-based* references — and the same wall blocks **P2-PAGE-002 (reorder)**,
+  which the spec says must "update all internal references." Surviving
+  *object-ref* destinations already track renumbering for free (verified).
+  Decision: when reorder/full-reference-integrity is needed, add **`lopdf`**
+  (COS/dict access) alongside PDFium — a `docs/03_TECH_STACK.md` library
+  decision — and route the page-tree + reference edits through it. Until
+  then, B-track edits keep object-ref integrity but don't clean dangling refs.
+
 - **Thumbnail appearance in dark mode — match vs. true-colour.**
   Currently the sidebar thumbnails invert with the page in dark mode
   (shared `DARK_PAGE_FILTER`, commit `13e139c`) so the sidebar matches the

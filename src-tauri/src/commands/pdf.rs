@@ -186,6 +186,37 @@ pub async fn pdf_rotate_pages(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
+/// the page tree; the removed pages are preserved for undo. Marks the
+/// document dirty; returns the new history availability.
+#[tauri::command]
+pub async fn pdf_delete_pages(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+) -> Result<HistoryState, CommandError> {
+    if pages.is_empty() {
+        return Err(CommandError::InvalidInput("no pages specified".into()));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.delete_pages_request(pages)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// Serialize the live in-memory document to bytes (returned as a
 /// `number[]` over IPC). The edit-preview pipeline reloads PDF.js from
 /// these so the main view reflects in-memory edits (rotate, …) without a

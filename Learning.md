@@ -2847,6 +2847,67 @@ slow.
 
 ---
 
+### P2.B2 — Delete page(s)
+
+#### Problem
+
+Delete pages, renumber, keep internal references correct, and make it
+undoable. The hard parts: undo must restore the *content* of a deleted
+page (not just a blank), and the spec says "update internal references."
+
+#### Concepts learned
+
+- **PDF references are object refs, not indices — the key realization.** A
+  link/bookmark/destination points to a page *object* (`5 0 R`), not "page
+  3." So deleting page 2 and renumbering doesn't break a reference to page
+  3 — it still points to the same object, which is now page 2. "Update
+  internal references" mostly **falls out for free**; we verified it with a
+  fixture (`links.pdf`) whose page-1 link survives a deletion and tracks
+  page 3 to its new index. *What you can't fix* is references *to* the
+  deleted page (dangling) — and pdfium-render's outline/link API is
+  read-only, so that cleanup (and reorder's full rewrite) waits on a
+  dict-level library (`lopdf`) — BACKLOG.
+- **Undo by stashing, not snapshotting.** `DeleteEdit`'s inverse can't just
+  remember indices — it must remember *content*. So `apply` copies the
+  doomed pages into a fresh holding `PdfDocument` (`create_new_pdf` +
+  `copy_pages_from_document` / `FPDF_ImportPages`), serializes it to bytes,
+  and stores those bytes in the inverse `RestorePagesEdit`. Undo loads the
+  holding doc and re-imports the pages. Bounded (bytes ride the undo stack,
+  capped at `MAX_UNDO_DEPTH`).
+- **Order matters twice.** Delete **descending** (so removing page 1 doesn't
+  shift the index of page 3 you're about to remove). Re-insert **ascending**
+  at the original target indices (each insert only shifts still-pending,
+  larger targets). Both directions are tested.
+- **Validate before you mutate.** Sort + de-dup + range-check the whole
+  index list up front, so a bad index in a batch fails atomically rather
+  than half-deleting.
+- **Free inheritance.** Because delete is just another `Edit<PdfDocument>`
+  routed through the actor's message + epoch bump, it got live preview
+  (pipeline), undo/redo (A3), and autosave/crash-recovery (A2) with no new
+  wiring. The rails paid off.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/delete_page.rs` | `DeleteEdit` + content-preserving `RestorePagesEdit`; validate + range-string helpers (+ unit tests). |
+| `src-tauri/src/pdf/actor.rs` | `DeletePages` message + handle methods. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_delete_pages`. |
+| `src/ipc/delete-pages.ts` | `deletePages` wrapper. |
+| `src/tools/rotate/RotateMenu.tsx` | "Delete page" menu item. |
+| `src/panels/ThumbnailPanel.tsx` | Delete handler + Delete/Backspace key on a focused tile. |
+| `tests/fixtures/basic/links.pdf` (+ generator) | 3-page fixture with a page-1→page-3 link. |
+| `src-tauri/tests/delete_page.rs` | count/undo-order/redo/**reference-integrity**/atomic-error + artifact. |
+| `src/ipc/__tests__/delete-pages.test.ts` | Marshalling. |
+
+#### Further reading
+
+- PDF page tree + indirect references (PDF 32000-1 §7.7.3) — any PDF reference.
+- `FPDF_ImportPages` (page copy between documents) — PDFium docs.
+- COS/dict access for reference rewriting — https://docs.rs/lopdf (the deferred path).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

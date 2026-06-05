@@ -9,10 +9,12 @@ export interface RotateMenuProps {
   y: number;
   /** `degrees` is a multiple of 90 (positive = clockwise). */
   onRotate: (degrees: number) => void;
+  /** SPEC: P2-PAGE-003 — delete this page. */
+  onDelete: () => void;
   onClose: () => void;
 }
 
-export function RotateMenu({ x, y, onRotate, onClose }: RotateMenuProps) {
+export function RotateMenu({ x, y, onRotate, onDelete, onClose }: RotateMenuProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -46,18 +48,38 @@ export function RotateMenu({ x, y, onRotate, onClose }: RotateMenuProps) {
         <MenuItem label="Rotate right 90°" onClick={() => choose(90)} />
         <MenuItem label="Rotate left 90°" onClick={() => choose(-90)} />
         <MenuItem label="Rotate 180°" onClick={() => choose(180)} />
+        <div className="my-1 border-t border-neutral-200 dark:border-neutral-700" />
+        <MenuItem
+          label="Delete page"
+          danger
+          onClick={() => {
+            onDelete();
+            onClose();
+          }}
+        />
       </div>
     </>
   );
 }
 
-function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
+function MenuItem({
+  label,
+  onClick,
+  danger = false,
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
   return (
     <button
       role="menuitem"
       type="button"
       onClick={onClick}
-      className="block w-full px-3 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-700"
+      className={
+        "block w-full px-3 py-1.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-700 " +
+        (danger ? "text-red-600 dark:text-red-400" : "")
+      }
     >
       {label}
     </button>
