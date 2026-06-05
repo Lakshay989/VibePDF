@@ -48,9 +48,13 @@ interface NaturalPage {
 interface Props {
   doc: PDFDocumentProxy;
   documentId: string;
+  /** Edit epoch; bumped on each edit so cached page renders invalidate. */
+  epoch: number;
   zoom: number;
   fitMode: FitMode | null;
   darkMode: boolean;
+  /** Pinch / Ctrl+wheel zoom: called with the new absolute scale. */
+  onZoom?: (scale: number) => void;
 }
 
 export interface PageVirtualizerHandle {
@@ -84,7 +88,7 @@ function computeFitScale(
 
 export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
   function PageVirtualizer(
-    { doc, documentId, zoom, fitMode, darkMode },
+    { doc, documentId, epoch, zoom, fitMode, darkMode, onZoom },
     ref,
   ) {
     const [pages, setPages] = useState<NaturalPage[] | null>(null);
@@ -163,12 +167,34 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       );
     }, [pages, zoom, fitMode, containerSize]);
 
-    // Drop bitmap cache whenever the effective scale or theme
-    // changes. Both are in the per-slot cache key, so stale entries
-    // would never be re-used; clearing also frees memory promptly.
+    // Drop bitmap cache whenever the effective scale, theme, or edit
+    // epoch changes. All three are in the per-slot cache key, so stale
+    // entries would never be re-used; clearing also frees memory promptly.
+    // (Edit epoch matters: a 180° rotate leaves page dimensions unchanged,
+    // so without it a cached render would be served for the rotated page.)
     useEffect(() => {
       cacheRef.current.clear();
-    }, [effectiveScale, darkMode]);
+    }, [effectiveScale, darkMode, epoch]);
+
+    // Pinch-zoom (a trackpad pinch arrives as a Ctrl+wheel event on macOS)
+    // and Ctrl/Cmd+wheel. A non-passive listener so we can preventDefault
+    // the webview's own page zoom. Reads the live scale via a ref so the
+    // listener doesn't re-attach on every scale change.
+    const effectiveScaleRef = useRef(effectiveScale);
+    effectiveScaleRef.current = effectiveScale;
+    useEffect(() => {
+      const el = scrollRef.current;
+      if (!el || !onZoom) return;
+      const onWheel = (e: WheelEvent) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        // Exponential so symmetric in/out steps round-trip to the same scale.
+        const factor = Math.exp(-e.deltaY * 0.01);
+        onZoom(effectiveScaleRef.current * factor);
+      };
+      el.addEventListener("wheel", onWheel, { passive: false });
+      return () => el.removeEventListener("wheel", onWheel);
+    }, [onZoom]);
 
     // Track which page is currently at (or just below) the viewport top.
     useEffect(() => {
@@ -246,6 +272,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
                 doc={doc}
                 scale={effectiveScale}
                 documentId={documentId}
+                epoch={epoch}
                 darkMode={darkMode}
                 cache={cacheRef.current}
                 onMount={(el) => registerSlot(info.pageNumber, el)}
@@ -263,6 +290,7 @@ interface SlotProps {
   doc: PDFDocumentProxy;
   scale: number;
   documentId: string;
+  epoch: number;
   darkMode: boolean;
   cache: LruCache<HTMLCanvasElement>;
   onMount: (el: HTMLDivElement | null) => void;
@@ -273,6 +301,7 @@ function PageSlot({
   doc,
   scale,
   documentId,
+  epoch,
   darkMode,
   cache,
   onMount,
@@ -283,8 +312,8 @@ function PageSlot({
   const cacheKey = useMemo(() => {
     const dpr =
       typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    return `${documentId}:${natural.pageNumber}:${scale}:${dpr}:${darkMode ? "d" : "l"}`;
-  }, [documentId, natural.pageNumber, scale, darkMode]);
+    return `${documentId}:${epoch}:${natural.pageNumber}:${scale}:${dpr}:${darkMode ? "d" : "l"}`;
+  }, [documentId, epoch, natural.pageNumber, scale, darkMode]);
 
   useEffect(() => {
     onMount(containerRef.current);

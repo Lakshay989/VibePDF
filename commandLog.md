@@ -1033,6 +1033,25 @@ reference rewriting (dangling refs, reorder) deferred → BACKLOG (lopdf).
 
 ---
 
+### Bug fixes — viewer regressions + pinch zoom (this commit)
+
+```bash
+# Found by driving the real app (npm run dev). No test coverage — the page
+# virtualizer needs a real DOM/canvas/IntersectionObserver/PDF.js.
+#   1. doc switch kept the old page (no-blank swap + StrictMode left
+#      PageVirtualizer mounted) → setDoc(null) on switch, blank-free on edit.
+#   2. trackpad pinch didn't zoom → Ctrl/Cmd+wheel listener → setZoom.
+#   3. rotate 180° only updated the thumbnail (same dims → stale cache key)
+#      → put the edit epoch in the page-render cache key.
+
+npm run check    # tsc ✓  eslint ✓ (added WheelEvent global)  clippy ✓
+npm run test     # 85/85 (unchanged — viewer has no unit tests)
+```
+
+GUI-verified by the human after re-running `npm run dev`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -84,6 +84,13 @@ export function PdfViewer({ documentId, path }: Props) {
       : 0;
     lastDocIdRef.current = documentId;
 
+    // On a document *switch* (not an in-place edit reload), clear the view
+    // first so PageVirtualizer unmounts and remounts cleanly on the new
+    // document — otherwise it keeps the previous document's pages mounted
+    // (StrictMode makes the in-place swap unreliable). Edit reloads
+    // (same documentId, bumped epoch) skip this to stay blank-free.
+    if (!sameDocReload) setDoc(null);
+
     (async () => {
       try {
         const bytes =
@@ -315,9 +322,11 @@ export function PdfViewer({ documentId, path }: Props) {
               ref={virtRef}
               doc={doc}
               documentId={documentId}
+              epoch={epoch}
               zoom={zoom}
               fitMode={fitMode}
               darkMode={darkMode}
+              onZoom={setZoom}
             />
           ) : (
             <div className="p-4 text-sm text-neutral-500">Opening…</div>

@@ -32,6 +32,7 @@ export default [
         HTMLSelectElement: "readonly",
         RegExpExecArray: "readonly",
         requestAnimationFrame: "readonly",
+        WheelEvent: "readonly",
         IntersectionObserver: "readonly",
         IntersectionObserverCallback: "readonly",
         IntersectionObserverEntry: "readonly",

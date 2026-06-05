@@ -2908,6 +2908,52 @@ page (not just a blank), and the spec says "update internal references."
 
 ---
 
+### Bug fixes — viewer regressions from the edit-preview pipeline (+ pinch zoom)
+
+Three issues surfaced the moment a human drove the real app — none caught by
+tests (the page virtualizer needs a real DOM + canvas + IntersectionObserver
++ PDF.js, so it has no unit coverage).
+
+#### 1. Switching documents kept showing the old page
+
+The edit-preview pipeline's "no-blank swap" stopped nulling `doc` on a
+document switch, so `PageVirtualizer` (rendered only `{doc ? … }`, not
+keyed) stayed **mounted** across the switch and kept the previous
+document's pages — made worse by React **StrictMode** double-invoking the
+load effect. Fix: on a *switch* (documentId changed) `setDoc(null)` first
+so the virtualizer unmounts and remounts clean; an *edit reload* (same
+documentId, bumped epoch) still skips it to stay blank-free. **Lesson:** an
+in-place optimization quietly relied on the old unmount/remount to reset
+child state; keep the reset where state must be fresh.
+
+#### 2. Trackpad pinch / Ctrl+wheel didn't zoom
+
+There was never a wheel handler — zoom was toolbar-only. macOS delivers a
+trackpad pinch as a **Ctrl+wheel** event, so a non-passive `wheel` listener
+on the scroll container (so we can `preventDefault` the webview's own page
+zoom) maps it to `setZoom(scale × exp(-deltaY·0.01))`. The exponential
+factor makes equal in/out gestures round-trip to the same scale.
+
+#### 3. Rotate 180° updated only the thumbnail
+
+The page-render LRU is keyed `documentId:page:scale:dpr:dark`. A 90° rotate
+swaps width↔height (so scale/layout shifts → new key → re-render), but a
+**180° rotate leaves dimensions unchanged** → identical key → a *stale*
+cached canvas was served. Fix: put the **edit epoch in the cache key**, so
+any edit invalidates the cache by construction — immune to React's
+child-before-parent effect ordering (a parent "clear the cache" effect runs
+*after* the child slot already read it). **Lesson:** invalidate caches by
+*key*, not by a separate clear effect, when a child consumes the cache.
+
+#### Files
+
+`src/view/PdfViewer.tsx` (switch reset, pass `epoch`/`onZoom`),
+`src/view/PageVirtualizer.tsx` (epoch in cache key, wheel-zoom listener),
+`eslint.config.js` (`WheelEvent` global). GUI-verified — no unit coverage
+for the virtualizer.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
