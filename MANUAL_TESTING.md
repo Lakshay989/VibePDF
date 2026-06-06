@@ -71,6 +71,21 @@ This one is finicky; follow the order exactly:
   xvfb). If green → flip **P1.E5** to `[x]`. If red → paste me the failing
   step's log and I'll iterate.
 
+## E. Recent viewer fixes (`npm run dev`)
+
+From the round of GUI bugs found in real use. Rotate was confirmed working;
+the rest still want a pass.
+
+- [~] **Rotate fast-path** — instant, 90°/180° both update the main view.
+  *(Looked good; re-confirm the switch-back case below.)*
+- [ ] **Switch-back consistency** — rotate a page → switch tabs → switch
+  back. The **main page and thumbnail must both stay rotated** (the last
+  fix). And ⌘S → reopen in Preview → rotation persisted.
+- [ ] **Pinch / Ctrl+wheel zoom** — smooth, responsive (not crawling).
+- [ ] **Close tabs** — the **×** on each tab closes that PDF.
+- [ ] **Doc switch** — clicking between tabs always updates the main view
+  (no "invalid pdf", no stale page).
+
 ---
 
 ## Status flips waiting on the above
