@@ -38,6 +38,14 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## Deferred polish / tech debt
 
+- **Actor's cached page count goes stale after edits (found in P2.B3).**
+  `Message::GetPageCount` (and `pdf_open`'s `OpenedDocument.pageCount`)
+  return the count captured at *open*; after an insert/delete it's wrong.
+  `GetMetadata` re-reads live, so the fix is to have `GetPageCount` return
+  `doc.pages().len()` (and/or refresh the cached metadata on each mutating
+  message). Low impact today — the UI's page count comes from PDF.js, which
+  reloads via the edit epoch — but a trap waiting for the next consumer.
+
 - **D1 sidebar open/close animation** — the thumbnail panel snaps; a slide
   transition would feel better.
 - **Dark-mode load flash** — a freshly opened page can flash light before

@@ -21,6 +21,9 @@ validity.
 - [ ] **`~/Desktop/vibepdf-verify-deleted.pdf`** (B2 delete) — **2 pages**
   ("Page 1 (link to page 3)" then "Page 3"); page 2 gone; not corrupt.
   → on pass, flip **P2.B2** to `[x]`.
+- [ ] **`~/Desktop/vibepdf-verify-inserted.pdf`** (B3 insert) — **4 pages**:
+  "Page 1", then a **blank** page, then "Page 2", "Page 3"; not corrupt.
+  → on pass, flip **P2.B3** to `[x]`.
 - [x] `~/Desktop/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -37,6 +40,10 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   count drops, and the main view updates live. **⌘Z** brings it back in the
   same position. ⌘S → reopen externally → page really gone.
   → on pass, flip **P2.B2** to `[x]`.
+- [ ] **Insert blank (B3):** right-click a page thumbnail → **Insert blank
+  page after**. A blank page (same size) appears right after it; count goes
+  up; main view + thumbnails update. **⌘Z** removes it; ⌘S → reopen → blank
+  page present. → on pass, flip **P2.B3** to `[x]`.
 - [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.

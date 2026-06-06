@@ -217,6 +217,41 @@ pub async fn pdf_delete_pages(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P2-PAGE-004 — insert a blank page at `index` (0-based; `index ==
+/// page count` appends). When both `width` and `height` (points) are given
+/// they set the page size; otherwise it inherits the adjacent page's
+/// dimensions. Undoable, marks the document dirty.
+#[tauri::command]
+pub async fn pdf_insert_blank_page(
+    state: State<'_, AppState>,
+    id: String,
+    index: i32,
+    width: Option<f32>,
+    height: Option<f32>,
+) -> Result<HistoryState, CommandError> {
+    let size = match (width, height) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None,
+    };
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.insert_blank_page_request(index, size)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// Serialize the live in-memory document to bytes (returned as a
 /// `number[]` over IPC). The edit-preview pipeline reloads PDF.js from
 /// these so the main view reflects in-memory edits (rotate, …) without a

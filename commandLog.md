@@ -1100,6 +1100,33 @@ GUI-verified by the human (rotate instant; undo/switch still reload).
 
 ---
 
+### P2.B3 — Insert blank page (this commit)
+
+```bash
+# No new deps, no new fixture. Third page edit; inverse REUSES DeleteEdit
+# (B2). PDF WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+npm run test    # 97/97 (+3 ipc/insert-blank)
+npm run test:rust
+#   insert_blank.rs: 4 passed (+1 ignored artifact) —
+#     count+persist, inherit adjacent dims (612×792), undo-removes/
+#     redo-reinserts, prepend+append+out-of-range (atomic).
+#   (One test fix: handle.page_count() is the CACHED open-time count and is
+#    stale after an edit → use metadata_live() (re-reads). Logged the cache
+#    staleness to BACKLOG.)
+
+# PDF write-path verification artifact (ignored, run on demand):
+node scripts/cargo-test.mjs --test insert_blank \
+  insert_writes_verification_artifact -- --ignored --nocapture
+#   → /tmp/vibepdf-verify-inserted.pdf (4 pages; also ~/Desktop)
+file /tmp/vibepdf-verify-inserted.pdf   # PDF 1.4, 4 pages
+```
+
+Left `[~]` pending the human cross-reader check + GUI flow.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -9,12 +9,21 @@ export interface RotateMenuProps {
   y: number;
   /** `degrees` is a multiple of 90 (positive = clockwise). */
   onRotate: (degrees: number) => void;
+  /** SPEC: P2-PAGE-004 — insert a blank page after this one. */
+  onInsert: () => void;
   /** SPEC: P2-PAGE-003 — delete this page. */
   onDelete: () => void;
   onClose: () => void;
 }
 
-export function RotateMenu({ x, y, onRotate, onDelete, onClose }: RotateMenuProps) {
+export function RotateMenu({
+  x,
+  y,
+  onRotate,
+  onInsert,
+  onDelete,
+  onClose,
+}: RotateMenuProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -49,6 +58,13 @@ export function RotateMenu({ x, y, onRotate, onDelete, onClose }: RotateMenuProp
         <MenuItem label="Rotate left 90°" onClick={() => choose(-90)} />
         <MenuItem label="Rotate 180°" onClick={() => choose(180)} />
         <div className="my-1 border-t border-neutral-200 dark:border-neutral-700" />
+        <MenuItem
+          label="Insert blank page after"
+          onClick={() => {
+            onInsert();
+            onClose();
+          }}
+        />
         <MenuItem
           label="Delete page"
           danger

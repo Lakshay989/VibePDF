@@ -2954,6 +2954,58 @@ for the virtualizer.
 
 ---
 
+### P2.B3 — Insert blank page
+
+#### Problem
+
+Insert a blank page at a position, undoably, inheriting the neighbour's
+size and orientation. After rotate (B1) and delete (B2), this is the third
+page edit — and the shortest, because it leans on what's already there.
+
+#### Concepts learned
+
+- **The inverse of an insert is a delete — so reuse it.** `InsertBlankEdit`
+  doesn't define its own undo logic; `apply` inserts the page and returns a
+  `DeleteEdit { pages: [index] }` (the B2 type). Undo runs that delete
+  (which itself returns a re-insert for redo). Two edits compose into a
+  full undo/redo cycle with almost no new code — the payoff of the generic
+  `Edit<T>` design from A3.
+- **Orientation = dimensions.** A page is "landscape" because it's wider
+  than tall — there's no separate orientation flag. So inheriting the
+  neighbour's width/height (via `create_page_at_index` with a `Custom`
+  paper size) satisfies the spec's "size *and* orientation" in one step.
+- **Insert can't use the rotate fast-path.** Rotate previews cosmetically
+  (a `getViewport` rotation) because the page set is unchanged. Insert
+  changes the page *count*, so the main view must actually reload (bump the
+  epoch, like delete). Cosmetic tricks only work when the page tree's shape
+  is stable.
+- **Append is index == count.** Unlike delete (valid range `0..count`),
+  insert's valid range is `0..=count` — inserting *at* the end appends.
+  Off-by-one in the bound check is a real bug class; tested at both ends.
+- **A cached value quietly went stale.** The actor's `GetPageCount` returns
+  the count captured at *open*, so a test that read it after an insert saw
+  the old number. Fix in the test (use the live `GetMetadata` re-read);
+  logged the real cache-staleness as a backlog trap.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/insert_blank.rs` | `InsertBlankEdit` (`Edit<PdfDocument>`) + adjacent-page size inheritance; inverse = `DeleteEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `InsertBlankPage` message + handle methods. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_insert_blank_page` (optional `width`/`height`). |
+| `src/ipc/insert-blank.ts` | `insertBlankPage` wrapper. |
+| `src/tools/rotate/RotateMenu.tsx`, `src/panels/ThumbnailPanel.tsx` | "Insert blank page after" + handler (full-reload preview). |
+| `src-tauri/tests/insert_blank.rs` | count/inherit-dims/undo-redo/prepend-append/out-of-range + artifact. |
+| `src/ipc/__tests__/insert-blank.test.ts` | Marshalling. |
+
+#### Further reading
+
+- `FPDFPage_New` (create a blank page) — PDFium docs.
+- PDF page boxes / MediaBox (size = the page rectangle) — PDF 32000-1 §14.11.2.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

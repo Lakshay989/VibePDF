@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { deletePages } from "@/ipc/delete-pages";
+import { insertBlankPage } from "@/ipc/insert-blank";
 import { renderPage } from "@/ipc/pdf";
 import { rotatePages } from "@/ipc/rotate";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
@@ -111,6 +112,22 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
     [documentId, bumpEpoch, setHistory],
   );
 
+  // SPEC: P2-PAGE-004 — insert a blank page after `page`. A page-tree
+  // change, so bump the epoch (full reload, like delete) — not the cosmetic
+  // rotate fast-path.
+  const insert = useCallback(
+    async (page: number) => {
+      try {
+        const history = await insertBlankPage(documentId, page + 1);
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("insert failed", documentId, page, err);
+      }
+    },
+    [documentId, bumpEpoch, setHistory],
+  );
+
   // One shared observer for all tiles. All tiles mount at once (fixed
   // pageCount, no virtualization), so we can observe them straight from
   // the DOM after commit — no per-tile callback refs / timing dance.
@@ -179,6 +196,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
           x={menu.x}
           y={menu.y}
           onRotate={(degrees) => void rotate(menu.page, degrees)}
+          onInsert={() => void insert(menu.page)}
           onDelete={() => void del(menu.page)}
           onClose={() => setMenu(null)}
         />

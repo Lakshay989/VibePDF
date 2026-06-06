@@ -30,6 +30,7 @@ use uuid::Uuid;
 use crate::error::CommandError;
 use crate::pdf::autosave;
 use crate::pdf::delete_page::DeleteEdit;
+use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
@@ -112,6 +113,14 @@ pub enum Message {
     /// content-preserving inverse on the undo stack and marks dirty.
     DeletePages {
         pages: Vec<i32>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-004 — insert a blank page at `index` (0-based; `index
+    /// == page_count` appends). `size` (w, h in points) overrides the
+    /// inherited adjacent-page dimensions. Undoable, marks dirty.
+    InsertBlankPage {
+        index: i32,
+        size: Option<(f32, f32)>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
@@ -419,6 +428,30 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-004 — insert a blank page at `index`. Await-holding
+    /// convenience for tests; IPC uses `insert_blank_page_request`.
+    pub async fn insert_blank_page(
+        &self,
+        index: i32,
+        size: Option<(f32, f32)>,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.insert_blank_page_request(index, size)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn insert_blank_page_request(
+        &self,
+        index: i32,
+        size: Option<(f32, f32)>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::InsertBlankPage { index, size, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -621,6 +654,18 @@ fn run_worker(
             Message::DeletePages { pages, reply } => {
                 // SPEC: P2-PAGE-003 — same edit/undo dance as rotate.
                 let result = match Box::new(DeleteEdit { pages }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::InsertBlankPage { index, size, reply } => {
+                // SPEC: P2-PAGE-004 — insert; inverse is a delete.
+                let result = match Box::new(InsertBlankEdit { index, size }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

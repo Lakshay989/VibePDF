@@ -97,6 +97,7 @@ pub fn run() {
             commands::pdf::pdfium_version,
             commands::pdf::pdf_rotate_pages,
             commands::pdf::pdf_delete_pages,
+            commands::pdf::pdf_insert_blank_page,
             commands::pdf::pdf_get_bytes,
             commands::save::pdf_save,
             commands::history::pdf_undo,
