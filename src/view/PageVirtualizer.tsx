@@ -11,6 +11,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { renderPageOnDoc } from "@/view/render-page";
 import { LruCache } from "@/view/page-cache";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
+import { useDocRotations } from "@/state/rotation-preview-store";
 import type { FitMode } from "@/state/view-store";
 
 // SPEC: P1-VIEW-010 — dark-mode page invert. We apply a CSS filter
@@ -175,11 +176,29 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       return () => ro.disconnect();
     }, []);
 
+    // Cosmetic per-page rotations (the rotate fast-path). Apply them to the
+    // measured dimensions — a 90°/270° page is laid out (and rendered)
+    // landscape — so the view reflects a rotation without re-parsing.
+    const rotations = useDocRotations(documentId);
+    const effectivePages = useMemo(() => {
+      if (!pages) return null;
+      return pages.map((p) => {
+        const rotation = rotations[p.pageNumber - 1] ?? 0;
+        const swap = rotation % 180 === 90;
+        return {
+          pageNumber: p.pageNumber,
+          width: swap ? p.height : p.width,
+          height: swap ? p.width : p.height,
+          rotation,
+        };
+      });
+    }, [pages, rotations]);
+
     const effectiveScale = useMemo(() => {
-      if (!pages || pages.length === 0) return zoom;
+      if (!effectivePages || effectivePages.length === 0) return zoom;
       if (!fitMode) return zoom;
       if (!containerSize) return zoom;
-      const first = pages[0];
+      const first = effectivePages[0];
       return computeFitScale(
         fitMode,
         containerSize.w,
@@ -187,7 +206,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
         first.width,
         first.height,
       );
-    }, [pages, zoom, fitMode, containerSize]);
+    }, [effectivePages, zoom, fitMode, containerSize]);
 
     // Drop bitmap cache whenever the effective scale, theme, or edit
     // epoch changes. All three are in the per-slot cache key, so stale
@@ -289,14 +308,15 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
           <div className="mx-auto mt-8 max-w-lg p-4 text-sm text-red-700 dark:text-red-300">
             {error}
           </div>
-        ) : !pages ? (
+        ) : !effectivePages ? (
           <div className="p-4 text-sm text-neutral-500">Reading pages…</div>
         ) : (
           <div className="flex flex-col items-center gap-4 py-4">
-            {pages.map((info) => (
+            {effectivePages.map((info) => (
               <PageSlot
                 key={info.pageNumber}
                 natural={info}
+                rotation={info.rotation}
                 doc={doc}
                 scale={effectiveScale}
                 documentId={documentId}
@@ -315,6 +335,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
 
 interface SlotProps {
   natural: NaturalPage;
+  rotation: number;
   doc: PDFDocumentProxy;
   scale: number;
   documentId: string;
@@ -326,6 +347,7 @@ interface SlotProps {
 
 function PageSlot({
   natural,
+  rotation,
   doc,
   scale,
   documentId,
@@ -340,8 +362,8 @@ function PageSlot({
   const cacheKey = useMemo(() => {
     const dpr =
       typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    return `${documentId}:${epoch}:${natural.pageNumber}:${scale}:${dpr}:${darkMode ? "d" : "l"}`;
-  }, [documentId, epoch, natural.pageNumber, scale, darkMode]);
+    return `${documentId}:${epoch}:${natural.pageNumber}:${rotation}:${scale}:${dpr}:${darkMode ? "d" : "l"}`;
+  }, [documentId, epoch, natural.pageNumber, rotation, scale, darkMode]);
 
   useEffect(() => {
     onMount(containerRef.current);
@@ -393,6 +415,7 @@ function PageSlot({
       pageNumber: natural.pageNumber,
       scale,
       canvas,
+      rotation,
     })
       .then(() => {
         if (cancelled) return;
@@ -408,7 +431,7 @@ function PageSlot({
     return () => {
       cancelled = true;
     };
-  }, [visible, cacheKey, cache, doc, natural.pageNumber, scale, darkMode]);
+  }, [visible, cacheKey, cache, doc, natural.pageNumber, rotation, scale, darkMode]);
 
   return (
     <div

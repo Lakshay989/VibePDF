@@ -1076,6 +1076,30 @@ npm run test     # 85/85 (viewer still has no unit coverage)
 
 ---
 
+### Perf — rotate viewport fast-path (this commit)
+
+```bash
+# Make the common edit (rotate) instant even on a 1300-page book: instead
+# of reloading the whole document, preview the rotation cosmetically via
+# PDF.js getViewport({ rotation }) while PDFium keeps the real /Rotate.
+#
+#   - rotation-preview-store.ts: cosmetic per-(doc,page) rotation; reset on
+#     any reload (reloaded bytes carry the real rotation).
+#   - render-page.ts: renderPageOnDoc forwards `rotation` to getViewport.
+#   - PageVirtualizer: per-page rotation → swap layout dims + render + cache
+#     key. PdfViewer: resetDoc on (re)load.
+#   - ThumbnailPanel: rotate updates the cosmetic store (NOT the epoch → no
+#     full reload); the page's thumbnail re-renders from PDFium.
+#   delete / undo / redo still do the full reload (BACKLOG).
+
+npm run check   # tsc ✓  eslint ✓  clippy ✓
+npm run test    # 92/92 (+7: rotation-preview-store ×4, render rotation ×3)
+```
+
+GUI-verified by the human (rotate instant; undo/switch still reload).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -22,6 +22,7 @@ import {
   saveViewSettings,
 } from "@/state/view-persistence";
 import { useDocEpoch } from "@/state/edit-epoch-store";
+import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
 
 interface Props {
@@ -81,6 +82,7 @@ export function PdfViewer({ documentId, path }: Props) {
   // cost — incremental preview is tracked in BACKLOG.
   const lastDocIdRef = useRef<string | null>(null);
   const initialPageRef = useRef(1);
+  const resetRotations = useRotationPreviewStore((s) => s.resetDoc);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +94,9 @@ export function PdfViewer({ documentId, path }: Props) {
       : 1;
     lastDocIdRef.current = documentId;
     setDoc(null);
+    // The (re)loaded bytes carry the real /Rotate, so any cosmetic rotation
+    // preview for this doc starts over at 0.
+    resetRotations(documentId);
 
     (async () => {
       try {
@@ -117,7 +122,7 @@ export function PdfViewer({ documentId, path }: Props) {
       void localDoc?.destroy();
       setDoc(null);
     };
-  }, [path, epoch, documentId]);
+  }, [path, epoch, documentId, resetRotations]);
 
   // SPEC: P1-VIEW-006 — restore persisted zoom + fit-mode on open.
   useEffect(() => {

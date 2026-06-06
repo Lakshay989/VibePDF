@@ -23,6 +23,10 @@ import { rotatePages } from "@/ipc/rotate";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import {
+  useDocRotations,
+  useRotationPreviewStore,
+} from "@/state/rotation-preview-store";
 import { RotateMenu } from "@/tools/rotate/RotateMenu";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
 
@@ -63,24 +67,28 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   );
   const epoch = useDocEpoch(documentId);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const rotations = useDocRotations(documentId);
+  const rotatePreview = useRotationPreviewStore((s) => s.rotate);
   const setHistory = useHistoryStore((s) => s.setHistory);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // SPEC: P2-PAGE-001 — rotate one page, then bump the edit epoch (which
-  // refreshes the thumbnails + reloads the main view) and sync the Undo
-  // button state from the returned history.
+  // SPEC: P2-PAGE-001 — rotate one page. PDFium holds the real /Rotate; the
+  // cosmetic rotation store previews it in the main view *without* a full
+  // re-parse (the fast path). We do NOT bump the edit epoch — only update
+  // the per-page rotation (the main view + this page's thumbnail react to
+  // it) and sync the Undo button. Undo/redo go through the full reload.
   const rotate = useCallback(
     async (page: number, degrees: number) => {
       try {
         const history = await rotatePages(documentId, [page], degrees);
-        bumpEpoch(documentId);
+        rotatePreview(documentId, page, degrees);
         setHistory(documentId, history);
       } catch (err) {
         console.warn("rotate failed", documentId, page, err);
       }
     },
-    [documentId, bumpEpoch, setHistory],
+    [documentId, rotatePreview, setHistory],
   );
 
   // SPEC: P2-PAGE-003 — delete a page, then bump the epoch (refresh both
@@ -148,6 +156,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
               dpr={dpr}
               darkMode={darkMode}
               version={epoch}
+              rotation={rotations[page] ?? 0}
               shouldLoad={visible.has(page)}
               isActive={active === page}
               onSelect={() => {
@@ -179,8 +188,10 @@ interface TileProps {
   page: number;
   dpr: number;
   darkMode: boolean;
-  /** Render token; bumped after an edit (rotate) to force a re-render. */
+  /** Render token; bumped on an edit (delete / reload) to force a re-render. */
   version: number;
+  /** Cosmetic rotation (degrees) for this page; a change re-renders the tile. */
+  rotation: number;
   shouldLoad: boolean;
   isActive: boolean;
   onSelect: () => void;
@@ -195,6 +206,7 @@ function ThumbTile({
   dpr,
   darkMode,
   version,
+  rotation,
   shouldLoad,
   isActive,
   onSelect,
@@ -203,16 +215,18 @@ function ThumbTile({
 }: TileProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  // The render token this tile last loaded. Kept in a ref (not deps) so
-  // setting `url` doesn't re-run the effect (which would revoke the blob
-  // URL we just handed to <img>). The effect re-runs only when `version`
-  // changes (an edit) — then we invalidate the cache and re-render.
-  const loadedVersionRef = useRef(-1);
+  // The (version, rotation) this tile last loaded, as a string key. Kept in
+  // a ref (not deps) so setting `url` doesn't re-run the effect (which would
+  // revoke the blob URL we just handed to <img>). The effect re-runs only
+  // when the version (an edit) or the rotation changes — then we invalidate
+  // the cache and re-render (PDFium applies the real /Rotate).
+  const loadedKeyRef = useRef("");
 
   useEffect(() => {
-    if (!shouldLoad || loadedVersionRef.current === version) return;
-    const isRefresh = version > 0; // 0 is the initial load; >0 is an edit
-    loadedVersionRef.current = version;
+    const loadKey = `${version}:${rotation}`;
+    if (!shouldLoad || loadedKeyRef.current === loadKey) return;
+    const isRefresh = loadedKeyRef.current !== ""; // first load isn't a refresh
+    loadedKeyRef.current = loadKey;
     let cancelled = false;
     let objectUrl: string | null = null;
 
@@ -259,7 +273,7 @@ function ThumbTile({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [shouldLoad, version, doc, documentId, page, dpr]);
+  }, [shouldLoad, version, rotation, doc, documentId, page, dpr]);
 
   return (
     <li className="flex flex-col items-center">

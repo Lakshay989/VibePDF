@@ -19,6 +19,13 @@ export interface RenderPageOnDocInput {
    * `window.devicePixelRatio`.
    */
   dpr?: number;
+  /**
+   * Extra clockwise rotation in degrees (a multiple of 90), *added* to the
+   * page's own rotation. Used for the rotate fast-path: PDFium holds the
+   * real `/Rotate`, and the main view previews it via the viewport rotation
+   * without re-parsing the document. Defaults to 0.
+   */
+  rotation?: number;
 }
 
 export async function loadDocument(
@@ -42,7 +49,12 @@ export async function renderPageOnDoc(
     (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
   const page = await input.doc.getPage(input.pageNumber);
   // Render the backing store at the physical resolution (scale × dpr)…
-  const viewport = page.getViewport({ scale: input.scale * dpr });
+  // `rotation` (added to the page's own) is how the rotate fast-path
+  // previews a rotation; 90/270 swap the viewport's width and height.
+  const viewport = page.getViewport({
+    scale: input.scale * dpr,
+    rotation: input.rotation ?? 0,
+  });
   input.canvas.width = Math.floor(viewport.width);
   input.canvas.height = Math.floor(viewport.height);
   // …but display it at the logical (CSS) size, so the browser

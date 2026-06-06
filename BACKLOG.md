@@ -58,15 +58,16 @@ the current roadmap phase. When one is picked up, move it into the relevant
   recovery copy; a `std::process::exit` that skips actor `Drop` could leave
   a stale copy, causing a spurious recovery offer after a *clean* quit.
   Moot until edits create copies (B-steps); revisit then.
-- **Edit-preview is a full re-parse + remount per edit.** The pipeline
-  reloads PDF.js from the whole document on every edit/undo/redo *and*
-  remounts the page virtualizer (the no-blank in-place swap was reverted —
-  it was unreliable under StrictMode: stale pages, "invalid pdf"). Correct
-  and uniform, but a large doc (e.g. a 1300-page book) blanks and re-parses
-  on each edit. Optimizations: re-render only the affected page(s); a
-  rotate-only PDF.js viewport-rotation fast path; reuse measured page
-  dimensions across reloads; and the `tauri::ipc::Response` raw-bytes
-  upgrade (also above). Do when a large PDF feels slow.
+- **Edit-preview re-parses the whole document per edit (except rotate).**
+  **Rotate** now uses a fast path — a cosmetic PDF.js viewport rotation while
+  PDFium holds the real `/Rotate`, no reload (`rotation-preview-store.ts`).
+  But **delete / undo / redo** still reload PDF.js from the whole document
+  (and remount the virtualizer — the no-blank in-place swap was reverted as
+  unreliable). On a large doc (1300-page book) those blank + re-parse.
+  Remaining optimizations: re-render only the affected page(s) on delete;
+  reuse measured page dimensions across reloads; make undo/redo of a rotate
+  also cosmetic (they currently reload); and the `tauri::ipc::Response`
+  raw-bytes upgrade (also above). Do when a large PDF feels slow.
 - **External-edit reload / file watching.** If the user edits an open PDF in
   another app (Preview, etc.), VibePDF doesn't notice — the preview is stale
   and re-opening just focuses the existing tab. Watch the file's mtime (or a
