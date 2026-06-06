@@ -1151,6 +1151,31 @@ Left `[~]` pending the human cross-reader check + GUI flow.
 
 ---
 
+### P2.C2 — Extract pages to a new PDF (this commit)
+
+```bash
+# No new deps. First Track-C feature + first that WRITES A NEW FILE (not an
+# edit → no undo/dirty). Reuses create_new_pdf + copy_pages_from_document
+# (from delete's undo) + save_document (A1 verified write). PDF WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (one fix: exactOptionalPropertyTypes — ZoomToolbar onExtract typed
+#    `(() => void) | undefined` to allow the no-doc case.)
+npm run test    # 108/108 (+8: page-range ×6, ipc/extract ×2)
+npm run test:rust
+#   extract.rs: 3 passed (+1 ignored artifact) — selected pages, single/all,
+#   out-of-range + empty write nothing. Full suite green.
+
+# PDF write-path artifact (ignored, on demand):
+node scripts/cargo-test.mjs --test extract \
+  extract_writes_verification_artifact -- --ignored --nocapture
+#   → /tmp/vibepdf-verify-extracted.pdf (2 pages; also ~/Desktop)
+```
+
+Left `[~]` pending the human cross-reader check. Unblocks C3 (split).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

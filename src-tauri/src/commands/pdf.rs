@@ -5,6 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
+use crate::pdf::document::SaveOutcome;
 use crate::pdf::render::{ImageFormat, RenderedPage};
 use crate::pdf::undo::HistoryState;
 use crate::AppState;
@@ -287,6 +288,37 @@ pub async fn pdf_crop_page(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.crop_page_request(page, rect)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P2-PAGE-006 — extract `pages` (0-based) of the document into a new
+/// PDF at `dest`. Read-only on the source; returns the write outcome.
+#[tauri::command]
+pub async fn pdf_extract_pages(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    dest: String,
+) -> Result<SaveOutcome, CommandError> {
+    if pages.is_empty() {
+        return Err(CommandError::InvalidInput("no pages specified".into()));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.extract_pages_request(pages, std::path::PathBuf::from(dest))?
     };
 
     rx.await

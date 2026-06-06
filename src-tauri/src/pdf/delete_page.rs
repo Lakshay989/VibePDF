@@ -36,7 +36,8 @@ struct RestorePagesEdit {
 
 /// 0-based indices → a 1-based `PDFium` page-range string, e.g.
 /// `[1, 3, 4]` → `"2,4,5"`. (`FPDF_ImportPages` ranges are 1-based.)
-fn range_string(indices: &[i32]) -> String {
+/// Shared with `pdf::extract` (P2.C2).
+pub(crate) fn range_string(indices: &[i32]) -> String {
     indices
         .iter()
         .map(|i| (i + 1).to_string())
@@ -47,8 +48,8 @@ fn range_string(indices: &[i32]) -> String {
 /// Normalize a caller-supplied index list: sort ascending, de-dup, and
 /// validate every entry against `count`. Returns the clean list or a
 /// typed error *before* any mutation (so a bad index can't leave the
-/// document half-edited).
-fn validate(mut indices: Vec<i32>, count: i32) -> Result<Vec<i32>, CommandError> {
+/// document half-edited). Shared with `pdf::extract` (P2.C2).
+pub(crate) fn validate(mut indices: Vec<i32>, count: i32) -> Result<Vec<i32>, CommandError> {
     indices.sort_unstable();
     indices.dedup();
     if indices.is_empty() {

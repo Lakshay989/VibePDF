@@ -27,6 +27,9 @@ validity.
 - [ ] **`~/Desktop/vibepdf-verify-cropped.pdf`** (B4 crop) — page 1 shows
   only its **centre** (100pt trimmed each edge); pages 2–3 full; not corrupt.
   → on pass, flip **P2.B4** to `[x]`.
+- [ ] **`~/Desktop/vibepdf-verify-extracted.pdf`** (C2 extract) — **2 pages**:
+  "Page 1 (link to page 3)" and "Page 3"; renders correctly; not corrupt.
+  → on pass, flip **P2.C2** to `[x]`.
 - [x] `~/Desktop/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -51,6 +54,10 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   Apply. The page shows only the cropped region (main view + thumbnail).
   **Reset crop** restores the full page; **⌘Z** undoes; ⌘S → reopen → cropped.
   → on pass, flip **P2.B4** to `[x]`.
+- [ ] **Extract (C2):** in the viewer toolbar click **Extract…** → enter a
+  range (e.g. `1,3`) → a save dialog opens → pick a path. The new PDF has
+  exactly those pages and opens cleanly. (The open document is unchanged.)
+  → on pass, flip **P2.C2** to `[x]`.
 - [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.
@@ -110,6 +117,7 @@ the rest still want a pass.
 | P2.B2 — Delete | A (deleted PDF) + B (delete) pass |
 | P2.B3 — Insert blank | A (inserted PDF) + B (insert) pass |
 | P2.B4 — Crop | A (cropped PDF) + B (crop) pass |
+| P2.C2 — Extract | A (extracted PDF) + B (extract) pass |
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |
 | P1.E5 — E2E harness | D (`e2e.yml`) goes green |

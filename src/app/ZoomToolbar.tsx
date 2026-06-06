@@ -19,7 +19,13 @@ function nextZoom(current: number, direction: 1 | -1): number {
   return lower ?? MIN_ZOOM;
 }
 
-export function ZoomToolbar() {
+export interface ZoomToolbarProps {
+  /** SPEC: P2-PAGE-006 — open the extract-pages dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onExtract?: (() => void) | undefined;
+}
+
+export function ZoomToolbar({ onExtract }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
   const setZoom = useViewStore((s) => s.setZoom);
@@ -117,6 +123,17 @@ export function ZoomToolbar() {
           </option>
         ))}
       </select>
+
+      {onExtract ? (
+        <button
+          type="button"
+          onClick={onExtract}
+          title="Extract pages to a new PDF"
+          className="ml-2 rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Extract…
+        </button>
+      ) : null}
 
       <span className="ml-auto text-neutral-300 dark:text-neutral-700">|</span>
       <label className="flex items-center gap-1" title="Theme">

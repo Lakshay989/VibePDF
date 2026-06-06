@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { loadDocument } from "@/view/render-page";
@@ -9,7 +10,9 @@ import {
 } from "@/view/PageVirtualizer";
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
+import { ExtractDialog } from "@/app/ExtractDialog";
 import { SearchBar } from "@/app/SearchBar";
+import { extractPages } from "@/ipc/extract";
 import { useDarkMode } from "@/app/use-dark-mode";
 import { OutlinePanel } from "@/panels/OutlinePanel";
 import { ThumbnailPanel } from "@/panels/ThumbnailPanel";
@@ -55,6 +58,26 @@ export function PdfViewer({ documentId, path }: Props) {
   // SPEC: edit-preview pipeline — bumped on every edit/undo/redo; drives
   // the reload-from-actor-bytes effect below.
   const epoch = useDocEpoch(documentId);
+
+  // SPEC: P2-PAGE-006 — extract pages: pick a range, then a native save
+  // dialog, then write the new PDF. Read-only on the open document.
+  const [extractOpen, setExtractOpen] = useState(false);
+  const handleExtract = useCallback(
+    async (pages: number[]) => {
+      setExtractOpen(false);
+      try {
+        const dest = await saveDialog({
+          defaultPath: "extracted.pdf",
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+        if (typeof dest !== "string") return; // user cancelled the dialog
+        await extractPages(documentId, pages, dest);
+      } catch (err) {
+        console.warn("extract failed", documentId, err);
+      }
+    },
+    [documentId],
+  );
 
   // Search state subscriptions (kept narrow to avoid extra renders).
   const searchOpen = useSearchStore((s) => s.isOpen);
@@ -289,8 +312,14 @@ export function PdfViewer({ documentId, path }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <ZoomToolbar />
+      <ZoomToolbar onExtract={doc ? () => setExtractOpen(true) : undefined} />
       <SearchBar />
+      <ExtractDialog
+        open={extractOpen}
+        pageCount={doc?.numPages ?? 0}
+        onExtract={(pages) => void handleExtract(pages)}
+        onClose={() => setExtractOpen(false)}
+      />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (
           <ThumbnailPanel

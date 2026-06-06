@@ -31,6 +31,7 @@ use crate::error::CommandError;
 use crate::pdf::autosave;
 use crate::pdf::crop::CropEdit;
 use crate::pdf::delete_page::DeleteEdit;
+use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
@@ -130,6 +131,13 @@ pub enum Message {
         page: i32,
         rect: Option<(f32, f32, f32, f32)>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-006 — extract `pages` (0-based) into a new PDF at
+    /// `dest`. Read-only on the source: no mutation, no undo, no dirty.
+    ExtractPages {
+        pages: Vec<i32>,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<SaveOutcome, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
     /// recovery copy iff the document is dirty; no reply (best-effort).
@@ -484,6 +492,30 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-006 — extract `pages` into a new PDF at `dest`.
+    /// Await-holding convenience for tests; IPC uses `extract_pages_request`.
+    pub async fn extract_pages(
+        &self,
+        pages: Vec<i32>,
+        dest: PathBuf,
+    ) -> Result<SaveOutcome, CommandError> {
+        let rx = self.extract_pages_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn extract_pages_request(
+        &self,
+        pages: Vec<i32>,
+        dest: PathBuf,
+    ) -> Result<oneshot::Receiver<Result<SaveOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExtractPages { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -718,6 +750,11 @@ fn run_worker(
                     Err(e) => Err(e),
                 };
                 let _ = reply.send(result);
+            }
+            Message::ExtractPages { pages, dest, reply } => {
+                // SPEC: P2-PAGE-006 — read-only: build a new PDF from the
+                // source pages. No undo, no dirty (the open doc is unchanged).
+                let _ = reply.send(extract_pages(&doc, pages, &dest));
             }
             Message::Autosave => {
                 // SPEC: P2.A2 — write a recovery copy only when dirty.

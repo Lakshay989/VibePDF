@@ -3,6 +3,7 @@ pub mod autosave;
 pub mod crop;
 pub mod delete_page;
 pub mod document;
+pub mod extract;
 pub mod insert_blank;
 pub mod render;
 pub mod rotate;

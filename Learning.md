@@ -3061,6 +3061,60 @@ undo and "reset" both work.
 
 ---
 
+### P2.C2 — Extract pages to a new PDF
+
+#### Problem
+
+Produce a new PDF containing exactly the chosen pages, with their resources
+(fonts/images) intact — the first Track-C feature, and the first that
+*writes a different file* rather than editing the open one.
+
+#### Concepts learned
+
+- **Not every operation is an `Edit`.** Rotate/delete/insert/crop mutate the
+  open document and live on the undo stack. Extract is *read-only* on the
+  source — it builds and saves a *new* file. So it skips the whole
+  `Edit<PdfDocument>` / undo / dirty / epoch machinery; it's just "read
+  these pages, write a new doc." Recognising what *doesn't* need the
+  framework keeps it simple.
+- **Reuse beats reinvention — twice over.** The output is built with the
+  exact `create_new_pdf()` + `copy_pages_from_document()` (FPDF_ImportPages)
+  pair from delete's undo holding-doc, and written with A1's
+  `save_document` (atomic temp+rename + round-trip verify). FPDF_ImportPages
+  copies each page's referenced resources, which is what satisfies the
+  spec's "resources copied" — for free.
+- **Lock discipline across a reused helper.** `extract_pages` builds the new
+  doc *under* the PDFium lock, then *releases* it before calling
+  `save_document` (which re-locks to serialize + verify) — the lock isn't
+  reentrant. Same rule as save's own internal staging.
+- **Validate the input where it's cheap, but trust the backend.** The
+  dialog's page-range parser (`parsePageRange`) is pure + unit-tested and
+  validates against the live count; the actor re-validates against its own
+  live document, so a stale frontend count can't corrupt the output.
+- **Document-level UI ≠ page-level UI.** Rotate/delete/etc. hang off the
+  per-page thumbnail menu; extract is a *document* action, so it's a viewer-
+  toolbar button → a range dialog → the native save dialog.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/extract.rs` | `extract_pages` — new doc via import + `save_document`. |
+| `src-tauri/src/pdf/delete_page.rs` | `validate` / `range_string` promoted to `pub(crate)` (shared). |
+| `src-tauri/src/pdf/actor.rs` | `ExtractPages` message (read-only; no undo/dirty). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_extract_pages`. |
+| `src/ipc/extract.ts` | `extractPages` wrapper. |
+| `src/tools/extract/page-range.ts` | `parsePageRange` ("1-3,5" → 0-based indices). |
+| `src/app/ExtractDialog.tsx`, `src/app/ZoomToolbar.tsx`, `src/view/PdfViewer.tsx` | Range dialog + toolbar "Extract…" + native save dialog. |
+| `src-tauri/tests/extract.rs`, `src/tools/extract/__tests__/page-range.test.ts`, `src/ipc/__tests__/extract.test.ts` | Tests. |
+
+#### Further reading
+
+- `FPDF_ImportPages` — copying pages + resources between documents.
+- Tauri save dialog (`@tauri-apps/plugin-dialog`) — https://v2.tauri.app/plugin/dialog/
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

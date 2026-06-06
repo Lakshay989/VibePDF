@@ -38,6 +38,12 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## Deferred polish / tech debt
 
+- **Embedded-font fixture for extract/merge (from P2.C2).** Tests use
+  `links.pdf`, whose pages use *standard* Helvetica (not embedded), so they
+  prove structure (page count, opens cleanly) but not embedded-glyph
+  fidelity. Add a fixture with an embedded/subset font so `extract.rs` (and
+  later `merge.rs`) can assert the spec's "no missing glyphs" directly.
+
 - **Drag-select crop overlay (from P2.B4).** Crop currently uses a margins
   dialog (trim N points from each edge). The richer UX is a draggable /
   resizable selection rectangle over the page in the main view, mapping
