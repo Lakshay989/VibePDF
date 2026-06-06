@@ -252,6 +252,47 @@ pub async fn pdf_insert_blank_page(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P2-PAGE-009 — crop `page` to a `CropBox` (left/bottom/right/top in
+/// points). All four edges present → crop to that rectangle; all four
+/// absent → reset to the `MediaBox`. Undoable, marks the document dirty.
+#[tauri::command]
+pub async fn pdf_crop_page(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    left: Option<f32>,
+    bottom: Option<f32>,
+    right: Option<f32>,
+    top: Option<f32>,
+) -> Result<HistoryState, CommandError> {
+    let rect = match (left, bottom, right, top) {
+        (Some(l), Some(b), Some(r), Some(t)) => Some((l, b, r, t)),
+        (None, None, None, None) => None,
+        _ => {
+            return Err(CommandError::InvalidInput(
+                "crop requires all four edges or none (reset)".into(),
+            ))
+        }
+    };
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.crop_page_request(page, rect)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// Serialize the live in-memory document to bytes (returned as a
 /// `number[]` over IPC). The edit-preview pipeline reloads PDF.js from
 /// these so the main view reflects in-memory edits (rotate, …) without a

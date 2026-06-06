@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::error::CommandError;
 use crate::pdf::autosave;
+use crate::pdf::crop::CropEdit;
 use crate::pdf::delete_page::DeleteEdit;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::document::{
@@ -121,6 +122,13 @@ pub enum Message {
     InsertBlankPage {
         index: i32,
         size: Option<(f32, f32)>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-009 — crop `page` to `rect` (left, bottom, right, top
+    /// in points), or reset to the `MediaBox` when `None`. Undoable, dirty.
+    CropPage {
+        page: i32,
+        rect: Option<(f32, f32, f32, f32)>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
@@ -452,6 +460,30 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-009 — crop `page` to `rect`, or reset when `None`.
+    /// Await-holding convenience for tests; IPC uses `crop_page_request`.
+    pub async fn crop_page(
+        &self,
+        page: i32,
+        rect: Option<(f32, f32, f32, f32)>,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.crop_page_request(page, rect)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn crop_page_request(
+        &self,
+        page: i32,
+        rect: Option<(f32, f32, f32, f32)>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::CropPage { page, rect, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -666,6 +698,18 @@ fn run_worker(
             Message::InsertBlankPage { index, size, reply } => {
                 // SPEC: P2-PAGE-004 — insert; inverse is a delete.
                 let result = match Box::new(InsertBlankEdit { index, size }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::CropPage { page, rect, reply } => {
+                // SPEC: P2-PAGE-009 — adjust /CropBox; inverse restores it.
+                let result = match Box::new(CropEdit { page, rect }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

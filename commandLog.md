@@ -1127,6 +1127,30 @@ Left `[~]` pending the human cross-reader check + GUI flow.
 
 ---
 
+### P2.B4 — Crop page (this commit)
+
+```bash
+# No new deps. CropBox-only crop (content untouched), reset-to-MediaBox,
+# undoable. Margins dialog (drag-select deferred). PDF WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+npm run test    # 100/100 (+3 ipc/crop)
+npm run test:rust
+#   crop.rs: 5 passed (+1 ignored artifact) — set+persist, reset→MediaBox,
+#   undo restores prior box, out-of-range, inverted-rect rejected.
+#   (Gotcha: pdfium-render crop() ERRORS when a page has no explicit
+#    CropBox → fall back to media() for the effective box.)
+
+# PDF write-path artifact (ignored, on demand):
+node scripts/cargo-test.mjs --test crop \
+  crop_writes_verification_artifact -- --ignored --nocapture
+#   → /tmp/vibepdf-verify-cropped.pdf (page 1 cropped; also ~/Desktop)
+```
+
+Left `[~]` pending the human cross-reader check + GUI flow.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

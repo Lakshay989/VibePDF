@@ -38,6 +38,13 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## Deferred polish / tech debt
 
+- **Drag-select crop overlay (from P2.B4).** Crop currently uses a margins
+  dialog (trim N points from each edge). The richer UX is a draggable /
+  resizable selection rectangle over the page in the main view, mapping
+  screen → PDF points (with the y-flip). The backend (`pdf_crop_page`)
+  already takes an arbitrary rectangle, so this is purely a viewer-overlay
+  + coordinate-mapping job.
+
 - **Actor's cached page count goes stale after edits (found in P2.B3).**
   `Message::GetPageCount` (and `pdf_open`'s `OpenedDocument.pageCount`)
   return the count captured at *open*; after an insert/delete it's wrong.

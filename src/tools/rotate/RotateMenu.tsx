@@ -11,6 +11,8 @@ export interface RotateMenuProps {
   onRotate: (degrees: number) => void;
   /** SPEC: P2-PAGE-004 — insert a blank page after this one. */
   onInsert: () => void;
+  /** SPEC: P2-PAGE-009 — crop this page. */
+  onCrop: () => void;
   /** SPEC: P2-PAGE-003 — delete this page. */
   onDelete: () => void;
   onClose: () => void;
@@ -21,6 +23,7 @@ export function RotateMenu({
   y,
   onRotate,
   onInsert,
+  onCrop,
   onDelete,
   onClose,
 }: RotateMenuProps) {
@@ -62,6 +65,13 @@ export function RotateMenu({
           label="Insert blank page after"
           onClick={() => {
             onInsert();
+            onClose();
+          }}
+        />
+        <MenuItem
+          label="Crop page…"
+          onClick={() => {
+            onCrop();
             onClose();
           }}
         />

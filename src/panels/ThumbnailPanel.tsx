@@ -17,10 +17,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import { cropPage, type CropRect } from "@/ipc/crop";
 import { deletePages } from "@/ipc/delete-pages";
 import { insertBlankPage } from "@/ipc/insert-blank";
 import { renderPage } from "@/ipc/pdf";
 import { rotatePages } from "@/ipc/rotate";
+import { CropDialog, type CropTarget } from "@/tools/crop/CropDialog";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -66,6 +68,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   const [menu, setMenu] = useState<{ page: number; x: number; y: number } | null>(
     null,
   );
+  const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
   const epoch = useDocEpoch(documentId);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const markEdited = useEditEpochStore((s) => s.markEdited);
@@ -123,6 +126,49 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
         setHistory(documentId, history);
       } catch (err) {
         console.warn("insert failed", documentId, page, err);
+      }
+    },
+    [documentId, bumpEpoch, setHistory],
+  );
+
+  // SPEC: P2-PAGE-009 — open the crop dialog for `page`. PDF.js `page.view`
+  // ([x0,y0,x1,y1]) gives the current box so margins map to absolute coords.
+  const openCrop = useCallback(
+    async (page: number) => {
+      try {
+        const pdfPage = await doc.getPage(page + 1);
+        const [x0, y0, x1, y1] = pdfPage.view;
+        setCropTarget({ page, x0, y0, width: x1 - x0, height: y1 - y0 });
+      } catch (err) {
+        console.warn("crop open failed", documentId, page, err);
+      }
+    },
+    [doc, documentId],
+  );
+
+  const applyCrop = useCallback(
+    async (page: number, rect: CropRect) => {
+      setCropTarget(null);
+      try {
+        const history = await cropPage(documentId, page, rect);
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("crop failed", documentId, page, err);
+      }
+    },
+    [documentId, bumpEpoch, setHistory],
+  );
+
+  const resetCrop = useCallback(
+    async (page: number) => {
+      setCropTarget(null);
+      try {
+        const history = await cropPage(documentId, page); // reset to MediaBox
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("crop reset failed", documentId, page, err);
       }
     },
     [documentId, bumpEpoch, setHistory],
@@ -197,10 +243,21 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
           y={menu.y}
           onRotate={(degrees) => void rotate(menu.page, degrees)}
           onInsert={() => void insert(menu.page)}
+          onCrop={() => void openCrop(menu.page)}
           onDelete={() => void del(menu.page)}
           onClose={() => setMenu(null)}
         />
       ) : null}
+      <CropDialog
+        target={cropTarget}
+        onApply={(rect) => {
+          if (cropTarget) void applyCrop(cropTarget.page, rect);
+        }}
+        onReset={() => {
+          if (cropTarget) void resetCrop(cropTarget.page);
+        }}
+        onClose={() => setCropTarget(null)}
+      />
     </aside>
   );
 }

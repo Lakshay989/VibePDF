@@ -3006,6 +3006,61 @@ page edit — and the shortest, because it leans on what's already there.
 
 ---
 
+### P2.B4 — Crop page (CropBox only)
+
+#### Problem
+
+Crop a page without throwing away content — so it's reversible — and let
+undo and "reset" both work.
+
+#### Concepts learned
+
+- **Crop is a window, not a cut.** A page has a `/MediaBox` (the real
+  paper) and a `/CropBox` (the visible window). Cropping just shrinks the
+  `/CropBox`; the content streams are untouched, so nothing is destroyed and
+  resetting `/CropBox` back to `/MediaBox` restores the full page. Both
+  PDFium and PDF.js render the CropBox region, so the preview reflects it.
+- **The inverse must capture the *old* box.** Unlike rotate (inverse = a
+  fixed −angle) or insert (inverse = delete), crop's inverse is "restore
+  whatever the box was before." So `apply` reads the current box, sets the
+  new one, and returns a `CropEdit` carrying the old rectangle. "Reset
+  crop" is just a crop to the MediaBox — and it's undoable for free because
+  it captures the pre-reset box the same way.
+- **A defaulted value can still error.** `boundaries().crop()` *errors*
+  (not "returns the MediaBox") when a page has no explicit `/CropBox` —
+  found via a test that exploded on the fixture. The effective box is the
+  MediaBox in that case, so the fix is `crop().or_else(|_| media())`.
+  Lesson: don't assume a "get" returns a sensible default; check.
+- **Coordinates: bottom-left origin + absolute space.** PDF rectangles are
+  (left, bottom, right, top) with y *up* from the bottom. The crop dialog
+  collects edge margins and converts to an absolute box, offset by the
+  page's current box origin (`page.view` from PDF.js) so it's correct even
+  for an already-cropped page.
+- **A full overlay isn't required to ship.** A margins dialog satisfies the
+  spec ("when the user crops a page…") with far less risk than a
+  drag-select overlay on the viewer (which we'd just been debugging).
+  Drag-select is deferred — the backend already takes any rectangle.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/crop.rs` | `CropEdit` (`Edit<PdfDocument>`): set `/CropBox`, reset-to-MediaBox, capture-and-restore inverse. |
+| `src-tauri/src/pdf/actor.rs` | `CropPage` message + handle methods. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_crop_page` (all-four-edges = crop, all-none = reset). |
+| `src/ipc/crop.ts` | `cropPage` wrapper. |
+| `src/tools/crop/CropDialog.tsx` | Margin-input dialog (+ reset). |
+| `src/tools/rotate/RotateMenu.tsx`, `src/panels/ThumbnailPanel.tsx` | "Crop page…" entry + handlers (reads `page.view`). |
+| `src-tauri/tests/crop.rs` | set/persist, reset, undo, out-of-range, inverted-rect + artifact. |
+| `src/ipc/__tests__/crop.test.ts` | Marshalling (rect vs reset). |
+
+#### Further reading
+
+- PDF boundary boxes (MediaBox/CropBox) — PDF 32000-1 §14.11.2.
+- `FPDFPage_GetCropBox` / `FPDFPage_SetCropBox` — PDFium docs.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
