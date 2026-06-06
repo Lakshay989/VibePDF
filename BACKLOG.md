@@ -42,7 +42,17 @@ the current roadmap phase. When one is picked up, move it into the relevant
   `links.pdf`, whose pages use *standard* Helvetica (not embedded), so they
   prove structure (page count, opens cleanly) but not embedded-glyph
   fidelity. Add a fixture with an embedded/subset font so `extract.rs` (and
-  later `merge.rs`) can assert the spec's "no missing glyphs" directly.
+  later `merge.rs`) can assert the spec's "no missing glyphs" directly. The
+  new `bookmarks.pdf` (P2.C3) is in the same boat — standard Helvetica.
+
+- **Split by-size re-serializes per page — O(n²) (from P2.C3).**
+  `split::groups_by_size` grows a chunk one page at a time and calls
+  `save_to_bytes()` after each addition to measure size, because PDFium gives
+  no size oracle. On a large document that is a lot of repeated serialization.
+  Acceptable for a one-shot split today; optimize (incremental size estimate,
+  or a coarse pass then refine) only if a big split feels slow. Also: the
+  result is *approximate* (shared resources compress unpredictably), so a
+  chunk can slightly exceed the target — documented behaviour, not a bug.
 
 - **Drag-select crop overlay (from P2.B4).** Crop currently uses a margins
   dialog (trim N points from each edge). The richer UX is a draggable /

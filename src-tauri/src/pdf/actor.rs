@@ -38,6 +38,7 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::rotate::RotateEdit;
+use crate::pdf::split::{split_document, SplitMode, SplitOutcome};
 use crate::pdf::undo::{Edit, HistoryState, UndoStack};
 
 /// Event name on the wire. The frontend listens for this via
@@ -138,6 +139,14 @@ pub enum Message {
         pages: Vec<i32>,
         dest: PathBuf,
         reply: oneshot::Sender<Result<SaveOutcome, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-007 — split into multiple files under `dest_dir`,
+    /// named `{stem}-NNN.pdf`. Read-only on the source: no undo, no dirty.
+    SplitDocument {
+        mode: SplitMode,
+        dest_dir: PathBuf,
+        stem: String,
+        reply: oneshot::Sender<Result<SplitOutcome, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
     /// recovery copy iff the document is dirty; no reply (best-effort).
@@ -516,6 +525,32 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-007 — split into multiple files under `dest_dir`.
+    /// Await-holding convenience for tests; IPC uses `split_document_request`.
+    pub async fn split_document(
+        &self,
+        mode: SplitMode,
+        dest_dir: PathBuf,
+        stem: String,
+    ) -> Result<SplitOutcome, CommandError> {
+        let rx = self.split_document_request(mode, dest_dir, stem)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn split_document_request(
+        &self,
+        mode: SplitMode,
+        dest_dir: PathBuf,
+        stem: String,
+    ) -> Result<oneshot::Receiver<Result<SplitOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::SplitDocument { mode, dest_dir, stem, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// Best-effort graceful close. Sends `Close`; the worker exits on
     /// next iteration. Dropping the handle has the same effect (mailbox
     /// closes) so callers that don't care can just `drop(handle)`.
@@ -755,6 +790,11 @@ fn run_worker(
                 // SPEC: P2-PAGE-006 — read-only: build a new PDF from the
                 // source pages. No undo, no dirty (the open doc is unchanged).
                 let _ = reply.send(extract_pages(&doc, pages, &dest));
+            }
+            Message::SplitDocument { mode, dest_dir, stem, reply } => {
+                // SPEC: P2-PAGE-007 — read-only: emit N files from the source.
+                // No undo, no dirty (the open doc is unchanged).
+                let _ = reply.send(split_document(&doc, &mode, &dest_dir, &stem));
             }
             Message::Autosave => {
                 // SPEC: P2.A2 — write a recovery copy only when dirty.

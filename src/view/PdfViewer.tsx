@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { loadDocument } from "@/view/render-page";
@@ -11,8 +11,10 @@ import {
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { ExtractDialog } from "@/app/ExtractDialog";
+import { SplitDialog } from "@/app/SplitDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { extractPages } from "@/ipc/extract";
+import { splitDocument, type SplitMode } from "@/ipc/split";
 import { useDarkMode } from "@/app/use-dark-mode";
 import { OutlinePanel } from "@/panels/OutlinePanel";
 import { ThumbnailPanel } from "@/panels/ThumbnailPanel";
@@ -77,6 +79,26 @@ export function PdfViewer({ documentId, path }: Props) {
       }
     },
     [documentId],
+  );
+
+  // SPEC: P2-PAGE-007 — split: pick a mode, then a directory, then write N
+  // numbered files. Read-only on the open document. The output stem is the
+  // source file name (without extension), defaulting to "split".
+  const [splitOpen, setSplitOpen] = useState(false);
+  const handleSplit = useCallback(
+    async (mode: SplitMode) => {
+      setSplitOpen(false);
+      try {
+        const destDir = await openDialog({ directory: true, multiple: false });
+        if (typeof destDir !== "string") return; // user cancelled the dialog
+        const base = path.split(/[\\/]/).pop() ?? "";
+        const stem = base.replace(/\.pdf$/i, "") || "split";
+        await splitDocument(documentId, mode, destDir, stem);
+      } catch (err) {
+        console.warn("split failed", documentId, err);
+      }
+    },
+    [documentId, path],
   );
 
   // Search state subscriptions (kept narrow to avoid extra renders).
@@ -312,13 +334,22 @@ export function PdfViewer({ documentId, path }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <ZoomToolbar onExtract={doc ? () => setExtractOpen(true) : undefined} />
+      <ZoomToolbar
+        onExtract={doc ? () => setExtractOpen(true) : undefined}
+        onSplit={doc ? () => setSplitOpen(true) : undefined}
+      />
       <SearchBar />
       <ExtractDialog
         open={extractOpen}
         pageCount={doc?.numPages ?? 0}
         onExtract={(pages) => void handleExtract(pages)}
         onClose={() => setExtractOpen(false)}
+      />
+      <SplitDialog
+        open={splitOpen}
+        pageCount={doc?.numPages ?? 0}
+        onSplit={(mode) => void handleSplit(mode)}
+        onClose={() => setSplitOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (

@@ -30,6 +30,11 @@ validity.
 - [ ] **`~/Desktop/vibepdf-verify-extracted.pdf`** (C2 extract) — **2 pages**:
   "Page 1 (link to page 3)" and "Page 3"; renders correctly; not corrupt.
   → on pass, flip **P2.C2** to `[x]`.
+- [ ] **`~/Desktop/vibepdf-verify-split-001/002/003.pdf`** (C3 split) — **three
+  files, 2 pages each** ("Page 1"+"Page 2", "Page 3"+"Page 4", "Page 5"+"Page
+  6"); each opens cleanly and is not corrupt. (Produced by splitting the
+  6-page `bookmarks.pdf` every 2 pages.)
+  → on pass, flip **P2.C3** to `[x]`.
 - [x] `~/Desktop/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -58,6 +63,12 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   range (e.g. `1,3`) → a save dialog opens → pick a path. The new PDF has
   exactly those pages and opens cleanly. (The open document is unchanged.)
   → on pass, flip **P2.C2** to `[x]`.
+- [ ] **Split (C3):** in the viewer toolbar click **Split…** → pick a mode
+  (try **Every N pages** = 2, and on a bookmarked PDF **By top-level
+  bookmarks**) → a folder picker opens → choose a folder. The folder gets
+  `{name}-001.pdf`, `-002.pdf`, … each opening cleanly with the right pages.
+  (The open document is unchanged.) A split that would make < 2 files shows
+  an error. → on pass, flip **P2.C3** to `[x]`.
 - [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.
@@ -118,6 +129,7 @@ the rest still want a pass.
 | P2.B3 — Insert blank | A (inserted PDF) + B (insert) pass |
 | P2.B4 — Crop | A (cropped PDF) + B (crop) pass |
 | P2.C2 — Extract | A (extracted PDF) + B (extract) pass |
+| P2.C3 — Split | A (split PDFs) + B (split) pass |
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |
 | P1.E5 — E2E harness | D (`e2e.yml`) goes green |

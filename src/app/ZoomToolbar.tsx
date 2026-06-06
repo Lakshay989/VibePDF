@@ -23,9 +23,12 @@ export interface ZoomToolbarProps {
   /** SPEC: P2-PAGE-006 — open the extract-pages dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onExtract?: (() => void) | undefined;
+  /** SPEC: P2-PAGE-007 — open the split dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onSplit?: (() => void) | undefined;
 }
 
-export function ZoomToolbar({ onExtract }: ZoomToolbarProps = {}) {
+export function ZoomToolbar({ onExtract, onSplit }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
   const setZoom = useViewStore((s) => s.setZoom);
@@ -132,6 +135,17 @@ export function ZoomToolbar({ onExtract }: ZoomToolbarProps = {}) {
           className="ml-2 rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Extract…
+        </button>
+      ) : null}
+
+      {onSplit ? (
+        <button
+          type="button"
+          onClick={onSplit}
+          title="Split into multiple PDFs"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Split…
         </button>
       ) : null}
 

@@ -7,4 +7,5 @@ pub mod extract;
 pub mod insert_blank;
 pub mod render;
 pub mod rotate;
+pub mod split;
 pub mod undo;

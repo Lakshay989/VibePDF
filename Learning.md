@@ -3115,6 +3115,71 @@ Produce a new PDF containing exactly the chosen pages, with their resources
 
 ---
 
+### P2.C3 — Split (4 modes)
+
+#### Problem
+
+Acrobat lets you break one PDF into many. The spec (P2-PAGE-007) wants four
+ways to choose the cut points: every N pages, at specific pages, by file-size
+target, and by top-level bookmarks. Each produces N separate files.
+
+#### Concepts learned
+
+- **One algorithm, four front-ends.** Every mode collapses to the same
+  shape: *a list of contiguous page groups*. `plan_groups` turns the mode
+  into `Vec<Vec<i32>>`; the writer loop is mode-agnostic. New requirements
+  ("split by chapter") become a new `plan_groups` arm, nothing else.
+- **Reuse the verified writer.** Splitting is "extract, N times." Pulling
+  `write_subset_pdf` out of C2 means every output file gets the same atomic
+  temp+rename + round-trip-reopen guarantee for free — no second write path
+  to keep correct.
+- **No size oracle → measure by serializing.** PDFium won't tell you how big
+  an output will be without building it. By-size mode therefore *probes*:
+  grow a chunk a page at a time, `save_to_bytes()`, compare. It's O(n²) and
+  approximate (shared resources compress unpredictably) — a deliberate,
+  documented trade for a one-shot operation. A lone page bigger than the
+  target still gets its own file: never drop a page.
+- **Reading the outline needs no dict library.** Splitting by bookmarks only
+  *reads* where each top-level bookmark points (`bookmark.destination()?.
+  page_index()`), so PDFium's read-only outline API is enough. This is the
+  opposite of *rewriting* references (reorder / dangling-ref cleanup), which
+  still needs lopdf. Read vs. write is the whole distinction.
+- **`root()` is the first bookmark, not a synthetic parent.** In
+  pdfium-render, `bookmarks().root()` returns the first top-level item
+  (`FPDFBookmark_GetFirstChild(doc, NULL)`); walk `next_sibling()` to visit
+  the rest. There is no node above the top level.
+- **A degenerate split is an error, not a silent copy.** If a mode yields
+  fewer than two groups (e.g. "every 10 pages" on a 3-page doc), the actor
+  returns an error rather than writing one file — clearer feedback, and it
+  keeps the by-size "huge target" case honest.
+- **N output files → pick a directory, not a file.** Unlike extract (one
+  file → `save` dialog), split needs `open({ directory: true })`; the backend
+  names files `{stem}-NNN.pdf` (zero-padded so they sort lexically).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/split.rs` | `SplitMode`/`SplitOutcome`; `split_document`; `plan_groups` (the four-mode boundary math) + `probe_chunk_size`. |
+| `src-tauri/src/pdf/extract.rs` | Refactor: shared `write_subset_pdf` (used by extract + every split chunk). |
+| `src-tauri/src/pdf/actor.rs` | `SplitDocument` message (read-only; no undo/dirty). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_split_document`. |
+| `src/ipc/split.ts` | `splitDocument` wrapper + `SplitMode`/`SplitOutcome` types. |
+| `src/tools/split/split-points.ts` | `parseSplitPoints` (mode-b "split before pages"). |
+| `src/app/SplitDialog.tsx`, `src/app/ZoomToolbar.tsx`, `src/view/PdfViewer.tsx` | Mode-picker dialog + toolbar "Split…" + native directory picker. |
+| `tests/fixtures/basic/bookmarks.pdf` (+ `generate-bookmarks.py`) | 6 pp, 3 top-level bookmarks → pages 0/2/4 (mode-d fixture). |
+| `src-tauri/tests/split.rs`, `src/tools/split/__tests__/split-points.test.ts`, `src/ipc/__tests__/split.test.ts` | Tests. |
+
+#### Further reading
+
+- `FPDFBookmark_GetFirstChild` / `FPDFDest_GetDestPageIndex` — reading the
+  outline tree and resolving a bookmark to a page index.
+- `FPDF_SaveAsCopy` (via `save_to_bytes`) — serializing a document to measure
+  or persist it.
+- Tauri dialog `open({ directory: true })` — https://v2.tauri.app/plugin/dialog/
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

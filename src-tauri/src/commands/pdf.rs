@@ -7,6 +7,7 @@ use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::document::SaveOutcome;
 use crate::pdf::render::{ImageFormat, RenderedPage};
+use crate::pdf::split::{SplitMode, SplitOutcome};
 use crate::pdf::undo::HistoryState;
 use crate::AppState;
 
@@ -346,6 +347,42 @@ pub async fn pdf_get_bytes(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.get_bytes_request()?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P2-PAGE-007 — split the document into multiple PDFs under
+/// `dest_dir`, named `{stem}-NNN.pdf`. Read-only on the source; returns one
+/// write outcome per output file.
+#[tauri::command]
+pub async fn pdf_split_document(
+    state: State<'_, AppState>,
+    id: String,
+    mode: SplitMode,
+    dest_dir: String,
+    stem: String,
+) -> Result<SplitOutcome, CommandError> {
+    if dest_dir.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no output directory".into()));
+    }
+    if stem.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no output file name".into()));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.split_document_request(mode, PathBuf::from(dest_dir), stem)?
     };
 
     rx.await

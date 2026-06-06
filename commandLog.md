@@ -1176,6 +1176,36 @@ Left `[~]` pending the human cross-reader check. Unblocks C3 (split).
 
 ---
 
+### P2.C3 — Split (4 modes) (this commit)
+
+```bash
+# No new deps. Read-only on the source (like C2 — no undo/dirty). Reuses the
+# C2 writer, refactored to a shared extract::write_subset_pdf. PDF WRITE PATH
+# (emits N files). New fixture for the bookmarks mode:
+python3 tests/fixtures/basic/generate-bookmarks.py
+#   → tests/fixtures/basic/bookmarks.pdf (6 pp, 3 top-level bookmarks @ 0/2/4)
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (two clippy fixes in split.rs: cast_sign_loss on step_by — use
+#    usize::try_from; doc_markdown — backtick `PDFium`.)
+npm run test    # 117/117 (+9: split-points ×6, ipc/split ×3)
+npm run test:rust
+#   split.rs: 6 passed (+1 ignored artifact) — every-N, at-pages, by-size
+#   (1-byte → per-page; huge → <2-files error), by-bookmarks, bad-input.
+#   Full suite green, no PDFium crashes (--test-threads=1).
+
+# PDF write-path artifacts (ignored, on demand):
+cargo test --test split split_writes_verification_artifacts \
+  -- --ignored --test-threads=1 --nocapture   # (run from src-tauri/)
+#   → /tmp/vibepdf-verify-split-00{1,2,3}.pdf (3×2 pp; also copied to ~/Desktop)
+```
+
+Left `[~]` pending the human cross-reader check. Unblocks C3-dependent work
+(no further C-track item strictly depends on split, but it shares the
+subset-writer with a future merge/D1).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
