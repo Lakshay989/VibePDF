@@ -21,7 +21,7 @@ import {
   pathHash,
   saveViewSettings,
 } from "@/state/view-persistence";
-import { useDocEpoch } from "@/state/edit-epoch-store";
+import { isDocEdited, useDocEpoch } from "@/state/edit-epoch-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
 
@@ -100,8 +100,12 @@ export function PdfViewer({ documentId, path }: Props) {
 
     (async () => {
       try {
-        const bytes =
-          epoch === 0 ? await readFile(path) : await getPdfBytes(documentId);
+        // A pristine document loads from disk (cheap); an edited one — even
+        // a rotate, which doesn't bump the epoch — must load from the
+        // actor's live bytes, which carry the in-memory edits.
+        const bytes = isDocEdited(documentId)
+          ? await getPdfBytes(documentId)
+          : await readFile(path);
         if (cancelled) return;
         localDoc = await loadDocument(bytes);
         if (cancelled) {

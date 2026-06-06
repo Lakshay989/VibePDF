@@ -67,6 +67,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   );
   const epoch = useDocEpoch(documentId);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const markEdited = useEditEpochStore((s) => s.markEdited);
   const rotations = useDocRotations(documentId);
   const rotatePreview = useRotationPreviewStore((s) => s.rotate);
   const setHistory = useHistoryStore((s) => s.setHistory);
@@ -83,12 +84,16 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
       try {
         const history = await rotatePages(documentId, [page], degrees);
         rotatePreview(documentId, page, degrees);
+        // No epoch bump (cosmetic preview) — but mark the doc edited so a
+        // later reload (e.g. switching back) loads the rotated actor bytes,
+        // not the pristine disk copy.
+        markEdited(documentId);
         setHistory(documentId, history);
       } catch (err) {
         console.warn("rotate failed", documentId, page, err);
       }
     },
-    [documentId, rotatePreview, setHistory],
+    [documentId, rotatePreview, markEdited, setHistory],
   );
 
   // SPEC: P2-PAGE-003 — delete a page, then bump the epoch (refresh both

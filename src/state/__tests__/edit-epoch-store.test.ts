@@ -4,10 +4,10 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { useEditEpochStore } from "@/state/edit-epoch-store";
+import { isDocEdited, useEditEpochStore } from "@/state/edit-epoch-store";
 
 beforeEach(() => {
-  useEditEpochStore.setState({ byDoc: {} });
+  useEditEpochStore.setState({ byDoc: {}, edited: {} });
 });
 
 describe("edit-epoch-store", () => {
@@ -26,5 +26,20 @@ describe("edit-epoch-store", () => {
     bumpEpoch("d2");
     expect(useEditEpochStore.getState().byDoc["d1"]).toBe(2);
     expect(useEditEpochStore.getState().byDoc["d2"]).toBe(1);
+  });
+
+  it("tracks the edited flag: false until marked or bumped", () => {
+    expect(isDocEdited("d1")).toBe(false);
+    // A rotate marks edited *without* bumping the epoch.
+    useEditEpochStore.getState().markEdited("d1");
+    expect(isDocEdited("d1")).toBe(true);
+    expect(useEditEpochStore.getState().byDoc["d1"]).toBeUndefined();
+  });
+
+  it("bumpEpoch also marks the doc edited (delete/undo/redo)", () => {
+    expect(isDocEdited("d2")).toBe(false);
+    useEditEpochStore.getState().bumpEpoch("d2");
+    expect(isDocEdited("d2")).toBe(true);
+    expect(isDocEdited("d1")).toBe(false); // independent
   });
 });
