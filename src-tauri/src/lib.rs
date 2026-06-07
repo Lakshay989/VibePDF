@@ -101,6 +101,7 @@ pub fn run() {
             commands::pdf::pdf_crop_page,
             commands::pdf::pdf_extract_pages,
             commands::pdf::pdf_split_document,
+            commands::pdf::pdf_merge_documents,
             commands::pdf::pdf_get_bytes,
             commands::save::pdf_save,
             commands::history::pdf_undo,

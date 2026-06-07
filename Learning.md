@@ -3180,6 +3180,76 @@ target, and by top-level bookmarks. Each produces N separate files.
 
 ---
 
+### P2.C4 — Merge (basic: concat + annotations)
+
+#### Problem
+
+Combine several PDFs into one. Spec P2-PAGE-008 wants annotations, form
+fields, AND bookmarks preserved, with colliding form-field names made unique.
+We can do the page/annotation part with PDFium today; the rest needs a
+dict-level library, so this ships as an explicit **partial**.
+
+#### Concepts learned
+
+- **Know what your primitive actually copies.** `FPDF_ImportPages` (our only
+  merge tool) copies pages, their resources, and their *page-level
+  annotations* — but **not** the document `/Outlines` (bookmarks) or the
+  `/AcroForm` (interactive form fields), and it can't rename anything. So
+  "merge" splits cleanly into what PDFium can do (concat + annotations) and
+  what needs lopdf (bookmarks, form fields, collision renaming). Naming that
+  boundary up front turned a vague feature into a shippable slice + a tracked
+  follow-up.
+- **Ship a partial honestly, and *lock the gap with a test*.**
+  `merge_does_not_yet_carry_bookmarks` asserts the merged file has *no*
+  bookmarks. That feels backwards (testing a missing feature), but it's a
+  tripwire: when the lopdf follow-up adds bookmark preservation, that test
+  fails on purpose, forcing whoever lands it to notice and update. A deferred
+  requirement with a failing-when-fixed test can't be silently forgotten.
+- **Not every command fits the actor.** The architecture says "every command
+  takes a `DocumentId` and routes to that document's actor." Merge reads N
+  files that needn't be open and writes a new one — it owns no document. So it
+  became a **standalone command**, documented in `docs/04` as a "stateless
+  multi-file operation." It still honors the two real invariants: the frontend
+  never writes bytes (Rust does, via `save_document`), and all PDFium FFI is
+  serialized under `PDFIUM_LOCK`. The rule existed to enforce *those*; the
+  `DocumentId` was the mechanism, not the point.
+- **Blocking work belongs on a blocking thread.** Actor edits run on the
+  actor's own OS thread, off the async runtime. A standalone async command
+  doing heavy FFI (open N docs, import, serialize) would instead stall a tokio
+  worker — so the body runs inside `tokio::task::spawn_blocking`. Paths are
+  `Send`; the `PdfDocument`s are created and consumed *inside* the closure, so
+  nothing un-`Send` crosses the thread boundary.
+- **DRY the write spine, not the orchestration.** Extract, split, and now
+  merge all end in the same verified `save_document` (atomic temp+rename +
+  round-trip reopen). The differences are only *which pages from where* —
+  extract: one open doc; split: one doc, N groups; merge: N files, all pages.
+- **Stable references for "seed once" props.** `MergeDialog` resets its list
+  from `initialPaths` when it opens; passing `initialPaths={[path]}` (a fresh
+  array each render) would reset it on *every* render and eat the user's edits.
+  `useMemo(() => [path], [path])` makes the reference stable so the reset fires
+  only when the dialog opens or the file actually changes.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/merge.rs` | `merge_documents(sources, dest)` — open N, append all pages, verified save. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_merge_documents` — standalone command, `spawn_blocking`. |
+| `docs/04_ARCHITECTURE.md` | New "Stateless multi-file operations" subsection (the architecture note). |
+| `src/ipc/merge.ts` | `mergeDocuments` wrapper. |
+| `src/tools/merge/reorder.ts` | Pure `moveUp`/`moveDown`/`removeAt` for the file list. |
+| `src/app/MergeDialog.tsx`, `src/app/ZoomToolbar.tsx`, `src/view/PdfViewer.tsx` | Ordered-list dialog + toolbar "Merge…" + native pickers. |
+| `src-tauri/tests/merge.rs`, `src/tools/merge/__tests__/reorder.test.ts`, `src/ipc/__tests__/merge.test.ts` | Tests (incl. the deferred-bookmark tripwire). |
+
+#### Further reading
+
+- `FPDF_ImportPages` — what it copies (pages, resources, annots) and what it
+  doesn't (outline, AcroForm).
+- `tokio::task::spawn_blocking` — running blocking work without starving the
+  async runtime: https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -153,6 +153,28 @@ Every command returns `Result<T, CommandError>`. `CommandError` is a typed enum:
 
 We do NOT throw strings across IPC. Strings lose information and break i18n.
 
+### Stateless multi-file operations
+
+Most commands take a `DocumentId` and route to that document's actor (the
+actor owns the bytes and serializes mutations). A few operations don't fit
+that shape: they read **one or more files from disk that need not be open**
+and produce a **new** file, mutating nothing. **Merge** (`pdf_merge_documents`,
+P2-PAGE-008) is the first.
+
+These run as **standalone commands** that take file paths instead of a
+`DocumentId`. They still obey the two invariants that matter:
+
+- **The frontend never writes bytes** — the Rust side does all I/O through the
+  verified `pdf::document::save_document` (atomic temp+rename + round-trip
+  reopen), exactly like an actor edit.
+- **All PDFium FFI is serialized** — they acquire the process-global
+  `PDFIUM_LOCK` for their build span, so they can't race an actor thread.
+
+Because the work is blocking PDFium FFI (opening N documents, importing pages,
+serializing), the command body runs inside `tokio::task::spawn_blocking` so it
+never stalls the async runtime. No actor is spawned; no `document-changed`
+event is emitted (no open document changed).
+
 ---
 
 ## State on the frontend

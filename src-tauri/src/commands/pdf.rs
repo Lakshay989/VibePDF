@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::document::SaveOutcome;
+use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
 use crate::pdf::split::{SplitMode, SplitOutcome};
 use crate::pdf::undo::HistoryState;
@@ -387,4 +388,30 @@ pub async fn pdf_split_document(
 
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P2-PAGE-008 (partial) — merge `paths` (≥ 2, in order) into a new PDF
+/// at `dest`. Standalone: reads files from disk, not an open document (see
+/// `docs/04_ARCHITECTURE.md` §"Stateless multi-file operations"). Runs the
+/// blocking `PDFium` work on a `spawn_blocking` thread.
+#[tauri::command]
+pub async fn pdf_merge_documents(
+    paths: Vec<String>,
+    dest: String,
+) -> Result<SaveOutcome, CommandError> {
+    if paths.len() < 2 {
+        return Err(CommandError::InvalidInput(
+            "merge needs at least two files".into(),
+        ));
+    }
+    if dest.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no output file".into()));
+    }
+
+    let sources: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let dest = PathBuf::from(dest);
+
+    tokio::task::spawn_blocking(move || merge_documents(&sources, &dest))
+        .await
+        .map_err(|e| CommandError::Internal(format!("merge task panicked: {e}")))?
 }

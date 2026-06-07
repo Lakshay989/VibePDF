@@ -19,6 +19,13 @@ the current roadmap phase. When one is picked up, move it into the relevant
   (COS/dict access) alongside PDFium — a `docs/03_TECH_STACK.md` library
   decision — and route the page-tree + reference edits through it. Until
   then, B-track edits keep object-ref integrity but don't clean dangling refs.
+  **Also completes P2.C4 (merge):** the shipped merge is partial — it
+  concatenates pages + page annotations but drops the `/Outlines` tree
+  (bookmarks) and the `/AcroForm` (form fields), and can't rename colliding
+  field names (`_2`, `_3`). All three are dict-level work the same `lopdf`
+  decision unblocks. `src-tauri/tests/merge.rs::merge_does_not_yet_carry_bookmarks`
+  asserts the current gap, so it will fail (by design) when bookmarks land —
+  update it then. Same gap applies to **D1** (insert-from-PDF) form fields.
 
 - **Thumbnail appearance in dark mode — match vs. true-colour.**
   Currently the sidebar thumbnails invert with the page in dark mode

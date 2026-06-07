@@ -1206,6 +1206,37 @@ subset-writer with a future merge/D1).
 
 ---
 
+### P2.C4 — Merge multiple PDFs (PARTIAL) (this commit)
+
+```bash
+# No new deps. PARTIAL against P2-PAGE-008: concat + page annotations now;
+# bookmarks + form fields + collision renaming deferred (need lopdf). First
+# STANDALONE command (no actor / no DocumentId) — docs/04 §"Stateless
+# multi-file operations"; runs in spawn_blocking. PDF WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (one clippy fix: doc_markdown — backtick `PDFium` in the command doc.)
+npm run test    # 126/126 (+9: merge/reorder ×7, ipc/merge ×2)
+npm run test:rust
+#   merge.rs: 6 passed (+1 ignored artifact) — concat page count, annotation
+#   survival, order-respected, <2 guard, missing-file error, and
+#   merge_does_not_yet_carry_bookmarks (tripwire locking the deferred gap).
+#   Full suite green, no crashes (--test-threads=1).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test merge merge_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (run from src-tauri/)
+#   → /tmp/vibepdf-verify-merged.pdf (10 pp: bookmarks+links+hello); copied
+#     to Sample PDFs/. Cross-checked: gs pdfpagecount=10 + visual page 1/7/10
+#     render confirms in-order concat across the three sources.
+```
+
+Left `[~]` — only the concat+annotation leg of P2.C4 is done; the bookmark /
+form-field / rename criteria stay open against P2-PAGE-008 pending the lopdf
+decision.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -26,9 +26,12 @@ export interface ZoomToolbarProps {
   /** SPEC: P2-PAGE-007 — open the split dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onSplit?: (() => void) | undefined;
+  /** SPEC: P2-PAGE-008 — open the merge dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onMerge?: (() => void) | undefined;
 }
 
-export function ZoomToolbar({ onExtract, onSplit }: ZoomToolbarProps = {}) {
+export function ZoomToolbar({ onExtract, onSplit, onMerge }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
   const setZoom = useViewStore((s) => s.setZoom);
@@ -146,6 +149,17 @@ export function ZoomToolbar({ onExtract, onSplit }: ZoomToolbarProps = {}) {
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Split…
+        </button>
+      ) : null}
+
+      {onMerge ? (
+        <button
+          type="button"
+          onClick={onMerge}
+          title="Merge PDFs into a new file"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Merge…
         </button>
       ) : null}
 

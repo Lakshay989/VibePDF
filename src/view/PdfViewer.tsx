@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -12,9 +12,11 @@ import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
+import { MergeDialog } from "@/app/MergeDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
+import { mergeDocuments } from "@/ipc/merge";
 import { useDarkMode } from "@/app/use-dark-mode";
 import { OutlinePanel } from "@/panels/OutlinePanel";
 import { ThumbnailPanel } from "@/panels/ThumbnailPanel";
@@ -99,6 +101,29 @@ export function PdfViewer({ documentId, path }: Props) {
       }
     },
     [documentId, path],
+  );
+
+  // SPEC: P2-PAGE-008 — merge: pick an ordered set of PDFs (seeded with the
+  // current file), then a save dialog, then write a new combined PDF. Read-only
+  // on every input; the open document is untouched.
+  const [mergeOpen, setMergeOpen] = useState(false);
+  // Stable reference so MergeDialog's reset effect doesn't re-fire each render.
+  const mergeSeedPaths = useMemo(() => [path], [path]);
+  const handleMerge = useCallback(
+    async (paths: string[]) => {
+      setMergeOpen(false);
+      try {
+        const dest = await saveDialog({
+          defaultPath: "merged.pdf",
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+        if (typeof dest !== "string") return; // user cancelled the dialog
+        await mergeDocuments(paths, dest);
+      } catch (err) {
+        console.warn("merge failed", err);
+      }
+    },
+    [],
   );
 
   // Search state subscriptions (kept narrow to avoid extra renders).
@@ -337,6 +362,7 @@ export function PdfViewer({ documentId, path }: Props) {
       <ZoomToolbar
         onExtract={doc ? () => setExtractOpen(true) : undefined}
         onSplit={doc ? () => setSplitOpen(true) : undefined}
+        onMerge={doc ? () => setMergeOpen(true) : undefined}
       />
       <SearchBar />
       <ExtractDialog
@@ -350,6 +376,12 @@ export function PdfViewer({ documentId, path }: Props) {
         pageCount={doc?.numPages ?? 0}
         onSplit={(mode) => void handleSplit(mode)}
         onClose={() => setSplitOpen(false)}
+      />
+      <MergeDialog
+        open={mergeOpen}
+        initialPaths={mergeSeedPaths}
+        onMerge={(paths) => void handleMerge(paths)}
+        onClose={() => setMergeOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (
