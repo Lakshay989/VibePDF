@@ -416,6 +416,37 @@ pub async fn pdf_merge_documents(
         .map_err(|e| CommandError::Internal(format!("merge task panicked: {e}")))?
 }
 
+/// SPEC: P2-PAGE-002 — reorder the pages of document `id` by `new_order`
+/// (`new_order[new_pos] = old_index`, a permutation of `0..page_count`).
+/// Undoable, mutating edit routed through the document actor.
+#[tauri::command]
+pub async fn pdf_reorder_pages(
+    state: State<'_, AppState>,
+    id: String,
+    new_order: Vec<usize>,
+) -> Result<HistoryState, CommandError> {
+    if new_order.is_empty() {
+        return Err(CommandError::InvalidInput("no page order specified".into()));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.reorder_pages_request(new_order)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at `source_path`
 /// into the open document `id` at `index`. Undoable, mutating edit routed
 /// through the document actor.

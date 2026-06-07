@@ -22,6 +22,8 @@ import { deletePages } from "@/ipc/delete-pages";
 import { insertBlankPage } from "@/ipc/insert-blank";
 import { renderPage } from "@/ipc/pdf";
 import { rotatePages } from "@/ipc/rotate";
+import { reorderPages } from "@/ipc/reorder";
+import { isPermutation, movePage } from "@/tools/reorder/compute-reorder";
 import { CropDialog, type CropTarget } from "@/tools/crop/CropDialog";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
@@ -77,6 +79,27 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
   const setHistory = useHistoryStore((s) => s.setHistory);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // SPEC: P2-PAGE-002 — drag a thumbnail to a new position. The dragged page
+  // index is held in a ref (mutating it must not re-render); on drop we compute
+  // the new order, reorder via the backend (lopdf COS layer), then bump the
+  // epoch (full reload — page order changed) and sync undo/redo.
+  const dragFrom = useRef<number | null>(null);
+  const reorder = useCallback(
+    async (from: number, to: number) => {
+      if (from === to) return;
+      const order = movePage(pageCount, from, to);
+      if (!isPermutation(order)) return;
+      try {
+        const history = await reorderPages(documentId, order);
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("reorder failed", documentId, from, to, err);
+      }
+    },
+    [documentId, pageCount, bumpEpoch, setHistory],
+  );
 
   // SPEC: P2-PAGE-001 — rotate one page. PDFium holds the real /Rotate; the
   // cosmetic rotation store previews it in the main view *without* a full
@@ -233,6 +256,14 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
               }}
               onContextMenu={(x, y) => setMenu({ page, x, y })}
               onDelete={() => void del(page)}
+              onDragStartPage={() => {
+                dragFrom.current = page;
+              }}
+              onDropPage={() => {
+                const from = dragFrom.current;
+                dragFrom.current = null;
+                if (from !== null) void reorder(from, page);
+              }}
             />
           ))}
         </ul>
@@ -277,6 +308,10 @@ interface TileProps {
   onSelect: () => void;
   onContextMenu: (x: number, y: number) => void;
   onDelete: () => void;
+  /** SPEC: P2-PAGE-002 — drag-reorder: this tile started being dragged. */
+  onDragStartPage: () => void;
+  /** SPEC: P2-PAGE-002 — drag-reorder: something was dropped onto this tile. */
+  onDropPage: () => void;
 }
 
 function ThumbTile({
@@ -292,6 +327,8 @@ function ThumbTile({
   onSelect,
   onContextMenu,
   onDelete,
+  onDragStartPage,
+  onDropPage,
 }: TileProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -356,7 +393,21 @@ function ThumbTile({
   }, [shouldLoad, version, rotation, doc, documentId, page, dpr]);
 
   return (
-    <li className="flex flex-col items-center">
+    <li
+      className="flex flex-col items-center"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        // Some browsers require drag data to be set for a drag to begin.
+        e.dataTransfer.setData("text/plain", String(page));
+        onDragStartPage();
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDropPage();
+      }}
+    >
       <button
         type="button"
         onClick={onSelect}

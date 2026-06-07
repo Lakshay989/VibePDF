@@ -38,6 +38,7 @@ use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
+use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::rotate::RotateEdit;
 use crate::pdf::split::{split_document, SplitMode, SplitOutcome};
 use crate::pdf::undo::{Edit, HistoryState, UndoStack};
@@ -132,6 +133,12 @@ pub enum Message {
     CropPage {
         page: i32,
         rect: Option<(f32, f32, f32, f32)>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-002 — reorder pages; `order[new_pos] = old_index` (a
+    /// permutation of `0..page_count`). Undoable, marks dirty.
+    ReorderPages {
+        order: Vec<usize>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
@@ -510,6 +517,25 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-002 — reorder pages by the given permutation.
+    /// Await-holding convenience for tests; IPC uses `reorder_pages_request`.
+    pub async fn reorder_pages(&self, order: Vec<usize>) -> Result<HistoryState, CommandError> {
+        let rx = self.reorder_pages_request(order)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn reorder_pages_request(
+        &self,
+        order: Vec<usize>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReorderPages { order, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P2-PAGE-005 — insert `pages` of `source_path` at `index`.
     /// Await-holding convenience for tests; IPC uses `insert_from_pdf_request`.
     pub async fn insert_from_pdf(
@@ -812,6 +838,20 @@ fn run_worker(
             Message::CropPage { page, rect, reply } => {
                 // SPEC: P2-PAGE-009 — adjust /CropBox; inverse restores it.
                 let result = match Box::new(CropEdit { page, rect }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReorderPages { order, reply } => {
+                // SPEC: P2-PAGE-002 — reorder via the lopdf COS layer; this
+                // replaces the live document with the reordered bytes. Records
+                // the inverse permutation and marks the document dirty.
+                let result = match Box::new(ReorderEdit { order }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

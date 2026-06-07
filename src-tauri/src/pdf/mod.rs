@@ -9,6 +9,7 @@ pub mod insert_from;
 pub mod merge;
 pub mod insert_blank;
 pub mod render;
+pub mod reorder;
 pub mod rotate;
 pub mod split;
 pub mod undo;

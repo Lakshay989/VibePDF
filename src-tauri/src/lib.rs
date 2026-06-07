@@ -103,6 +103,7 @@ pub fn run() {
             commands::pdf::pdf_split_document,
             commands::pdf::pdf_merge_documents,
             commands::pdf::pdf_insert_from_pdf,
+            commands::pdf::pdf_reorder_pages,
             commands::pdf::pdf_peek_page_count,
             commands::pdf::pdf_get_bytes,
             commands::save::pdf_save,

@@ -210,3 +210,72 @@ pub fn rename_form_fields_with_suffix(
     doc.save_to(&mut buf)?;
     Ok(buf)
 }
+
+/// Reorder the document's pages by rewriting the root `/Pages` `/Kids` array.
+/// `new_order[new_pos] = old_index` (0-based). Object-ref links, bookmarks, and
+/// named destinations reference page *objects* (not positions), so they track
+/// the move for free — nothing else needs rewriting (P2-PAGE-002).
+///
+/// Requires a **flat** page tree (the root `/Kids` are exactly the page leaves):
+/// errors on a nested tree rather than risk dropping inherited attributes, so
+/// the document is never corrupted. Nested-tree reorder is a follow-up.
+pub fn reorder_pages(bytes: &[u8], new_order: &[usize]) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+
+    let pages_id = doc
+        .catalog()
+        .map_err(cos_err)?
+        .get(b"Pages")
+        .and_then(Object::as_reference)
+        .map_err(cos_err)?;
+
+    let kids = doc
+        .get_dictionary(pages_id)
+        .map_err(cos_err)?
+        .get(b"Kids")
+        .and_then(Object::as_array)
+        .map_err(cos_err)?
+        .clone();
+
+    // Require a flat page tree: one Kid per page, each a /Page leaf.
+    if kids.len() != new_order.len() {
+        return Err(CommandError::InvalidInput(format!(
+            "reorder needs a flat page tree (Kids={}, pages={}); nested trees unsupported",
+            kids.len(),
+            new_order.len()
+        )));
+    }
+    for kid in &kids {
+        let kid_id = kid.as_reference().map_err(cos_err)?;
+        let ty = doc
+            .get_dictionary(kid_id)
+            .map_err(cos_err)?
+            .get(b"Type")
+            .ok()
+            .and_then(|t| t.as_name().ok());
+        if ty != Some(&b"Page"[..]) {
+            return Err(CommandError::InvalidInput(
+                "reorder needs a flat page tree (a child is not a page)".into(),
+            ));
+        }
+    }
+
+    // Validate the permutation: a bijection of 0..n.
+    let n = kids.len();
+    let mut seen = vec![false; n];
+    for &i in new_order {
+        if i >= n || seen[i] {
+            return Err(CommandError::InvalidInput("invalid reorder permutation".into()));
+        }
+        seen[i] = true;
+    }
+
+    let new_kids: Vec<Object> = new_order.iter().map(|&i| kids[i].clone()).collect();
+    doc.get_dictionary_mut(pages_id)
+        .map_err(cos_err)?
+        .set("Kids", Object::Array(new_kids));
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}

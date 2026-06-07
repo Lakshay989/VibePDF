@@ -66,6 +66,10 @@ validity.
   pages**: "Hello, Vibe.PDF." then the 3 pages of links.pdf ("Page 1 (link to
   page 3)", "Page 2", "Page 3") inserted after it; the inserted page keeps its
   annotation; opens cleanly. *(Partial: form fields not carried — expected.)*
+- [ ] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
+  in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
+  reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
+  jumps to the "Page 3" page (reference integrity).
 - [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -113,6 +117,11 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   appear live in the main view + thumbnails; **⌘Z** removes them, **⌘⇧Z**
   re-adds. ⌘S → reopen → inserted pages persist. (Form fields not carried —
   expected.)
+- [ ] **Reorder (C1):** in the thumbnail sidebar, **drag a thumbnail** to a new
+  position and drop it. The page order updates live (main view + thumbnails);
+  **⌘Z** restores the old order, **⌘⇧Z** re-applies. ⌘S → reopen → order
+  persisted. On a PDF with internal links, the link still lands on the right
+  page after reordering. → on pass, flip **P2.C1** to `[x]`.
 - [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.
@@ -176,6 +185,7 @@ the rest still want a pass.
 | P2.C3 — Split | A (split PDFs) + B (split) pass |
 | P2.C4 — Merge (partial) | A (merged PDF) + B (merge) pass — concat leg only; full step needs lopdf |
 | P2.D1 — Insert from PDF (partial) | A (insert-from PDF) + B (insert PDF) pass — form fields need lopdf |
+| P2.C1 — Reorder | A (reordered PDF) + B (drag reorder) pass |
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |
 | P1.E5 — E2E harness | D (`e2e.yml`) goes green |

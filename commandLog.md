@@ -1309,6 +1309,36 @@ completion (form fields), and B2/C3 dangling-ref cleanup — each its own step.
 
 ---
 
+### P2.C1 — Reorder via thumbnail drag (this commit)
+
+```bash
+# No new deps. FIRST feature on the lopdf byte-handoff: ReorderEdit serializes
+# the live doc → cos::reorder_pages (permute /Kids) → load_pdf_from_byte_vec
+# REPLACES the actor's doc. Undoable (inverse permutation). PDF WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   fixes: doc_markdown (backtick `PDFium` in reorder.rs); test helper
+#   scoped the PdfPages borrow (avoid drop-of-non-Drop under -D warnings);
+#   pages.get wants i32 (i32::try_from, not `as u16`).
+npm run test    # 141/141 (+11: compute-reorder ×9, ipc/reorder ×2)
+npm run test:rust
+#   reorder.rs: 2 (+1 ignored) — annotated page moves + undo/redo (verified by
+#   save+reopen+annotation position); permutation validation (no mutation).
+#   cos.rs: +2 — reorder /Kids reopens in PDFium; rejects bad permutation.
+#   Full suite green (--test-threads=1).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test reorder reorder_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (from src-tauri/)
+#   → /tmp/vibepdf-verify-reordered.pdf (links.pdf reordered [2,0,1]); copied
+#     to Sample PDFs/. gs: 3 pages; render of p1 shows "Page 3" (old p3 → front).
+```
+
+Left `[~]` pending the human cross-reader check. Flat page tree only (nested =
+BACKLOG). Object-ref reference integrity holds (the link page moves correctly).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

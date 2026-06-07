@@ -3381,6 +3381,73 @@ to *rewrite* those. We needed a tool that can.
 
 ---
 
+### P2.C1 — Reorder via thumbnail drag
+
+#### Problem
+
+Drag a page thumbnail to a new slot and the document reorders — Acrobat's
+bread-and-butter page management, and the first feature built on the lopdf
+COS layer. It was *blocked* (not just partial) before lopdf: PDFium exposes no
+way to reorder the page tree.
+
+#### Concepts learned
+
+- **Reordering is an object-graph edit, not a render edit.** Page order lives
+  in the root `/Pages` dictionary's `/Kids` array. Reordering = permuting that
+  array. lopdf does it in a few lines; PDFium can't touch it. This is the COS
+  layer's first real job.
+- **Reference integrity is *free* when references are object-refs.** Links,
+  bookmarks, and named destinations point at page **objects** (by id), not page
+  positions. Permuting `/Kids` moves the pages but leaves the objects (and their
+  ids) untouched — so every reference still resolves to the same page. The spec
+  says "update all internal references"; for real PDFs there's nothing to
+  update. (Same insight as delete.)
+- **A cos edit *replaces* the live document; an in-place edit *mutates* it.**
+  rotate/delete/crop mutate the actor's `PdfDocument` through PDFium calls.
+  Reorder can't — the transform happens in lopdf, on bytes. So `ReorderEdit`
+  does: serialize (`save_to_bytes`) → `cos::reorder_pages` → **`*doc = pdfium
+  .load_pdf_from_byte_vec(new_bytes)`**. This is the byte-handoff made concrete,
+  and every future cos-based mutation (merge/insert form fields, ref cleanup)
+  reuses the exact shape.
+- **Two subtleties of replacing `*doc`:** (1) `load_pdf_from_byte_vec` takes an
+  *owned* `Vec<u8>` and hands the buffer to the document, so the new doc is
+  `'static` — and `PdfDocument` is covariant in its lifetime (`PhantomData<&'a>`
+  + `&'a` borrows, no `&mut`/`fn`), so the `'static` value slots into the
+  generic `'a`. (2) The assignment **drops the old document**, which calls
+  `FPDF_CloseDocument` — so it must happen *under* `PDFIUM_LOCK`, like every FFI
+  call. Both handled by doing the reload inside one lock guard.
+- **Invert a permutation for a free undo.** The inverse of "reorder by `p`" is
+  "reorder by `p⁻¹`", where `inv[p[i]] = i`. So undo/redo store a `Vec<usize>`,
+  not a multi-megabyte byte snapshot. Cheap and exact.
+- **Identify a moved page without reading its text.** The test marks a page with
+  an annotation (links.pdf's page 1) and asserts *which index* now carries the
+  annotation after the reorder — proving order changed without OCR or text
+  extraction. The same annotation trick verified merge/insert order.
+- **Drag-reorder = one move → a full permutation.** A drag is "page `from` →
+  position `to`"; the backend wants the whole new order. `movePage` (pure,
+  unit-tested) does the splice; `isPermutation` is a defensive guard before the
+  IPC call. Native HTML5 DnD on the `<li>` (draggable + onDragOver-preventDefault
+  + onDrop); the dragged index rides in a ref so mutating it doesn't re-render.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `reorder_pages` — permute root `/Kids` (flat-tree, validates permutation). |
+| `src-tauri/src/pdf/reorder.rs` | `ReorderEdit` — serialize → cos → replace `*doc`; inverse = inverse permutation. |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs` | `ReorderPages` message + `pdf_reorder_pages`. |
+| `src/ipc/reorder.ts`, `src/tools/reorder/compute-reorder.ts` | Wrapper + `movePage`/`isPermutation`. |
+| `src/panels/ThumbnailPanel.tsx` | HTML5 drag-and-drop on tiles → reorder → epoch + history. |
+| `src-tauri/tests/reorder.rs`, `tests/cos.rs` (+2), `src/tools/reorder/__tests__/…`, `src/ipc/__tests__/reorder.test.ts` | Tests. |
+
+#### Further reading
+
+- PDF page tree (`/Pages`, `/Kids`, `/Count`, inheritance) — PDF 32000-1 §7.7.3.
+- `FPDF_LoadMemDocument64` ownership — why `load_pdf_from_byte_vec` keeps the buffer alive.
+- HTML Drag and Drop API: https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -51,6 +51,15 @@ the current roadmap phase. When one is picked up, move it into the relevant
   later `merge.rs`) can assert the spec's "no missing glyphs" directly. The
   new `bookmarks.pdf` (P2.C3) is in the same boat — standard Helvetica.
 
+- **Nested page-tree reorder (from P2.C1).** `cos::reorder_pages` reorders the
+  root `/Pages` `/Kids` and requires a **flat** tree (each Kid is a `/Page`
+  leaf); it errors on a nested tree (intermediate `/Pages` nodes) rather than
+  risk dropping inherited attributes (`/Resources`, `/MediaBox`, `/Rotate`).
+  Most PDFs — and all PDFium-resaved ones — are flat, so this is rare. To
+  support nested trees, flatten the tree before reordering: resolve each page's
+  effective inherited attributes onto the page, re-parent all leaves to the
+  root, then reorder. Add a nested fixture to test it.
+
 - **Audit transient-document drops for lock-safety (from P2.D1).**
   `PdfDocument::drop` calls `FPDF_CloseDocument` *without* our process-global
   `PDFIUM_LOCK`, which can race another PDFium thread (the SIGABRT/SIGSEGV

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use vibepdf_lib::pdf::cos::{
     add_top_level_bookmark, read_form_field_names, read_top_level_outline_titles,
-    rename_form_fields_with_suffix,
+    rename_form_fields_with_suffix, reorder_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -90,6 +90,21 @@ fn cos_transforms_preserve_page_count() {
     let forms = fixture_bytes("forms.pdf");
     let renamed = rename_form_fields_with_suffix(&forms, "_2").expect("rename");
     assert_eq!(pdfium_page_count(&renamed), pdfium_page_count(&forms));
+}
+
+#[test]
+fn cos_reorders_kids_reopens_in_pdfium() {
+    let input = fixture_bytes("bookmarks.pdf"); // 6 pages, flat tree
+    // Reverse the page order.
+    let out = reorder_pages(&input, &[5, 4, 3, 2, 1, 0]).expect("reorder");
+    assert_eq!(pdfium_page_count(&out), 6, "reorder preserves page count + reopens in PDFium");
+}
+
+#[test]
+fn cos_reorder_rejects_bad_permutation() {
+    let input = fixture_bytes("bookmarks.pdf");
+    assert!(reorder_pages(&input, &[0, 0, 0, 0, 0, 0]).is_err(), "duplicate indices");
+    assert!(reorder_pages(&input, &[0, 1, 2]).is_err(), "wrong length (flat-tree check)");
 }
 
 /// Writes a lopdf-produced PDF (a bookmark added to `bookmarks.pdf`) to
