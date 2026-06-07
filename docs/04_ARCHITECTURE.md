@@ -26,6 +26,7 @@ vibepdf/
 │   │   ├── commands/             # Tauri commands (the IPC surface)
 │   │   ├── pdf/                  # Core PDF engine (PDFium wrapper)
 │   │   │   ├── document.rs       # Open, save, metadata
+│   │   │   ├── cos.rs            # lopdf object-model layer (structural edits)
 │   │   │   ├── page.rs           # Page operations
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations
@@ -104,6 +105,36 @@ Every open PDF lives behind an actor.
 **Identity:** Each opened document gets a `DocumentId` (UUID). All commands take a `DocumentId` and the dispatcher routes the message to that actor's channel.
 
 **Lifetime:** Actors are dropped when the document is closed. If the actor panics, the document is reported as crashed; the user gets a recovery offer from auto-save state.
+
+### Structural edits via `lopdf` (COS layer)
+
+Some edits are dictionary-level surgery PDFium's API can't do: rewriting the
+`/Outlines` (bookmarks), the `/AcroForm` (form fields), the page tree, and
+indirect references — needed by reorder (P2-PAGE-002), delete ref-cleanup
+(P2-PAGE-003), insert-from form fields (P2-PAGE-005), and merge
+bookmarks/form-fields (P2-PAGE-008). These go through `pdf::cos` (the `lopdf`
+object model), **not** PDFium. See `docs/03` "Structural edits — `lopdf`" for
+the why.
+
+**The two libraries never share a live handle.** A structural edit is a pass
+over **serialized bytes** between PDFium passes:
+
+```
+PDFium op ──save_to_bytes──▶ bytes ──lopdf load+rewrite+serialize──▶ bytes'
+                                                                       │
+                          verify_pdf_reopens(bytes')  ◀── PDFium ──────┘
+                                    │ (must succeed before persisting)
+                                    ▼
+                              save / reload
+```
+
+Because `lopdf` is pure Rust it acquires **no `PDFIUM_LOCK`** — there's no
+shared global to race. The one hard rule: **every `cos` output is
+round-trip-verified by reopening it in PDFium before it's written to the
+user's file** (the project's "no silent breakage" constraint). `cos.rs`'s
+spike tests assert exactly this. `cos` functions are pure `&[u8] → Vec<u8>`
+transforms, so they compose cleanly into the existing `save_document`
+pipeline.
 
 ---
 

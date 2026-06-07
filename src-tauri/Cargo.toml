@@ -35,6 +35,13 @@ pdfium-render = "0.9"
 # routines we'll never call.
 png = "0.17"
 uuid = { version = "1", features = ["v4", "serde"] }
+# COS / object-model layer for the structural edits PDFium's high-level API
+# can't do: rewriting /Outlines, /AcroForm, the page tree, and indirect refs.
+# Pure Rust, MIT. Operates on serialized bytes *between* PDFium passes — never
+# a shared live handle (see docs/03 "Structural edits", docs/04 "COS layer").
+# default-features off: we need only the core object model + nom parser, not
+# date parsing (chrono/jiff/time) or rayon parallelism.
+lopdf = { version = "0.36.0", default-features = false }
 
 [dev-dependencies]
 pdfium-render = "0.9"

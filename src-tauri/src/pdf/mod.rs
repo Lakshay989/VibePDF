@@ -1,5 +1,6 @@
 pub mod actor;
 pub mod autosave;
+pub mod cos;
 pub mod crop;
 pub mod delete_page;
 pub mod document;

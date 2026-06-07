@@ -75,6 +75,20 @@ The newer `pdfium` crate (with thread-safe init via `parking_lot::ReentrantMutex
 
 **Thread safety:** PDFium is single-threaded per-document. We wrap each open document in an actor (an `mpsc` channel + dedicated thread) so the rest of the app can interact with it concurrently without holding locks.
 
+### Structural edits — `lopdf` (COS / object model)
+
+**Why a second library:** `pdfium-render`'s high-level API is **read-only** for the document `/Outlines` (bookmarks) and the `/AcroForm` (interactive form fields), and it exposes no way to rewrite the page tree or indirect references. That blocks four spec clauses: **P2-PAGE-002** (reorder must "update all internal references"), **P2-PAGE-003** (delete ref cleanup), **P2-PAGE-005** (insert must "preserve form fields"), and **P2-PAGE-008** (merge must "preserve bookmarks, form fields" + uniquify colliding field names). `lopdf` (MIT, pure Rust, on crates.io) is a read/write model of the PDF object graph (COS = the Carousel Object System) — exactly the dictionary-level surgery PDFium won't do.
+
+**This is *not* a "double engine"** (the thing line "no WebAssembly PDF library that competes with PDFium" guards against). `lopdf` does **not** render and does **not** edit content streams — zero overlap with PDFium's job. It does only the object/dictionary rewrites PDFium's API can't reach. The two are **complementary**, and this subsection is the architectural review that the "off-limits without review" list requires.
+
+**Integration model — byte handoff, never a shared handle.** PDFium and `lopdf` never hold the same live document at once. A structural edit is a pass over a **byte buffer** that sits *between* PDFium passes: PDFium produces bytes (`save_to_bytes`) → `lopdf` loads them, rewrites the object graph, re-serializes → PDFium reloads / the bytes are saved. `lopdf` is pure Rust, so it needs no `PDFIUM_LOCK` and can't race the actors. **Every `lopdf` output is round-trip-verified by reopening it in PDFium** before it's persisted (`verify_pdf_reopens`); the `cos.rs` spike tests assert this on real fixtures. See `docs/04` "Structural edits via lopdf".
+
+**Alternatives passed:** the `pdf` crate (read-focused, weaker write story); `pdf-writer` (generation only, can't load+edit existing files); hand-rolling a COS parser/serializer (re-implements xref/object-streams/refs that `lopdf` already does, with far less testing and all the round-trip risk on us — worse than adopting a proven MIT lib).
+
+**Features:** `default-features = false` — we need only the core object model + the `nom` parser, not date parsing (`chrono`/`jiff`/`time`) or `rayon`. The transitive tree (RustCrypto `aes`/`cbc`/`ecb`/`md-5` for `/Encrypt`, `flate2` for `FlateDecode`, `nom`, `encoding_rs`, `indexmap`) is all permissive (MIT/Apache/BSD) — audited, no GPL/AGPL.
+
+**Known limits:** encrypted-PDF *structural* edits and exotic object-stream layouts are not yet exercised beyond our fixtures; revisit when a real file needs them.
+
 ---
 
 ## OCR — Tesseract via `leptess` (Rust)
@@ -167,6 +181,10 @@ These dependencies are off-limits as quick additions:
 - Any cloud SDK (AWS, Azure, GCP)
 - Any analytics or error-tracking SDK (Sentry, PostHog, etc.)
 - Any WebAssembly PDF library that competes with PDFium (no double engines)
+  - *Reviewed & approved (this list's required review): `lopdf` is **not** a
+    competing engine — it's a COS/object-model layer (no render, no content-stream
+    edits) that does only the dictionary rewrites PDFium's API can't. See "PDF
+    mutation → Structural edits — `lopdf`".*
 - Any Java/JVM runtime
 - Any "free for non-commercial use" library
 - Any library not on crates.io or npm (no `git` dependencies in production)
@@ -184,6 +202,9 @@ tauri-build  = "2.11"
 
 # Rust PDF
 pdfium-render = "0.9"        # current stable as of May 2026
+lopdf        = "0.36"        # COS/object-model layer (structural edits PDFium
+                             # can't do); default-features off. 0.41 exists but
+                             # needs a newer Rust than our 1.80 floor.
 
 # OCR
 leptess = "0.14"             # WARNING: last release 2023-02-21. Re-evaluate before Phase 7;

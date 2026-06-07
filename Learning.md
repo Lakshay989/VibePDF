@@ -3313,6 +3313,74 @@ defers form fields.
 
 ---
 
+### lopdf adoption — a second PDF library (COS layer)
+
+#### Problem
+
+Four spec clauses were stuck because PDFium's binding is read-only for the
+bits that live in the PDF's *object dictionaries*: bookmarks (`/Outlines`),
+form fields (`/AcroForm`), the page tree, and indirect references. Reorder,
+merge-bookmarks, merge/insert-form-fields, and dangling-ref cleanup all need
+to *rewrite* those. We needed a tool that can.
+
+#### Concepts learned
+
+- **A PDF is two things at once: a render target and an object graph.** PDFium
+  is superb at the first (it's Chrome's engine) and deliberately hides the
+  second. `lopdf` is the opposite — it's a read/write model of the **COS**
+  (Carousel Object System: the `obj`/`endobj` dictionaries, arrays, refs, and
+  the xref table). Picking the right tool means knowing which *layer* a problem
+  lives on. "Preserve bookmarks on merge" is an object-graph problem, so it's a
+  COS-library job, not a render-engine job.
+- **"Don't add a competing engine" ≠ "never add a second library."** The rule
+  exists to stop *redundant* engines (two renderers, two content editors). A
+  library that does only what the first one *can't*, with zero overlap, is
+  complementary, not competing. The discipline is to write down *why* the new
+  thing isn't redundant — that's what the `docs/03` review gate forced.
+- **Make two libraries cooperate by handing off bytes, not handles.** The whole
+  integration is: PDFium → `save_to_bytes` → lopdf loads/edits/serializes →
+  PDFium reopens. Neither library ever sees the other's live state. That one
+  decision erases a whole class of nightmares — no shared FFI handle, no
+  cross-library locking, no "who owns this pointer." Pure byte buffers compose.
+- **Trust, but verify across the boundary.** The real risk of two serializers
+  is that one writes bytes the other mangles or rejects. The mitigation isn't
+  hope — it's a hard rule: *every lopdf output is reopened in PDFium before it's
+  persisted*, and the spike tests assert it (we even checked a third engine,
+  Ghostscript). A "no silent breakage" constraint becomes a concrete gate.
+- **De-risk a one-way door with a throwaway spike.** Adding a dependency is hard
+  to undo. So this step shipped *only* the decision + a capability spike
+  (`cos.rs` + tests) wired to nothing — proving outline-write and form-rename
+  round-trip before any feature leans on them. If the round-trip had failed,
+  we'd have spent a day and walked away. Front-load the scary risk; defer the
+  cheap wiring.
+- **Trim a dependency's surface.** `default-features = false` dropped lopdf's
+  `chrono`/`jiff`/`time`/`rayon` (we need neither dates nor parallelism), and a
+  license audit confirmed the whole transitive tree (RustCrypto, `flate2`,
+  `nom`, …) is permissive — no GPL. A dependency is a liability you can shrink.
+- **lopdf API texture:** `Document::load_mem(&[u8])` / `save_to(&mut Vec<u8>)`;
+  `catalog()`/`catalog_mut()`; `get_dictionary(_mut)(id)`; `add_object`;
+  `get_pages()` (1-based → `ObjectId`). Gotchas: `From<&str> for Object` builds
+  a **Name**, so a *title* must use `Object::string_literal`; and `save_to`
+  returns `io::Error` (not `lopdf::Error`).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | The lopdf layer: outline read/write, form-field read/rename — pure `&[u8]→Vec<u8>` transforms. |
+| `src-tauri/Cargo.toml` | `lopdf = { version = "0.36.0", default-features = false }` + justification. |
+| `docs/03_TECH_STACK.md` | The library decision + "not a double engine" review-gate sign-off + version lock. |
+| `docs/04_ARCHITECTURE.md` | The byte-handoff integration model + `cos.rs` in the module tree. |
+| `tests/fixtures/basic/forms.pdf` (+ generator) | AcroForm fixture (one text field) for the rename test. |
+| `src-tauri/tests/cos.rs` | Spike tests — each asserts the lopdf output reopens in PDFium. |
+
+#### Further reading
+
+- `lopdf` — the COS document model: https://docs.rs/lopdf
+- PDF object model (COS) & the `/Outlines`, `/AcroForm` dictionaries — PDF 32000-1, §7 and §12.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

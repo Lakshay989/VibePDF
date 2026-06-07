@@ -1267,6 +1267,48 @@ P2-PAGE-005 stays open pending lopdf.
 
 ---
 
+### lopdf adoption — COS layer + capability spike (this commit)
+
+```bash
+# NEW DEPENDENCY (approved): lopdf — pure-Rust COS/object-model library for the
+# structural edits PDFium's API can't do. Needs network to fetch.
+cargo add lopdf                       # resolved 0.36.0 (0.41 needs newer Rust
+                                      # than our 1.80 floor)
+# Then trimmed to default-features = false (drop chrono/jiff/time/rayon) in
+# Cargo.toml by hand + justification comment.
+
+# License audit of lopdf's transitive tree (plan requirement):
+cargo tree -p lopdf --edges normal    # aes/cbc/ecb/md-5 (/Encrypt), flate2
+                                      # (FlateDecode), nom, encoding_rs, indexmap
+#   → all permissive (MIT/Apache/BSD); NO GPL/AGPL/LGPL. lopdf itself MIT.
+
+# New AcroForm fixture for the form-field rename test:
+python3 tests/fixtures/basic/generate-forms.py   # → forms.pdf (1 text field "name")
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   clippy fixes in cos.rs: doc_markdown (backtick `PDFium`), manual_let_else,
+#   single_match_else (match → let/if-let-else), needless_pass_by_value
+#   (#[allow] on the cos_err map_err adapter).
+npm run test    # 130/130 (unchanged — no frontend in this step)
+npm run test:rust
+#   cos.rs: 4 passed (+1 ignored artifact) — outline read; outline WRITE then
+#   REOPEN IN PDFIUM; form-field rename then reopen; page count preserved.
+#   The reopen-in-PDFium asserts prove cross-library byte compatibility (the
+#   go/no-go gate). Full suite green (--test-threads=1).
+
+# Optional cross-reader artifact (3rd engine check):
+cargo test --test cos cos_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (from src-tauri/)
+#   → /tmp/vibepdf-verify-lopdf.pdf (bookmark added to bookmarks.pdf); copied
+#     to Sample PDFs/. gs pdfpagecount=6 → valid to Ghostscript too.
+```
+
+Decision LANDED. No user-facing feature; this validates the dependency and
+unblocks C1 (reorder), C4 completion (bookmarks + form fields + rename), D1
+completion (form fields), and B2/C3 dangling-ref cleanup — each its own step.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
