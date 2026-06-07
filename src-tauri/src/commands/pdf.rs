@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
-use crate::pdf::document::SaveOutcome;
+use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
 use crate::pdf::split::{SplitMode, SplitOutcome};
@@ -414,4 +414,56 @@ pub async fn pdf_merge_documents(
     tokio::task::spawn_blocking(move || merge_documents(&sources, &dest))
         .await
         .map_err(|e| CommandError::Internal(format!("merge task panicked: {e}")))?
+}
+
+/// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at `source_path`
+/// into the open document `id` at `index`. Undoable, mutating edit routed
+/// through the document actor.
+#[tauri::command]
+pub async fn pdf_insert_from_pdf(
+    state: State<'_, AppState>,
+    id: String,
+    source_path: String,
+    pages: Vec<i32>,
+    index: i32,
+) -> Result<HistoryState, CommandError> {
+    if source_path.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no source file".into()));
+    }
+    if pages.is_empty() {
+        return Err(CommandError::InvalidInput("no pages specified".into()));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.insert_from_pdf_request(PathBuf::from(source_path), pages, index)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P2-PAGE-005 (support) — read a file's page count without opening it as
+/// a document (no actor). Used by the insert-from dialog to show the source's
+/// length and validate the page range. Read-only standalone op (see `docs/04`
+/// §"Stateless multi-file operations").
+#[tauri::command]
+pub async fn pdf_peek_page_count(path: String) -> Result<u32, CommandError> {
+    if path.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no file path".into()));
+    }
+    tokio::task::spawn_blocking(move || {
+        open_document_metadata(&PathBuf::from(path)).map(|m| m.page_count)
+    })
+    .await
+    .map_err(|e| CommandError::Internal(format!("peek task panicked: {e}")))?
 }

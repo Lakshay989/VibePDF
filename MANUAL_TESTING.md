@@ -62,6 +62,10 @@ validity.
   ("Hello, Vibe.PDF."); opens cleanly. Note: merged file has **no bookmarks**
   and form fields are not carried (deferred to lopdf — expected for now).
   *(Partial step: this only clears the concat+annotation leg of P2.C4.)*
+- [ ] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **4
+  pages**: "Hello, Vibe.PDF." then the 3 pages of links.pdf ("Page 1 (link to
+  page 3)", "Page 2", "Page 3") inserted after it; the inserted page keeps its
+  annotation; opens cleanly. *(Partial: form fields not carried — expected.)*
 - [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -103,6 +107,12 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   cleanly. (Open document unchanged; **bookmarks/form-fields not carried yet**
   — expected.) The button stays disabled with < 2 files.
   *(Only clears the concat+annotation leg; full P2.C4 waits on lopdf.)*
+- [ ] **Insert PDF (D1, partial):** in the viewer toolbar click **Insert
+  PDF…** → **Choose file…** (the page count appears) → pick pages (blank =
+  all) → choose position (start / end / after page N) → **Insert**. The pages
+  appear live in the main view + thumbnails; **⌘Z** removes them, **⌘⇧Z**
+  re-adds. ⌘S → reopen → inserted pages persist. (Form fields not carried —
+  expected.)
 - [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.
@@ -165,6 +175,7 @@ the rest still want a pass.
 | P2.C2 — Extract | A (extracted PDF) + B (extract) pass |
 | P2.C3 — Split | A (split PDFs) + B (split) pass |
 | P2.C4 — Merge (partial) | A (merged PDF) + B (merge) pass — concat leg only; full step needs lopdf |
+| P2.D1 — Insert from PDF (partial) | A (insert-from PDF) + B (insert PDF) pass — form fields need lopdf |
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |
 | P1.E5 — E2E harness | D (`e2e.yml`) goes green |

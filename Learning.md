@@ -3250,6 +3250,69 @@ dict-level library, so this ships as an explicit **partial**.
 
 ---
 
+### P2.D1 — Insert pages from another PDF (partial)
+
+#### Problem
+
+Pull pages out of one PDF and drop them into the document you're editing, at a
+spot you choose — undoably. Spec P2-PAGE-005 also wants form fields preserved;
+PDFium can't do that part, so this ships content + annotations + dimensions and
+defers form fields.
+
+#### Concepts learned
+
+- **The import primitive, pointed inward.** Extract/split/merge used
+  `copy_pages_from_document` to build *new* files. D1 aims it at the *open*
+  document — same call, but now it's a mutation, so it becomes an `Edit`. The
+  reusable verb didn't change; where it writes did.
+- **Compose the inverse from edits you already have.** `InsertFromEdit`'s
+  inverse is just `DeleteEdit` over the block it inserted — the exact pattern
+  insert-blank uses. And because `DeleteEdit` stashes the removed pages' bytes
+  in a holding doc, *redo* restores the imported content even if the user has
+  since moved or deleted the source file. The undo system's primitives compose:
+  insert⁻¹ = delete, delete⁻¹ = restore-bytes. No new inverse logic to write.
+- **Open before you lock; close under the lock.** `apply` runs on the actor
+  thread. It must open the source *without* holding `PDFIUM_LOCK` (because
+  `open_pdf` locks internally and the lock isn't reentrant), then take the lock
+  to copy, then take it again to `drop(source)` — because `Drop` calls
+  `FPDF_CloseDocument` and an unlocked close can race other PDFium threads.
+  Getting drop-ordering right matters: a guard declared after the source would
+  release *before* the source dropped, leaving the close unlocked. (This also
+  surfaced a latent gap — transient docs in extract/split/merge drop unlocked
+  too; logged to BACKLOG.)
+- **A tiny read-only command beats a heavy one.** The dialog needs the source's
+  page count to validate the range. Re-using `pdf_open` would spawn a whole
+  actor and register a document. Instead, `pdf_peek_page_count` is a standalone
+  read-only op (wraps `open_document_metadata`, opens+reads+drops). `DocumentMetadata`
+  isn't `Serialize`, so rather than change it, the command returns just the
+  `u32` the caller actually needs.
+- **`bumpEpoch` already implies "edited".** A content change must reload PDF.js
+  from the actor's live bytes, not disk. `bumpEpoch` both increments the reload
+  counter *and* sets the `edited` flag (which flips the loader's byte source),
+  so insert-from is the same one-liner as delete/insert-blank — no separate
+  `markEdited`. (Rotate is the exception: cosmetic preview, so it `markEdited`s
+  without bumping.)
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/insert_from.rs` | `InsertFromEdit` — open source, copy into open doc, inverse = `DeleteEdit`; source closed under the lock. |
+| `src-tauri/src/pdf/actor.rs` | `InsertFromPdf` message + handle methods + worker arm (records inverse, dirty). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_insert_from_pdf` (actor edit) + `pdf_peek_page_count` (standalone read). |
+| `src/ipc/insert-from.ts`, `src/ipc/peek.ts` | Typed wrappers. |
+| `src/app/InsertFromDialog.tsx`, `src/app/ZoomToolbar.tsx`, `src/view/PdfViewer.tsx` | File picker + range (reuses `parsePageRange`) + position; toolbar "Insert PDF…"; epoch+history wiring. |
+| `src-tauri/tests/insert_from.rs`, `src/ipc/__tests__/{insert-from,peek}.test.ts` | Tests (count+undo/redo, annotation survival, validation, missing source, peek). |
+
+#### Further reading
+
+- `FPDF_ImportPages` into an existing document vs. a fresh one — same call, the
+  destination handle differs.
+- Drop order in Rust (reverse declaration order) — why the close-under-lock
+  guard must outlive the document it closes: https://doc.rust-lang.org/reference/destructors.html
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

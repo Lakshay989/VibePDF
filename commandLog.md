@@ -1237,6 +1237,36 @@ decision.
 
 ---
 
+### P2.D1 — Insert pages from another PDF (PARTIAL) (this commit)
+
+```bash
+# No new deps. PARTIAL against P2-PAGE-005: content + annotations + dimensions
+# now; interactive form fields deferred (lopdf). Undoable actor edit
+# (InsertFromEdit, inverse = DeleteEdit). Adds a read-only pdf_peek_page_count
+# (standalone) so the dialog can show the source length. PDF WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (one clippy fix: doc_markdown — backtick `MediaBox`.)
+npm run test    # 130/130 (+4: ipc/insert-from ×2, ipc/peek ×2)
+npm run test:rust
+#   insert_from.rs: 6 passed (+1 ignored artifact) — count+undo/redo,
+#   annotation survival (save+reopen), start/end positions, validation
+#   (bad source page / bad index, no mutation), missing-source, peek count.
+#   Full suite green, no crashes (--test-threads=1).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test insert_from insert_from_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (run from src-tauri/)
+#   → /tmp/vibepdf-verify-insertfrom.pdf (4 pp: hello + links[1-3]); copied to
+#     Sample PDFs/. Cross-checked: gs pdfpagecount=4 + page 1/2 render confirms
+#     the import landed after hello (p1=hello, p2=links "Page 1").
+```
+
+Left `[~]` — content/annotations/dimensions done; the form-field clause of
+P2-PAGE-005 stays open pending lopdf.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

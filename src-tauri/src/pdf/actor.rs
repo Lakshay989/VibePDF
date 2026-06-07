@@ -33,6 +33,7 @@ use crate::pdf::crop::CropEdit;
 use crate::pdf::delete_page::DeleteEdit;
 use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
+use crate::pdf::insert_from::InsertFromEdit;
 use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
@@ -131,6 +132,14 @@ pub enum Message {
     CropPage {
         page: i32,
         rect: Option<(f32, f32, f32, f32)>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
+    /// `source_path` into the open document at `index`. Undoable, marks dirty.
+    InsertFromPdf {
+        source_path: PathBuf,
+        pages: Vec<i32>,
+        index: i32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-006 — extract `pages` (0-based) into a new PDF at
@@ -501,6 +510,32 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P2-PAGE-005 — insert `pages` of `source_path` at `index`.
+    /// Await-holding convenience for tests; IPC uses `insert_from_pdf_request`.
+    pub async fn insert_from_pdf(
+        &self,
+        source_path: PathBuf,
+        pages: Vec<i32>,
+        index: i32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.insert_from_pdf_request(source_path, pages, index)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn insert_from_pdf_request(
+        &self,
+        source_path: PathBuf,
+        pages: Vec<i32>,
+        index: i32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::InsertFromPdf { source_path, pages, index, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P2-PAGE-006 — extract `pages` into a new PDF at `dest`.
     /// Await-holding convenience for tests; IPC uses `extract_pages_request`.
     pub async fn extract_pages(
@@ -777,6 +812,21 @@ fn run_worker(
             Message::CropPage { page, rect, reply } => {
                 // SPEC: P2-PAGE-009 — adjust /CropBox; inverse restores it.
                 let result = match Box::new(CropEdit { page, rect }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::InsertFromPdf { source_path, pages, index, reply } => {
+                // SPEC: P2-PAGE-005 — import pages from another file; the edit
+                // opens the source itself. Records its inverse (a delete of the
+                // inserted block) and marks the document dirty.
+                let edit = InsertFromEdit { source_path, pages, index };
+                let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

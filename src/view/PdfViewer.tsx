@@ -13,10 +13,13 @@ import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
+import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
 import { mergeDocuments } from "@/ipc/merge";
+import { insertPagesFromPdf } from "@/ipc/insert-from";
+import { useHistoryStore } from "@/state/history-store";
 import { useDarkMode } from "@/app/use-dark-mode";
 import { OutlinePanel } from "@/panels/OutlinePanel";
 import { ThumbnailPanel } from "@/panels/ThumbnailPanel";
@@ -28,7 +31,7 @@ import {
   pathHash,
   saveViewSettings,
 } from "@/state/view-persistence";
-import { isDocEdited, useDocEpoch } from "@/state/edit-epoch-store";
+import { isDocEdited, useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
 
@@ -124,6 +127,34 @@ export function PdfViewer({ documentId, path }: Props) {
       }
     },
     [],
+  );
+
+  // SPEC: P2-PAGE-005 — insert pages from another PDF into the open document.
+  // A page-tree change, so bump the epoch (full reload, like delete/insert) and
+  // sync the undo/redo state. Undoable.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const setHistory = useHistoryStore((s) => s.setHistory);
+  const [insertFromOpen, setInsertFromOpen] = useState(false);
+  const handleInsertFromPdf = useCallback(
+    async ({
+      sourcePath,
+      pages,
+      index,
+    }: {
+      sourcePath: string;
+      pages: number[];
+      index: number;
+    }) => {
+      setInsertFromOpen(false);
+      try {
+        const history = await insertPagesFromPdf(documentId, sourcePath, pages, index);
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("insert-from-pdf failed", documentId, err);
+      }
+    },
+    [documentId, bumpEpoch, setHistory],
   );
 
   // Search state subscriptions (kept narrow to avoid extra renders).
@@ -363,6 +394,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onExtract={doc ? () => setExtractOpen(true) : undefined}
         onSplit={doc ? () => setSplitOpen(true) : undefined}
         onMerge={doc ? () => setMergeOpen(true) : undefined}
+        onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
       />
       <SearchBar />
       <ExtractDialog
@@ -382,6 +414,12 @@ export function PdfViewer({ documentId, path }: Props) {
         initialPaths={mergeSeedPaths}
         onMerge={(paths) => void handleMerge(paths)}
         onClose={() => setMergeOpen(false)}
+      />
+      <InsertFromDialog
+        open={insertFromOpen}
+        destPageCount={doc?.numPages ?? 0}
+        onInsert={(args) => void handleInsertFromPdf(args)}
+        onClose={() => setInsertFromOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (

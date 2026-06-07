@@ -29,9 +29,17 @@ export interface ZoomToolbarProps {
   /** SPEC: P2-PAGE-008 — open the merge dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onMerge?: (() => void) | undefined;
+  /** SPEC: P2-PAGE-005 — open the insert-from-PDF dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onInsertFromPdf?: (() => void) | undefined;
 }
 
-export function ZoomToolbar({ onExtract, onSplit, onMerge }: ZoomToolbarProps = {}) {
+export function ZoomToolbar({
+  onExtract,
+  onSplit,
+  onMerge,
+  onInsertFromPdf,
+}: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
   const setZoom = useViewStore((s) => s.setZoom);
@@ -160,6 +168,17 @@ export function ZoomToolbar({ onExtract, onSplit, onMerge }: ZoomToolbarProps = 
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Merge…
+        </button>
+      ) : null}
+
+      {onInsertFromPdf ? (
+        <button
+          type="button"
+          onClick={onInsertFromPdf}
+          title="Insert pages from another PDF"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Insert PDF…
         </button>
       ) : null}
 

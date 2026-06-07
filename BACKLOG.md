@@ -52,6 +52,18 @@ the current roadmap phase. When one is picked up, move it into the relevant
   later `merge.rs`) can assert the spec's "no missing glyphs" directly. The
   new `bookmarks.pdf` (P2.C3) is in the same boat — standard Helvetica.
 
+- **Audit transient-document drops for lock-safety (from P2.D1).**
+  `PdfDocument::drop` calls `FPDF_CloseDocument` *without* our process-global
+  `PDFIUM_LOCK`, which can race another PDFium thread (the SIGABRT/SIGSEGV
+  class the lock exists to prevent). The actor closes its own doc under the
+  lock, and `insert_from` now closes its source under the lock — but the
+  transient docs in `extract`/`split`/`merge` (`out`, and merge's N opened
+  sources) and `save_document`'s verify-reopen doc still drop *unlocked*. It
+  hasn't crashed in practice (single-threaded tests; real sessions haven't
+  hit the window), but it's a latent race. Wrap each transient drop in a
+  `pdfium_lock()` guard (or add a small `close_under_lock(doc)` helper) and
+  use it everywhere a `PdfDocument` is dropped off the actor's main path.
+
 - **Split by-size re-serializes per page — O(n²) (from P2.C3).**
   `split::groups_by_size` grows a chunk one page at a time and calls
   `save_to_bytes()` after each addition to measure size, because PDFium gives
