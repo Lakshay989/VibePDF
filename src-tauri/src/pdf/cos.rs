@@ -23,6 +23,8 @@
 //! (delete ref cleanup), P2-PAGE-005 (insert form fields), and P2-PAGE-008
 //! (merge bookmarks + form-field rename).
 
+use std::collections::{BTreeMap, HashMap, HashSet};
+
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::error::CommandError;
@@ -278,4 +280,259 @@ pub fn reorder_pages(bytes: &[u8], new_order: &[usize]) -> Result<Vec<u8>, Comma
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// True when `obj` is a dictionary/stream whose `/Type` is `name`.
+fn type_is(obj: &Object, name: &[u8]) -> bool {
+    obj.type_name().ok() == Some(name)
+}
+
+/// Merge `sources` (≥ 2 serialized PDFs) into one, preserving pages, content,
+/// annotations, **bookmarks** (one outline subtree per source), and **form
+/// fields** (with colliding `/T` names suffixed `_2`, `_3`, …). Returns the
+/// merged bytes. SPEC: P2-PAGE-008.
+///
+/// This is the all-lopdf merge: each source's objects are renumbered to a
+/// disjoint id range and combined into one document, then `/Pages`,
+/// `/Catalog`, `/Outlines`, and `/AcroForm` are rebuilt. Because the whole
+/// object graph is copied (not re-imported page-by-page), nothing is lost.
+pub fn merge_documents(sources: &[Vec<u8>]) -> Result<Vec<u8>, CommandError> {
+    if sources.len() < 2 {
+        return Err(CommandError::InvalidInput(
+            "merge needs at least two files".into(),
+        ));
+    }
+
+    // 1. Load + renumber each source to a disjoint id range; collect every
+    //    object, the page ids (in order), and each source's catalog id.
+    let mut max_id = 1u32;
+    let mut objects: BTreeMap<ObjectId, Object> = BTreeMap::new();
+    let mut page_ids: Vec<ObjectId> = Vec::new();
+    let mut catalog_ids: Vec<ObjectId> = Vec::new();
+
+    for bytes in sources {
+        let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+        doc.renumber_objects_with(max_id);
+        max_id = doc.max_id + 1;
+
+        if let Some((cat_id, _)) = doc.objects.iter().find(|(_, o)| type_is(o, b"Catalog")) {
+            catalog_ids.push(*cat_id);
+        }
+        page_ids.extend(doc.get_pages().into_values());
+        objects.extend(doc.objects);
+    }
+    if catalog_ids.is_empty() || page_ids.is_empty() {
+        return Err(CommandError::PdfError("a source has no catalog/pages".into()));
+    }
+
+    // 2. New merged document. Allocate a fresh /Pages root id, then copy every
+    //    object except the structural roots we rebuild; re-parent each page.
+    let mut document = Document::with_version("1.5");
+    document.max_id = max_id;
+    let merged_pages_id = document.new_object_id();
+
+    let page_set: HashSet<ObjectId> = page_ids.iter().copied().collect();
+    for (oid, obj) in &objects {
+        if page_set.contains(oid) {
+            if let Ok(dict) = obj.as_dict() {
+                let mut dict = dict.clone();
+                dict.set("Parent", Object::Reference(merged_pages_id));
+                document.objects.insert(*oid, Object::Dictionary(dict));
+            }
+            continue;
+        }
+        // Skip the source Catalog / Pages / Outlines roots — rebuilt below.
+        if type_is(obj, b"Catalog") || type_is(obj, b"Pages") || type_is(obj, b"Outlines") {
+            continue;
+        }
+        document.objects.insert(*oid, obj.clone());
+    }
+
+    // 3. Merged /Pages root.
+    let count = i64::try_from(page_ids.len()).unwrap_or(i64::MAX);
+    let mut pages_dict = Dictionary::new();
+    pages_dict.set("Type", Object::Name(b"Pages".to_vec()));
+    pages_dict.set("Count", Object::Integer(count));
+    pages_dict.set(
+        "Kids",
+        Object::Array(page_ids.iter().map(|&id| Object::Reference(id)).collect()),
+    );
+    document.objects.insert(merged_pages_id, Object::Dictionary(pages_dict));
+
+    // 4. Merged /Catalog (reuse the first source's, point it at the new roots).
+    let merged_catalog_id = catalog_ids[0];
+    let mut catalog = objects
+        .get(&merged_catalog_id)
+        .and_then(|o| o.as_dict().ok())
+        .cloned()
+        .ok_or_else(|| CommandError::PdfError("first source has no catalog".into()))?;
+    catalog.set("Pages", Object::Reference(merged_pages_id));
+    catalog.remove(b"Outlines");
+    catalog.remove(b"AcroForm");
+
+    if let Some(outlines_id) = merge_outlines(&mut document, &objects, &catalog_ids)? {
+        catalog.set("Outlines", Object::Reference(outlines_id));
+    }
+    if let Some(acroform_id) = merge_acroform(&mut document, &objects, &catalog_ids) {
+        catalog.set("AcroForm", Object::Reference(acroform_id));
+    }
+
+    document.objects.insert(merged_catalog_id, Object::Dictionary(catalog));
+    document.trailer.set("Root", Object::Reference(merged_catalog_id));
+    document.max_id = document.objects.keys().map(|&(n, _)| n).max().unwrap_or(0);
+
+    let mut buf = Vec::new();
+    document.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Chain every source's top-level outline items under one new `/Outlines`
+/// root. Each item keeps its (renumbered) `/Dest` and nested children; only
+/// the top-level `Parent`/`Next`/`Prev` chain is rebuilt. Returns the new
+/// root id, or `None` when no source had any bookmarks.
+fn merge_outlines(
+    document: &mut Document,
+    objects: &BTreeMap<ObjectId, Object>,
+    catalog_ids: &[ObjectId],
+) -> Result<Option<ObjectId>, CommandError> {
+    let mut top_items: Vec<ObjectId> = Vec::new();
+    for &cat_id in catalog_ids {
+        let Some(outlines_id) = objects
+            .get(&cat_id)
+            .and_then(|o| o.as_dict().ok())
+            .and_then(|c| c.get(b"Outlines").ok())
+            .and_then(|o| o.as_reference().ok())
+        else {
+            continue;
+        };
+        let mut cur = objects
+            .get(&outlines_id)
+            .and_then(|o| o.as_dict().ok())
+            .and_then(|d| d.get(b"First").ok())
+            .and_then(|o| o.as_reference().ok());
+        while let Some(item_id) = cur {
+            top_items.push(item_id);
+            cur = objects
+                .get(&item_id)
+                .and_then(|o| o.as_dict().ok())
+                .and_then(|d| d.get(b"Next").ok())
+                .and_then(|o| o.as_reference().ok());
+        }
+    }
+    if top_items.is_empty() {
+        return Ok(None);
+    }
+
+    let mut root = Dictionary::new();
+    root.set("Type", Object::Name(b"Outlines".to_vec()));
+    root.set("Count", Object::Integer(i64::try_from(top_items.len()).unwrap_or(i64::MAX)));
+    root.set("First", Object::Reference(top_items[0]));
+    root.set("Last", Object::Reference(top_items[top_items.len() - 1]));
+    let root_id = document.add_object(Object::Dictionary(root));
+
+    let last = top_items.len() - 1;
+    for i in 0..top_items.len() {
+        let item = document.get_dictionary_mut(top_items[i]).map_err(cos_err)?;
+        item.set("Parent", Object::Reference(root_id));
+        if i > 0 {
+            item.set("Prev", Object::Reference(top_items[i - 1]));
+        } else {
+            item.remove(b"Prev");
+        }
+        if i < last {
+            item.set("Next", Object::Reference(top_items[i + 1]));
+        } else {
+            item.remove(b"Next");
+        }
+    }
+    Ok(Some(root_id))
+}
+
+/// Resolve a catalog's `/AcroForm`, whether it's an indirect reference or an
+/// inline dictionary.
+fn resolve_acroform<'a>(
+    objects: &'a BTreeMap<ObjectId, Object>,
+    catalog: &'a Dictionary,
+) -> Option<&'a Dictionary> {
+    let acro = catalog.get(b"AcroForm").ok()?;
+    match acro.as_reference() {
+        Ok(id) => objects.get(&id)?.as_dict().ok(),
+        Err(_) => acro.as_dict().ok(),
+    }
+}
+
+/// Merge every source's `/AcroForm` `/Fields` into one form, suffixing
+/// colliding top-level field names (`/T`) with `_2`, `_3`, … Returns the new
+/// `/AcroForm` object id, or `None` when no source had a form.
+fn merge_acroform(
+    document: &mut Document,
+    objects: &BTreeMap<ObjectId, Object>,
+    catalog_ids: &[ObjectId],
+) -> Option<ObjectId> {
+    let mut field_ids: Vec<ObjectId> = Vec::new();
+    let mut default_resources: Option<Dictionary> = None;
+    let mut default_appearance: Option<Object> = None;
+
+    for &cat_id in catalog_ids {
+        let Some(catalog) = objects.get(&cat_id).and_then(|o| o.as_dict().ok()) else {
+            continue;
+        };
+        let Some(acro) = resolve_acroform(objects, catalog) else {
+            continue;
+        };
+        if let Ok(fields) = acro.get(b"Fields").and_then(Object::as_array) {
+            field_ids.extend(fields.iter().filter_map(|f| f.as_reference().ok()));
+        }
+        if default_appearance.is_none() {
+            if let Ok(da) = acro.get(b"DA") {
+                default_appearance = Some(da.clone());
+            }
+        }
+        if let Ok(dr) = acro.get(b"DR").and_then(Object::as_dict) {
+            let merged = default_resources.get_or_insert_with(Dictionary::new);
+            for (k, v) in dr {
+                if !merged.has(k) {
+                    merged.set(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    if field_ids.is_empty() {
+        return None;
+    }
+
+    // Suffix colliding top-level field names.
+    let mut seen: HashMap<Vec<u8>, u32> = HashMap::new();
+    for &fid in &field_ids {
+        let base = match document.get_dictionary(fid).ok().and_then(|f| f.get(b"T").and_then(Object::as_str).ok()) {
+            Some(t) => t.to_vec(),
+            None => continue,
+        };
+        let count = {
+            let entry = seen.entry(base.clone()).or_insert(0);
+            *entry += 1;
+            *entry
+        };
+        if count > 1 {
+            let mut new_name = base;
+            new_name.extend_from_slice(format!("_{count}").as_bytes());
+            if let Ok(field) = document.get_dictionary_mut(fid) {
+                field.set("T", Object::string_literal(new_name));
+            }
+        }
+    }
+
+    let mut acroform = Dictionary::new();
+    acroform.set(
+        "Fields",
+        Object::Array(field_ids.iter().map(|&id| Object::Reference(id)).collect()),
+    );
+    acroform.set("NeedAppearances", Object::Boolean(true));
+    if let Some(da) = default_appearance {
+        acroform.set("DA", da);
+    }
+    if let Some(dr) = default_resources {
+        acroform.set("DR", Object::Dictionary(dr));
+    }
+    Some(document.add_object(Object::Dictionary(acroform)))
 }

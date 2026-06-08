@@ -57,11 +57,11 @@ validity.
   6"); each opens cleanly and is not corrupt. (Produced by splitting the
   6-page `bookmarks.pdf` every 2 pages.)
   → on pass, flip **P2.C3** to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **10 pages** in
-  order: bookmarks.pdf (Page 1–6) → links.pdf (Page 1–3) → hello.pdf
-  ("Hello, Vibe.PDF."); opens cleanly. Note: merged file has **no bookmarks**
-  and form fields are not carried (deferred to lopdf — expected for now).
-  *(Partial step: this only clears the concat+annotation leg of P2.C4.)*
+- [ ] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
+  bookmarks.pdf (Page 1–6) → forms.pdf ("Form", page 7). The **bookmarks panel
+  shows 3 bookmarks** (Chapter 1/2/3, navigating to the right pages) **and** a
+  **form field** is present on the last page. Opens cleanly. *(Full P2-PAGE-008
+  now — bookmarks + form fields preserved.)*
 - [ ] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **4
   pages**: "Hello, Vibe.PDF." then the 3 pages of links.pdf ("Page 1 (link to
   page 3)", "Page 2", "Page 3") inserted after it; the inserted page keeps its
@@ -104,13 +104,13 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   `{name}-001.pdf`, `-002.pdf`, … each opening cleanly with the right pages.
   (The open document is unchanged.) A split that would make < 2 files shows
   an error. → on pass, flip **P2.C3** to `[x]`.
-- [ ] **Merge (C4, partial):** in the viewer toolbar click **Merge…** → the
-  list is seeded with the current file → **Add files…** to append more →
-  reorder with ↑/↓, remove with ✕ → **Merge…** → save dialog → pick a path.
-  The new PDF has every page of every file, in the listed order, and opens
-  cleanly. (Open document unchanged; **bookmarks/form-fields not carried yet**
-  — expected.) The button stays disabled with < 2 files.
-  *(Only clears the concat+annotation leg; full P2.C4 waits on lopdf.)*
+- [ ] **Merge (C4):** in the viewer toolbar click **Merge…** → the list is
+  seeded with the current file → **Add files…** to append more → reorder with
+  ↑/↓, remove with ✕ → **Merge…** → save dialog → pick a path. The new PDF has
+  every page of every file, in the listed order, and opens cleanly. **Merge two
+  bookmarked / form PDFs** → the result keeps **both sources' bookmarks** and
+  **all form fields** (colliding names suffixed `_2`). Open document unchanged;
+  button disabled with < 2 files. → on pass, flip **P2.C4** to `[x]`.
 - [ ] **Insert PDF (D1, partial):** in the viewer toolbar click **Insert
   PDF…** → **Choose file…** (the page count appears) → pick pages (blank =
   all) → choose position (start / end / after page N) → **Insert**. The pages
@@ -183,7 +183,7 @@ the rest still want a pass.
 | P2.B4 — Crop | A (cropped PDF) + B (crop) pass |
 | P2.C2 — Extract | A (extracted PDF) + B (extract) pass |
 | P2.C3 — Split | A (split PDFs) + B (split) pass |
-| P2.C4 — Merge (partial) | A (merged PDF) + B (merge) pass — concat leg only; full step needs lopdf |
+| P2.C4 — Merge | A (merged PDF: bookmarks + form field) + B (merge) pass |
 | P2.D1 — Insert from PDF (partial) | A (insert-from PDF) + B (insert PDF) pass — form fields need lopdf |
 | P2.C1 — Reorder | A (reordered PDF) + B (drag reorder) pass |
 | P2.A3 — Undo/redo | B (undo/redo) passes |

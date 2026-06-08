@@ -3448,6 +3448,71 @@ way to reorder the page tree.
 
 ---
 
+### P2.C4 completion — full merge (bookmarks + form fields + rename)
+
+#### Problem
+
+The shipped merge concatenated pages + annotations but dropped bookmarks and
+form fields (a `FPDF_ImportPages` limitation). Completing P2-PAGE-008 means
+preserving the `/Outlines` and `/AcroForm` too, with colliding form-field
+names made unique.
+
+#### Concepts learned
+
+- **Sometimes "complete the feature" means "replace the engine."** No lopdf
+  fixup could cleanly recover what `FPDF_ImportPages` threw away (the AcroForm
+  is gone; widgets are orphaned). So merge switched from PDFium-import to an
+  **all-lopdf merge**: copy the *whole object graph* of each source into one
+  document. Because nothing is discarded, outlines and form-field dicts arrive
+  intact — there's nothing to reconstruct, only to *re-link*. Choosing the
+  right layer (object graph vs. page API) turned a hard reconstruction problem
+  into an easy bookkeeping one.
+- **Merging documents = renumber to disjoint id ranges, then union.** Two PDFs
+  both have an object `(1,0)`. lopdf's `renumber_objects_with(max_id)` shifts a
+  source's ids past everything seen so far; then every object can be dumped
+  into one `objects` map with no collisions, and — crucially — **every internal
+  reference stays valid** because renumber rewrites refs too. After that, merge
+  is just: pick one Catalog, build one `/Pages` with all the page refs,
+  re-parent the pages, and re-link `/Outlines` + `/AcroForm`.
+- **Preserve, don't rebuild, the outline.** lopdf's own merge example *drops*
+  source outlines and synthesizes a "Page 1, Page 2…" TOC via `add_bookmark`.
+  We do better: keep each source's outline items (they're already copied +
+  renumbered, with correct `/Dest` refs and nesting) and only **re-chain the
+  top level** under one new `/Outlines` root (`First`/`Last`/`Count` + each
+  item's `Parent`/`Next`/`Prev`). Real titles, real nesting, real targets.
+- **Collision rename is a seen-set over `/T`.** Walk the combined `/Fields`,
+  track each name's count; the 2nd `name` becomes `name_2`, the 3rd `name_3`.
+  Read the old `/T` (immutable borrow) and write the new one (mutable borrow) in
+  two steps — never both at once.
+- **Round-trip through PDFium is both the writer and the proof.** The lopdf
+  merge produces bytes; we load them into PDFium and write via the verified
+  `save_document`. That gives the atomic write *and* validates that PDFium
+  accepts the lopdf output — and the bookmark test reads the result back
+  *through PDFium's* outline API, proving the two engines agree.
+- **Flip the tripwire you planted.** `merge_does_not_yet_carry_bookmarks` was a
+  test asserting a *missing* feature. Completing the feature flips it to
+  `merge_carries_bookmarks` — the deferred gap couldn't be silently forgotten.
+- **Keep the old tests as regression guards across an engine swap.** Page
+  count, annotation survival, and order were proven under the PDFium merge;
+  keeping them green under the lopdf merge is how you swap engines without
+  regressing the behavior that already worked.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `merge_documents` (+ `merge_outlines`, `merge_acroform`, `resolve_acroform`, `type_is`) — the all-lopdf merge. |
+| `src-tauri/src/pdf/merge.rs` | Engine swap: read source bytes → `cos::merge_documents` → load into PDFium → verified `save_document`. |
+| `src-tauri/tests/merge.rs` | Flipped `merge_carries_bookmarks`; new `merge_carries_form_fields_with_rename`; old tests kept as regression guards. |
+| `src-tauri/tests/cos.rs` | `cos_merges_outlines_and_fields_reopens_in_pdfium`. |
+
+#### Further reading
+
+- lopdf `examples/merge.rs` — the renumber+combine merge pattern (we extend it with outline + AcroForm preservation).
+- PDF interactive forms (`/AcroForm`, field `/T`, `/Kids`) — PDF 32000-1 §12.7.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

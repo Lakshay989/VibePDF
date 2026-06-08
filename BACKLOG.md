@@ -18,13 +18,14 @@ the current roadmap phase. When one is picked up, move it into the relevant
   edits — `lopdf`" and `docs/04` "Structural edits via lopdf". A capability
   spike (`tests/cos.rs`) proves outline read/write + form-field rename and that
   every lopdf output round-trips through PDFium (and Ghostscript). **Now-unblocked
-  follow-up work** (each its own step, none done yet):
-  - **C1 (reorder):** rewrite the page tree `/Kids` via `cos`.
-  - **C4 completion:** merge the `/Outlines` trees + the `/AcroForm` fields,
-    uniquifying colliding `/T` names (`name` → `name_2`). When this lands,
-    `tests/merge.rs::merge_does_not_yet_carry_bookmarks` flips (by design) — update it.
-  - **D1 completion:** carry the source `/AcroForm` fields on insert.
-  - **B2/C3:** clean dangling refs to removed pages.
+  follow-up work** (each its own step):
+  - ✅ **C1 (reorder)** — done (`reorder.rs`, `cos::reorder_pages`).
+  - ✅ **C4 completion** — done (`cos::merge_documents`: merges `/Outlines` +
+    `/AcroForm`, suffixes colliding `/T`). *Limit:* top-level field `/T` only —
+    kid-field hierarchies (parent `/T` + `/Kids` partial names) are a follow-up.
+  - **D1 completion:** carry the source `/AcroForm` fields on insert (reuse the
+    `cos` merge-acroform helper).
+  - **B2/C3:** clean dangling refs to removed pages (via `cos`).
 
 - **Thumbnail appearance in dark mode — match vs. true-colour.**
   Currently the sidebar thumbnails invert with the page in dark mode

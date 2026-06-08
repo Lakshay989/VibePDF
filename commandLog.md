@@ -1339,6 +1339,39 @@ BACKLOG). Object-ref reference integrity holds (the link page moves correctly).
 
 ---
 
+### P2.C4 completion — full merge via lopdf (this commit)
+
+```bash
+# No new deps. ENGINE SWAP: merge now an all-lopdf merge (cos::merge_documents)
+# replacing FPDF_ImportPages. Preserves bookmarks + form fields + renames
+# colliding /T. PDF WRITE PATH (load merged bytes into PDFium → save_document).
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   clippy fixes: explicit_iter_loop (`for (k,v) in dr` not `dr.iter()`);
+#   doc_markdown (backtick `PDFium` in merge.rs).
+npm run test    # 141/141 (no frontend change — engine swap is backend-only)
+npm run test:rust
+#   merge.rs: 7 (+1 ignored) — REGRESSION GUARDS kept green across the swap
+#   (concat count, annotation survival, order, ≥2 guard, missing-file) PLUS
+#   merge_carries_bookmarks (flipped tripwire; 6 top-level via PDFium) +
+#   merge_carries_form_fields_with_rename (name + name_2 via cos read).
+#   cos.rs: +1 (merge outlines+fields reopens in PDFium). Full suite green.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test merge merge_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (from src-tauri/)
+#   → /tmp/vibepdf-verify-merged.pdf (bookmarks.pdf + forms.pdf = 7 pp, 3
+#     bookmarks + 1 form field); copied to Sample PDFs/. gs pdfpagecount=7.
+#     (mdls showed 10 — stale Spotlight index of the overwritten file, not the
+#     bytes; gs + PDFium both read 7.)
+```
+
+Full P2-PAGE-008 now met (bookmarks ✅ form fields ✅ collision rename ✅).
+Left `[~]` pending the human cross-reader check (bookmarks panel + form field
+in Acrobat/Preview).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use vibepdf_lib::pdf::cos::{
-    add_top_level_bookmark, read_form_field_names, read_top_level_outline_titles,
+    add_top_level_bookmark, merge_documents, read_form_field_names, read_top_level_outline_titles,
     rename_form_fields_with_suffix, reorder_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
@@ -105,6 +105,20 @@ fn cos_reorder_rejects_bad_permutation() {
     let input = fixture_bytes("bookmarks.pdf");
     assert!(reorder_pages(&input, &[0, 0, 0, 0, 0, 0]).is_err(), "duplicate indices");
     assert!(reorder_pages(&input, &[0, 1, 2]).is_err(), "wrong length (flat-tree check)");
+}
+
+#[test]
+fn cos_merges_outlines_and_fields_reopens_in_pdfium() {
+    // bookmarks.pdf (6 pp, 3 bookmarks) + forms.pdf (1 pp, field "name").
+    let merged = merge_documents(&[fixture_bytes("bookmarks.pdf"), fixture_bytes("forms.pdf")])
+        .expect("merge");
+
+    // Outline + field survive in the lopdf output...
+    assert_eq!(read_top_level_outline_titles(&merged).expect("outline").len(), 3);
+    assert_eq!(as_strs(&read_form_field_names(&merged).expect("fields")), vec!["name"]);
+
+    // ...and the bytes reopen cleanly in PDFium with the combined page count.
+    assert_eq!(pdfium_page_count(&merged), 7);
 }
 
 /// Writes a lopdf-produced PDF (a bookmark added to `bookmarks.pdf`) to

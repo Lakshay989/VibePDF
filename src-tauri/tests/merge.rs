@@ -1,15 +1,14 @@
 //! Integration tests for merge (P2.C4).
 //!
-//! SPEC: P2-PAGE-008 (PARTIAL) — concatenation + page-annotation preservation.
-//! Bookmarks and form fields are deferred (need lopdf); the
-//! `merge_does_not_yet_carry_bookmarks` test deliberately locks that current
-//! behavior so the follow-up trips it. Merge is a standalone op (no actor), so
-//! these call `pdf::merge::merge_documents` directly against fixtures. The
-//! whole binary runs single-threaded (PDFium), so the inspection helpers don't
-//! need to hold the crate-private `PDFIUM_LOCK`.
+//! SPEC: P2-PAGE-008 — concatenation + annotations + **bookmarks + form
+//! fields** (colliding `/T` names suffixed). Merge is a standalone op (no
+//! actor), so these call `pdf::merge::merge_documents` directly against
+//! fixtures. The whole binary runs single-threaded (PDFium), so the inspection
+//! helpers don't need to hold the crate-private `PDFIUM_LOCK`.
 
 use std::path::{Path, PathBuf};
 
+use vibepdf_lib::pdf::cos::read_form_field_names;
 use vibepdf_lib::pdf::document::open_pdf;
 use vibepdf_lib::pdf::merge::merge_documents;
 
@@ -38,6 +37,25 @@ fn page_has_annotations(path: &Path, page: i32) -> bool {
     let pages = doc.pages();
     let p = pages.get(page).expect("page");
     !p.annotations().is_empty()
+}
+
+/// Count the document's top-level bookmarks via PDFium (proves the outline
+/// survived the lopdf-merge → PDFium load+save round-trip).
+fn top_level_bookmark_count(path: &Path) -> usize {
+    let (doc, _meta) = open_pdf(path, None).expect("open");
+    let mut n = 0;
+    let mut node = doc.bookmarks().root();
+    while let Some(b) = node {
+        n += 1;
+        node = b.next_sibling();
+    }
+    n
+}
+
+/// The merged document's top-level form-field names (read via the COS layer).
+fn field_names(path: &Path) -> Vec<String> {
+    let bytes = std::fs::read(path).expect("read output");
+    read_form_field_names(&bytes).expect("read field names")
 }
 
 #[test]
@@ -103,28 +121,41 @@ fn merge_missing_file_errors() {
     let missing = dir.join("does-not-exist.pdf");
 
     let err = merge_documents(&[fixture("hello.pdf"), missing], &out).expect_err("missing input");
-    assert!(format!("{err}").contains("cannot open"), "got: {err}");
+    assert!(format!("{err}").contains("cannot read"), "got: {err}");
     assert!(!out.exists(), "a failed merge must not write a file");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Locks the CURRENT (deferred) behavior: `FPDF_ImportPages` does not copy the
-/// `/Outlines` tree, so a merge of bookmarked PDFs has no top-level bookmarks.
-/// When the lopdf follow-up lands bookmark preservation, this test SHOULD fail
-/// and be updated — that's the signal the gap closed.
+/// SPEC: P2-PAGE-008 — the merged document preserves each source's bookmarks
+/// (one outline subtree per source). Merging `bookmarks.pdf` (3 top-level
+/// bookmarks) with itself yields 6 top-level bookmarks.
 #[test]
-fn merge_does_not_yet_carry_bookmarks() {
+fn merge_carries_bookmarks() {
     let dir = temp_dir();
     let out = dir.join("merged.pdf");
 
-    merge_documents(&[fixture("bookmarks.pdf"), fixture("hello.pdf")], &out).expect("merge");
+    merge_documents(&[fixture("bookmarks.pdf"), fixture("bookmarks.pdf")], &out).expect("merge");
+    assert_eq!(page_count(&out), 12, "6 + 6 pages");
+    assert_eq!(top_level_bookmark_count(&out), 6, "both sources' bookmarks preserved");
 
-    let (doc, _meta) = open_pdf(&out, None).expect("open output");
-    assert!(
-        doc.bookmarks().root().is_none(),
-        "bookmark preservation is deferred (lopdf); update this test when it lands"
-    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// SPEC: P2-PAGE-008 — the merged document preserves form fields, and a
+/// colliding field name is suffixed (`name` → `name_2`). Merging `forms.pdf`
+/// (one field `name`) with itself yields fields `name` and `name_2`.
+#[test]
+fn merge_carries_form_fields_with_rename() {
+    let dir = temp_dir();
+    let out = dir.join("merged.pdf");
+
+    merge_documents(&[fixture("forms.pdf"), fixture("forms.pdf")], &out).expect("merge");
+    assert_eq!(page_count(&out), 2);
+
+    let mut names = field_names(&out);
+    names.sort();
+    assert_eq!(names, vec!["name".to_string(), "name_2".to_string()], "collision renamed");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -136,13 +167,11 @@ fn merge_does_not_yet_carry_bookmarks() {
 #[ignore = "produces a verification artifact; run on demand"]
 fn merge_writes_verification_artifact() {
     let out = PathBuf::from("/tmp/vibepdf-verify-merged.pdf");
-    merge_documents(
-        &[fixture("bookmarks.pdf"), fixture("links.pdf"), fixture("hello.pdf")],
-        &out,
-    )
-    .expect("merge");
+    // bookmarks.pdf (6 pp, 3 bookmarks) + forms.pdf (1 pp, a form field) →
+    // a single file exercising bookmarks AND a form field.
+    merge_documents(&[fixture("bookmarks.pdf"), fixture("forms.pdf")], &out).expect("merge");
     assert!(out.is_file());
-    // 6 + 3 + 1 = 10 pages.
-    assert_eq!(page_count(&out), 10);
+    assert_eq!(page_count(&out), 7);
+    assert_eq!(top_level_bookmark_count(&out), 3, "bookmarks preserved");
     eprintln!("wrote merged verification artifact to {}", out.display());
 }
