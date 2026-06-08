@@ -3513,6 +3513,65 @@ names made unique.
 
 ---
 
+### P2.D1 completion — form fields on insert + a snapshot-undo primitive
+
+#### Problem
+
+Insert-from-PDF preserved content/annotations/dimensions but dropped form
+fields (`FPDF_ImportPages` copies the widget annotations but doesn't link them
+into the document `/AcroForm`). Completing P2-PAGE-005 means re-attaching them
+— and making that reversible.
+
+#### Concepts learned
+
+- **A widget annotation and a form field aren't the same thing.** A form
+  field's interactivity comes from being listed in the document `/AcroForm`
+  `/Fields`. Page import copies the *widget* (it rides in the page's `/Annots`)
+  but not the `/AcroForm` membership — so the inserted field renders but isn't
+  "registered." The fix is a small lopdf pass that scans the inserted pages'
+  `/Annots` for widgets carrying a `/T` and adds them to `/AcroForm /Fields`,
+  creating the form if absent.
+- **Don't swap the engine when a patch will do.** Merge needed a full lopdf
+  rewrite (the AcroForm was *gone*). Insert didn't — PDFium already copies the
+  widgets correctly, so the cheaper *hybrid* wins: keep the working PDFium
+  page-copy, then a lopdf post-pass for the `/AcroForm` linkage only. Match the
+  size of the fix to the size of the gap.
+- **Some edits are easier to undo by snapshot than by inverse.** The old insert
+  inverse was a `DeleteEdit` (remove the pages). But the edit now *also* mutates
+  `/AcroForm` — and a delete wouldn't unwind that, leaving orphaned fields. The
+  general fix is **`RestoreDocEdit`**: capture the document's bytes *before* the
+  edit; undo replaces the live doc with that snapshot; redo replaces it with the
+  post-edit snapshot. Correct for *any* structural change, at the cost of
+  holding a full-doc byte snapshot in the undo stack. A reusable primitive — the
+  escape hatch for edits too tangled for a clean inverse.
+- **Make idempotent operations actually idempotent.** First cut of the field
+  pass renamed a field that was *already* registered (it appeared in both
+  "existing fields" and "widgets on this page" → false collision → `name_2`).
+  The fix: subtract the already-registered set before treating widgets as new.
+  Re-running the pass, or registering a page whose field is already in the form,
+  is now a no-op. (Caught by the cos unit test — the integration tests, which
+  insert genuinely new fields, passed regardless.)
+- **Verify with a tool that doesn't share your code.** Beyond the tests
+  (which read fields via our own `cos`), a raw-byte grep of the artifact
+  confirmed `/AcroForm`, `/Widget`, and `/T (name)` are physically present — an
+  independent check that the linkage is really in the file.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/restore.rs` | `RestoreDocEdit` — generic snapshot-undo (replace `*doc` from bytes). |
+| `src-tauri/src/pdf/cos.rs` | `register_inserted_form_fields` — re-attach inserted pages' terminal fields, idempotently, with `/T` collision rename. |
+| `src-tauri/src/pdf/insert_from.rs` | `apply` now: snapshot → PDFium copy → field pass → reload; inverse = `RestoreDocEdit`. |
+| `src-tauri/tests/insert_from.rs`, `tests/cos.rs` | Form-field preserve + rename tests; old tests kept as regression guards. |
+
+#### Further reading
+
+- PDF interactive forms: the widget-annotation ↔ field relationship (`/AcroForm`, `/T`, `/FT`) — PDF 32000-1 §12.7.
+- Command pattern: snapshot vs. inverse-operation undo (memory/time trade-off).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

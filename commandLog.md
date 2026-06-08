@@ -1372,6 +1372,38 @@ in Acrobat/Preview).
 
 ---
 
+### P2.D1 completion — form fields on insert (this commit)
+
+```bash
+# No new deps. HYBRID: keep the PDFium page-copy, add a lopdf pass
+# (cos::register_inserted_form_fields) to re-attach inserted pages' terminal
+# form fields into /AcroForm with /T collision rename. Inverse switched from
+# DeleteEdit to the new generic RestoreDocEdit (byte-snapshot undo). WRITE PATH.
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   clippy fix: doc_markdown (backtick `PDFium` in insert_from.rs).
+npm run test    # 141/141 (no FE change)
+npm run test:rust
+#   insert_from.rs: 8 (+1 ignored) — NEW preserve-form-fields + collision-rename
+#   PLUS regression guards (count + undo/redo now via RestoreDocEdit, annotation
+#   survival, start/end, validation, missing-source) all green across the
+#   engine change. cos.rs: +1 (register_inserted_form_fields, idempotent).
+#   Fixed a false-collision bug: skip widgets already in /AcroForm /Fields.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test insert_from insert_from_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (from src-tauri/)
+#   → /tmp/vibepdf-verify-insertfrom.pdf (hello + links[1-3] + forms = 5 pp);
+#     copied to Sample PDFs/. gs pdfpagecount=5; raw-byte grep confirms
+#     /AcroForm + /Widget + /T (name) present (independent of our code).
+```
+
+Full P2-PAGE-005 now met (content/annotations/dimensions ✅ + form fields ✅).
+Left `[~]` pending the human cross-reader check (fillable field in Acrobat).
+Terminal fields only (kid hierarchies = follow-up).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

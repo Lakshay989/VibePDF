@@ -23,8 +23,11 @@ the current roadmap phase. When one is picked up, move it into the relevant
   - ✅ **C4 completion** — done (`cos::merge_documents`: merges `/Outlines` +
     `/AcroForm`, suffixes colliding `/T`). *Limit:* top-level field `/T` only —
     kid-field hierarchies (parent `/T` + `/Kids` partial names) are a follow-up.
-  - **D1 completion:** carry the source `/AcroForm` fields on insert (reuse the
-    `cos` merge-acroform helper).
+  - ✅ **D1 completion** — done (`cos::register_inserted_form_fields` re-attaches
+    inserted pages' terminal fields; undo via `RestoreDocEdit`). *Limit:*
+    terminal fields only (kid hierarchies = follow-up); `RestoreDocEdit` holds
+    a full-doc byte snapshot per insert in the undo stack — fine for infrequent
+    inserts, but a memory cost on large docs (folds into the edit-perf item).
   - **B2/C3:** clean dangling refs to removed pages (via `cos`).
 
 - **Thumbnail appearance in dark mode — match vs. true-colour.**

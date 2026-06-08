@@ -62,10 +62,10 @@ validity.
   shows 3 bookmarks** (Chapter 1/2/3, navigating to the right pages) **and** a
   **form field** is present on the last page. Opens cleanly. *(Full P2-PAGE-008
   now — bookmarks + form fields preserved.)*
-- [ ] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **4
-  pages**: "Hello, Vibe.PDF." then the 3 pages of links.pdf ("Page 1 (link to
-  page 3)", "Page 2", "Page 3") inserted after it; the inserted page keeps its
-  annotation; opens cleanly. *(Partial: form fields not carried — expected.)*
+- [ ] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
+  pages**: "Hello, Vibe.PDF.", then links.pdf's 3 pages (the first keeps its
+  annotation), then forms.pdf ("Form"). The **last page has a fillable form
+  field** (`name`). Opens cleanly. *(Full P2-PAGE-005 — form fields preserved.)*
 - [ ] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
   in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
   reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
@@ -111,12 +111,13 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   bookmarked / form PDFs** → the result keeps **both sources' bookmarks** and
   **all form fields** (colliding names suffixed `_2`). Open document unchanged;
   button disabled with < 2 files. → on pass, flip **P2.C4** to `[x]`.
-- [ ] **Insert PDF (D1, partial):** in the viewer toolbar click **Insert
-  PDF…** → **Choose file…** (the page count appears) → pick pages (blank =
-  all) → choose position (start / end / after page N) → **Insert**. The pages
-  appear live in the main view + thumbnails; **⌘Z** removes them, **⌘⇧Z**
-  re-adds. ⌘S → reopen → inserted pages persist. (Form fields not carried —
-  expected.)
+- [ ] **Insert PDF (D1):** in the viewer toolbar click **Insert PDF…** →
+  **Choose file…** (the page count appears) → pick pages (blank = all) →
+  choose position (start / end / after page N) → **Insert**. The pages appear
+  live in the main view + thumbnails; **⌘Z** removes them, **⌘⇧Z** re-adds. ⌘S
+  → reopen → inserted pages persist. **Insert a form PDF** → the inserted page's
+  **form field is present and fillable** (colliding names suffixed `_2`).
+  → on pass, flip **P2.D1** to `[x]`.
 - [ ] **Reorder (C1):** in the thumbnail sidebar, **drag a thumbnail** to a new
   position and drop it. The page order updates live (main view + thumbnails);
   **⌘Z** restores the old order, **⌘⇧Z** re-applies. ⌘S → reopen → order
@@ -184,7 +185,7 @@ the rest still want a pass.
 | P2.C2 — Extract | A (extracted PDF) + B (extract) pass |
 | P2.C3 — Split | A (split PDFs) + B (split) pass |
 | P2.C4 — Merge | A (merged PDF: bookmarks + form field) + B (merge) pass |
-| P2.D1 — Insert from PDF (partial) | A (insert-from PDF) + B (insert PDF) pass — form fields need lopdf |
+| P2.D1 — Insert from PDF | A (insert-from PDF: form field) + B (insert PDF) pass |
 | P2.C1 — Reorder | A (reordered PDF) + B (drag reorder) pass |
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |

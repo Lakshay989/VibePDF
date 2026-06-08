@@ -536,3 +536,128 @@ fn merge_acroform(
     }
     Some(document.add_object(Object::Dictionary(acroform)))
 }
+
+/// Register the terminal form-field widgets on the pages `[start, start+count)`
+/// (0-based) into the document's `/AcroForm`, creating the form if absent and
+/// suffixing any `/T` that collides with an existing field name (`name` →
+/// `name_2`). Used after an insert-from-PDF to re-attach the inserted pages'
+/// form fields, which page import copies as widgets but doesn't link into the
+/// form. Terminal fields only (a widget carrying its own `/T`).
+///
+/// SPEC: P2-PAGE-005 (form fields).
+#[allow(clippy::too_many_lines)]
+pub fn register_inserted_form_fields(
+    bytes: &[u8],
+    start: usize,
+    count: usize,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+
+    // 1. Collect terminal widget fields (`/Subtype /Widget` with a `/T`) on the
+    //    inserted pages. `get_pages` is keyed by 1-based page number.
+    let pages = doc.get_pages();
+    let mut new_fields: Vec<ObjectId> = Vec::new();
+    for i in start..start.saturating_add(count) {
+        let pnum = u32::try_from(i + 1).unwrap_or(u32::MAX);
+        let Some(&page_id) = pages.get(&pnum) else {
+            continue;
+        };
+        let annots = doc
+            .get_dictionary(page_id)
+            .ok()
+            .and_then(|p| p.get(b"Annots").and_then(Object::as_array).ok().cloned());
+        let Some(annots) = annots else {
+            continue;
+        };
+        for a in &annots {
+            let Ok(aid) = a.as_reference() else {
+                continue;
+            };
+            let Ok(annot) = doc.get_dictionary(aid) else {
+                continue;
+            };
+            let is_widget =
+                annot.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) == Some(&b"Widget"[..]);
+            if is_widget && annot.has(b"T") {
+                new_fields.push(aid);
+            }
+        }
+    }
+    if new_fields.is_empty() {
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf)?;
+        return Ok(buf);
+    }
+
+    // 2. Existing /AcroForm (if any) + the field names already in use.
+    let acro_id = doc
+        .catalog()
+        .map_err(cos_err)?
+        .get(b"AcroForm")
+        .ok()
+        .and_then(|o| o.as_reference().ok());
+    let mut existing_fields: Vec<ObjectId> = Vec::new();
+    if let Some(aid) = acro_id {
+        if let Ok(fields) = doc.get_dictionary(aid).map_err(cos_err)?.get(b"Fields").and_then(Object::as_array) {
+            existing_fields = fields.iter().filter_map(|f| f.as_reference().ok()).collect();
+        }
+    }
+    // Idempotent: a widget already in /AcroForm /Fields is not "new" (re-running
+    // the pass, or a page whose field is already registered, must be a no-op).
+    let existing_set: HashSet<ObjectId> = existing_fields.iter().copied().collect();
+    new_fields.retain(|id| !existing_set.contains(id));
+    if new_fields.is_empty() {
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf)?;
+        return Ok(buf);
+    }
+    let mut seen: HashMap<Vec<u8>, u32> = HashMap::new();
+    for &fid in &existing_fields {
+        if let Some(name) = doc.get_dictionary(fid).ok().and_then(|f| f.get(b"T").and_then(Object::as_str).ok()) {
+            *seen.entry(name.to_vec()).or_insert(0) += 1;
+        }
+    }
+
+    // 3. Suffix colliding new field names.
+    for &fid in &new_fields {
+        let Some(base) = doc.get_dictionary(fid).ok().and_then(|f| f.get(b"T").and_then(Object::as_str).ok()).map(<[u8]>::to_vec)
+        else {
+            continue;
+        };
+        let n = {
+            let entry = seen.entry(base.clone()).or_insert(0);
+            *entry += 1;
+            *entry
+        };
+        if n > 1 {
+            let mut new_name = base;
+            new_name.extend_from_slice(format!("_{n}").as_bytes());
+            if let Ok(field) = doc.get_dictionary_mut(fid) {
+                field.set("T", Object::string_literal(new_name));
+            }
+        }
+    }
+
+    // 4. Append the new fields to /AcroForm /Fields, creating the form if absent.
+    let mut all_fields = existing_fields;
+    all_fields.extend(new_fields);
+    let fields_array =
+        Object::Array(all_fields.iter().map(|&id| Object::Reference(id)).collect());
+    if let Some(aid) = acro_id {
+        let acro = doc.get_dictionary_mut(aid).map_err(cos_err)?;
+        acro.set("Fields", fields_array);
+        if !acro.has(b"NeedAppearances") {
+            acro.set("NeedAppearances", Object::Boolean(true));
+        }
+    } else {
+        let mut acro = Dictionary::new();
+        acro.set("Fields", fields_array);
+        acro.set("NeedAppearances", Object::Boolean(true));
+        let aid = doc.add_object(Object::Dictionary(acro));
+        doc.catalog_mut().map_err(cos_err)?.set("AcroForm", Object::Reference(aid));
+    }
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}

@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 
 use vibepdf_lib::pdf::cos::{
-    add_top_level_bookmark, merge_documents, read_form_field_names, read_top_level_outline_titles,
-    rename_form_fields_with_suffix, reorder_pages,
+    add_top_level_bookmark, merge_documents, read_form_field_names, register_inserted_form_fields,
+    read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -119,6 +119,16 @@ fn cos_merges_outlines_and_fields_reopens_in_pdfium() {
 
     // ...and the bytes reopen cleanly in PDFium with the combined page count.
     assert_eq!(pdfium_page_count(&merged), 7);
+}
+
+#[test]
+fn cos_registers_widget_fields() {
+    // forms.pdf already lists its field in /AcroForm, so re-registering page 0's
+    // widget is a no-op for the name set — assert the field is still present and
+    // the output reopens in PDFium.
+    let out = register_inserted_form_fields(&fixture_bytes("forms.pdf"), 0, 1).expect("register");
+    assert!(as_strs(&read_form_field_names(&out).expect("names")).contains(&"name"));
+    assert_eq!(pdfium_page_count(&out), 1);
 }
 
 /// Writes a lopdf-produced PDF (a bookmark added to `bookmarks.pdf`) to
