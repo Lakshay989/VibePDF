@@ -8,11 +8,41 @@
 
 use std::path::PathBuf;
 
+use lopdf::{Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_top_level_bookmark, merge_documents, read_form_field_names, register_inserted_form_fields,
-    read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages,
+    add_top_level_bookmark, merge_documents, prune_dangling_destinations, read_form_field_names,
+    register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
+    reorder_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
+
+/// Strip the `/Dest` from an annotation, producing a destination-less "dead"
+/// link — the shape `FPDF_ImportPages` leaves when a link's target page isn't
+/// copied. (lopdf's writer strips references to *deleted* objects on save, so a
+/// genuinely dangling page ref can only come from PDFium — that path is covered
+/// by the delete/split integration tests.)
+fn strip_dest_via_lopdf(bytes: &[u8], annot_obj: (u32, u16)) -> Vec<u8> {
+    let mut doc = Document::load_mem(bytes).expect("load");
+    if let Ok(annot) = doc.get_dictionary_mut(annot_obj) {
+        annot.remove(b"Dest");
+        annot.remove(b"A");
+    }
+    let mut out = Vec::new();
+    doc.save_to(&mut out).expect("save");
+    out
+}
+
+/// The number of annotations on a 0-based page, read via lopdf.
+fn page_annot_count(bytes: &[u8], page_index: usize) -> usize {
+    let doc = Document::load_mem(bytes).expect("load");
+    let Some(&page_id) = doc.get_pages().get(&(page_index as u32 + 1)) else {
+        return 0;
+    };
+    doc.get_dictionary(page_id)
+        .ok()
+        .and_then(|p| p.get(b"Annots").and_then(Object::as_array).ok())
+        .map_or(0, Vec::len)
+}
 
 fn fixture_bytes(name: &str) -> Vec<u8> {
     let p = PathBuf::from("../tests/fixtures/basic").join(name);
@@ -129,6 +159,24 @@ fn cos_registers_widget_fields() {
     let out = register_inserted_form_fields(&fixture_bytes("forms.pdf"), 0, 1).expect("register");
     assert!(as_strs(&read_form_field_names(&out).expect("names")).contains(&"name"));
     assert_eq!(pdfium_page_count(&out), 1);
+}
+
+#[test]
+fn cos_prunes_dead_link() {
+    // A /Link with no /Dest and no /A (what page-import leaves) is a dead link.
+    let bytes = strip_dest_via_lopdf(&fixture_bytes("links.pdf"), (10, 0));
+    assert_eq!(page_annot_count(&bytes, 0), 1, "link present before prune");
+    let pruned = prune_dangling_destinations(bytes);
+    assert_eq!(page_annot_count(&pruned, 0), 0, "dead link removed");
+}
+
+#[test]
+fn cos_keeps_valid_link() {
+    // Unmodified links.pdf: the page-1 link targets page 3, which still exists.
+    let bytes = fixture_bytes("links.pdf");
+    let pruned = prune_dangling_destinations(bytes.clone());
+    assert_eq!(pruned, bytes, "a clean document is returned unchanged");
+    assert_eq!(page_annot_count(&pruned, 0), 1, "valid link kept");
 }
 
 /// Writes a lopdf-produced PDF (a bookmark added to `bookmarks.pdf`) to

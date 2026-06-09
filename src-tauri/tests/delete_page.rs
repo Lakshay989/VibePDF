@@ -153,6 +153,79 @@ async fn delete_out_of_range_is_atomic_typed_error() {
     assert!(!state.can_undo, "a failed delete must record no undo entry");
 }
 
+/// SPEC: P2-PAGE-003 — references TO a deleted page are pruned on save.
+/// `links.pdf` page 1 links to page 3; delete page 3, save, and the (now
+/// dangling) link is gone from the saved file.
+#[tokio::test]
+async fn delete_prunes_dangling_link() {
+    let dir = temp_subdir();
+    let out = dir.join("out.pdf");
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("links.pdf"), None).expect("spawn");
+
+    // Delete page index 2 (page 3 — the link target).
+    handle.delete_pages(vec![2]).await.expect("delete page 3");
+    handle.save(Some(out.clone())).await.expect("save");
+
+    let (doc, _meta) = open_pdf(&out, None).expect("open output");
+    let empty = {
+        let pages = doc.pages();
+        pages.get(0).expect("page 0").annotations().is_empty()
+    };
+    assert!(empty, "dangling link pruned on save");
+    drop(doc);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// SPEC: P2-PAGE-003 — a bookmark pointing at a deleted page is pruned on save.
+/// `bookmarks.pdf` has 3 top-level bookmarks (pages 1/3/5); delete page 3 and
+/// the middle bookmark (now dangling) is gone, leaving 2.
+#[tokio::test]
+async fn delete_prunes_dangling_bookmark() {
+    let dir = temp_subdir();
+    let out = dir.join("out.pdf");
+    let id = uuid::Uuid::new_v4();
+    let handle =
+        DocumentActorHandle::spawn(None, id, fixture("bookmarks.pdf"), None).expect("spawn");
+
+    // Delete page index 2 (page 3 — the middle bookmark's target).
+    handle.delete_pages(vec![2]).await.expect("delete page 3");
+    handle.save(Some(out.clone())).await.expect("save");
+
+    let (doc, _meta) = open_pdf(&out, None).expect("open output");
+    let mut count = 0;
+    let mut node = doc.bookmarks().root();
+    while let Some(b) = node {
+        count += 1;
+        node = b.next_sibling();
+    }
+    assert_eq!(count, 2, "dangling bookmark pruned on save");
+    drop(doc);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Writes a "dangling refs pruned" artifact: `bookmarks.pdf` with page 3
+/// deleted, so the bookmarks panel should show 2 entries (Chapter 2 gone).
+/// Ignored — run on demand:
+///   cargo test --test delete_page prune_writes_verification_artifact -- --ignored
+#[tokio::test]
+#[ignore = "produces a verification artifact; run on demand"]
+async fn prune_writes_verification_artifact() {
+    let out = PathBuf::from("/tmp/vibepdf-verify-pruned.pdf");
+    let id = uuid::Uuid::new_v4();
+    let handle =
+        DocumentActorHandle::spawn(None, id, fixture("bookmarks.pdf"), None).expect("spawn");
+
+    handle.delete_pages(vec![2]).await.expect("delete page 3");
+    handle.save(Some(out.clone())).await.expect("save");
+    assert!(out.is_file());
+    eprintln!("wrote pruned verification artifact to {}", out.display());
+
+    drop(handle);
+}
+
 /// Writes a deleted, saved PDF to `/tmp/vibepdf-verify-deleted.pdf` for the
 /// manual cross-reader check. Ignored by default — run on demand:
 ///   cargo test --test delete_page delete_writes_verification_artifact -- --ignored

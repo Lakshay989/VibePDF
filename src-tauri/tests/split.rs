@@ -193,6 +193,36 @@ async fn split_rejects_bad_input() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// SPEC: P2-PAGE-003 (cleanup) — a link that crosses a split boundary dangles
+/// in the output file and is pruned. `links.pdf` page 1 links to page 3; split
+/// at page 2 puts page 1 in file 1 and page 3 in file 2, so file 1's link is
+/// dangling and must be gone.
+#[tokio::test]
+async fn split_prunes_cross_file_link() {
+    let dir = temp_subdir();
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("links.pdf"), None).expect("spawn");
+
+    handle
+        .split_document(SplitMode::AtPages { boundaries: vec![2] }, dir.clone(), "doc".into())
+        .await
+        .expect("split");
+
+    let files = output_files(&dir);
+    assert_eq!(files.len(), 2);
+    // file 1 is [page 1]; its link to page 3 (now in file 2) is dangling.
+    let (doc, _meta) = open_pdf(&files[0], None).expect("open file 1");
+    let empty = {
+        let pages = doc.pages();
+        pages.get(0).expect("page 0").annotations().is_empty()
+    };
+    assert!(empty, "cross-file dangling link pruned");
+    drop(doc);
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Writes split output to `/tmp/vibepdf-verify-split-*.pdf` for the manual
 /// cross-reader check. Ignored — run on demand:
 ///   cargo test --test split split_writes_verification_artifacts -- --ignored

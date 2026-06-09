@@ -1404,6 +1404,43 @@ Terminal fields only (kid hierarchies = follow-up).
 
 ---
 
+### B2/C3 — dangling-reference cleanup on save (this commit)
+
+```bash
+# No new deps. cos::prune_dangling_destinations runs in save_document: removes
+# broken /Link annotations + dangling bookmarks (re-chained), GCs orphans via
+# prune_objects. No-op + infallible for clean docs. New /Square-annot fixture:
+python3 tests/fixtures/basic/generate-annots.py   # → annots.pdf
+
+npm run check   # tsc ✓  eslint ✓  clippy --all-targets -D warnings ✓
+#   (test fixes: scoped PdfPages borrows to avoid drop-of-ref under -D warnings)
+npm run test    # 141/141 (no FE change — backend write-path cleanup)
+npm run test:rust
+#   cos.rs: +2 (prune dead link / keep valid link). delete_page.rs: +2
+#   (delete_prunes_dangling_link, delete_prunes_dangling_bookmark — REAL PDFium
+#   dangling refs). split.rs: +1 (split_prunes_cross_file_link — dead link from
+#   FPDF_ImportPages). insert_from preserves-annotations repointed to annots.pdf
+#   (links.pdf's only annot is an internal link → import dangles → pruned).
+#   Full suite green (107 rust tests, --test-threads=1).
+
+# Key finding: lopdf's WRITER strips refs to deleted objects on save, so a
+# dangling ref can only be manufactured via PDFium — hence the cos unit tests
+# cover the "dead link" shape and the integration tests cover real dangling.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test delete_page prune_writes_verification_artifact \
+  -- --ignored --test-threads=1 --nocapture   # (from src-tauri/)
+#   → /tmp/vibepdf-verify-pruned.pdf (bookmarks.pdf, page 3 deleted → Chapter 2
+#     bookmark gone); copied to Sample PDFs/. Raw grep confirms (Chapter 2)
+#     absent, (Chapter 1)/(Chapter 3) present; gs 5 pages.
+```
+
+Both halves of P2-PAGE-003 "update internal references" now done (surviving
+refs track ✅, dangling refs pruned ✅). Same prune cleans C2/C3 outputs.
+Named-dest cleanup → BACKLOG.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

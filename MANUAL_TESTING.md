@@ -70,6 +70,10 @@ validity.
   in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
   reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
   jumps to the "Page 3" page (reference integrity).
+- [ ] **`Sample PDFs/vibepdf-verify-pruned.pdf`** (B2/C3 dangling cleanup) —
+  `bookmarks.pdf` with page 3 deleted. The **bookmarks panel shows 2 entries**
+  (Chapter 1 + Chapter 3; **Chapter 2 — which pointed at the deleted page — is
+  gone**), and no broken bookmark remains. 5 pages, opens cleanly.
 - [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -123,6 +127,11 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   **⌘Z** restores the old order, **⌘⇧Z** re-applies. ⌘S → reopen → order
   persisted. On a PDF with internal links, the link still lands on the right
   page after reordering. → on pass, flip **P2.C1** to `[x]`.
+- [ ] **Dangling-ref cleanup (B2/C3):** open a PDF that has internal links or
+  bookmarks pointing to a page, **delete that target page**, **⌘S**, reopen →
+  the link/bookmark to the deleted page is **gone** (no broken navigation), the
+  rest intact. (Use `bookmarks.pdf`: delete page 3 → the Chapter 2 bookmark
+  disappears.)
 - [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
   → on pass, flip **P2.A3** to `[x]`.

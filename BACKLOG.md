@@ -28,7 +28,16 @@ the current roadmap phase. When one is picked up, move it into the relevant
     terminal fields only (kid hierarchies = follow-up); `RestoreDocEdit` holds
     a full-doc byte snapshot per insert in the undo stack — fine for infrequent
     inserts, but a memory cost on large docs (folds into the edit-perf item).
-  - **B2/C3:** clean dangling refs to removed pages (via `cos`).
+  - ✅ **B2/C3 dangling-ref cleanup** — done. `cos::prune_dangling_destinations`
+    runs on the write path (`save_document`): removes `/Link` annotations that
+    dangle (target page gone) or are destination-less, drops dangling top-level
+    bookmarks (re-chained) + neutralizes nested ones, and `prune_objects()`
+    GCs the orphans. *Remaining:* named-destination (`/Names /Dests`) cleanup;
+    and the per-save lopdf load is unconditional — gate it on "a delete/split
+    happened this session" if save latency on huge docs becomes an issue.
+    *Note:* `FPDF_ImportPages` (insert/split) doesn't remap internal-link dests,
+    so inserted internal links are pruned as dead — non-link annotations
+    survive (the lopdf merge does preserve links).
 
 - **Thumbnail appearance in dark mode — match vs. true-colour.**
   Currently the sidebar thumbnails invert with the page in dark mode

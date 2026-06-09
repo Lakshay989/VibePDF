@@ -3572,6 +3572,70 @@ into the document `/AcroForm`). Completing P2-PAGE-005 means re-attaching them
 
 ---
 
+### B2/C3 — dangling-reference cleanup on the write path
+
+#### Problem
+
+Deleting a page (B2) or splitting (C3) leaves *references to* the removed page
+dangling: a link or bookmark that jumps to a page that's no longer there. The
+spec's "update internal references" has two halves — surviving refs track
+(done), and refs to removed pages get cleaned (this).
+
+#### Concepts learned
+
+- **Clean the artifact, not the session.** The fork was: prune the *live edited
+  document* (per-edit) or the *file written to disk* (write-path). Per-edit
+  would have forced delete onto a serialize→prune→reload with snapshot undo,
+  **regressing its lightweight inverse**. Putting the prune in `save_document`
+  — the one choke point every write passes — means the *saved file* is clean
+  with zero undo-model change, and it covers delete, extract, **and** split in
+  one place. "What reaches disk" is what the spec actually cares about.
+- **Make a cross-cutting pass safe to be everywhere.** A prune in the universal
+  save path is scary. Two properties tame it: it **returns the input unchanged
+  when nothing dangles** (clean docs aren't even re-serialized), and it's
+  **infallible** (any lopdf error → return the input), so it can never break a
+  save. The existing round-trip-verify is the backstop.
+- **Your test harness can lie about the system under test.** I tried to
+  manufacture a dangling ref with lopdf's `delete_pages` — but lopdf's *writer
+  strips references to deleted objects on save*, so it produced a *clean* doc.
+  Even hand-removing the object didn't help: lopdf cleans on write. The dangling
+  state only exists because **PDFium doesn't** clean it. Lesson: when testing
+  "what tool A leaves behind," manufacture the state *with tool A* (the
+  integration tests via the real PDFium delete), not with tool B that has
+  different semantics.
+- **Two shapes of "broken link."** PDFium-delete leaves a `/Dest [5 0 R]` whose
+  target is gone (a *dangling* ref). `FPDF_ImportPages` (split) copies the link
+  but *strips its dest entirely* (a *dead* link with no `/Dest`/`/A`). Both are
+  broken; the detector handles both — while **keeping** `/URI` (external) links
+  and named destinations, which have no resolvable page target by design.
+- **Removing from a chain ≠ removing from the file.** Re-chaining the outline
+  (fixing `First`/`Last`/`Next`/`Prev`) makes PDFium *show* the right bookmarks,
+  but the dropped item still sits in the file orphaned (the integration test
+  passed while a raw grep still found "Chapter 2"). `prune_objects()` GCs the
+  orphans so the file is truly clean, not just functionally correct.
+- **A correct cleanup can invalidate an old test's premise.** `insert`'s
+  annotation test used links.pdf, whose only annotation is an internal link —
+  which import dangles and the prune now (correctly) removes. The honest fix
+  wasn't to weaken the prune but to test annotation-preservation with an
+  annotation that *isn't* a broken link: a new `annots.pdf` with a `/Square`
+  markup annotation (page-independent, survives both import and prune).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `prune_dangling_destinations` (+ `is_broken_link`, `nav_target_page`, `prune_outline`, …) — remove broken links/bookmarks, GC orphans. |
+| `src-tauri/src/pdf/document.rs` | `save_document` runs the prune before staging the temp file. |
+| `tests/fixtures/basic/annots.pdf` (+ generator) | A `/Square` markup-annotation fixture for insert's annotation test. |
+| `src-tauri/tests/{cos,delete_page,split,insert_from}.rs` | Prune tests via the real PDFium paths; insert annotation test repointed at `annots.pdf`. |
+
+#### Further reading
+
+- PDF destinations & GoTo actions (`/Dest`, `/A /S /GoTo`, named dests) — PDF 32000-1 §12.3.
+- lopdf `prune_objects` / `delete_pages` — object GC and why the writer rewrites references.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

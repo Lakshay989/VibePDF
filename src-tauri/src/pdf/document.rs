@@ -186,6 +186,10 @@ pub fn save_document(
         let _guard = pdfium_lock()?;
         doc.save_to_bytes().map_err(CommandError::from)?
     };
+    // SPEC: P2-PAGE-003 — clean references to removed pages (dangling links /
+    // bookmarks left by a delete or split) before the bytes hit disk. A no-op
+    // for documents with nothing dangling; infallible (never breaks a save).
+    let bytes = crate::pdf::cos::prune_dangling_destinations(bytes);
     let tmp = sibling_with_suffix(dest, ".vibepdf-tmp");
     std::fs::write(&tmp, &bytes)?;
 

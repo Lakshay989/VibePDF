@@ -287,6 +287,262 @@ fn type_is(obj: &Object, name: &[u8]) -> bool {
     obj.type_name().ok() == Some(name)
 }
 
+/// Extract the explicit target page object id from a destination value: a
+/// `/Dest` array `[pageRef …]` or an action `<< /S /GoTo /D [pageRef …] >>`.
+/// Returns `None` for named destinations (a name/string), indirect dests, or
+/// non-`GoTo` actions — those are left untouched.
+fn dest_target_page(obj: &Object) -> Option<ObjectId> {
+    if let Ok(arr) = obj.as_array() {
+        return arr.first().and_then(|o| o.as_reference().ok());
+    }
+    if let Ok(dict) = obj.as_dict() {
+        let is_goto = dict.get(b"S").ok().and_then(|s| s.as_name().ok()) == Some(&b"GoTo"[..]);
+        if is_goto {
+            if let Ok(d) = dict.get(b"D").and_then(Object::as_array) {
+                return d.first().and_then(|o| o.as_reference().ok());
+            }
+        }
+    }
+    None
+}
+
+/// Whether a `/Link` annotation is broken: a destination-less link (no `/Dest`
+/// and no `/A` — e.g. what page-import leaves when the target wasn't copied) or
+/// one whose explicit page target no longer exists. A `/URI` (or other non-page
+/// action) link, or a named destination we can't resolve, is **kept**.
+fn is_broken_link(annot: &Dictionary, page_set: &HashSet<ObjectId>) -> bool {
+    let is_link =
+        annot.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) == Some(&b"Link"[..]);
+    if !is_link {
+        return false;
+    }
+    if !annot.has(b"Dest") && !annot.has(b"A") {
+        return true; // dead link: no destination at all
+    }
+    match nav_target_page(annot) {
+        Some(target) => !page_set.contains(&target), // explicit page target is gone
+        None => false,                               // named dest / URI action → keep
+    }
+}
+
+/// The page a navigable dict (link annotation or outline item) targets, via
+/// `/Dest` then `/A`. `None` when it has no explicit page destination.
+fn nav_target_page(dict: &Dictionary) -> Option<ObjectId> {
+    if let Ok(dest) = dict.get(b"Dest") {
+        if let Some(id) = dest_target_page(dest) {
+            return Some(id);
+        }
+    }
+    if let Ok(action) = dict.get(b"A") {
+        if let Some(id) = dest_target_page(action) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// SPEC: P2-PAGE-003 — remove references **to** pages that no longer exist
+/// (the other half of "update internal references"). After a delete or split,
+/// `/Link` annotations and bookmarks can point at removed pages. This prunes
+/// them so the saved file is clean.
+///
+/// Infallible: returns the input bytes unchanged when nothing dangles (so a
+/// clean document is not re-serialized) **or** on any lopdf error (so it can
+/// never break saving). Applied on the write path (`save_document`).
+#[must_use]
+pub fn prune_dangling_destinations(bytes: Vec<u8>) -> Vec<u8> {
+    match prune_inner(&bytes) {
+        Ok(Some(pruned)) => pruned,
+        Ok(None) | Err(_) => bytes,
+    }
+}
+
+/// Returns `Some(pruned)` when something was removed, `None` when nothing
+/// dangled, or an error if the document couldn't be parsed/serialized.
+#[allow(clippy::too_many_lines)]
+fn prune_inner(bytes: &[u8]) -> Result<Option<Vec<u8>>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_set: HashSet<ObjectId> = doc.get_pages().into_values().collect();
+    let mut changed = false;
+
+    // 1. Remove dangling /Link annotations from each page's /Annots.
+    let page_ids: Vec<ObjectId> = page_set.iter().copied().collect();
+    for page_id in page_ids {
+        let annots = doc
+            .get_dictionary(page_id)
+            .ok()
+            .and_then(|p| p.get(b"Annots").and_then(Object::as_array).ok().cloned());
+        let Some(annots) = annots else {
+            continue;
+        };
+        let mut kept: Vec<Object> = Vec::with_capacity(annots.len());
+        let mut removed_any = false;
+        for a in &annots {
+            let dangling = a
+                .as_reference()
+                .ok()
+                .and_then(|aid| doc.get_dictionary(aid).ok())
+                .is_some_and(|annot| is_broken_link(annot, &page_set));
+            if dangling {
+                removed_any = true;
+            } else {
+                kept.push(a.clone());
+            }
+        }
+        if removed_any {
+            changed = true;
+            if let Ok(page) = doc.get_dictionary_mut(page_id) {
+                if kept.is_empty() {
+                    page.remove(b"Annots");
+                } else {
+                    page.set("Annots", Object::Array(kept));
+                }
+            }
+        }
+    }
+
+    // 2. Bookmarks: drop dangling top-level items (re-chain); neutralize nested.
+    if prune_outline(&mut doc, &page_set)? {
+        changed = true;
+    }
+
+    if !changed {
+        return Ok(None);
+    }
+    // Garbage-collect now-unreferenced objects (the removed link annotations and
+    // outline items, plus any leftovers from the page delete) so the file is
+    // actually clean, not just functionally correct.
+    doc.prune_objects();
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(Some(buf))
+}
+
+/// Remove dangling top-level outline items (re-chaining the survivors) and
+/// neutralize dangling nested items (drop their `/Dest`/`/A`). Returns whether
+/// anything changed.
+fn prune_outline(doc: &mut Document, page_set: &HashSet<ObjectId>) -> Result<bool, CommandError> {
+    let Some(outlines_id) = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"Outlines").ok())
+        .and_then(|o| o.as_reference().ok())
+    else {
+        return Ok(false);
+    };
+
+    // Collect top-level items (the outline root's direct children).
+    let mut top: Vec<ObjectId> = Vec::new();
+    let mut cur = doc
+        .get_dictionary(outlines_id)
+        .ok()
+        .and_then(|d| d.get(b"First").ok())
+        .and_then(|o| o.as_reference().ok());
+    while let Some(id) = cur {
+        top.push(id);
+        cur = doc
+            .get_dictionary(id)
+            .ok()
+            .and_then(|d| d.get(b"Next").ok())
+            .and_then(|o| o.as_reference().ok());
+    }
+    if top.is_empty() {
+        return Ok(false);
+    }
+
+    let mut survivors: Vec<ObjectId> = Vec::new();
+    for &id in &top {
+        let dangling = doc
+            .get_dictionary(id)
+            .ok()
+            .and_then(nav_target_page)
+            .is_some_and(|t| !page_set.contains(&t));
+        if !dangling {
+            survivors.push(id);
+        }
+    }
+    let mut changed = survivors.len() != top.len();
+
+    if changed {
+        if survivors.is_empty() {
+            doc.catalog_mut().map_err(cos_err)?.remove(b"Outlines");
+        } else {
+            let count = i64::try_from(survivors.len()).unwrap_or(i64::MAX);
+            {
+                let root = doc.get_dictionary_mut(outlines_id).map_err(cos_err)?;
+                root.set("First", Object::Reference(survivors[0]));
+                root.set("Last", Object::Reference(survivors[survivors.len() - 1]));
+                root.set("Count", Object::Integer(count));
+            }
+            let last = survivors.len() - 1;
+            for i in 0..survivors.len() {
+                let item = doc.get_dictionary_mut(survivors[i]).map_err(cos_err)?;
+                if i > 0 {
+                    item.set("Prev", Object::Reference(survivors[i - 1]));
+                } else {
+                    item.remove(b"Prev");
+                }
+                if i < last {
+                    item.set("Next", Object::Reference(survivors[i + 1]));
+                } else {
+                    item.remove(b"Next");
+                }
+            }
+        }
+    }
+
+    // Neutralize dangling destinations on nested descendants of the survivors.
+    for &s in &survivors {
+        if neutralize_dangling_descendants(doc, s, page_set) {
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// Recursively drop `/Dest`/`/A` from descendant outline items whose target
+/// page is gone. Returns whether anything changed.
+fn neutralize_dangling_descendants(
+    doc: &mut Document,
+    item_id: ObjectId,
+    page_set: &HashSet<ObjectId>,
+) -> bool {
+    let mut children: Vec<ObjectId> = Vec::new();
+    let mut cur = doc
+        .get_dictionary(item_id)
+        .ok()
+        .and_then(|d| d.get(b"First").ok())
+        .and_then(|o| o.as_reference().ok());
+    while let Some(id) = cur {
+        children.push(id);
+        cur = doc
+            .get_dictionary(id)
+            .ok()
+            .and_then(|d| d.get(b"Next").ok())
+            .and_then(|o| o.as_reference().ok());
+    }
+
+    let mut changed = false;
+    for child in children {
+        let dangling = doc
+            .get_dictionary(child)
+            .ok()
+            .and_then(nav_target_page)
+            .is_some_and(|t| !page_set.contains(&t));
+        if dangling {
+            if let Ok(d) = doc.get_dictionary_mut(child) {
+                d.remove(b"Dest");
+                d.remove(b"A");
+            }
+            changed = true;
+        }
+        if neutralize_dangling_descendants(doc, child, page_set) {
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Merge `sources` (≥ 2 serialized PDFs) into one, preserving pages, content,
 /// annotations, **bookmarks** (one outline subtree per source), and **form
 /// fields** (with colliding `/T` names suffixed `_2`, `_3`, …). Returns the

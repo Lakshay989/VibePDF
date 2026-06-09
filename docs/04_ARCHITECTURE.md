@@ -136,6 +136,12 @@ spike tests assert exactly this. `cos` functions are pure `&[u8] → Vec<u8>`
 transforms, so they compose cleanly into the existing `save_document`
 pipeline.
 
+`save_document` itself runs one such pass — `cos::prune_dangling_destinations`
+removes references to pages a delete/split removed (broken links, bookmarks),
+so every file written to disk has clean internal references (P2-PAGE-003). It's
+a no-op (returns the input unchanged) when nothing dangles, and infallible, so
+it never breaks a save.
+
 ---
 
 ## The command boundary

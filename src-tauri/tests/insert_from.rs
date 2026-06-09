@@ -67,15 +67,15 @@ async fn insert_from_preserves_annotations() {
     let id = uuid::Uuid::new_v4();
     let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
 
-    // Insert links.pdf page 1 (its annotated page) at index 1, then save and
-    // reopen to confirm the annotation rode along.
+    // Insert annots.pdf (a /Square markup annotation — no page destination, so
+    // it survives both import and the dangling-ref prune) after hello's page.
     handle
-        .insert_from_pdf(fixture("links.pdf"), vec![0], 1)
+        .insert_from_pdf(fixture("annots.pdf"), vec![0], 1)
         .await
         .expect("insert");
     handle.save(Some(out.clone())).await.expect("save");
 
-    assert!(page_has_annotations(&out, 1), "inserted page should keep its annotation");
+    assert!(page_has_annotations(&out, 1), "inserted page should keep its markup annotation");
 
     drop(handle);
     let _ = std::fs::remove_dir_all(&dir);
