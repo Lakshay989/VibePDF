@@ -30,8 +30,14 @@ import { insertBlankPage } from "@/ipc/insert-blank";
 import { renderPage } from "@/ipc/pdf";
 import { rotatePages } from "@/ipc/rotate";
 import { reorderPages } from "@/ipc/reorder";
+import { resizePages } from "@/ipc/resize";
 import { isPermutation, movePage } from "@/tools/reorder/compute-reorder";
 import { CropDialog, type CropTarget } from "@/tools/crop/CropDialog";
+import {
+  ResizeDialog,
+  type ResizeRequest,
+  type ResizeTarget,
+} from "@/tools/resize/ResizeDialog";
 import { deleteThumb, getThumb, putThumb } from "@/panels/thumbnail-cache";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -78,6 +84,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
     null,
   );
   const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
+  const [resizeTarget, setResizeTarget] = useState<ResizeTarget | null>(null);
   const epoch = useDocEpoch(documentId);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const markEdited = useEditEpochStore((s) => s.markEdited);
@@ -287,6 +294,31 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
     [documentId, bumpEpoch, setHistory],
   );
 
+  // SPEC: P2-PAGE-010 — resize the targeted page, or every page, to a chosen
+  // size; the backend scales content to fit. Like crop, a page-size change
+  // bumps the edit epoch so the main view + thumbnails reload.
+  const applyResize = useCallback(
+    async (page: number, req: ResizeRequest) => {
+      setResizeTarget(null);
+      const pages =
+        req.scope === "all" ? Array.from({ length: pageCount }, (_, i) => i) : [page];
+      try {
+        const history = await resizePages(
+          documentId,
+          pages,
+          req.width,
+          req.height,
+          req.preserveAspect,
+        );
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      } catch (err) {
+        console.warn("resize failed", documentId, page, err);
+      }
+    },
+    [documentId, pageCount, bumpEpoch, setHistory],
+  );
+
   // One shared observer for all tiles. All tiles mount at once (fixed
   // pageCount, no virtualization), so we can observe them straight from
   // the DOM after commit — no per-tile callback refs / timing dance.
@@ -371,6 +403,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
           onRotate={(degrees) => void rotate(menu.page, degrees)}
           onInsert={() => void insert(menu.page)}
           onCrop={() => void openCrop(menu.page)}
+          onResize={() => setResizeTarget({ page: menu.page })}
           onDelete={() => void del(menu.page)}
           onClose={() => setMenu(null)}
         />
@@ -384,6 +417,14 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
           if (cropTarget) void resetCrop(cropTarget.page);
         }}
         onClose={() => setCropTarget(null)}
+      />
+      <ResizeDialog
+        target={resizeTarget}
+        pageCount={pageCount}
+        onApply={(req) => {
+          if (resizeTarget) void applyResize(resizeTarget.page, req);
+        }}
+        onClose={() => setResizeTarget(null)}
       />
     </aside>
   );

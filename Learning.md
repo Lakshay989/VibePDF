@@ -3700,6 +3700,67 @@ was never the problem — the drag never reached it.
 
 ---
 
+### P2.B5 — resize a page by scaling content (lopdf content-stream wrap)
+
+#### Problem
+
+"Resize a page to A4" sounds like just changing a number (the `/MediaBox`), but
+the spec requires **scaling the content to fit** the new size — otherwise the
+text would stay its original size in a differently-sized box. So we need to
+transform every drawing on the page, then relabel the box.
+
+#### Concepts learned
+
+- **A PDF page is content + a box.** The `/MediaBox` (`[llx lly urx ury]`, in
+  points = 1/72") defines the page rectangle; the `/Contents` stream(s) draw the
+  marks. Resizing must scale the *contents* and set a new *box* — two separate
+  steps. The box can also be **inherited** from a parent `/Pages` node, so to
+  read a page's effective size you walk up `/Parent` until you find a `/MediaBox`.
+- **Scaling content with a transformation matrix.** PDF content operators draw
+  in "user space"; the `cm` operator concatenates an affine matrix
+  `[a b c d e f]` onto the current transform. For a pure scale + offset that's
+  `[sx 0 0 sy e f]`: `x' = sx·x + e`, `y' = sy·y + f`. Wrapping the whole content
+  in `q … Q` (save/restore graphics state) keeps the scale from leaking. So
+  prepending one stream `q sx 0 0 sy e f cm` and appending `Q` scales the entire
+  page **without decompressing or parsing the original content** — `/Contents`
+  is allowed to be an *array* of streams that PDFium concatenates.
+  - **Preserve aspect** = uniform scale `s = min(W/w, H/h)` and centre the
+    result (`e,f` add the leftover margin/2). **Stretch** = independent
+    `sx = W/w, sy = H/h`.
+- **When the obvious API is a trap — the diagnosis that forced a pivot.** The
+  plan was to use PDFium's `FPDFPage_TransFormWithClip`. It *worked* (assertions
+  passed) but the pdfium-render wrapper calls `reload_in_place()` (a documented
+  workaround for PDFium issue #93) that left the document in a state that
+  **SIGSEGV'd at process teardown** — and nondeterministically, which is the
+  worst kind. Every PDFium content-transform path (even `page.scale()`) routes
+  through it. Lesson: a passing assertion isn't a passing *process*; watch the
+  exit code, and when a library's only API for a job is unreliable, change the
+  mechanism rather than paper over it.
+- **The byte-handoff makes the pivot cheap.** Because `cos` edits are pure
+  `&[u8] → Vec<u8>`, swapping resize from "PDFium transform" to "lopdf
+  content-wrap" touched only `ResizeEdit`'s internals + one new `cos` function —
+  the actor, command, IPC, dialog, undo, and most tests were unchanged. That
+  composability is the whole point of the byte-handoff architecture.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `resize_pages()` — wrap each page's content with `q <matrix> cm … Q`, set the new `/MediaBox`, drop crop/bleed/trim/art boxes; `effective_media_box()` walks `/Parent` for an inherited box. |
+| `src-tauri/src/pdf/resize.rs` | `ResizeEdit` — byte-handoff (serialize → `cos::resize_pages` → reload/replace doc); inverse is a `RestoreDocEdit` pre-resize snapshot. |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | `ResizePages` message + handle, `pdf_resize_pages` command + registration. |
+| `src/ipc/resize.ts`, `src/tools/resize/{page-sizes.ts,ResizeDialog.tsx}` | Typed wrapper, the standard-size table, and the preset/custom dialog (size, preserve-aspect, this-page/all-pages). |
+| `src-tauri/tests/resize.rs`, `tests/cos.rs`, `src/tools/resize/page-sizes.test.ts` | Integration (MediaBox/undo/validation), a byte-level content-wrap test, and the preset-table unit tests. |
+
+#### Further reading
+
+- PDF content streams & the `cm` operator — PDF 32000-1 §8.3 (coordinate systems & transforms), §7.8.2 (content streams).
+- Graphics state `q`/`Q` — PDF 32000-1 §8.4.
+- Inherited page attributes (`/MediaBox` on `/Pages`) — PDF 32000-1 §7.7.3.4.
+- pdfium-render `reload_in_place` / issue #93 — why the PDFium content transform was unusable here.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

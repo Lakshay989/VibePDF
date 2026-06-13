@@ -1468,6 +1468,44 @@ Root cause + pattern recorded in `docs/04` "WebView quirks" and `Learning.md`.
 
 ---
 
+### P2.B5 — resize page (this commit)
+
+```bash
+# No new deps. Resize scales content via the lopdf byte-handoff
+# (cos::resize_pages wraps each page's content in `q <matrix> cm … Q` + sets the
+# new /MediaBox), NOT PDFium.
+
+# WHY the pivot (mid-implementation): the planned PDFium path
+# (FPDFPage_TransFormWithClip / page.scale()) forces a reload_in_place
+# (pdfium-render #93) that SIGSEGVs at process teardown — caught by running a
+# single resize test in isolation:
+cargo test --test resize resize_to_a4_sets_mediabox -- --test-threads=1
+#   → signal: 11 (SIGSEGV) even though the assertions passed. Pivoted to lopdf;
+#     no PDFium content API, no reload_in_place, no crash.
+
+npm run check    # tsc ✓  eslint src ✓  clippy --all-targets -D warnings ✓
+npm run test     # 145/145 (page-sizes: 4 new)
+npm run test:rust
+#   resize.rs: 5 (a4 / all-pages / undo-restores / rejects-nonpositive /
+#   out-of-range) + 1 ignored artifact. cos.rs: +1
+#   (cos_resizes_sets_mediabox_and_wraps_content — MediaBox=A4, first content
+#   stream is the `q … cm` wrapper, reopens in PDFium). Full suite green, NO
+#   SIGSEGV (the whole point of the pivot).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test resize resize_writes_verification_artifact \
+  -- --ignored --test-threads=1   # (from src-tauri/)
+#   → /tmp/vibepdf-verify-resized.pdf (hello.pdf Letter → A4, preserve-aspect);
+#     copied to Sample PDFs/. MediaBox confirmed [0 0 595.28 841.89].
+```
+
+Mechanism + rationale recorded in `docs/04` "Structural edits via lopdf" and
+`Learning.md`. Limits (annotations not re-scaled; CropBox dropped; no
+orientation match) → `BACKLOG.md`. Left `[~]` pending the human cross-reader of
+`Sample PDFs/vibepdf-verify-resized.pdf` + the in-app flow.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

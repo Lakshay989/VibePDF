@@ -116,6 +116,16 @@ bookmarks/form-fields (P2-PAGE-008). These go through `pdf::cos` (the `lopdf`
 object model), **not** PDFium. See `docs/03` "Structural edits — `lopdf`" for
 the why.
 
+**Page resize (P2-PAGE-010) also lives here, for a different reason.** Scaling a
+page's content is something PDFium *can* nominally do (`FPDFPage_TransFormWithClip`),
+but pdfium-render's wrapper forces a `reload_in_place()` (a documented PDFium
+workaround, issue #93) that leaves the document in a state that **SIGSEGVs at
+teardown** — reproducibly, in our tests. So `cos::resize_pages` does it at the
+COS level instead: wrap each page's content stream with `q <scale-matrix> cm …
+Q` (push state, concat a scale matrix, …, pop) and set the new `/MediaBox`. No
+PDFium content API, no `reload_in_place`. Annotations aren't re-scaled (their
+`/Rect`s keep their coordinates) — a documented limitation in `BACKLOG.md`.
+
 **The two libraries never share a live handle.** A structural edit is a pass
 over **serialized bytes** between PDFium passes:
 

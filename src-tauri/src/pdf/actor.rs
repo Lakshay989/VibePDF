@@ -39,6 +39,7 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::reorder::ReorderEdit;
+use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
 use crate::pdf::split::{split_document, SplitMode, SplitOutcome};
 use crate::pdf::undo::{Edit, HistoryState, UndoStack};
@@ -139,6 +140,16 @@ pub enum Message {
     /// permutation of `0..page_count`). Undoable, marks dirty.
     ReorderPages {
         order: Vec<usize>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P2-PAGE-010 — resize `pages` (0-based) to `width` × `height`
+    /// points, scaling content to fit (`preserve_aspect` centres it under a
+    /// uniform scale). Undoable (snapshot inverse), marks dirty.
+    ResizePages {
+        pages: Vec<i32>,
+        width: f32,
+        height: f32,
+        preserve_aspect: bool,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
@@ -444,6 +455,40 @@ impl DocumentActorHandle {
             .send(Message::RotatePages {
                 pages,
                 quarter_turns,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P2-PAGE-010 — resize `pages` to `width` × `height` points.
+    /// Await-holding convenience for tests; IPC uses `resize_pages_request`.
+    pub async fn resize_pages(
+        &self,
+        pages: Vec<i32>,
+        width: f32,
+        height: f32,
+        preserve_aspect: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.resize_pages_request(pages, width, height, preserve_aspect)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn resize_pages_request(
+        &self,
+        pages: Vec<i32>,
+        width: f32,
+        height: f32,
+        preserve_aspect: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ResizePages {
+                pages,
+                width,
+                height,
+                preserve_aspect,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -852,6 +897,31 @@ fn run_worker(
                 // replaces the live document with the reordered bytes. Records
                 // the inverse permutation and marks the document dirty.
                 let result = match Box::new(ReorderEdit { order }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ResizePages {
+                pages,
+                width,
+                height,
+                preserve_aspect,
+                reply,
+            } => {
+                // SPEC: P2-PAGE-010 — scale content + set MediaBox; the inverse
+                // is a pre-resize byte snapshot (RestoreDocEdit).
+                let edit = ResizeEdit {
+                    pages,
+                    width,
+                    height,
+                    preserve_aspect,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

@@ -84,6 +84,11 @@ validity.
   gone**), and no broken bookmark remains. 5 pages, opens cleanly.
   → **PASS (2026-06-13):** Ch2 removal confirmed in bytes (Ch1 + Ch3 only,
   `/Count 2`); folded into P2.B2 `[x]`.
+- [ ] **`Sample PDFs/vibepdf-verify-resized.pdf`** (B5 resize) — `hello.pdf`
+  (Letter) resized to **A4 (595×842 pt)** with preserve-aspect. The text
+  "Hello, Vibe.PDF." should be **scaled to fit** the A4 page (not clipped, not
+  sitting at the old position with empty space), and the page should measure A4.
+  Opens cleanly. → on pass (Preview + Chrome), flip **P2.B5** to `[x]`.
 - [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -140,6 +145,12 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   page after reordering. → **PASS (2026-06-13)** after the pointer-event rewrite
   (source tile dims, hovered tile rings, drop reorders; click still selects).
   P2.C1 flipped to `[x]`.
+- [ ] **Resize (B5):** right-click a page thumbnail → **Resize page…** → pick a
+  size (e.g. **A4**) or **Custom** W×H, toggle **preserve aspect ratio**, choose
+  **This page** / **All pages** → Apply. The page reflows to the new size in the
+  main view + thumbnails with content scaled; **⌘Z** restores the old size,
+  **⌘⇧Z** re-applies. ⌘S → reopen externally → new size persists. Try **All
+  pages** on a multi-page PDF. → on pass, flip **P2.B5** to `[x]`.
 - [x] **Dangling-ref cleanup (B2/C3):** open a PDF that has internal links or
   bookmarks pointing to a page, **delete that target page**, **⌘S**, reopen →
   the link/bookmark to the deleted page is **gone** (no broken navigation), the
@@ -206,6 +217,7 @@ the rest still want a pass.
 | P2.B2 — Delete | A (deleted PDF) + B (delete) pass |
 | P2.B3 — Insert blank | A (inserted PDF) + B (insert) pass |
 | P2.B4 — Crop | A (cropped PDF) + B (crop) pass |
+| P2.B5 — Resize | A (resized PDF: A4, content scaled) + B (resize) pass |
 | P2.C2 — Extract | A (extracted PDF) + B (extract) pass |
 | P2.C3 — Split | A (split PDFs) + B (split) pass |
 | P2.C4 — Merge | A (merged PDF: bookmarks + form field) + B (merge) pass |

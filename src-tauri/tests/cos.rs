@@ -12,7 +12,7 @@ use lopdf::{Document, Object};
 use vibepdf_lib::pdf::cos::{
     add_top_level_bookmark, merge_documents, prune_dangling_destinations, read_form_field_names,
     register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
-    reorder_pages,
+    reorder_pages, resize_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -68,6 +68,45 @@ fn pdfium_page_count(bytes: &[u8]) -> u32 {
 
 fn as_strs(v: &[String]) -> Vec<&str> {
     v.iter().map(String::as_str).collect()
+}
+
+/// A PDF number (Integer/Real) as f32, for reading a MediaBox in a test.
+fn num(obj: &Object) -> f32 {
+    match obj {
+        Object::Integer(i) => *i as f32,
+        Object::Real(r) => *r,
+        _ => panic!("expected a number, got {obj:?}"),
+    }
+}
+
+/// SPEC: P2-PAGE-010 — resize sets the new MediaBox AND scales content (the
+/// page's first content stream becomes a `q … cm` scale matrix), and the result
+/// reopens in PDFium. hello.pdf is Letter (612×792); resize to A4.
+#[test]
+fn cos_resizes_sets_mediabox_and_wraps_content() {
+    let bytes = fixture_bytes("hello.pdf");
+    let out = resize_pages(&bytes, &[0], 595.28, 841.89, true).expect("resize");
+
+    // Reopens in the *other* engine.
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let doc = Document::load_mem(&out).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let pd = doc.get_dictionary(page_id).expect("page dict");
+
+    // MediaBox is now A4.
+    let mb = pd.get(b"MediaBox").and_then(Object::as_array).expect("MediaBox");
+    assert!((num(&mb[2]) - 595.28).abs() < 0.5, "width: {:?}", mb[2]);
+    assert!((num(&mb[3]) - 841.89).abs() < 0.5, "height: {:?}", mb[3]);
+
+    // Content was scaled, not just relabeled: the first content stream is our
+    // `q <matrix> cm` wrapper (proves the box wasn't merely changed).
+    let contents = pd.get(b"Contents").and_then(Object::as_array).expect("Contents array");
+    let first = contents.first().expect("a content stream").as_reference().expect("ref");
+    let stream = doc.get_object(first).and_then(Object::as_stream).expect("stream");
+    let text = String::from_utf8_lossy(&stream.content);
+    assert!(text.contains("cm"), "first stream should be the scale matrix, got: {text}");
+    assert!(text.contains('q'), "scale wrapper should push graphics state: {text}");
 }
 
 #[test]

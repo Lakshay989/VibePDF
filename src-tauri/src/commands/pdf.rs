@@ -189,6 +189,52 @@ pub async fn pdf_rotate_pages(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P2-PAGE-010 — resize `pages` (0-based) to `width` × `height` points,
+/// scaling content to fit. `preserve_aspect` scales uniformly and centres;
+/// otherwise content is stretched. Undoable, marks dirty; returns the new
+/// history availability.
+#[tauri::command]
+pub async fn pdf_resize_pages(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    width: f32,
+    height: f32,
+    preserve_aspect: bool,
+) -> Result<HistoryState, CommandError> {
+    if pages.is_empty() {
+        return Err(CommandError::InvalidInput("no pages specified".into()));
+    }
+    if !(width.is_finite() && height.is_finite()) || width <= 0.0 || height <= 0.0 {
+        return Err(CommandError::InvalidInput(format!(
+            "resize dimensions must be positive and finite, got {width}×{height}"
+        )));
+    }
+    // Guard against absurd sizes (PDF's practical max page side is 200" = 14400pt).
+    if width > 14_400.0 || height > 14_400.0 {
+        return Err(CommandError::InvalidInput(format!(
+            "resize dimensions exceed the 14400pt limit, got {width}×{height}"
+        )));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.resize_pages_request(pages, width, height, preserve_aspect)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

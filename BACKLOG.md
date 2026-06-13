@@ -169,6 +169,28 @@ the current roadmap phase. When one is picked up, move it into the relevant
   Decide: reject a descending range with an error, or keep normalizing and
   document it. Today it just inserts ascending.
 
+## From P2.B5 (resize)
+
+- **Resize doesn't re-scale annotations (from P2.B5).** `cos::resize_pages`
+  scales page *content* (wraps the content stream in `q <matrix> cm … Q`) but
+  leaves `/Annots` `/Rect`s at their original coordinates, so an annotation on a
+  resized page ends up mis-placed/wrong-sized. Most resize targets are plain
+  content pages, so this was scoped out. To fix: apply the same affine to each
+  annotation's `/Rect` (and `/QuadPoints`, appearance-stream `/BBox`/`/Matrix`)
+  in the cos pass. Shares the "annotation geometry" concern with the crop-in-split
+  item above.
+
+- **Resize drops `/CropBox` (and Bleed/Trim/Art) (from P2.B5).** To avoid a
+  stale crop window over the new geometry, resize removes those boxes so they
+  default to the new `/MediaBox`. If a user cropped *then* resized, the crop is
+  lost. Acceptable for now; revisit if resize-after-crop is a real workflow
+  (scale the CropBox by the same matrix instead of dropping it).
+
+- **Resize orientation isn't auto-matched (from P2.B5).** Presets are portrait;
+  applying e.g. A4 to a landscape page forces portrait (preserve-aspect centres
+  the content so nothing is lost). A "match source orientation" toggle, plus
+  mm/inch input units in the dialog, are easy follow-ups.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

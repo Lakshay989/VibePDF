@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
 
@@ -276,6 +276,131 @@ pub fn reorder_pages(bytes: &[u8], new_order: &[usize]) -> Result<Vec<u8>, Comma
     doc.get_dictionary_mut(pages_id)
         .map_err(cos_err)?
         .set("Kids", Object::Array(new_kids));
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Read a PDF number (`Integer` or `Real`) as `f32`.
+#[allow(clippy::cast_precision_loss)] // MediaBox values are small (≤ 14400pt).
+fn number_as_f32(obj: &Object) -> Option<f32> {
+    match obj {
+        Object::Integer(i) => Some(*i as f32),
+        Object::Real(r) => Some(*r),
+        _ => None,
+    }
+}
+
+/// The effective `/MediaBox` of `page_id` as `[llx, lly, urx, ury]`, walking up
+/// the `/Parent` chain for an inherited box. `None` if absent/malformed.
+fn effective_media_box(doc: &Document, page_id: ObjectId) -> Option<[f32; 4]> {
+    let mut current = Some(page_id);
+    for _ in 0..32 {
+        let id = current?;
+        let dict = doc.get_dictionary(id).ok()?;
+        if let Ok(mb) = dict.get(b"MediaBox").and_then(Object::as_array) {
+            if mb.len() == 4 {
+                let vals: Option<Vec<f32>> = mb.iter().map(number_as_f32).collect();
+                if let Some(v) = vals {
+                    return Some([v[0], v[1], v[2], v[3]]);
+                }
+            }
+        }
+        current = dict.get(b"Parent").ok().and_then(|o| o.as_reference().ok());
+    }
+    None
+}
+
+/// SPEC: P2-PAGE-010 — resize `pages` (0-based) to `width` × `height` points,
+/// scaling each page's content to fit. Done at the COS level rather than via
+/// `PDFium`: a page's content is scaled by wrapping its content stream(s) with
+/// `q <matrix> cm … Q`, and the `/MediaBox` is set to the new size. (`PDFium`'s
+/// page-content transform forces a `reload_in_place` that SIGSEGVs at teardown —
+/// see `docs/04`.) When `preserve_aspect` is set, content is scaled uniformly by
+/// the smaller ratio and centred; otherwise it is stretched to fill.
+///
+/// Annotations (`/Annots`) are not re-scaled — their coordinates are left as-is
+/// (a documented limitation; see `BACKLOG.md`).
+pub fn resize_pages(
+    bytes: &[u8],
+    pages: &[usize],
+    width: f32,
+    height: f32,
+    preserve_aspect: bool,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_map = doc.get_pages();
+    let page_count = page_map.len();
+
+    for &idx in pages {
+        let page_no = u32::try_from(idx)
+            .ok()
+            .map(|n| n + 1)
+            .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {idx}")))?;
+        let page_id = *page_map.get(&page_no).ok_or_else(|| {
+            CommandError::InvalidInput(format!(
+                "page index out of range: {idx} (document has {page_count} pages)"
+            ))
+        })?;
+
+        let mb = effective_media_box(&doc, page_id).ok_or_else(|| {
+            CommandError::InvalidInput(format!("page {idx} has no readable MediaBox"))
+        })?;
+        let (ml, mb_bottom, w, h) = (mb[0], mb[1], mb[2] - mb[0], mb[3] - mb[1]);
+        if w <= 0.0 || h <= 0.0 {
+            return Err(CommandError::InvalidInput(format!(
+                "page {idx} has a degenerate MediaBox ({w}×{h})"
+            )));
+        }
+
+        let (sx, sy, off_x, off_y) = if preserve_aspect {
+            let s = (width / w).min(height / h);
+            (s, s, (width - w * s) / 2.0, (height - h * s) / 2.0)
+        } else {
+            (width / w, height / h, 0.0, 0.0)
+        };
+        // Map the old box origin to the new box: x' = sx*(x - ml) + off_x.
+        let e = off_x - sx * ml;
+        let f = off_y - sy * mb_bottom;
+
+        // Existing /Contents → a list of stream references (single ref or array).
+        let existing: Vec<Object> = {
+            let pd = doc.get_dictionary(page_id).map_err(cos_err)?;
+            match pd.get(b"Contents") {
+                Ok(Object::Reference(id)) => vec![Object::Reference(*id)],
+                Ok(Object::Array(arr)) => arr.clone(),
+                _ => Vec::new(),
+            }
+        };
+
+        // Wrap content with `q <scale> cm … Q` (push state, scale, …, pop).
+        let pre = format!("q {sx:.6} 0 0 {sy:.6} {e:.6} {f:.6} cm\n").into_bytes();
+        let pre_id = doc.add_object(Stream::new(Dictionary::new(), pre));
+        let post_id = doc.add_object(Stream::new(Dictionary::new(), b"\nQ".to_vec()));
+
+        let mut contents = Vec::with_capacity(existing.len() + 2);
+        contents.push(Object::Reference(pre_id));
+        contents.extend(existing);
+        contents.push(Object::Reference(post_id));
+
+        let pd = doc.get_dictionary_mut(page_id).map_err(cos_err)?;
+        pd.set("Contents", Object::Array(contents));
+        pd.set(
+            "MediaBox",
+            Object::Array(vec![
+                Object::Real(0.0),
+                Object::Real(0.0),
+                Object::Real(width),
+                Object::Real(height),
+            ]),
+        );
+        // The old crop/bleed/trim/art boxes describe the pre-resize geometry;
+        // drop them so they default to the new MediaBox.
+        for key in [&b"CropBox"[..], b"BleedBox", b"TrimBox", b"ArtBox"] {
+            pd.remove(key);
+        }
+    }
 
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;

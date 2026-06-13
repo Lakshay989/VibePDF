@@ -13,6 +13,8 @@ export interface RotateMenuProps {
   onInsert: () => void;
   /** SPEC: P2-PAGE-009 — crop this page. */
   onCrop: () => void;
+  /** SPEC: P2-PAGE-010 — resize this page (or all pages). */
+  onResize: () => void;
   /** SPEC: P2-PAGE-003 — delete this page. */
   onDelete: () => void;
   onClose: () => void;
@@ -24,6 +26,7 @@ export function RotateMenu({
   onRotate,
   onInsert,
   onCrop,
+  onResize,
   onDelete,
   onClose,
 }: RotateMenuProps) {
@@ -72,6 +75,13 @@ export function RotateMenu({
           label="Crop page…"
           onClick={() => {
             onCrop();
+            onClose();
+          }}
+        />
+        <MenuItem
+          label="Resize page…"
+          onClick={() => {
+            onResize();
             onClose();
           }}
         />
