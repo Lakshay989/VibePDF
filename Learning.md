@@ -3636,6 +3636,70 @@ spec's "update internal references" has two halves — surviving refs track
 
 ---
 
+### P2.C1 (GUI fix) — thumbnail reorder via pointer events
+
+#### Problem
+
+Drag-to-reorder thumbnails *looked* implemented (backend + tests all green) but
+**did nothing in the running app**: you could pick up a thumbnail but dropping
+it changed no order. The reorder backend (`reorder.rs` → `cos::reorder_pages`)
+was never the problem — the drag never reached it.
+
+#### Concepts learned
+
+- **The Tauri webview is not Chrome.** Tauri renders the UI in the OS-native
+  webview. On macOS that's **WKWebView** (the Safari engine). Anything that
+  "works in Chrome" must still be checked there — the DOM APIs are *mostly* the
+  same but not identical.
+- **WKWebView doesn't support HTML5 drag-and-drop for in-page reordering.** The
+  HTML5 DnD model is a sequence of events: `dragstart` on the source, then
+  `dragenter`/`dragover` on whatever you pass over, then `drop` on the target,
+  then `dragend`. We proved with one-line `console.warn` probes at each handler
+  that WKWebView fires only **`dragstart` and `dragend`** — the three
+  drop-target events **never fire**. With no `drop`, the handler that computes
+  the new order can't run. No amount of `preventDefault`/`dataTransfer` fiddling
+  fixes a missing event.
+- **Instrument before you rewrite.** Rather than guess (the first guess — a
+  nested page-tree that the backend rejects — was *wrong*), we added logging at
+  every stage and had the human read the console. The trace (`dragstart` +
+  `dragend`, nothing else) pinpointed the exact failure and ruled out four other
+  hypotheses in one shot. This is the diagnosis loop: reproduce → instrument →
+  read the evidence → *then* fix.
+- **Pointer events are the portable substitute.** `pointerdown`/`pointermove`/
+  `pointerup` are a unified model for mouse, touch, and pen, and WKWebView
+  delivers them reliably. To rebuild drag-reorder on them:
+  - **Click vs. drag:** on `pointerdown` just record the start; only treat it as
+    a drag once the pointer moves past a small threshold (6px). Under the
+    threshold it stays a click (→ select the page). This is the standard way to
+    let one gesture mean two things.
+  - **Pointer capture:** `setPointerCapture(pointerId)` makes one element keep
+    receiving the move/up events even when the pointer leaves it — so the drag
+    doesn't "drop out" when you move fast or past the list edge.
+  - **Finding the drop target:** capture redirects *events*, not *hit-testing*,
+    so `document.elementFromPoint(x, y)` still returns the real element under the
+    cursor. Tag each tile with a `data-thumb-tile={page}` attribute and
+    `.closest('[data-thumb-tile]')` from that point to read which page you're
+    over. (We kept the lazy-load observer's separate `data-thumb-page` on the
+    inner image div untouched — two attributes, two concerns.)
+  - **Suppress the trailing click:** after a real drag, set a ref flag so the
+    `click` the browser may synthesize next doesn't also "select" the page.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/panels/ThumbnailPanel.tsx` | Replaced HTML5 DnD (`draggable`/`onDragStart`/`onDrop`) with pointer-event handlers on the `<ul>` (`onTilePointerDown/Move/Up/Cancel`), a 6px click/drag threshold, `data-thumb-tile` hit-testing, and visual feedback (source dims, hovered tile rings). Backend call (`reorderPages`) unchanged. |
+| `docs/04_ARCHITECTURE.md` | New "WebView quirks" section documenting the WKWebView DnD gap + the pointer-event pattern, so no future drag UI reaches for HTML5 DnD. |
+
+#### Further reading
+
+- Pointer events (unified mouse/touch/pen): https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events
+- `setPointerCapture`: https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture
+- `Document.elementFromPoint`: https://developer.mozilla.org/en-US/docs/Web/API/Document/elementFromPoint
+- WKWebView HTML5 drag-and-drop limitations (WebKit) — long-standing gap for in-page DnD; pointer/mouse events are the portable workaround.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

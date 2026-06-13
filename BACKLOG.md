@@ -171,18 +171,15 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## Real bugs (fix soon — these aren't polish)
 
-- **C1 reorder did nothing in the GUI — likely the nested-tree limit.**
-  Dragging a thumbnail shows the `+` cursor but releasing doesn't reorder. On
-  review the `ThumbnailPanel` HTML5 DnD is correctly wired (`onDragOver`
-  preventDefaults, `onDrop` → `reorder` → `reorderPages`), so the `preventDefault`
-  theory is *out*. Leading cause: `cos::reorder_pages` **rejects nested page
-  trees** (flat-tree only) and the frontend swallows the error with a bare
-  `console.warn` — a silent no-op to the user. Two fixes: (a) **surface the
-  failure** (toast: "can't reorder this PDF's page structure yet") instead of a
-  silent warn; (b) the real feature work — **nested-tree flatten before
-  reorder** (already tracked above under "Nested page-tree reorder"). Bisect on
-  a flat fixture (`Sample PDFs/reorder-bisect-*.pdf`) confirms which. **Blocks
-  P2.C1's `[x]`.**
+- ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was
+  **WKWebView dropping all HTML5 drag-and-drop drop-target events**
+  (`dragenter`/`dragover`/`drop` never fire; only `dragstart`/`dragend`),
+  confirmed by instrumentation — not the nested-tree limit (it failed on a flat
+  fixture). Fixed by reimplementing the reorder with **pointer events** in
+  `ThumbnailPanel.tsx`. Recorded as a webview gotcha in `docs/04`. *(The
+  nested-tree reorder limit above is still real but separate — `cos::reorder_pages`
+  remains flat-tree-only; a nested PDF will still no-op, and surfacing that as a
+  toast instead of a silent `console.warn` is a worthwhile follow-up.)*
 
 - **Thumbnail click lands at the wrong scroll offset.** Clicking a thumbnail
   scrolls to the target page but leaves most of the *previous* page on screen

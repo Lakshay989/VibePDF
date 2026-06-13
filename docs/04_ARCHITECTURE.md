@@ -230,6 +230,24 @@ Five zustand stores. Each store owns a clearly scoped slice. Stores never reach 
 
 ---
 
+## WebView quirks
+
+The frontend runs in the OS-native webview (Tauri 2), **not** Chromium — so it
+is not a Chrome-equivalent. Behaviour differs per platform, and on macOS the
+webview is **WKWebView**.
+
+- **No HTML5 drag-and-drop for in-page reordering.** WKWebView fires
+  `dragstart`/`dragend` on a `draggable` element but **never delivers the
+  drop-target events** (`dragenter`/`dragover`/`drop`), so a native HTML5 DnD
+  reorder can never complete. Implement element-to-element drag with **pointer
+  events** (`pointerdown`/`pointermove`/`pointerup`) instead: arm on
+  pointerdown, begin past a small movement threshold (so a plain click still
+  fires), `setPointerCapture` once dragging, and resolve the drop target with
+  `document.elementFromPoint` + a `data-*` marker (capture redirects events, not
+  hit-testing). The thumbnail reorder (`panels/ThumbnailPanel.tsx`, SPEC
+  P2-PAGE-002) is the reference implementation. **Do not reach for HTML5 DnD for
+  any future in-app drag UI** (page reorder, tab reorder, annotation drag).
+
 ## The render pipeline
 
 PDF.js handles rendering in the WebView for the interactive canvas. PDFium handles rendering on the Rust side for: thumbnails, export-to-image, OCR input, visual diff. We accept rendering them twice. Performance benchmarking has shown this is fine; the two engines are both fast.

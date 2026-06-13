@@ -75,11 +75,12 @@ validity.
   fillable but **white-on-white with no border** (camouflaged). Functionally
   correct; faint-border rendering filed to BACKLOG. Full Acrobat pass still
   wanted to flip P2.D1.
-- [ ] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
+- [x] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
   in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
   reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
   jumps to the "Page 3" page (reference integrity).
-  → *(artifact is fine; but the in-app reorder DROP is broken — see Findings.)*
+  → **PASS (2026-06-13):** in-app drag-reorder fixed (pointer events) and
+  verified live; backend output was always correct.
 - [x] **`Sample PDFs/vibepdf-verify-pruned.pdf`** (B2/C3 dangling cleanup) —
   `bookmarks.pdf` with page 3 deleted. The **bookmarks panel shows 2 entries**
   (Chapter 1 + Chapter 3; **Chapter 2 — which pointed at the deleted page — is
@@ -135,11 +136,13 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   → reopen → inserted pages persist. **Insert a form PDF** → the inserted page's
   **form field is present and fillable** (colliding names suffixed `_2`).
   → on pass, flip **P2.D1** to `[x]`.
-- [ ] **Reorder (C1):** in the thumbnail sidebar, **drag a thumbnail** to a new
+- [x] **Reorder (C1):** in the thumbnail sidebar, **drag a thumbnail** to a new
   position and drop it. The page order updates live (main view + thumbnails);
   **⌘Z** restores the old order, **⌘⇧Z** re-applies. ⌘S → reopen → order
   persisted. On a PDF with internal links, the link still lands on the right
-  page after reordering. → on pass, flip **P2.C1** to `[x]`.
+  page after reordering. → **PASS (2026-06-13)** after the pointer-event rewrite
+  (source tile dims, hovered tile rings, drop reorders; click still selects).
+  P2.C1 flipped to `[x]`.
 - [x] **Dangling-ref cleanup (B2/C3):** open a PDF that has internal links or
   bookmarks pointing to a page, **delete that target page**, **⌘S**, reopen →
   the link/bookmark to the deleted page is **gone** (no broken navigation), the
@@ -228,11 +231,11 @@ via `git restore` + cleanup. **Always open a COPY from `Sample PDFs/` for manual
 testing — never the committed fixtures.** (PDFs you edit get saved in place.)
 
 ### Real bugs to fix
-1. **C1 reorder drop is broken (GUI).** Dragging a thumbnail shows the `+`
-   drop cursor but the drop does **not** reorder. Backend is proven by tests;
-   the defect is in `ThumbnailPanel` HTML5 DnD wiring (likely missing
-   `preventDefault` on `dragover`, or the `drop`/`movePage` handler not firing).
-   **Blocks P2.C1.**
+1. ~~**C1 reorder drop is broken (GUI).**~~ **FIXED 2026-06-13.** Root cause:
+   **WKWebView never delivers HTML5 drop-target events** (`dragenter`/`dragover`/
+   `drop`) — only `dragstart`/`dragend` — confirmed by instrumented logging, and
+   it failed on a flat fixture too (so not the nested-tree limit). Rewrote the
+   reorder with **pointer events**; verified live. C1 → `[x]`.
 2. **Thumbnail-click scroll offset.** Clicking a thumbnail jumps to that page
    but lands so most of the *previous* page is still visible (only the very top
    of the target shows). Scroll-anchor/offset bug in the main viewer.

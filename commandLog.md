@@ -1441,6 +1441,33 @@ Named-dest cleanup → BACKLOG.
 
 ---
 
+### P2.C1 (GUI fix) — thumbnail reorder via pointer events (this commit)
+
+```bash
+# No new deps. Frontend-only fix: P2.C1's drag-reorder never worked in the
+# macOS Tauri webview (WKWebView). Diagnosed by instrumenting each DnD handler
+# with console.warn and reading the live console: only dragstart + dragend
+# fired — dragenter/dragover/drop NEVER fire in WKWebView. Rewrote the reorder
+# with pointer events (pointerdown/move/up on the <ul>, 6px click/drag
+# threshold, data-thumb-tile + elementFromPoint for the drop target).
+
+# Verification (frontend only — no Rust changed, so clippy unaffected from the
+# last green run; avoided running it concurrently with `npm run dev`'s cargo lock):
+npx tsc --noEmit                       # ✓
+npx eslint src --max-warnings=0        # ✓  (the `eslint src` scope from `npm run check`)
+npx vitest run                         # 141/141 ✓ (reorder helper 9/9)
+
+# Human-verified live in `npm run dev`: drag reorders pages (sidebar + main
+# view), source tile dims + hovered tile rings, ⌘Z/⌘⇧Z work, plain click still
+# selects. Tested on Sample PDFs/reorder-bisect-bookmarks.pdf (a flat-tree COPY,
+# never the committed fixture).
+```
+
+Root cause + pattern recorded in `docs/04` "WebView quirks" and `Learning.md`.
+**Do not use HTML5 DnD for any future in-app drag UI** — pointer events only.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -14,7 +14,14 @@
 // ~96 CSS px. The panel is keyed by documentId at the mount site, so a
 // document switch remounts it with a fresh observer + empty state.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { cropPage, type CropRect } from "@/ipc/crop";
@@ -80,11 +87,16 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // SPEC: P2-PAGE-002 — drag a thumbnail to a new position. The dragged page
-  // index is held in a ref (mutating it must not re-render); on drop we compute
-  // the new order, reorder via the backend (lopdf COS layer), then bump the
-  // epoch (full reload — page order changed) and sync undo/redo.
-  const dragFrom = useRef<number | null>(null);
+  // SPEC: P2-PAGE-002 — drag a thumbnail to a new position. The reorder runs
+  // through the backend (lopdf COS layer); on drop we compute the new order,
+  // bump the epoch (full reload — page order changed) and sync undo/redo.
+  //
+  // NOTE: implemented with *pointer* events, not HTML5 drag-and-drop. The macOS
+  // Tauri webview (WKWebView) fires `dragstart`/`dragend` but never delivers
+  // the drop-target events (`dragenter`/`dragover`/`drop`), so native DnD can
+  // never complete a reorder there. Pointer events work everywhere. Tiles are
+  // located by `data-thumb-tile` + `elementFromPoint` (pointer capture
+  // redirects events, not hit-testing).
   const reorder = useCallback(
     async (from: number, to: number) => {
       if (from === to) return;
@@ -100,6 +112,84 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
     },
     [documentId, pageCount, bumpEpoch, setHistory],
   );
+
+  // Active pointer-drag bookkeeping (a ref so mutating it never re-renders).
+  const dragRef = useRef<{
+    from: number;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+  } | null>(null);
+  // A drag just finished, so swallow the click the browser synthesises next
+  // (otherwise releasing over the source tile would also "select" it).
+  const suppressClickRef = useRef(false);
+  // Visible feedback (re-renders): the source tile and the tile under the
+  // cursor. Non-null only while an actual drag is in progress.
+  const [dragInfo, setDragInfo] = useState<{ from: number; over: number | null } | null>(
+    null,
+  );
+
+  const tileAt = (x: number, y: number): number | null => {
+    const el = document
+      .elementFromPoint(x, y)
+      ?.closest<HTMLElement>("[data-thumb-tile]");
+    if (!el) return null;
+    const page = Number(el.dataset.thumbTile);
+    return Number.isNaN(page) ? null : page;
+  };
+
+  const onTilePointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return;
+    const tile = (e.target as HTMLElement).closest<HTMLElement>("[data-thumb-tile]");
+    if (!tile) return;
+    const from = Number(tile.dataset.thumbTile);
+    if (Number.isNaN(from)) return;
+    // Don't capture yet — a plain click must still select the page. We only
+    // capture once the pointer crosses the drag threshold (in pointermove).
+    dragRef.current = {
+      from,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      dragging: false,
+    };
+  };
+
+  const onTilePointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (!d.dragging) {
+      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 6) return;
+      d.dragging = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    setDragInfo({ from: d.from, over: tileAt(e.clientX, e.clientY) });
+  };
+
+  const onTilePointerUp = (e: ReactPointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    if (d.dragging) {
+      const to = tileAt(e.clientX, e.clientY);
+      if (to !== null) void reorder(d.from, to);
+      suppressClickRef.current = true;
+    }
+    dragRef.current = null;
+    setDragInfo(null);
+  };
+
+  const onTilePointerCancel = (e: ReactPointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (d && e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    dragRef.current = null;
+    setDragInfo(null);
+  };
 
   // SPEC: P2-PAGE-001 — rotate one page. PDFium holds the real /Rotate; the
   // cosmetic rotation store previews it in the main view *without* a full
@@ -237,7 +327,13 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
         <span className="ml-1 text-neutral-400">({pageCount})</span>
       </header>
       <div ref={scrollRef} className="flex-1 overflow-auto p-2">
-        <ul className="flex flex-col items-center gap-2">
+        <ul
+          className="flex flex-col items-center gap-2"
+          onPointerDown={onTilePointerDown}
+          onPointerMove={onTilePointerMove}
+          onPointerUp={onTilePointerUp}
+          onPointerCancel={onTilePointerCancel}
+        >
           {Array.from({ length: pageCount }, (_, page) => (
             <ThumbTile
               key={page}
@@ -250,20 +346,20 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
               rotation={rotations[page] ?? 0}
               shouldLoad={visible.has(page)}
               isActive={active === page}
+              isDragSource={dragInfo !== null && dragInfo.from === page}
+              isDropTarget={
+                dragInfo !== null && dragInfo.over === page && dragInfo.from !== page
+              }
               onSelect={() => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+                }
                 setActive(page);
                 onJump(page + 1);
               }}
               onContextMenu={(x, y) => setMenu({ page, x, y })}
               onDelete={() => void del(page)}
-              onDragStartPage={() => {
-                dragFrom.current = page;
-              }}
-              onDropPage={() => {
-                const from = dragFrom.current;
-                dragFrom.current = null;
-                if (from !== null) void reorder(from, page);
-              }}
             />
           ))}
         </ul>
@@ -305,13 +401,13 @@ interface TileProps {
   rotation: number;
   shouldLoad: boolean;
   isActive: boolean;
+  /** SPEC: P2-PAGE-002 — this tile is the one being pointer-dragged. */
+  isDragSource: boolean;
+  /** SPEC: P2-PAGE-002 — the dragged tile is hovering over this one. */
+  isDropTarget: boolean;
   onSelect: () => void;
   onContextMenu: (x: number, y: number) => void;
   onDelete: () => void;
-  /** SPEC: P2-PAGE-002 — drag-reorder: this tile started being dragged. */
-  onDragStartPage: () => void;
-  /** SPEC: P2-PAGE-002 — drag-reorder: something was dropped onto this tile. */
-  onDropPage: () => void;
 }
 
 function ThumbTile({
@@ -324,11 +420,11 @@ function ThumbTile({
   rotation,
   shouldLoad,
   isActive,
+  isDragSource,
+  isDropTarget,
   onSelect,
   onContextMenu,
   onDelete,
-  onDragStartPage,
-  onDropPage,
 }: TileProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -394,19 +490,15 @@ function ThumbTile({
 
   return (
     <li
-      className="flex flex-col items-center"
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
-        // Some browsers require drag data to be set for a drag to begin.
-        e.dataTransfer.setData("text/plain", String(page));
-        onDragStartPage();
-      }}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDropPage();
-      }}
+      data-thumb-tile={page}
+      // `touch-none` + `select-none`: a pointer-drag must not scroll the list
+      // or start a text/image selection. Reorder is driven by pointer events on
+      // the parent <ul> (WKWebView doesn't deliver HTML5 drop events).
+      className={
+        "flex select-none touch-none flex-col items-center rounded transition-opacity " +
+        (isDragSource ? "opacity-40 " : "") +
+        (isDropTarget ? "ring-2 ring-blue-500 ring-offset-1" : "")
+      }
     >
       <button
         type="button"
@@ -442,6 +534,9 @@ function ThumbTile({
             <img
               src={url}
               alt={`Page ${page + 1}`}
+              // The image must NOT start its own native drag, or it hijacks the
+              // tile's reorder drag (copy cursor, dragstart bypassed → no-op).
+              draggable={false}
               className="h-full w-full object-contain"
               style={darkMode ? { filter: DARK_PAGE_FILTER } : undefined}
             />
