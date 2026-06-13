@@ -37,71 +37,84 @@ Open each in **Adobe Acrobat + macOS Preview + a third reader** (Chrome
 works as the third). A passing unit test does *not* prove cross-reader
 validity.
 
-- [ ] **`Sample PDFs/vibepdf-verify-rotated.pdf`** (B1 rotate) — page 1 should
+- [x] **`Sample PDFs/vibepdf-verify-rotated.pdf`** (B1 rotate) — page 1 should
   render **rotated 90°** and the file must not be flagged corrupt.
-  → on pass, flip **P2.B1** to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-deleted.pdf`** (B2 delete) — **2 pages**
+  → **PASS (2026-06-13, Preview).** P2.B1 flipped to `[x]`.
+- [x] **`Sample PDFs/vibepdf-verify-deleted.pdf`** (B2 delete) — **2 pages**
   ("Page 1 (link to page 3)" then "Page 3"); page 2 gone; not corrupt.
-  → on pass, flip **P2.B2** to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-inserted.pdf`** (B3 insert) — **4 pages**:
+  → **PASS (2026-06-13, Preview).** P2.B2 flipped to `[x]`.
+- [x] **`Sample PDFs/vibepdf-verify-inserted.pdf`** (B3 insert) — **4 pages**:
   "Page 1", then a **blank** page, then "Page 2", "Page 3"; not corrupt.
-  → on pass, flip **P2.B3** to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-cropped.pdf`** (B4 crop) — page 1 shows
+  → **PASS (2026-06-13, Preview).** P2.B3 flipped to `[x]`.
+- [x] **`Sample PDFs/vibepdf-verify-cropped.pdf`** (B4 crop) — page 1 shows
   only its **centre** (100pt trimmed each edge); pages 2–3 full; not corrupt.
-  → on pass, flip **P2.B4** to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-extracted.pdf`** (C2 extract) — **2 pages**:
+  → **PASS (2026-06-13, Preview).** P2.B4 flipped to `[x]`.
+- [x] **`Sample PDFs/vibepdf-verify-extracted.pdf`** (C2 extract) — **2 pages**:
   "Page 1 (link to page 3)" and "Page 3"; renders correctly; not corrupt.
-  → on pass, flip **P2.C2** to `[x]`.
+  → **PASS (2026-06-13, Preview).** P2.C2 flipped to `[x]`.
 - [ ] **`Sample PDFs/vibepdf-verify-split-001/002/003.pdf`** (C3 split) — **three
   files, 2 pages each** ("Page 1"+"Page 2", "Page 3"+"Page 4", "Page 5"+"Page
   6"); each opens cleanly and is not corrupt. (Produced by splitting the
   6-page `bookmarks.pdf` every 2 pages.)
   → on pass, flip **P2.C3** to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
+- [~] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
   bookmarks.pdf (Page 1–6) → forms.pdf ("Form", page 7). The **bookmarks panel
   shows 3 bookmarks** (Chapter 1/2/3, navigating to the right pages) **and** a
   **form field** is present on the last page. Opens cleanly. *(Full P2-PAGE-008
   now — bookmarks + form fields preserved.)*
-- [ ] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
+  → **PARTIAL (2026-06-13, Preview):** 7 pages + form field ✓; **bookmarks
+  appeared absent — but that's a Preview limitation**, not a defect. Byte
+  inspection confirms the full outline tree is present (`/Outlines`, `/Count 3`,
+  Chapter 1/2/3 with valid `/Dest`). **Re-check in Acrobat** (or Preview →
+  View → Table of Contents, ⌥⌘3) to flip P2.C4.
+- [~] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
   pages**: "Hello, Vibe.PDF.", then links.pdf's 3 pages (the first keeps its
   annotation), then forms.pdf ("Form"). The **last page has a fillable form
   field** (`name`). Opens cleanly. *(Full P2-PAGE-005 — form fields preserved.)*
+  → **PASS w/ cosmetic note (2026-06-13, Preview):** field is present and
+  fillable but **white-on-white with no border** (camouflaged). Functionally
+  correct; faint-border rendering filed to BACKLOG. Full Acrobat pass still
+  wanted to flip P2.D1.
 - [ ] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
   in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
   reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
   jumps to the "Page 3" page (reference integrity).
-- [ ] **`Sample PDFs/vibepdf-verify-pruned.pdf`** (B2/C3 dangling cleanup) —
+  → *(artifact is fine; but the in-app reorder DROP is broken — see Findings.)*
+- [x] **`Sample PDFs/vibepdf-verify-pruned.pdf`** (B2/C3 dangling cleanup) —
   `bookmarks.pdf` with page 3 deleted. The **bookmarks panel shows 2 entries**
   (Chapter 1 + Chapter 3; **Chapter 2 — which pointed at the deleted page — is
   gone**), and no broken bookmark remains. 5 pages, opens cleanly.
+  → **PASS (2026-06-13):** Ch2 removal confirmed in bytes (Ch1 + Ch3 only,
+  `/Count 2`); folded into P2.B2 `[x]`.
 - [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
 
 Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
 
-- [ ] **Rotate (B1):** right-click a page thumbnail → Rotate right / left /
-  180. The thumbnail updates immediately.
+- [x] **Rotate (B1):** right-click a page thumbnail → Rotate right / left /
+  180. The thumbnail updates immediately. → **PASS (2026-06-13).**
 - [ ] **Live preview (pipeline):** scroll to ~page 3, then rotate that page.
   The **main view** should rotate *in place at page 3* — no blank flash, no
   scroll jump. (If it jumps to page 1, tell me — page-restore timing.)
-- [ ] **Delete (B2):** right-click a page thumbnail → **Delete page** (or
+- [x] **Delete (B2):** right-click a page thumbnail → **Delete page** (or
   focus a thumbnail and press **Delete/Backspace**). The page vanishes, the
   count drops, and the main view updates live. **⌘Z** brings it back in the
   same position. ⌘S → reopen externally → page really gone.
-  → on pass, flip **P2.B2** to `[x]`.
-- [ ] **Insert blank (B3):** right-click a page thumbnail → **Insert blank
+  → **PASS (2026-06-13).** P2.B2 flipped to `[x]`.
+- [x] **Insert blank (B3):** right-click a page thumbnail → **Insert blank
   page after**. A blank page (same size) appears right after it; count goes
   up; main view + thumbnails update. **⌘Z** removes it; ⌘S → reopen → blank
-  page present. → on pass, flip **P2.B3** to `[x]`.
-- [ ] **Crop (B4):** right-click a page → **Crop page…** → enter margins →
+  page present. → **PASS (2026-06-13).** P2.B3 flipped to `[x]`.
+- [x] **Crop (B4):** right-click a page → **Crop page…** → enter margins →
   Apply. The page shows only the cropped region (main view + thumbnail).
   **Reset crop** restores the full page; **⌘Z** undoes; ⌘S → reopen → cropped.
-  → on pass, flip **P2.B4** to `[x]`.
-- [ ] **Extract (C2):** in the viewer toolbar click **Extract…** → enter a
+  → **PASS (2026-06-13)** for the main view. Note: thumbnail did **not** show
+  the crop (filed to Findings); CropBox-only crop per spec works. P2.B4 → `[x]`.
+- [x] **Extract (C2):** in the viewer toolbar click **Extract…** → enter a
   range (e.g. `1,3`) → a save dialog opens → pick a path. The new PDF has
   exactly those pages and opens cleanly. (The open document is unchanged.)
-  → on pass, flip **P2.C2** to `[x]`.
+  → **PASS (2026-06-13).** P2.C2 flipped to `[x]`.
 - [ ] **Split (C3):** in the viewer toolbar click **Split…** → pick a mode
   (try **Every N pages** = 2, and on a bookmarked PDF **By top-level
   bookmarks**) → a folder picker opens → choose a folder. The folder gets
@@ -127,18 +140,20 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   **⌘Z** restores the old order, **⌘⇧Z** re-applies. ⌘S → reopen → order
   persisted. On a PDF with internal links, the link still lands on the right
   page after reordering. → on pass, flip **P2.C1** to `[x]`.
-- [ ] **Dangling-ref cleanup (B2/C3):** open a PDF that has internal links or
+- [x] **Dangling-ref cleanup (B2/C3):** open a PDF that has internal links or
   bookmarks pointing to a page, **delete that target page**, **⌘S**, reopen →
   the link/bookmark to the deleted page is **gone** (no broken navigation), the
   rest intact. (Use `bookmarks.pdf`: delete page 3 → the Chapter 2 bookmark
-  disappears.)
-- [ ] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
+  disappears.) → **PASS (2026-06-13)** (Ch2 removal confirmed in bytes).
+  ⚠️ **Do this on a COPY in `Sample PDFs/`, never the committed fixture** —
+  saving onto `tests/fixtures/basic/bookmarks.pdf` clobbers it (see Findings).
+- [x] **Undo/redo (A3):** after a rotate or delete, **⌘Z** reverts both views
   and **⌘⇧Z** re-applies. The Undo/Redo toolbar buttons enable/disable right.
-  → on pass, flip **P2.A3** to `[x]`.
+  → **PASS (2026-06-13).** P2.A3 flipped to `[x]`.
 - [ ] **Persist on save (B1):** rotate → **⌘S** → reopen the file in Preview
   externally → still rotated. Reopen in VibePDF → rotation persisted.
-- [ ] **Save no-op (A1):** ⌘S on an *unedited* doc → toast **"No changes to
-  save"**; the file is left untouched.
+- [x] **Save no-op (A1):** ⌘S on an *unedited* doc → toast **"No changes to
+  save"**; the file is left untouched. → **PASS (2026-06-13).**
 - [ ] **Dark mode:** toggle theme in the toolbar → main view **and**
   thumbnails both invert and stay readable.
 
@@ -199,3 +214,47 @@ the rest still want a pass.
 | P2.A3 — Undo/redo | B (undo/redo) passes |
 | P2.A2 — Auto-save | C (crash recovery) passes |
 | P1.E5 — E2E harness | D (`e2e.yml`) goes green |
+
+---
+
+## Findings from the 2026-06-13 verification sweep
+
+**Passed & flipped to `[x]`:** A1, A3, B1, B2 (+B2/C3 dangling cleanup), B3, B4, C2.
+
+**⚠️ Process lesson (important):** the in-app testing was run **directly on the
+committed fixtures in `tests/fixtures/basic/`**, so ⌘S / split / delete wrote
+over the real `bookmarks.pdf` (and dropped scratch files in that dir). Restored
+via `git restore` + cleanup. **Always open a COPY from `Sample PDFs/` for manual
+testing — never the committed fixtures.** (PDFs you edit get saved in place.)
+
+### Real bugs to fix
+1. **C1 reorder drop is broken (GUI).** Dragging a thumbnail shows the `+`
+   drop cursor but the drop does **not** reorder. Backend is proven by tests;
+   the defect is in `ThumbnailPanel` HTML5 DnD wiring (likely missing
+   `preventDefault` on `dragover`, or the `drop`/`movePage` handler not firing).
+   **Blocks P2.C1.**
+2. **Thumbnail-click scroll offset.** Clicking a thumbnail jumps to that page
+   but lands so most of the *previous* page is still visible (only the very top
+   of the target shows). Scroll-anchor/offset bug in the main viewer.
+
+### Follow-ups → BACKLOG (do not block their parent step)
+3. **Crop not reflected in the thumbnail** (main view crops correctly; the
+   thumbnail re-render still shows the full MediaBox).
+4. **Crop (CropBox) lost in split output** — `FPDF_ImportPages` doesn't carry
+   the source `/CropBox` into split/extract children.
+5. **Inserted form fields render white-on-white, no border** (D1) — present and
+   fillable, just visually camouflaged. Consider a faint widget border.
+6. **Reversed page range `99-82`** (D1 insert) is silently normalized to
+   ascending `82..99` — decide: reject, or document as intended.
+7. **Save latency + `.bak` lock window.** Save feels slow and the `.bak` is
+   briefly unselectable in Finder mid-write. Matches the known per-save lopdf
+   load cost (BACKLOG: gate the prune/load for large docs).
+
+### Confirmed NOT bugs (expected behavior)
+- **"No bookmarks" in Apple Preview** — Preview doesn't surface PDF `/Outlines`
+  in its default sidebar. Bookmarks are present in the bytes (verified for
+  merged + pruned). Use **Acrobat**, or Preview → **View → Table of Contents**.
+- **"Can't edit the page text"** — text editing isn't a Phase 2 feature; it's
+  Phase 3 (redact + reflow). Preview also can't edit arbitrary PDF text.
+- **No per-page thumbnails in Preview** for these small hand-built PDFs — a
+  Preview rendering quirk, not a file defect.

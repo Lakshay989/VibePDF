@@ -144,3 +144,48 @@ the current roadmap phase. When one is picked up, move it into the relevant
   and re-opening just focuses the existing tab. Watch the file's mtime (or a
   Tauri fs watcher) and offer to reload when it changes on disk. Also: an
   explicit "Reload from disk" action.
+
+## From the 2026-06-13 verification sweep
+
+- **Thumbnail doesn't reflect a crop (from P2.B4).** The main view crops
+  correctly (CropBox), but the sidebar thumbnail still renders the full
+  MediaBox. The thumbnail re-render needs to honour `/CropBox` (PDF.js renders
+  the crop box by default — likely the cache isn't invalidated, or the
+  thumbnail render forces MediaBox). Cosmetic; doesn't affect saved output.
+
+- **Crop (CropBox) not carried into split/extract children (from P2.B4/C3).**
+  `FPDF_ImportPages` copies page content but drops the source page's
+  `/CropBox`, so a cropped page split into its own file shows uncropped. To
+  preserve it, re-apply the source `/CropBox` onto each imported child (either
+  via the lopdf COS pass or by reading the box before import and setting it
+  after). Confirm whether `/Rotate` survives import too while here.
+
+- **Inserted form widgets render with no visible border (from P2.D1).** A
+  white text field on a white page is invisible until focused. The field is
+  present and fillable (correct per spec). Consider giving inserted/registered
+  widgets a faint `/MK /BC` border (or a light `/BG`) so they're discoverable.
+
+- **Reversed insert range `99-82` is silently sorted to `82..99` (from P2.D1).**
+  Decide: reject a descending range with an error, or keep normalizing and
+  document it. Today it just inserts ascending.
+
+## Real bugs (fix soon — these aren't polish)
+
+- **C1 reorder did nothing in the GUI — likely the nested-tree limit.**
+  Dragging a thumbnail shows the `+` cursor but releasing doesn't reorder. On
+  review the `ThumbnailPanel` HTML5 DnD is correctly wired (`onDragOver`
+  preventDefaults, `onDrop` → `reorder` → `reorderPages`), so the `preventDefault`
+  theory is *out*. Leading cause: `cos::reorder_pages` **rejects nested page
+  trees** (flat-tree only) and the frontend swallows the error with a bare
+  `console.warn` — a silent no-op to the user. Two fixes: (a) **surface the
+  failure** (toast: "can't reorder this PDF's page structure yet") instead of a
+  silent warn; (b) the real feature work — **nested-tree flatten before
+  reorder** (already tracked above under "Nested page-tree reorder"). Bisect on
+  a flat fixture (`Sample PDFs/reorder-bisect-*.pdf`) confirms which. **Blocks
+  P2.C1's `[x]`.**
+
+- **Thumbnail click lands at the wrong scroll offset.** Clicking a thumbnail
+  scrolls to the target page but leaves most of the *previous* page on screen
+  (only the top sliver of the target is visible). Scroll-anchor math in the
+  main viewer (page top vs. container offset / inter-page gap). Annoying on
+  every navigation.
