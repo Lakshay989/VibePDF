@@ -57,24 +57,21 @@ validity.
   6"); each opens cleanly and is not corrupt. (Produced by splitting the
   6-page `bookmarks.pdf` every 2 pages.)
   → on pass, flip **P2.C3** to `[x]`.
-- [~] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
+- [x] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
   bookmarks.pdf (Page 1–6) → forms.pdf ("Form", page 7). The **bookmarks panel
   shows 3 bookmarks** (Chapter 1/2/3, navigating to the right pages) **and** a
   **form field** is present on the last page. Opens cleanly. *(Full P2-PAGE-008
   now — bookmarks + form fields preserved.)*
-  → **PARTIAL (2026-06-13, Preview):** 7 pages + form field ✓; **bookmarks
-  appeared absent — but that's a Preview limitation**, not a defect. Byte
-  inspection confirms the full outline tree is present (`/Outlines`, `/Count 3`,
-  Chapter 1/2/3 with valid `/Dest`). **Re-check in Acrobat** (or Preview →
-  View → Table of Contents, ⌥⌘3) to flip P2.C4.
-- [~] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
+  → **PASS (2026-06-13):** 7 pages + form field (Preview); **3-bookmark outline
+  confirmed in Chrome's outline sidebar** (Preview hides outlines by default).
+  P2.C4 flipped to `[x]`.
+- [x] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
   pages**: "Hello, Vibe.PDF.", then links.pdf's 3 pages (the first keeps its
   annotation), then forms.pdf ("Form"). The **last page has a fillable form
   field** (`name`). Opens cleanly. *(Full P2-PAGE-005 — form fields preserved.)*
-  → **PASS w/ cosmetic note (2026-06-13, Preview):** field is present and
-  fillable but **white-on-white with no border** (camouflaged). Functionally
-  correct; faint-border rendering filed to BACKLOG. Full Acrobat pass still
-  wanted to flip P2.D1.
+  → **PASS (2026-06-13):** field present and fillable, **confirmed rendering in
+  Chrome** (was camouflaged white-on-white in Preview — cosmetic, BACKLOG).
+  P2.D1 flipped to `[x]`.
 - [x] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
   in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
   reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
@@ -222,7 +219,10 @@ the rest still want a pass.
 
 ## Findings from the 2026-06-13 verification sweep
 
-**Passed & flipped to `[x]`:** A1, A3, B1, B2 (+B2/C3 dangling cleanup), B3, B4, C2.
+**Passed & flipped to `[x]`:** A1, A3, B1, B2 (+B2/C3 dangling cleanup), B3, B4,
+C1 (after the pointer-event fix), C2, C4 (bookmarks via Chrome), D1 (form field
+via Chrome). Every Phase-2 page-op except **B5 (resize, not built)** and **A2
+(crash recovery, deferred)** is now human-verified.
 
 **⚠️ Process lesson (important):** the in-app testing was run **directly on the
 committed fixtures in `tests/fixtures/basic/`**, so ⌘S / split / delete wrote
