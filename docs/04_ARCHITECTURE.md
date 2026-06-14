@@ -226,17 +226,39 @@ event is emitted (no open document changed).
 
 ## State on the frontend
 
-Five zustand stores. Each store owns a clearly scoped slice. Stores never reach into other stores.
+Several zustand stores, each owning a clearly scoped slice. Stores never reach
+into other stores. The authoritative state for the PDF itself is the Rust
+document actor — every frontend store caches a *derived view* or a *preview*.
 
-| Store | Owns | Source of truth? |
+| Store (`src/state/`) | Owns | Source of truth? |
 |---|---|---|
-| `useDocumentStore` | Open documents, current document id | Yes, but derived state syncs from backend events |
-| `useToolStore` | Active tool, tool options | Yes |
-| `useViewStore` | Zoom, scroll position, page index, sidebar visibility | Yes |
-| `useSelectionStore` | Selected text/region/object | Yes |
-| `useSettingsStore` | App-wide settings | Mirrored to Rust on every change |
+| `useDocumentStore` (`document-store`) | Open documents, current document id | Yes (synced from backend events) |
+| `useViewStore` (`view-store`) | Zoom, fit mode, page index, sidebar visibility | Yes |
+| `useSettingsStore` (`settings-store`) | App-wide settings | Mirrored to Rust on change |
+| `edit-epoch-store` | Per-doc edit epoch — bumped on each edit/undo/redo to drive the PDF.js reload | Derived |
+| `history-store` | Per-doc `{canUndo, canRedo}` mirror for button state | Derived (actor owns the stack) |
+| `rotation-preview-store` | Cosmetic per-page rotation (the rotate fast-path) | **Preview** (PDFium holds real `/Rotate`) |
+| `search-store` | Search query + matches | Derived |
+| `view-persistence` | Per-doc last zoom/page (IndexedDB) | Local cache |
+| `tool-store` (P3.A1) | Active annotation tool + style options | Yes |
+| `annotation-store` (P3.A1) | In-progress draft + committed annotations, per doc | **Preview** — see below |
 
-**Backend events** (annotations added, pages changed, form fields modified, etc.) are pushed via Tauri's event system. The frontend listens and updates the relevant store. The backend is always the source of truth for the PDF itself; the frontend stores cache *derived views*.
+**Annotation store is a draft/preview layer, not a second source of truth.** Like
+`rotation-preview-store`, it stages what the render layer (P3.A2) draws and what
+tools build, but it does **not** own the PDF. Authoritative annotation
+persistence + undo land in **P3.B1** via the actor (`pdf/annotation.rs` + an
+`Edit`); keeping the two in lockstep is B1's job. A1 ships the staging area + the
+tool framework so tools and the render layer can be built and tested first.
+
+The **annotation tool framework** (`src/tools/_framework/`, P3.A1) realizes the
+`§Edit tools` contract above: a pure lifecycle state machine drives stateless
+per-tool reducers over pointer gestures (pointer events, per `§WebView quirks` —
+no HTML5 DnD), with screen↔PDF coordinate mapping isolated in `coords.ts`.
+
+**Backend events** (pages changed, form fields modified, etc.) are pushed via
+Tauri's event system; the frontend listens and updates the relevant store. The
+backend is always the source of truth for the PDF itself; the frontend stores
+cache *derived views* or *previews*.
 
 ---
 

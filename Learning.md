@@ -3761,6 +3761,68 @@ transform every drawing on the page, then relabel the box.
 
 ---
 
+### P3.A1 — the annotation tool framework (start of Phase 3)
+
+#### Problem
+
+Phase 3 adds ~10 annotation tools (highlight, sticky note, shapes, ink, …). They
+all share one interaction — press, drag, release, commit — and one hard problem,
+mapping screen pixels to PDF coordinates. Building that once, as a tested
+framework, is the difference between ten consistent tools and ten subtly
+different ones.
+
+#### Concepts learned
+
+- **A "framework" here = a contract + a driver, not a base class.** The contract
+  (`AnnotationTool`) is three pure functions: `onPointerDown/Move/Up`, each a
+  reducer `(draft, point) → draft`. The driver (`lifecycle.ts`) is a **state
+  machine** that owns the phase (`idle`/`drawing`) and the in-progress draft, and
+  calls the tool's reducers. Tools stay **stateless** — the lifecycle threads
+  their draft through — which is why one tool instance can serve every gesture
+  and why the whole thing is unit-testable with no DOM.
+- **State machines make gesture code boring (in a good way).** Modelling input as
+  `(state, event) → { state, committed? }` kills the class of bugs where a stray
+  `move` without a `down`, or a second `down` mid-drag, corrupts things — those
+  are just transitions that return unchanged. The test feeds event sequences and
+  asserts the committed result.
+- **Coordinate spaces: PDF vs. screen.** PDF user space has its origin at the
+  **bottom-left, y up**, in points (1/72"). The browser has its origin
+  **top-left, y down**, in CSS pixels, and the page may be displayed rotated
+  (`/Rotate`). Converting between them means: divide by the render scale, flip y
+  (`y_pdf = height − y_screen/scale`), and undo the rotation. Getting this wrong
+  is *the* classic "my highlight is in the wrong place" bug, so it lives in one
+  module (`coords.ts`) with **round-trip property tests** (`screen → pdf → screen
+  ≈ identity`) for all four rotations.
+- **Anchor convention for drag-rects:** while dragging, keep the press point as
+  one corner and the cursor as the other *without normalizing*; normalize
+  (min/max) only on commit. Otherwise dragging back across the start point loses
+  the anchor.
+- **A "preview store" is not a source of truth.** The annotation store is a
+  frontend staging area (like the rotation-preview store) so tools + the render
+  layer can be built now; the **actor** will own persisted annotations + undo in
+  B1. Naming this boundary explicitly (in the store's header + docs/04) prevents
+  the frontend quietly becoming a second, drifting source of truth — the same
+  discipline as "PDF.js never writes."
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/tools/_framework/types.ts` | Annotation domain model (PDF-space shapes, draft = annotation minus identity). |
+| `src/tools/_framework/tool-contract.ts` | The `AnnotationTool` interface — three stateless gesture reducers. |
+| `src/tools/_framework/lifecycle.ts` | Pure `stepTool` state machine (idle→drawing→commit/cancel). |
+| `src/tools/_framework/coords.ts` | screen↔PDF mapping (scale, y-flip, 4 rotations) + rect helpers. |
+| `src/tools/_framework/registry.ts`, `example-rect-tool.ts`, `index.ts` | Tool registry, a test-only drag-rect tool, public surface. |
+| `src/state/{tool-store,annotation-store}.ts` | Active tool + options; per-doc draft + committed annotations (preview layer). |
+
+#### Further reading
+
+- Pointer Events spec & `setPointerCapture` — the portable gesture API (and our WKWebView workaround, docs/04).
+- PDF coordinate system (`/MediaBox`, user space, `/Rotate`) — PDF 32000-1 §8.3.
+- State machines for UI input (xstate's "why statecharts" essays) — the idea, not the library; ours is a hand-rolled reducer.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

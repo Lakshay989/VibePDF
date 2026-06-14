@@ -1506,6 +1506,29 @@ orientation match) → `BACKLOG.md`. Left `[~]` pending the human cross-reader o
 
 ---
 
+### P3.A1 — annotation tool framework (this commit) — start of Phase 3
+
+```bash
+# No new deps. Frontend-only infrastructure: the annotation tool framework
+# (contract + pure lifecycle state machine + screen↔PDF coords + registry) and
+# two zustand stores (tool-store, annotation-store). No Rust, no IPC — annotations
+# don't touch PDF bytes until P3.B1.
+
+# Verification (frontend only — nothing Rust changed, so clippy/test:rust unaffected):
+npx tsc --noEmit                 # ✓
+npx eslint src --max-warnings=0  # ✓
+npx vitest run                   # 160/160 (was 146): +lifecycle 5, +coords 4,
+                                 #   +annotation-store 5. coords has round-trip
+                                 #   property tests for all 4 page rotations.
+```
+
+Realizes the `useToolStore` + `§Edit tools` contract that `docs/04` described but
+hadn't built; store table in `docs/04` synced to reality + the two new stores.
+Pure infra, **no user-visible demo** — first exercised end-to-end by A2 (render
+layer) + B1 (highlight). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
