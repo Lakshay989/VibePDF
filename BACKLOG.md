@@ -203,8 +203,12 @@ the current roadmap phase. When one is picked up, move it into the relevant
   remains flat-tree-only; a nested PDF will still no-op, and surfacing that as a
   toast instead of a silent `console.warn` is a worthwhile follow-up.)*
 
-- **Thumbnail click lands at the wrong scroll offset.** Clicking a thumbnail
-  scrolls to the target page but leaves most of the *previous* page on screen
-  (only the top sliver of the target is visible). Scroll-anchor math in the
-  main viewer (page top vs. container offset / inter-page gap). Annoying on
-  every navigation.
+- ✅ **DONE 2026-06-13 — thumbnail/outline jump now lands at the page top.**
+  Clicking a thumbnail scrolled ~20% into the target page. Cause: the
+  `PageVirtualizer` scroller was `position: static`, so the page slots'
+  `offsetParent` was a positioned ancestor *above* the scroller (it included the
+  toolbar), inflating `el.offsetTop` by a constant ≈ the toolbar height.
+  `scrollTo(offsetTop - 8)` therefore over-scrolled. Fixed by making the scroller
+  `relative` (it becomes the offset context) — corrects all jump paths
+  (scrollToPage / scrollByPages / reload-restore) **and** the skewed current-page
+  tracking, in one line.

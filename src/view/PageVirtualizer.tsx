@@ -301,7 +301,12 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
     return (
       <div
         ref={scrollRef}
-        className="h-full overflow-auto bg-neutral-100 dark:bg-neutral-900"
+        // `relative`: make this scroller the offsetParent for the page slots, so
+        // `el.offsetTop` is measured from the scroll content's top (not from a
+        // positioned ancestor that includes the toolbar above us). Without it,
+        // jump-to-page over-scrolls by the toolbar's height — pages landed ~20%
+        // down — and the current-page tracking was skewed by the same constant.
+        className="relative h-full overflow-auto bg-neutral-100 dark:bg-neutral-900"
         tabIndex={0}
       >
         {error ? (
