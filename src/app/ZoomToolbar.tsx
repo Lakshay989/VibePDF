@@ -1,6 +1,11 @@
+import { useEffect } from "react";
+
 import type { Theme } from "@/app/theme";
 import { useSettingsStore } from "@/state/settings-store";
+import { useToolStore } from "@/state/tool-store";
 import { MIN_ZOOM, MAX_ZOOM, useViewStore, type FitMode } from "@/state/view-store";
+import { registerTool } from "@/tools/_framework";
+import { exampleRectTool } from "@/tools/_framework/example-rect-tool";
 
 // SPEC: P1-VIEW-006 (P1.C2).
 //
@@ -54,6 +59,15 @@ export function ZoomToolbar({
   // being forced to follow the OS.
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
+
+  // TEMPORARY (P3.A2 demo): a single rectangle tool so the annotation render
+  // layer is eyeball-able. The real annotation tool palette lands in P3.B1/C1;
+  // this toggle + the example tool registration go away then.
+  const activeTool = useToolStore((s) => s.activeTool);
+  const setActiveTool = useToolStore((s) => s.setActiveTool);
+  useEffect(() => {
+    registerTool(exampleRectTool);
+  }, []);
 
   const fitOptions: { value: FitMode | "manual"; label: string }[] = [
     { value: "manual", label: "Manual" },
@@ -137,6 +151,21 @@ export function ZoomToolbar({
           </option>
         ))}
       </select>
+
+      <span className="text-neutral-300 dark:text-neutral-700">|</span>
+      <button
+        type="button"
+        onClick={() => setActiveTool(activeTool === "rectangle" ? null : "rectangle")}
+        aria-label="Rectangle annotation (preview)"
+        aria-pressed={activeTool === "rectangle"}
+        title="Rectangle annotation — preview only (P3.A2 demo)"
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (activeTool === "rectangle" ? "bg-neutral-200 dark:bg-neutral-800" : "")
+        }
+      >
+        ▭
+      </button>
 
       {onExtract ? (
         <button

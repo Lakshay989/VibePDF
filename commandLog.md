@@ -1529,6 +1529,34 @@ layer) + B1 (highlight). Left `[~]`.
 
 ---
 
+### P3.A2 — annotation render layer (this commit)
+
+```bash
+# No new deps. Frontend-only: the per-page SVG annotation overlay
+# (annotation-layer.tsx) + a PageSlot restructure to host it + a temporary
+# toolbar toggle to make it visible. No Rust, no IPC (persistence is B1).
+
+# Added a jsdom PointerEvent polyfill to src/test-setup.ts — jsdom doesn't
+# implement PointerEvent, so fireEvent.pointerDown produced events with no
+# clientX (committed rect came out NaN until the polyfill).
+
+npx tsc --noEmit                 # ✓
+npx eslint src --max-warnings=0  # ✓
+npx vitest run                   # 164/164 (+annotation-layer 4): render a
+                                 #   committed rect at the mapped position,
+                                 #   render the draft, commit from down→move→up
+                                 #   with the rect tool, select on click when idle.
+npm run check                    # tsc + eslint + clippy (no Rust changed) ✓
+```
+
+Mounting detail (docs/04 + Learning.md): the canvas mounts into an inner div so
+the React overlay (sibling) survives PageSlot's imperative child-clear; the outer
+flow element stays registered for scroll (keeps the offsetTop jump-to-page fix).
+Temporary "▭" toggle + example-tool registration = A2 demo scaffolding (removed
+in B1/C1). Left `[~]` pending the human's in-app preview-rect check.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -3823,6 +3823,66 @@ different ones.
 
 ---
 
+### P3.A2 — the annotation render layer
+
+#### Problem
+
+A1 built the *logic* (lifecycle, coords, stores) but nothing visible. A2 is the
+DOM: an SVG layer over each page that draws annotations and turns real pointer
+events into the gestures A1's reducers consume. Two non-obvious problems showed
+up — coexisting with an imperatively-managed canvas, and pointer events in tests.
+
+#### Concepts learned
+
+- **An SVG overlay is the natural layer for vector annotations.** Each page gets
+  an `<svg>` sized to the rendered canvas; annotations become `<rect>`/`<ellipse>`
+  positioned with `coords.pdfToScreen`. SVG (not a second canvas) means crisp
+  shapes at any zoom and free hit-testing — the browser tells you which `<rect>`
+  you clicked.
+- **`pointer-events` is how you stack interactive layers.** The overlay sits on
+  top of the page. While a tool is active it must catch every pointer event
+  (`pointer-events: auto`) to draw; while idle it must be **click-through**
+  (`pointer-events: none`) so scrolling/selection underneath still works — *except*
+  the annotation shapes themselves, which keep `pointer-events: auto` so a click
+  still selects one. That per-element override (parent `none`, child `auto`) is
+  the whole trick.
+- **React vs. imperative DOM in the same box.** `PageSlot` mounts its canvas
+  *imperatively* (`appendChild`, and a `while (firstChild) removeChild` to clear).
+  A React-rendered overlay placed as a sibling **inside that same node gets wiped**
+  by the clear. Fix: give the canvas its **own inner div** to clear, and make the
+  overlay a sibling — React owns one subtree, the imperative code owns the other.
+  A subtlety that bit back: the element registered for **scroll-to-page** must stay
+  the *outer, in-flow* div (an absolutely-positioned inner div has `offsetTop: 0`,
+  which would re-break the jump-to-page fix from earlier).
+- **jsdom doesn't implement `PointerEvent`.** `fireEvent.pointerDown(el, {clientX})`
+  silently produces a bare event with no coordinates, so the committed annotation
+  came out `NaN`. A ~10-line subclass of `MouseEvent` (which jsdom *does* do,
+  including `clientX/Y`) in the shared test setup fixes every pointer-driven
+  component test now and later. Lesson: when a component test yields `NaN`/
+  `undefined` from an event, suspect the test environment's event model before the
+  component.
+- **Keep the demo honest but cheap.** A2 has no persistence, so to make it
+  eyeball-able we registered the *test* rect tool behind a temporary toolbar
+  toggle, clearly marked for removal in B1. Better a labelled throwaway than
+  pretending infra is a finished feature.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/annotation-layer.tsx` | Per-page SVG overlay: render committed + draft annotations; drive the A1 lifecycle from pointer events; hit-test for select. |
+| `src/view/PageVirtualizer.tsx` | `PageSlot` restructured — inner canvas div + sibling overlay; outer flow element still registered for scroll. |
+| `src/app/ZoomToolbar.tsx` | Temporary "▭" toggle + example-tool registration (A2 demo; removed in B1/C1). |
+| `src/test-setup.ts` | jsdom `PointerEvent` polyfill (MouseEvent subclass) for pointer-driven component tests. |
+
+#### Further reading
+
+- `pointer-events` (CSS) — MDN; the layered-interaction pattern.
+- SVG coordinate system & `<rect>`/`<ellipse>` — MDN SVG tutorial.
+- jsdom limitations (no PointerEvent / layout) — why component tests stub the environment.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

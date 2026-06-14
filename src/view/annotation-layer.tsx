@@ -1,0 +1,242 @@
+// SPEC: infrastructure (P3.A2) — the per-page annotation overlay.
+//
+// An SVG layer absolutely positioned over each page canvas. It (1) draws the
+// committed annotations + the live draft for its page (PDF → screen via the A1
+// `coords` helpers), and (2) when a tool is active, captures pointer events and
+// drives the A1 lifecycle, committing into the annotation store. When idle the
+// overlay is click-through (`pointer-events: none`) except on the shapes
+// themselves, so a click selects an annotation without blocking text selection
+// or scrolling underneath.
+//
+// Pointer events, not HTML5 DnD (WKWebView; docs/04 §WebView quirks) — the
+// drag uses `setPointerCapture`. No PDF bytes are touched here; persistence is
+// P3.B1.
+
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
+
+import { useAnnotationStore, useDocAnnotations } from "@/state/annotation-store";
+import { useToolStore } from "@/state/tool-store";
+import {
+  getTool,
+  IDLE,
+  type PageGeometry,
+  type PdfRect,
+  pdfToScreen,
+  type ScreenPoint,
+  screenToPdf,
+  stepTool,
+  type ToolSession,
+} from "@/tools/_framework";
+
+export interface AnnotationLayerProps {
+  documentId: string;
+  /** 0-based page index. */
+  page: number;
+  /** Displayed (rotation-swapped) page size in PDF points. */
+  displayedWidth: number;
+  displayedHeight: number;
+  /** CSS px per point. */
+  scale: number;
+  /** Page display rotation in degrees. */
+  rotation: number;
+}
+
+export function AnnotationLayer({
+  documentId,
+  page,
+  displayedWidth,
+  displayedHeight,
+  scale,
+  rotation,
+}: AnnotationLayerProps) {
+  const annotations = useDocAnnotations(documentId);
+  const draft = useAnnotationStore((s) => s.draft);
+  const selectedId = useAnnotationStore((s) => s.selectedId);
+  const setDraft = useAnnotationStore((s) => s.setDraft);
+  const addAnnotation = useAnnotationStore((s) => s.add);
+  const select = useAnnotationStore((s) => s.select);
+
+  const activeTool = useToolStore((s) => s.activeTool);
+  const options = useToolStore((s) => s.options);
+  const tool = activeTool ? getTool(activeTool) : undefined;
+
+  const sessionRef = useRef<ToolSession>(IDLE);
+
+  // `coords` expects the UNROTATED PDF dimensions; `displayed*` are already
+  // rotation-swapped for layout, so swap them back for 90°/270°.
+  const swapped = ((rotation % 180) + 180) % 180 === 90;
+  const geo: PageGeometry = {
+    page,
+    width: swapped ? displayedHeight : displayedWidth,
+    height: swapped ? displayedWidth : displayedHeight,
+    scale,
+    rotation,
+  };
+  const cssWidth = displayedWidth * scale;
+  const cssHeight = displayedHeight * scale;
+
+  // Escape cancels an in-progress draft.
+  useEffect(() => {
+    if (!tool) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        sessionRef.current = IDLE;
+        setDraft(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tool, setDraft]);
+
+  const pagePoint = (e: ReactPointerEvent<Element>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const s: ScreenPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return screenToPdf(s, geo);
+  };
+
+  const onPointerDown = (e: ReactPointerEvent<Element>) => {
+    if (!tool) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const r = stepTool(
+      tool,
+      sessionRef.current,
+      { kind: "pointerDown", pt: pagePoint(e) },
+      { documentId, options },
+    );
+    sessionRef.current = r.session;
+    setDraft(r.session.draft);
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<Element>) => {
+    if (!tool || sessionRef.current.phase !== "drawing") return;
+    const r = stepTool(
+      tool,
+      sessionRef.current,
+      { kind: "pointerMove", pt: pagePoint(e) },
+      { documentId, options },
+    );
+    sessionRef.current = r.session;
+    setDraft(r.session.draft);
+  };
+
+  const onPointerUp = (e: ReactPointerEvent<Element>) => {
+    if (!tool || sessionRef.current.phase !== "drawing") return;
+    const r = stepTool(
+      tool,
+      sessionRef.current,
+      { kind: "pointerUp", pt: pagePoint(e) },
+      { documentId, options },
+    );
+    sessionRef.current = r.session;
+    if (r.committed) addAnnotation(documentId, r.committed);
+    else setDraft(null);
+  };
+
+  const pageAnnotations = annotations.filter((a) => a.page === page);
+  const draftHere = draft && draft.page === page ? draft : null;
+
+  return (
+    <svg
+      className="absolute left-0 top-0"
+      width={cssWidth}
+      height={cssHeight}
+      style={{ pointerEvents: tool ? "auto" : "none", cursor: tool?.cursor }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      {pageAnnotations.map((a) => (
+        <Shape
+          key={a.id}
+          id={a.id}
+          shape={a}
+          geo={geo}
+          selected={a.id === selectedId}
+          selectable={!tool}
+          onSelect={() => select(a.id)}
+        />
+      ))}
+      {draftHere ? (
+        <Shape id="__draft__" shape={draftHere} geo={geo} selected={false} selectable={false} preview />
+      ) : null}
+    </svg>
+  );
+}
+
+interface ShapeInput {
+  type: "rectangle" | "ellipse";
+  rect: PdfRect;
+  color: string;
+  opacity: number;
+  strokeWidth: number;
+}
+
+function Shape({
+  id,
+  shape,
+  geo,
+  selected,
+  selectable,
+  onSelect,
+  preview = false,
+}: {
+  id: string;
+  shape: ShapeInput;
+  geo: PageGeometry;
+  selected: boolean;
+  selectable: boolean;
+  onSelect?: () => void;
+  preview?: boolean;
+}) {
+  const p0 = pdfToScreen({ page: geo.page, x: shape.rect.x0, y: shape.rect.y0 }, geo);
+  const p1 = pdfToScreen({ page: geo.page, x: shape.rect.x1, y: shape.rect.y1 }, geo);
+  const x = Math.min(p0.x, p1.x);
+  const y = Math.min(p0.y, p1.y);
+  const w = Math.abs(p1.x - p0.x);
+  const h = Math.abs(p1.y - p0.y);
+
+  const stroke = shape.color;
+  const strokeWidth = Math.max(1, shape.strokeWidth * geo.scale);
+  const common = {
+    fill: "none",
+    stroke,
+    strokeWidth,
+    opacity: shape.opacity,
+    strokeDasharray: preview ? "4 4" : undefined,
+    "data-ann-id": id,
+    style: {
+      pointerEvents: selectable ? ("auto" as const) : ("none" as const),
+      cursor: selectable ? "pointer" : undefined,
+    },
+    onPointerDown:
+      selectable && onSelect
+        ? (e: ReactPointerEvent<Element>) => {
+            e.stopPropagation();
+            onSelect();
+          }
+        : undefined,
+  };
+
+  return (
+    <g>
+      {shape.type === "ellipse" ? (
+        <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...common} />
+      ) : (
+        <rect x={x} y={y} width={w} height={h} {...common} />
+      )}
+      {selected ? (
+        <rect
+          x={x - 2}
+          y={y - 2}
+          width={w + 4}
+          height={h + 4}
+          fill="none"
+          stroke="#2563eb"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+          style={{ pointerEvents: "none" }}
+        />
+      ) : null}
+    </g>
+  );
+}

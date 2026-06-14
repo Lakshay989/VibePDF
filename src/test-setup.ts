@@ -17,6 +17,39 @@ if (typeof window !== "undefined" && !window.matchMedia) {
   });
 }
 
+// jsdom (as of v25) does not implement PointerEvent, so testing-library's
+// `fireEvent.pointerDown(...)` silently falls back to a bare Event with no
+// `clientX`/`clientY` — pointer-driven component tests (the annotation layer,
+// future drawing tools) then read `undefined` coordinates. A thin subclass of
+// MouseEvent (which jsdom *does* implement, including clientX/Y) is enough.
+if (typeof globalThis.PointerEvent === "undefined") {
+  interface PointerInit {
+    clientX?: number;
+    clientY?: number;
+    pointerId?: number;
+    pressure?: number;
+    button?: number;
+    buttons?: number;
+    bubbles?: boolean;
+    cancelable?: boolean;
+  }
+  const Base = globalThis.MouseEvent;
+  class JsdomPointerEvent extends Base {
+    public readonly pointerId: number;
+    public readonly pressure: number;
+    constructor(type: string, params: PointerInit = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pressure = params.pressure ?? 0;
+    }
+  }
+  const ctor = JsdomPointerEvent as unknown;
+  (globalThis as unknown as { PointerEvent: unknown }).PointerEvent = ctor;
+  if (typeof window !== "undefined") {
+    (window as unknown as { PointerEvent: unknown }).PointerEvent = ctor;
+  }
+}
+
 // jsdom (as of v25) does not implement DOMMatrix. PDF.js still touches
 // it at module load (`const SCALE_MATRIX = new DOMMatrix();` in
 // canvas.js) even in the legacy build, so importing the library would

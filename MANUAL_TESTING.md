@@ -213,6 +213,19 @@ the rest still want a pass.
 
 ---
 
+## F. Phase 3 — Annotations (`npm run dev`)
+
+- [ ] **Annotation render layer (P3.A2)** — open any PDF, click the **▭** toggle
+  in the toolbar (temporary A2 demo), then **drag on a page**: a dashed
+  rectangle should track the drag and become a solid rectangle on release.
+  Toggle **▭** off and **click the rectangle** → it shows a blue dashed
+  selection outline. Verify it does **not** block scrolling when the tool is
+  off. It is **preview-only** — a reload/save clears it (persistence is B1).
+  Also confirm jump-to-page (thumbnail click) still lands at the page top (the
+  overlay restructure touched `PageSlot`). → on pass, flip **P3.A2** to `[x]`.
+
+---
+
 ## Status flips waiting on the above
 
 | Step | Flips to `[x]` when |

@@ -191,6 +191,24 @@ the current roadmap phase. When one is picked up, move it into the relevant
   the content so nothing is lost). A "match source orientation" toggle, plus
   mm/inch input units in the dialog, are easy follow-ups.
 
+## From P3.A2 (annotation render layer)
+
+- **Draft re-renders the overlay on every `pointermove` (from P3.A2).** The live
+  draft is written to `useAnnotationStore` on each move, so the active page's
+  overlay re-renders per event. Fine for one rect; if a future tool (ink) emits
+  hundreds of points or a page has many annotations, keep the in-progress draft
+  in local component state and commit to the store only on `pointerup`.
+
+- **No deselect-on-empty-click (from P3.A2).** When idle the overlay is
+  `pointer-events:none`, so clicking empty page space can't clear the selection
+  (only clicking another shape moves it). Add a transparent hit area or an
+  Escape/clear affordance when selection editing lands (with the move/resize
+  handles, which are also deferred).
+
+- **The temporary "▭" toolbar toggle + `example-rect-tool` registration are A2
+  scaffolding** (`ZoomToolbar.tsx`) — remove when the real annotation tool
+  palette ships in B1/C1.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

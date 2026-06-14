@@ -9,6 +9,7 @@ import {
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPageOnDoc } from "@/view/render-page";
+import { AnnotationLayer } from "@/view/annotation-layer";
 import { LruCache } from "@/view/page-cache";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
 import { useDocRotations } from "@/state/rotation-preview-store";
@@ -362,6 +363,11 @@ function PageSlot({
   onMount,
 }: SlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // The canvas mounts into its own inner div (cleared imperatively) so the React
+  // annotation overlay — a sibling — survives that clear. `containerRef` stays
+  // the outer flow element registered for scroll (its `offsetTop` drives
+  // jump-to-page) and observed for visibility.
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
   const cacheKey = useMemo(() => {
@@ -389,7 +395,7 @@ function PageSlot({
   }, []);
 
   useEffect(() => {
-    const el = containerRef.current;
+    const el = canvasRef.current;
     if (!el) return;
 
     // Always clear before re-populating. Earlier versions only cleared
@@ -447,6 +453,16 @@ function PageSlot({
         height: Math.floor(natural.height * scale),
       }}
       className="relative bg-white dark:bg-neutral-100"
-    />
+    >
+      <div ref={canvasRef} className="absolute inset-0" />
+      <AnnotationLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+    </div>
   );
 }

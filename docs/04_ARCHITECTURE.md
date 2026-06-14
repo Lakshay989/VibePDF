@@ -253,7 +253,12 @@ tool framework so tools and the render layer can be built and tested first.
 The **annotation tool framework** (`src/tools/_framework/`, P3.A1) realizes the
 `§Edit tools` contract above: a pure lifecycle state machine drives stateless
 per-tool reducers over pointer gestures (pointer events, per `§WebView quirks` —
-no HTML5 DnD), with screen↔PDF coordinate mapping isolated in `coords.ts`.
+no HTML5 DnD), with screen↔PDF coordinate mapping isolated in `coords.ts`. The
+**render layer** (`src/view/annotation-layer.tsx`, P3.A2) is the per-page SVG
+overlay that draws the store's annotations and binds those pointer gestures; it
+mounts inside `PageVirtualizer`'s `PageSlot` as a sibling of the
+imperatively-managed canvas (the canvas gets its own inner div to clear, so the
+React overlay survives — and the outer flow element stays the scroll anchor).
 
 **Backend events** (pages changed, form fields modified, etc.) are pushed via
 Tauri's event system; the frontend listens and updates the relevant store. The
