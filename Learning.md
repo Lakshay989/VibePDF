@@ -3944,6 +3944,63 @@ builds both, preview-only — the actual PDF write is B1b.
 
 ---
 
+### P3.B1b — persist text markup to the PDF (the first annotation write)
+
+#### Problem
+
+B1a previewed highlights in an overlay; they vanished on reload. B1b makes them
+**real**: a standard PDF annotation, written into the file, visible in Acrobat /
+Preview / Chrome and undoable — the first time we write an *annotation* to a PDF.
+
+#### Concepts learned
+
+- **A text-markup annotation is a dictionary + an appearance.** The dict says
+  *what* it is: `/Subtype /Highlight`, `/QuadPoints` (the marked rectangles),
+  `/C` (colour), `/Rect`, `/P` (its page). The **`/AP`** ("appearance") says *how
+  to draw it* — a little embedded form (a Form XObject) with a content stream.
+  Acrobat can regenerate appearances from `/QuadPoints`+`/C`, but Preview/PDF.js
+  largely won't, so **shipping an `/AP` is what makes the markup show everywhere**.
+- **Generating an appearance stream.** The `/AP` is drawn in the page's own
+  coordinates by setting the form's `/BBox == /Rect` with an identity matrix —
+  then you draw with absolute page coords. Highlight = fill each quad's rectangle
+  with the colour under a **Multiply blend** (`/ExtGState << /BM /Multiply >>`,
+  `re f`) so the text underneath stays readable; underline/strikeout = a stroked
+  line (`m … l S`); squiggly = a little zigzag path. PDF content operators are
+  just `x y w h re`, `rg`/`RG` (fill/stroke colour), `gs` (graphics state), `f`/`S`.
+- **PDFium can read/keep annotations but can't *author* a coloured one.** Its
+  Rust binding exposes quadpoints but no colour setter, so authoring goes through
+  **lopdf** (build the dict + stream, append to `/Annots`) — same byte-handoff as
+  every other structural edit. PDFium then preserves it across the save round-trip
+  (verified: `/Subtype/Highlight` + `/QuadPoints` + `/AP` survive).
+- **"Who renders the committed annotation?" is an architectural choice.** Two
+  models: the **engine** renders it (write to PDF → reload → PDF.js draws the
+  `/AP`), or the **frontend overlay** renders it from a store. We chose the
+  engine — it matches every other edit ("the PDF is the source of truth; the
+  viewer renders it"), needs no store↔PDF sync, and makes *reopened* files just
+  work. B1a's overlay-rendering became preview scaffolding, kept (inert) for a
+  future optimistic preview.
+- **Undo of a "write a whole annotation" edit** reuses the snapshot pattern
+  (`RestoreDocEdit`): cheaper to remember the bytes-before than to author a
+  precise "remove that one annotation" inverse — same call we made for resize/D1.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_text_markup` — annot dict + generated `/AP` appearance → `/Annots`. |
+| `src-tauri/src/pdf/annotation.rs` | `TextMarkupEdit` (byte-handoff; `RestoreDocEdit` inverse). |
+| `actor.rs`, `commands/pdf.rs`, `lib.rs` | `AddTextMarkup` message + `pdf_add_text_markup` command. |
+| `src/ipc/annotations.ts`, `src/app/MarkupToolbar.tsx`, `src/tools/text-markup/apply-markup.ts` | Typed wrapper; toolbar now writes via IPC (not the store) → epoch reload. |
+
+#### Further reading
+
+- Text-markup annotations + `/QuadPoints` — PDF 32000-1 §12.5.6.10.
+- Appearance streams (`/AP`, Form XObjects) — §12.5.5, §8.10.
+- Blend modes (`/BM /Multiply`, `/ExtGState`) — §11.3.5.
+- PDF content stream operators (`re`, `rg`, `gs`, `f`, `S`) — §8.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -38,6 +38,7 @@ use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
+use crate::pdf::annotation::TextMarkupEdit;
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -150,6 +151,17 @@ pub enum Message {
         width: f32,
         height: f32,
         preserve_aspect: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-001 — add a text-markup annotation (`subtype` =
+    /// highlight/underline/strikethrough/squiggly) over `quads` on `page`.
+    /// Undoable (snapshot inverse), marks dirty.
+    AddTextMarkup {
+        page: i32,
+        subtype: String,
+        quads: Vec<[f32; 8]>,
+        color: String,
+        opacity: f32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
@@ -489,6 +501,43 @@ impl DocumentActorHandle {
                 width,
                 height,
                 preserve_aspect,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-001 — add a text-markup annotation. Await-holding
+    /// convenience for tests; IPC uses `add_text_markup_request`.
+    pub async fn add_text_markup(
+        &self,
+        page: i32,
+        subtype: String,
+        quads: Vec<[f32; 8]>,
+        color: String,
+        opacity: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_text_markup_request(page, subtype, quads, color, opacity)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_text_markup_request(
+        &self,
+        page: i32,
+        subtype: String,
+        quads: Vec<[f32; 8]>,
+        color: String,
+        opacity: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddTextMarkup {
+                page,
+                subtype,
+                quads,
+                color,
+                opacity,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -920,6 +969,33 @@ fn run_worker(
                     width,
                     height,
                     preserve_aspect,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddTextMarkup {
+                page,
+                subtype,
+                quads,
+                color,
+                opacity,
+                reply,
+            } => {
+                // SPEC: P3-ANN-001 — write the markup annotation via lopdf; the
+                // inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = TextMarkupEdit {
+                    page,
+                    subtype,
+                    quads,
+                    color,
+                    opacity,
                 };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {

@@ -126,6 +126,15 @@ Q` (push state, concat a scale matrix, …, pop) and set the new `/MediaBox`. No
 PDFium content API, no `reload_in_place`. Annotations aren't re-scaled (their
 `/Rect`s keep their coordinates) — a documented limitation in `BACKLOG.md`.
 
+**Authoring annotations also lives here (P3.B1b).** `cos::add_text_markup` builds
+a text-markup annotation dict (`/QuadPoints`, `/C`) **plus a generated `/AP`
+appearance stream** and appends it to the page `/Annots` — `PDFium` can read and
+preserve annotations but can't *author* a coloured one (no colour setter), and
+the `/AP` is what makes the markup render in every reader. The committed
+annotation is drawn in the main view by **PDF.js** (write → epoch reload → the
+canvas renders the `/AP`), consistent with every other edit; the annotation
+overlay stays draft/selection-only.
+
 **The two libraries never share a live handle.** A structural edit is a pass
 over **serialized bytes** between PDFium passes:
 

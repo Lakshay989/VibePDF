@@ -226,6 +226,25 @@ the current roadmap phase. When one is picked up, move it into the relevant
   layer (`getTextContent` + spans). Fine now (only visible pages); if a
   text-dense 1000-page doc stutters, gate or virtualize the text layer.
 
+## From P3.B1b (persist text markup)
+
+- **No optimistic preview.** Apply → IPC write → epoch reload → the canvas shows
+  the highlight; there's a brief delay (the lopdf+PDFium round-trip). For instant
+  feedback, optimistically add the markup to the store (overlay draws it) and
+  clear it once the reload lands. The overlay's `MarkupShape` rendering is kept
+  (inert in prod) precisely for this.
+- **`/QuadPoints` corner order is verified visually, not by spec.** We emit
+  `UL,UR,LL,LR`; since we own the `/AP`, rendering is correct regardless, but a
+  reader that *regenerates* appearance from `/QuadPoints` (Acrobat with `/AP`
+  stripped) depends on the order. Confirm against the de-facto Acrobat order.
+- **Squiggly `/AP` is a fixed-step zigzag**, not a true PDF squiggly wave.
+  Acceptable; refine for fidelity if it reads poorly.
+- **The frontend store doesn't track committed markup** (the canvas renders it
+  from the PDF). Editing/selecting/deleting existing annotations + the sidebar
+  need a read path (`cos::read_text_markup` → store) — that's **D1**. Reopened
+  files still *display* correctly (PDF.js renders their `/AP`); they just aren't
+  editable yet.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

@@ -224,8 +224,16 @@ the rest still want a pass.
   **Highlight** in the Markup toolbar → translucent colour over the text;
   **Underline / Strikethrough / Squiggly** draw the right marks; the **colour
   swatches** change the highlight colour. Selecting then clicking must **not**
-  lose the selection. It is **preview-only** — a reload/save clears it
-  (persistence is B1b). → on pass, flip **P3.A2 + P3.B1a** to `[x]`.
+  lose the selection. → on pass, flip **P3.A2 + P3.B1a** to `[x]`.
+- [ ] **Persisted text markup (P3.B1b)** — **the key check is the rendering
+  decision:** select text → **Highlight** → after a brief reload the highlight
+  **shows in the main view** (the PDF.js canvas renders the `/AP`). **Cmd+Z**
+  removes it; **Cmd+S** → reopen in VibePDF → still there. Then the
+  **cross-reader**: open `Sample PDFs/vibepdf-verify-highlight.pdf` (and your own
+  saved file) in **Preview + Chrome + Acrobat** — the highlight must be visible
+  and correctly placed over the text. Repeat for underline/strikethrough/squiggly.
+  → on pass, flip **P3.B1b** to `[x]`. *(If the highlight does NOT appear in the
+  main view, tell me — the fallback is overlay-rendering committed markup.)*
 
 ---
 

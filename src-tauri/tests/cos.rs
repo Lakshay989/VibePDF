@@ -10,9 +10,9 @@ use std::path::PathBuf;
 
 use lopdf::{Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_top_level_bookmark, merge_documents, prune_dangling_destinations, read_form_field_names,
-    register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
-    reorder_pages, resize_pages,
+    add_text_markup, add_top_level_bookmark, merge_documents, prune_dangling_destinations,
+    read_form_field_names, register_inserted_form_fields, read_top_level_outline_titles,
+    rename_form_fields_with_suffix, reorder_pages, resize_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -68,6 +68,76 @@ fn pdfium_page_count(bytes: &[u8]) -> u32 {
 
 fn as_strs(v: &[String]) -> Vec<&str> {
     v.iter().map(String::as_str).collect()
+}
+
+/// SPEC: P3-ANN-001 — add_text_markup writes a standard annotation dict
+/// (/Subtype, /QuadPoints, /C) AND a generated /AP appearance stream, and the
+/// result reopens in PDFium.
+#[test]
+fn cos_add_text_markup_writes_annot_with_ap() {
+    let bytes = fixture_bytes("hello.pdf");
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    let out = add_text_markup(&bytes, 0, "highlight", &quads, "#ffd400", 1.0).expect("markup");
+
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let doc = Document::load_mem(&out).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let annots = doc
+        .get_dictionary(page_id)
+        .unwrap()
+        .get(b"Annots")
+        .and_then(Object::as_array)
+        .expect("Annots array");
+    assert_eq!(annots.len(), 1);
+
+    let annot = doc.get_dictionary(annots[0].as_reference().unwrap()).unwrap();
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Highlight");
+    assert_eq!(annot.get(b"QuadPoints").and_then(Object::as_array).unwrap().len(), 8);
+    assert!(annot.get(b"C").and_then(Object::as_array).is_ok(), "colour /C present");
+
+    // /AP /N must resolve to a stream (the appearance).
+    let ap = annot.get(b"AP").and_then(Object::as_dict).unwrap();
+    let n = ap.get(b"N").unwrap().as_reference().unwrap();
+    assert!(
+        doc.get_object(n).and_then(Object::as_stream).is_ok(),
+        "AP /N should be a stream"
+    );
+}
+
+#[test]
+fn cos_text_markup_maps_each_subtype() {
+    let bytes = fixture_bytes("hello.pdf");
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    for (input, expected) in [
+        ("highlight", &b"Highlight"[..]),
+        ("underline", &b"Underline"[..]),
+        ("strikethrough", &b"StrikeOut"[..]),
+        ("squiggly", &b"Squiggly"[..]),
+    ] {
+        let out = add_text_markup(&bytes, 0, input, &quads, "#ff0000", 1.0).expect(input);
+        let doc = Document::load_mem(&out).expect("load");
+        let page_id = *doc.get_pages().get(&1).unwrap();
+        let annot = doc
+            .get_dictionary(page_id)
+            .unwrap()
+            .get(b"Annots")
+            .and_then(Object::as_array)
+            .unwrap()[0]
+            .as_reference()
+            .unwrap();
+        let subtype = doc.get_dictionary(annot).unwrap().get(b"Subtype").unwrap().as_name().unwrap();
+        assert_eq!(subtype, expected, "subtype for {input}");
+    }
+}
+
+#[test]
+fn cos_text_markup_rejects_bad_input() {
+    let bytes = fixture_bytes("hello.pdf");
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    assert!(add_text_markup(&bytes, 0, "bogus", &quads, "#ffd400", 1.0).is_err());
+    assert!(add_text_markup(&bytes, 0, "highlight", &[], "#ffd400", 1.0).is_err());
+    assert!(add_text_markup(&bytes, 0, "highlight", &quads, "nothex", 1.0).is_err());
 }
 
 /// A PDF number (Integer/Real) as f32, for reading a MediaBox in a test.

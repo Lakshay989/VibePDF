@@ -1042,3 +1042,224 @@ pub fn register_inserted_form_fields(
     doc.save_to(&mut buf)?;
     Ok(buf)
 }
+
+/// SPEC: P3-ANN-001 — append a text-markup annotation (highlight / underline /
+/// strikethrough / squiggly) over `quads` (each `[x1..y4]` in PDF points) on
+/// `page` (0-based) to the page's `/Annots`. Writes a standard annotation dict
+/// (`/QuadPoints`, `/C`, `/CA`, `/Rect`, `/P`) **plus a generated `/AP`
+/// appearance stream** so the markup renders in every reader (`PDFium` can't set
+/// annotation colour, so this lives in lopdf).
+pub fn add_text_markup(
+    bytes: &[u8],
+    page: usize,
+    subtype: &str,
+    quads: &[[f32; 8]],
+    color: &str,
+    opacity: f32,
+) -> Result<Vec<u8>, CommandError> {
+    if quads.is_empty() {
+        return Err(CommandError::InvalidInput("no quads for text markup".into()));
+    }
+    let pdf_subtype: &[u8] = match subtype {
+        "highlight" => b"Highlight",
+        "underline" => b"Underline",
+        "strikethrough" => b"StrikeOut",
+        "squiggly" => b"Squiggly",
+        other => {
+            return Err(CommandError::InvalidInput(format!(
+                "unknown markup subtype: {other}"
+            )))
+        }
+    };
+    let (r, g, b) = parse_hex_color(color)?;
+    let opacity = opacity.clamp(0.0, 1.0);
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let (x0, y0, x1, y1) = quads_bounds(quads);
+    let rect_obj = Object::Array(vec![
+        Object::Real(x0),
+        Object::Real(y0),
+        Object::Real(x1),
+        Object::Real(y1),
+    ]);
+
+    // Appearance content, drawn in absolute page coords (BBox == Rect, identity
+    // matrix, so form space == page space).
+    let content = markup_appearance_content(subtype, quads, (r, g, b));
+
+    // Appearance form XObject.
+    let mut gs = Dictionary::new();
+    gs.set("BM", Object::Name(b"Multiply".to_vec()));
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+
+    // /QuadPoints, flattened (UL, UR, LL, LR per quad — the order quads.ts emits).
+    let quad_points: Vec<Object> = quads
+        .iter()
+        .flat_map(|q| q.iter().map(|&v| Object::Real(v)))
+        .collect();
+
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(pdf_subtype.to_vec()));
+    annot.set("Rect", rect_obj);
+    annot.set("QuadPoints", Object::Array(quad_points));
+    annot.set("C", Object::Array(vec![Object::Real(r), Object::Real(g), Object::Real(b)]));
+    annot.set("CA", Object::Real(opacity));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    // Append to the page's /Annots (array, indirect array, or absent).
+    let existing = doc
+        .get_dictionary(page_id)
+        .map_err(cos_err)?
+        .get(b"Annots")
+        .ok()
+        .cloned();
+    match existing {
+        Some(Object::Reference(arr_id)) => {
+            if let Ok(Object::Array(arr)) = doc.get_object_mut(arr_id) {
+                arr.push(Object::Reference(annot_id));
+            } else {
+                return Err(CommandError::InvalidInput("malformed /Annots".into()));
+            }
+        }
+        Some(Object::Array(mut arr)) => {
+            arr.push(Object::Reference(annot_id));
+            doc.get_dictionary_mut(page_id)
+                .map_err(cos_err)?
+                .set("Annots", Object::Array(arr));
+        }
+        _ => {
+            doc.get_dictionary_mut(page_id)
+                .map_err(cos_err)?
+                .set("Annots", Object::Array(vec![Object::Reference(annot_id)]));
+        }
+    }
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Build the `/AP` appearance content stream for a markup subtype, drawn in
+/// absolute page coordinates (the form's `BBox` == `Rect`, identity matrix).
+fn markup_appearance_content(subtype: &str, quads: &[[f32; 8]], (r, g, b): (f32, f32, f32)) -> String {
+    use std::fmt::Write as _;
+
+    let mut content = String::new();
+    if subtype == "highlight" {
+        let _ = writeln!(content, "/GS gs");
+        let _ = writeln!(content, "{r:.4} {g:.4} {b:.4} rg");
+        for q in quads {
+            let (qx0, qy0, qx1, qy1) = quad_bbox(q);
+            let _ = writeln!(content, "{qx0:.2} {qy0:.2} {:.2} {:.2} re f", qx1 - qx0, qy1 - qy0);
+        }
+        return content;
+    }
+
+    let _ = writeln!(content, "{r:.4} {g:.4} {b:.4} RG");
+    for q in quads {
+        let (qx0, qy0, qx1, qy1) = quad_bbox(q);
+        let line_w = ((qy1 - qy0) * 0.06).max(0.75);
+        let _ = writeln!(content, "{line_w:.2} w");
+        let y = if subtype == "strikethrough" {
+            (qy0 + qy1) / 2.0
+        } else {
+            qy0 + (qy1 - qy0) * 0.12
+        };
+        if subtype == "squiggly" {
+            write_squiggle(&mut content, qx0, qx1, y, (qy1 - qy0) * 0.12);
+        } else {
+            let _ = writeln!(content, "{qx0:.2} {y:.2} m {qx1:.2} {y:.2} l S");
+        }
+    }
+    content
+}
+
+/// Parse `#rrggbb` into RGB components in 0..=1.
+#[allow(clippy::cast_precision_loss)] // 0..=255 → f32 is exact.
+fn parse_hex_color(hex: &str) -> Result<(f32, f32, f32), CommandError> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err(CommandError::InvalidInput(format!("bad colour: {hex}")));
+    }
+    let comp = |s: &str| f32::from(u8::from_str_radix(s, 16).unwrap_or(0)) / 255.0;
+    Ok((comp(&h[0..2]), comp(&h[2..4]), comp(&h[4..6])))
+}
+
+/// Bounding box [x0,y0,x1,y1] of all quads.
+fn quads_bounds(quads: &[[f32; 8]]) -> (f32, f32, f32, f32) {
+    let mut x0 = f32::INFINITY;
+    let mut y0 = f32::INFINITY;
+    let mut x1 = f32::NEG_INFINITY;
+    let mut y1 = f32::NEG_INFINITY;
+    for q in quads {
+        let (a, b, c, d) = quad_bbox(q);
+        x0 = x0.min(a);
+        y0 = y0.min(b);
+        x1 = x1.max(c);
+        y1 = y1.max(d);
+    }
+    (x0, y0, x1, y1)
+}
+
+/// Bounding box of one quad's four corners.
+fn quad_bbox(q: &[f32; 8]) -> (f32, f32, f32, f32) {
+    let xs = [q[0], q[2], q[4], q[6]];
+    let ys = [q[1], q[3], q[5], q[7]];
+    (
+        xs.iter().copied().fold(f32::INFINITY, f32::min),
+        ys.iter().copied().fold(f32::INFINITY, f32::min),
+        xs.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        ys.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+    )
+}
+
+/// Append a small zigzag path (squiggly underline) to the content stream.
+fn write_squiggle(out: &mut String, x0: f32, x1: f32, y: f32, amp: f32) {
+    use std::fmt::Write as _;
+    if (x1 - x0).abs() < 1.0 {
+        return;
+    }
+    let _ = writeln!(out, "{x0:.2} {y:.2} m");
+    let dir = if x1 >= x0 { 4.0_f32 } else { -4.0_f32 };
+    let mut x = x0;
+    let mut up = true;
+    loop {
+        x += dir;
+        let past = if dir > 0.0 { x >= x1 } else { x <= x1 };
+        let px = if past { x1 } else { x };
+        let dy = if up { amp } else { -amp };
+        let _ = writeln!(out, "{px:.2} {:.2} l", y + dy);
+        up = !up;
+        if past {
+            break;
+        }
+    }
+    let _ = writeln!(out, "S");
+}

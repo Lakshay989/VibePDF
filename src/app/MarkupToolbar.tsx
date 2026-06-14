@@ -6,7 +6,9 @@
 // button collapses the page text selection before the click handler runs, so we
 // suppress it to keep the selection alive.
 
-import { useAnnotationStore } from "@/state/annotation-store";
+import { addTextMarkup } from "@/ipc/annotations";
+import { useEditEpochStore } from "@/state/edit-epoch-store";
+import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
 import type { MarkupSubtype } from "@/tools/_framework";
 import { applyMarkupToSelection } from "@/tools/text-markup/apply-markup";
@@ -24,10 +26,21 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const color = useToolStore((s) => s.options.color);
   const opacity = useToolStore((s) => s.options.opacity);
   const setOptions = useToolStore((s) => s.setOptions);
-  const add = useAnnotationStore((s) => s.add);
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const setHistory = useHistoryStore((s) => s.setHistory);
 
   const apply = (subtype: MarkupSubtype) => {
-    applyMarkupToSelection({ documentId, subtype, color, opacity }, add);
+    void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
+      addTextMarkup(documentId, page, subtype, quads, color, opacity),
+    )
+      .then((history) => {
+        if (history) {
+          // The markup is now in the PDF; reload so the canvas renders it.
+          bumpEpoch(documentId);
+          setHistory(documentId, history);
+        }
+      })
+      .catch((err: unknown) => console.warn("markup failed", documentId, err));
   };
 
   return (

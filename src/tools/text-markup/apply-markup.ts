@@ -10,7 +10,7 @@
 // core (`buildMarkupDrafts`) is pure and unit-tested; `applyMarkupToSelection`
 // is the thin DOM wrapper, exercised in-app.
 
-import type { AnnotationDraft, MarkupSubtype, PageGeometry } from "@/tools/_framework";
+import type { AnnotationDraft, MarkupSubtype, PageGeometry, Quad } from "@/tools/_framework";
 
 import { type LocalRect, rectsToQuads } from "./quads";
 
@@ -103,15 +103,23 @@ function collectSelectionGroups(): PageGroup[] {
 }
 
 /**
- * Read the live text selection and add a markup annotation per page it covers.
- * Returns the number of annotations added (0 if nothing was selected).
+ * Read the live text selection and persist a markup annotation per page it
+ * covers, via `write` (the Rust actor — markup goes into the PDF, not the
+ * frontend store). Returns the last write's result, or `null` if nothing was
+ * selected.
  */
-export function applyMarkupToSelection(
+export async function applyMarkupToSelection<R>(
   req: MarkupRequest,
-  add: (documentId: string, draft: AnnotationDraft) => unknown,
-): number {
+  write: (page: number, quads: Quad[]) => Promise<R>,
+): Promise<R | null> {
   const drafts = buildMarkupDrafts(collectSelectionGroups(), req);
-  for (const draft of drafts) add(req.documentId, draft);
-  if (drafts.length > 0) window.getSelection()?.removeAllRanges();
-  return drafts.length;
+  if (drafts.length === 0) return null;
+  // Clear the selection up front so the marks (rendered on the next reload)
+  // aren't hidden behind the selection highlight.
+  window.getSelection()?.removeAllRanges();
+  let last: R | null = null;
+  for (const draft of drafts) {
+    last = await write(draft.page, draft.quads);
+  }
+  return last;
 }

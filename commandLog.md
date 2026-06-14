@@ -1579,6 +1579,38 @@ select-text → highlight preview check.
 
 ---
 
+### P3.B1b — persist text markup to the PDF (this commit)
+
+```bash
+# No new deps. The first annotation WRITE path: cos::add_text_markup (lopdf)
+# builds the annotation dict (/Subtype, /QuadPoints, /C) + a generated /AP
+# appearance (Multiply-blended quads / lines), append to /Annots. PDFium can't
+# author a coloured annotation, so it's all lopdf; PDFium preserves it on save.
+# TextMarkupEdit (annotation.rs) + AddTextMarkup actor msg + pdf_add_text_markup
+# command. MarkupToolbar now writes via IPC (not the store) → epoch reload → the
+# PDF.js canvas renders the /AP.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy fixes: backtick PDFium/BBox (doc_markdown); extracted
+#   markup_appearance_content to get add_text_markup under 100 lines.
+npm run test           # 173/173 (markup is Rust-tested; FE unchanged count)
+npm run test:rust      # EXIT 0, no SIGSEGV. text_markup.rs: 3 (highlight persists
+#   with /AP through save / undo removes it / rejects empty quads) + 1 ignored
+#   artifact. cos.rs: +3 (writes annot+/AP / maps each subtype / rejects bad input).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test text_markup markup_writes_verification_artifact \
+  -- --ignored --test-threads=1     # (from src-tauri/)
+#   → /tmp/vibepdf-verify-highlight.pdf (hello.pdf + a highlight); copied to
+#     Sample PDFs/. strings confirms /Subtype/Highlight + /QuadPoints + /AP.
+```
+
+Rendering decision: the **PDF.js canvas** renders committed markup from `/AP`
+(consistent with every other edit). Left `[~]` pending the human cross-reader
+(Acrobat/Preview/Chrome) + the in-app main-view render check.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

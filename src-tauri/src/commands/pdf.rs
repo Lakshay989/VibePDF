@@ -235,6 +235,45 @@ pub async fn pdf_resize_pages(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-001 — add a text-markup annotation over `quads` (each
+/// `[x1..y4]` in PDF points) on `page` (0-based). `subtype` is one of
+/// `highlight` / `underline` / `strikethrough` / `squiggly`; `color` is
+/// `#rrggbb`. Undoable, marks dirty; returns the new history availability.
+#[tauri::command]
+pub async fn pdf_add_text_markup(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    subtype: String,
+    quads: Vec<[f32; 8]>,
+    color: String,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    if quads.is_empty() {
+        return Err(CommandError::InvalidInput("no quads specified".into()));
+    }
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_text_markup_request(page, subtype, quads, color, opacity)?
+    };
+
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

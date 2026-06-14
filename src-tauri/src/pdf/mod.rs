@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod annotation;
 pub mod autosave;
 pub mod cos;
 pub mod crop;
