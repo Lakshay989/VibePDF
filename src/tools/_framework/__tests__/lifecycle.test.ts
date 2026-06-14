@@ -25,18 +25,22 @@ describe("tool lifecycle", () => {
 
     r = stepTool(exampleRectTool, s, { kind: "pointerUp", pt: pt(50, 80) }, ctx);
     expect(r.session).toEqual(IDLE);
-    expect(r.committed?.type).toBe("rectangle");
-    expect(r.committed?.rect).toEqual({ x0: 10, y0: 20, x1: 50, y1: 80 });
+    const c = r.committed;
+    if (!c || !("rect" in c)) throw new Error("expected a rect draft");
+    expect(c.type).toBe("rectangle");
+    expect(c.rect).toEqual({ x0: 10, y0: 20, x1: 50, y1: 80 });
     // Style flows from the active tool's options.
-    expect(r.committed?.color).toBe("#ff0000");
-    expect(r.committed?.strokeWidth).toBe(3);
+    expect(c.color).toBe("#ff0000");
+    expect(c.strokeWidth).toBe(3);
   });
 
   it("normalizes a rect dragged up-left (the anchor survives crossing itself)", () => {
     let s = stepTool(exampleRectTool, IDLE, { kind: "pointerDown", pt: pt(50, 80) }, ctx).session;
     s = stepTool(exampleRectTool, s, { kind: "pointerMove", pt: pt(10, 20) }, ctx).session;
     const r = stepTool(exampleRectTool, s, { kind: "pointerUp", pt: pt(10, 20) }, ctx);
-    expect(r.committed?.rect).toEqual({ x0: 10, y0: 20, x1: 50, y1: 80 });
+    const c = r.committed;
+    if (!c || !("rect" in c)) throw new Error("expected a rect draft");
+    expect(c.rect).toEqual({ x0: 10, y0: 20, x1: 50, y1: 80 });
   });
 
   it("commits nothing for a zero-area click (no drag)", () => {

@@ -259,6 +259,12 @@ overlay that draws the store's annotations and binds those pointer gestures; it
 mounts inside `PageVirtualizer`'s `PageSlot` as a sibling of the
 imperatively-managed canvas (the canvas gets its own inner div to clear, so the
 React overlay survives — and the outer flow element stays the scroll anchor).
+Between them sits the **text layer** (`src/view/text-layer.tsx`, P3.B1a) — PDF.js's
+`TextLayer`, transparent selectable spans that make page text selectable. Text
+markup (highlight/underline/…) is **selection-driven** (read `getSelection()` →
+`/QuadPoints`), so it bypasses the pointer lifecycle. Per-page stacking, bottom
+to top: **canvas → text layer → annotation overlay** (the overlay is
+click-through when idle, so selection reaches the text layer beneath).
 
 **Backend events** (pages changed, form fields modified, etc.) are pushed via
 Tauri's event system; the frontend listens and updates the relevant store. The

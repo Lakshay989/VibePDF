@@ -89,8 +89,62 @@ describe("AnnotationLayer", () => {
     const list = useAnnotationStore.getState().byDoc[DOC];
     expect(list).toHaveLength(1);
     // down (10,20)→PDF(10,772), up (110,120)→PDF(110,672), normalized.
-    expect(list?.[0]?.rect).toEqual({ x0: 10, y0: 672, x1: 110, y1: 772 });
+    const committed = list?.[0];
+    if (!committed || !("rect" in committed)) throw new Error("expected a rect annotation");
+    expect(committed.rect).toEqual({ x0: 10, y0: 672, x1: 110, y1: 772 });
     expect(useAnnotationStore.getState().draft).toBeNull();
+  });
+
+  it("draws a highlight markup as a polygon", () => {
+    useAnnotationStore.setState({
+      byDoc: {
+        [DOC]: [
+          {
+            id: "m1",
+            type: "markup",
+            subtype: "highlight",
+            page: 0,
+            quads: [[10, 772, 110, 772, 10, 762, 110, 762]],
+            color: "#ffd400",
+            opacity: 1,
+            createdAt: 1,
+          },
+        ],
+      },
+      draft: null,
+      selectedId: null,
+    });
+    const { container } = render(layer());
+    const poly = container.querySelector('g[data-ann-id="m1"] polygon');
+    expect(poly).not.toBeNull();
+    expect(poly?.getAttribute("fill")).toBe("#ffd400");
+    // PDF y 772/762 → screen 20/30 at scale 1, H=792.
+    expect(poly?.getAttribute("points")).toContain("10,20");
+  });
+
+  it("draws an underline markup as a line", () => {
+    useAnnotationStore.setState({
+      byDoc: {
+        [DOC]: [
+          {
+            id: "m2",
+            type: "markup",
+            subtype: "underline",
+            page: 0,
+            quads: [[10, 772, 110, 772, 10, 762, 110, 762]],
+            color: "#ff0000",
+            opacity: 1,
+            createdAt: 1,
+          },
+        ],
+      },
+      draft: null,
+      selectedId: null,
+    });
+    const { container } = render(layer());
+    const line = container.querySelector('g[data-ann-id="m2"] line');
+    expect(line).not.toBeNull();
+    expect(line?.getAttribute("stroke")).toBe("#ff0000");
   });
 
   it("selects an annotation on click when no tool is active", () => {

@@ -10,6 +10,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPageOnDoc } from "@/view/render-page";
 import { AnnotationLayer } from "@/view/annotation-layer";
+import { PageTextLayer } from "@/view/text-layer";
 import { LruCache } from "@/view/page-cache";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
 import { useDocRotations } from "@/state/rotation-preview-store";
@@ -444,10 +445,16 @@ function PageSlot({
     };
   }, [visible, cacheKey, cache, doc, natural.pageNumber, rotation, scale, darkMode]);
 
+  // Unrotated PDF dimensions, exposed as data-* so the text-markup apply path
+  // can reconstruct each page's geometry from the DOM (see tools/text-markup).
+  const swapped = (((rotation % 180) + 180) % 180) === 90;
   return (
     <div
       ref={containerRef}
       data-page={natural.pageNumber}
+      data-pdf-w={swapped ? natural.height : natural.width}
+      data-pdf-h={swapped ? natural.width : natural.height}
+      data-rotation={rotation}
       style={{
         width: Math.floor(natural.width * scale),
         height: Math.floor(natural.height * scale),
@@ -455,6 +462,14 @@ function PageSlot({
       className="relative bg-white dark:bg-neutral-100"
     >
       <div ref={canvasRef} className="absolute inset-0" />
+      {visible ? (
+        <PageTextLayer
+          doc={doc}
+          pageNumber={natural.pageNumber}
+          scale={scale}
+          rotation={rotation}
+        />
+      ) : null}
       <AnnotationLayer
         documentId={documentId}
         page={natural.pageNumber - 1}

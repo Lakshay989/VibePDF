@@ -19,9 +19,11 @@ import { useToolStore } from "@/state/tool-store";
 import {
   getTool,
   IDLE,
+  type MarkupAnnotation,
   type PageGeometry,
   type PdfRect,
   pdfToScreen,
+  type Quad,
   type ScreenPoint,
   screenToPdf,
   stepTool,
@@ -145,18 +147,29 @@ export function AnnotationLayer({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
-      {pageAnnotations.map((a) => (
-        <Shape
-          key={a.id}
-          id={a.id}
-          shape={a}
-          geo={geo}
-          selected={a.id === selectedId}
-          selectable={!tool}
-          onSelect={() => select(a.id)}
-        />
-      ))}
-      {draftHere ? (
+      {pageAnnotations.map((a) =>
+        a.type === "markup" ? (
+          <MarkupShape
+            key={a.id}
+            markup={a}
+            geo={geo}
+            selected={a.id === selectedId}
+            selectable={!tool}
+            onSelect={() => select(a.id)}
+          />
+        ) : (
+          <Shape
+            key={a.id}
+            id={a.id}
+            shape={a}
+            geo={geo}
+            selected={a.id === selectedId}
+            selectable={!tool}
+            onSelect={() => select(a.id)}
+          />
+        ),
+      )}
+      {draftHere && draftHere.type !== "markup" ? (
         <Shape id="__draft__" shape={draftHere} geo={geo} selected={false} selectable={false} preview />
       ) : null}
     </svg>
@@ -237,6 +250,145 @@ function Shape({
           style={{ pointerEvents: "none" }}
         />
       ) : null}
+    </g>
+  );
+}
+
+function quadCorners(q: Quad, geo: PageGeometry) {
+  const at = (x: number, y: number) => pdfToScreen({ page: geo.page, x, y }, geo);
+  return { ul: at(q[0], q[1]), ur: at(q[2], q[3]), ll: at(q[4], q[5]), lr: at(q[6], q[7]) };
+}
+
+function quadScreenBounds(q: Quad, geo: PageGeometry) {
+  const c = quadCorners(q, geo);
+  const xs = [c.ul.x, c.ur.x, c.ll.x, c.lr.x];
+  const ys = [c.ul.y, c.ur.y, c.ll.y, c.lr.y];
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+function squigglePath(a: ScreenPoint, b: ScreenPoint, amp: number): string {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 1) return `M ${a.x} ${a.y}`;
+  const steps = Math.max(2, Math.round(len / (amp * 2)));
+  const dx = (b.x - a.x) / steps;
+  const dy = (b.y - a.y) / steps;
+  const px = (-dy / len) * amp * steps; // perpendicular, scaled per step below
+  const py = (dx / len) * amp * steps;
+  let d = `M ${a.x} ${a.y}`;
+  for (let i = 1; i <= steps; i += 1) {
+    const sx = a.x + dx * i;
+    const sy = a.y + dy * i;
+    const up = i % 2 === 1 ? 1 : -1;
+    d += ` L ${sx + (up * px) / steps} ${sy + (up * py) / steps}`;
+  }
+  return d;
+}
+
+function MarkupShape({
+  markup,
+  geo,
+  selected,
+  selectable,
+  onSelect,
+}: {
+  markup: MarkupAnnotation;
+  geo: PageGeometry;
+  selected: boolean;
+  selectable: boolean;
+  onSelect?: () => void;
+}) {
+  const interaction = {
+    style: {
+      pointerEvents: selectable ? ("auto" as const) : ("none" as const),
+      cursor: selectable ? "pointer" : undefined,
+    },
+    onPointerDown:
+      selectable && onSelect
+        ? (e: ReactPointerEvent<Element>) => {
+            e.stopPropagation();
+            onSelect();
+          }
+        : undefined,
+  };
+  const lineWidth = Math.max(1, geo.scale); // ~1pt
+
+  return (
+    <g data-ann-id={markup.id}>
+      {markup.quads.map((q, i) => {
+        const { ul, ur, ll, lr } = quadCorners(q, geo);
+        const key = `${markup.id}-${i}`;
+        if (markup.subtype === "highlight") {
+          return (
+            <polygon
+              key={key}
+              points={`${ul.x},${ul.y} ${ur.x},${ur.y} ${lr.x},${lr.y} ${ll.x},${ll.y}`}
+              fill={markup.color}
+              opacity={markup.opacity}
+              {...interaction}
+              style={{ ...interaction.style, mixBlendMode: "multiply" }}
+            />
+          );
+        }
+        if (markup.subtype === "underline") {
+          return (
+            <line
+              key={key}
+              x1={ll.x}
+              y1={ll.y}
+              x2={lr.x}
+              y2={lr.y}
+              stroke={markup.color}
+              strokeWidth={lineWidth}
+              {...interaction}
+            />
+          );
+        }
+        if (markup.subtype === "strikethrough") {
+          return (
+            <line
+              key={key}
+              x1={(ul.x + ll.x) / 2}
+              y1={(ul.y + ll.y) / 2}
+              x2={(ur.x + lr.x) / 2}
+              y2={(ur.y + lr.y) / 2}
+              stroke={markup.color}
+              strokeWidth={lineWidth}
+              {...interaction}
+            />
+          );
+        }
+        return (
+          <path
+            key={key}
+            d={squigglePath(ll, lr, Math.max(1.2, geo.scale * 1.5))}
+            fill="none"
+            stroke={markup.color}
+            strokeWidth={lineWidth}
+            {...interaction}
+          />
+        );
+      })}
+      {selected
+        ? markup.quads.map((q, i) => {
+            const b = quadScreenBounds(q, geo);
+            return (
+              <rect
+                key={`sel-${markup.id}-${i}`}
+                x={b.x - 1}
+                y={b.y - 1}
+                width={b.w + 2}
+                height={b.h + 2}
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                style={{ pointerEvents: "none" }}
+              />
+            );
+          })
+        : null}
     </g>
   );
 }

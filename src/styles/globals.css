@@ -15,3 +15,33 @@ body {
     Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* SPEC: P3-ANN-001 (P3.B1a) — PDF.js text layer: transparent, selectable text
+   over the page canvas. Minimal port of pdfjs-dist/web/pdf_viewer.css's
+   `.textLayer` rules (no z-index — DOM order keeps the annotation overlay on
+   top). */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  overflow: clip;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+}
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.textLayer ::selection {
+  background: rgba(0, 100, 255, 0.3);
+}

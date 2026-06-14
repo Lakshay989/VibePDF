@@ -1557,6 +1557,28 @@ in B1/C1). Left `[~]` pending the human's in-app preview-rect check.
 
 ---
 
+### P3.B1a — text selection + markup preview (this commit)
+
+```bash
+# No new deps (pdfjs-dist already present — using its v5 TextLayer). Frontend
+# only: a PDF.js text layer (selectable text), selection→/QuadPoints math, a
+# markup toolbar, and overlay rendering of markup. Preview-only — NO PDF write,
+# NO IPC (persistence is B1b).
+
+npx tsc --noEmit                 # ✓ (DistributiveOmit fix for the Annotation union)
+npx eslint src --max-warnings=0  # ✓
+npx vitest run                   # 173/173 (+9): quads 4, apply-markup 3,
+                                 #   annotation-layer markup +2.
+npm run check                    # tsc + eslint + clippy (no Rust changed) ✓
+```
+
+Removed the temporary A2 "▭" toggle from ZoomToolbar (replaced by MarkupToolbar).
+Text layer styling = a minimal `.textLayer` port in styles/globals.css. Markup is
+selection-driven (not the A1 stepTool lifecycle). Left `[~]` pending the in-app
+select-text → highlight preview check.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

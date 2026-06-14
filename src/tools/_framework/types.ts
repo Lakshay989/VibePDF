@@ -68,15 +68,32 @@ export interface RectAnnotation extends AnnotationBase {
   strokeWidth: number;
 }
 
+/** The four corners of one marked text rectangle, in PDF points, in the PDF
+ *  `/QuadPoints` order: `[x1,y1 (UL), x2,y2 (UR), x3,y3 (LL), x4,y4 (LR)]`. */
+export type Quad = [number, number, number, number, number, number, number, number];
+
+export type MarkupSubtype = "highlight" | "underline" | "strikethrough" | "squiggly";
+
+/** A text-markup annotation (P3.B1) — one or more quads over selected text. */
+export interface MarkupAnnotation extends AnnotationBase {
+  type: "markup";
+  subtype: MarkupSubtype;
+  quads: Quad[];
+}
+
 /**
- * The committed-annotation union. For the framework step it has a single
- * member; P3.B/C extend it (highlight quads, ink paths, free-text, …).
+ * The committed-annotation union. Grows as concrete tools land (P3.B/C add ink
+ * paths, free-text, …).
  */
-export type Annotation = RectAnnotation;
+export type Annotation = RectAnnotation | MarkupAnnotation;
+
+/** `Omit` that distributes over a union (plain `Omit` collapses to common keys). */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 /**
  * An in-progress / finished annotation *before* the store assigns its identity.
  * Tools build and return this; the store stamps `id` + `createdAt` on commit,
- * so tools never generate ids.
+ * so tools never generate ids. Distributive so each union member keeps its own
+ * fields (`rect` for shapes, `quads` for markup).
  */
-export type AnnotationDraft = Omit<Annotation, "id" | "createdAt">;
+export type AnnotationDraft = DistributiveOmit<Annotation, "id" | "createdAt">;

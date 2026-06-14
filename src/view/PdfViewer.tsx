@@ -10,6 +10,7 @@ import {
 } from "@/view/PageVirtualizer";
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
+import { MarkupToolbar } from "@/app/MarkupToolbar";
 import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
@@ -396,6 +397,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onMerge={doc ? () => setMergeOpen(true) : undefined}
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
       />
+      {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
       <ExtractDialog
         open={extractOpen}

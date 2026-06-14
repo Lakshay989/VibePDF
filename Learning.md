@@ -3883,6 +3883,67 @@ up — coexisting with an imperatively-managed canvas, and pointer events in tes
 
 ---
 
+### P3.B1a — text selection + markup preview
+
+#### Problem
+
+Highlighting needs two things the app didn't have: **selectable text**, and a way
+to turn a selection into the geometry a PDF highlight stores (`/QuadPoints`). B1a
+builds both, preview-only — the actual PDF write is B1b.
+
+#### Concepts learned
+
+- **A PDF page on screen is three stacked layers.** Bottom: the rasterised
+  **canvas** (what you see). Middle: the **text layer** — transparent, precisely
+  positioned `<span>`s of the real text, so the browser's native selection works
+  over the page. Top: our **annotation overlay** (SVG). PDF.js's `TextLayer`
+  builds the middle layer from `page.getTextContent()` + the same viewport the
+  canvas used; it needs a `--scale-factor` CSS var and the `.textLayer` rules to
+  position spans. "Selectable PDF text" is this invisible layer, not the canvas.
+- **Not every tool is a drag gesture.** Shapes/ink fit the A1 pointer lifecycle
+  (down→move→up). **Text markup doesn't** — the interaction is "make a native
+  text selection, then click a button." So markup skips `stepTool` entirely:
+  read `window.getSelection()`, map it, done. Recognising that two interaction
+  models coexist (gesture vs. selection-apply) kept us from forcing markup
+  through the wrong abstraction.
+- **`Range.getClientRects()` → `/QuadPoints`.** A text selection exposes **one
+  rect per line**; each becomes a *quad* (4 corners) in PDF space. The corner
+  order matters (`UL, UR, LL, LR`) — get it wrong and readers draw a bow-tie. We
+  isolate the mapping (rects → quads, via the A1 `coords`) in a pure module with
+  tests, because it's the bug-prone part.
+- **`mousedown` steals your selection.** Clicking a toolbar button normally
+  collapses the page selection *before* the click handler runs. The fix is one
+  line — `onMouseDown={e => e.preventDefault()}` on the markup buttons — so the
+  selection survives to be read on click. A classic, easy-to-miss gotcha.
+- **`Omit` doesn't distribute over unions.** Once `Annotation` became
+  `Rect | Markup`, `Omit<Annotation, "id">` silently collapsed to only the
+  *common* keys (TS computes `keyof` as the intersection), dropping `rect`/
+  `quads`. A `DistributiveOmit` (`T extends unknown ? Omit<T,K> : never`) fixes
+  it — and accessing a variant-specific field then needs a narrow (`"rect" in x`).
+- **`mix-blend-mode: multiply`** makes an SVG highlight behave like a real
+  highlighter: the translucent colour darkens the text underneath instead of
+  hiding it — no manual alpha-compositing.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/text-layer.tsx` | PDF.js `TextLayer` over each page (selectable text). |
+| `src/tools/text-markup/quads.ts` | Pure: selection line-rects → `/QuadPoints`. |
+| `src/tools/text-markup/apply-markup.ts` | Read the selection, group rects per page, add markup to the store (pure `buildMarkupDrafts` core). |
+| `src/app/MarkupToolbar.tsx` | Highlight/underline/strike/squiggly + colour; `mousedown` preventDefault preserves the selection. |
+| `src/view/annotation-layer.tsx` | Render markup (highlight polygons w/ multiply blend; underline/strike/squiggly lines). |
+| `src/view/PageVirtualizer.tsx`, `styles/globals.css` | Mount the text layer + geometry data-attrs; `.textLayer` CSS. |
+
+#### Further reading
+
+- PDF.js `TextLayer` (display API) + `.textLayer` CSS — the selectable-text layer.
+- `/QuadPoints` (PDF 32000-1 §12.5.6.10, text-markup annotations) — corner order.
+- `Selection`/`Range.getClientRects()` — MDN; turning a selection into rects.
+- `Omit` over unions / distributive conditional types — the TS gotcha.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

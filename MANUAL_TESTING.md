@@ -215,14 +215,17 @@ the rest still want a pass.
 
 ## F. Phase 3 — Annotations (`npm run dev`)
 
-- [ ] **Annotation render layer (P3.A2)** — open any PDF, click the **▭** toggle
-  in the toolbar (temporary A2 demo), then **drag on a page**: a dashed
-  rectangle should track the drag and become a solid rectangle on release.
-  Toggle **▭** off and **click the rectangle** → it shows a blue dashed
-  selection outline. Verify it does **not** block scrolling when the tool is
-  off. It is **preview-only** — a reload/save clears it (persistence is B1).
-  Also confirm jump-to-page (thumbnail click) still lands at the page top (the
-  overlay restructure touched `PageSlot`). → on pass, flip **P3.A2** to `[x]`.
+- [~] **Annotation render layer (P3.A2)** — *(the temporary "▭" toggle was
+  removed in B1a; A2's overlay is now exercised by the B1a markup check below.
+  Confirm jump-to-page still lands at the page top.)*
+- [ ] **Text selection + markup preview (P3.B1a)** — open
+  `tests/fixtures/basic/hello.pdf` (or any text PDF). The text should now be
+  **selectable** (drag to select "Hello, Vibe.PDF."). With text selected, click
+  **Highlight** in the Markup toolbar → translucent colour over the text;
+  **Underline / Strikethrough / Squiggly** draw the right marks; the **colour
+  swatches** change the highlight colour. Selecting then clicking must **not**
+  lose the selection. It is **preview-only** — a reload/save clears it
+  (persistence is B1b). → on pass, flip **P3.A2 + P3.B1a** to `[x]`.
 
 ---
 

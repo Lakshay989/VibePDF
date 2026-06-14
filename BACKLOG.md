@@ -205,9 +205,26 @@ the current roadmap phase. When one is picked up, move it into the relevant
   Escape/clear affordance when selection editing lands (with the move/resize
   handles, which are also deferred).
 
-- **The temporary "▭" toolbar toggle + `example-rect-tool` registration are A2
-  scaffolding** (`ZoomToolbar.tsx`) — remove when the real annotation tool
-  palette ships in B1/C1.
+- ✅ **DONE (P3.B1a) — the temporary "▭" toggle is removed** from `ZoomToolbar`
+  (replaced by the markup toolbar). The `example-rect-tool` + the A1 drag
+  lifecycle stay (for C1 shapes + their tests), just no longer wired to a toggle.
+
+## From P3.B1a (text selection + markup preview)
+
+- **Multi-page selection robustness.** `apply-markup` maps each selection line
+  rect to a page via `elementsFromPoint(centre)`; a rect straddling the page gap,
+  or an overlay intercepting the point, could mis-assign. Works for the common
+  single-/adjacent-page case; harden (or use range-boundary containers) if
+  cross-page markup misbehaves.
+- **Squiggly is approximated** (`squigglePath`) as a fixed-amplitude zigzag, not
+  a true PDF squiggly appearance. Fine for the preview; B1b's `/AP` should use a
+  proper wavy appearance for cross-reader fidelity.
+- **Highlight blend in dark mode.** Preview uses `mix-blend-mode: multiply`,
+  which assumes a light page; with the dark-mode page invert filter the blend may
+  read oddly. Revisit when annotations meet dark mode.
+- **Text-layer cost on huge pages.** Every visible page builds a full PDF.js text
+  layer (`getTextContent` + spans). Fine now (only visible pages); if a
+  text-dense 1000-page doc stutters, gate or virtualize the text layer.
 
 ## Real bugs (fix soon — these aren't polish)
 
