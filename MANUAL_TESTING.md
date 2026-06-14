@@ -84,11 +84,13 @@ validity.
   gone**), and no broken bookmark remains. 5 pages, opens cleanly.
   → **PASS (2026-06-13):** Ch2 removal confirmed in bytes (Ch1 + Ch3 only,
   `/Count 2`); folded into P2.B2 `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-resized.pdf`** (B5 resize) — `hello.pdf`
+- [x] **`Sample PDFs/vibepdf-verify-resized.pdf`** (B5 resize) — `hello.pdf`
   (Letter) resized to **A4 (595×842 pt)** with preserve-aspect. The text
   "Hello, Vibe.PDF." should be **scaled to fit** the A4 page (not clipped, not
   sitting at the old position with empty space), and the page should measure A4.
-  Opens cleanly. → on pass (Preview + Chrome), flip **P2.B5** to `[x]`.
+  Opens cleanly. → **PASS (2026-06-13):** content-scale byte-verified (cos
+  `q…cm` wrapper + A4 MediaBox + PDFium reopen) and confirmed in-app via PDF.js.
+  P2.B5 flipped to `[x]`.
 - [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
@@ -145,12 +147,14 @@ Open a **multi-page** PDF for these (a one-pager hides the interesting bits).
   page after reordering. → **PASS (2026-06-13)** after the pointer-event rewrite
   (source tile dims, hovered tile rings, drop reorders; click still selects).
   P2.C1 flipped to `[x]`.
-- [ ] **Resize (B5):** right-click a page thumbnail → **Resize page…** → pick a
+- [x] **Resize (B5):** right-click a page thumbnail → **Resize page…** → pick a
   size (e.g. **A4**) or **Custom** W×H, toggle **preserve aspect ratio**, choose
   **This page** / **All pages** → Apply. The page reflows to the new size in the
   main view + thumbnails with content scaled; **⌘Z** restores the old size,
   **⌘⇧Z** re-applies. ⌘S → reopen externally → new size persists. Try **All
-  pages** on a multi-page PDF. → on pass, flip **P2.B5** to `[x]`.
+  pages** on a multi-page PDF. → **PASS (2026-06-13):** dialog opens at the
+  page's current size; This-page scales only that page, All-pages scales all.
+  P2.B5 flipped to `[x]`.
 - [x] **Dangling-ref cleanup (B2/C3):** open a PDF that has internal links or
   bookmarks pointing to a page, **delete that target page**, **⌘S**, reopen →
   the link/bookmark to the deleted page is **gone** (no broken navigation), the
@@ -232,9 +236,10 @@ the rest still want a pass.
 ## Findings from the 2026-06-13 verification sweep
 
 **Passed & flipped to `[x]`:** A1, A3, B1, B2 (+B2/C3 dangling cleanup), B3, B4,
-C1 (after the pointer-event fix), C2, C4 (bookmarks via Chrome), D1 (form field
-via Chrome). Every Phase-2 page-op except **B5 (resize, not built)** and **A2
-(crash recovery, deferred)** is now human-verified.
+B5 (resize, lopdf content-wrap), C1 (after the pointer-event fix), C2, C4
+(bookmarks via Chrome), D1 (form field via Chrome). **Every Phase-2 page-op is
+now built and human-verified**; only **A2 (auto-save / crash recovery)** remains
+`[~]`, deferred by choice.
 
 **⚠️ Process lesson (important):** the in-app testing was run **directly on the
 committed fixtures in `tests/fixtures/basic/`**, so ⌘S / split / delete wrote
