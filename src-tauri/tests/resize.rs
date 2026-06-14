@@ -88,6 +88,25 @@ async fn resize_all_pages_to_a4() {
 // way crop/extract visual correctness is checked.
 
 #[tokio::test]
+async fn resize_one_page_leaves_others_unchanged() {
+    // Resizing the middle page of a 3-page Letter doc must touch ONLY that page.
+    let dir = temp_subdir();
+    let out = dir.join("one.pdf");
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("links.pdf"), None).expect("spawn");
+
+    handle.resize_pages(vec![1], A4.0, A4.1, true).await.expect("resize page 1");
+    handle.save(Some(out.clone())).await.expect("save-as");
+
+    assert!(approx_wh(media_box(&out, 0), 612.0, 792.0), "page 0 must stay Letter");
+    assert!(approx_wh(media_box(&out, 1), A4.0, A4.1), "page 1 must be A4");
+    assert!(approx_wh(media_box(&out, 2), 612.0, 792.0), "page 2 must stay Letter");
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
 async fn resize_undo_restores_original_size() {
     let dir = temp_subdir();
     let out = dir.join("undo.pdf");

@@ -25,6 +25,21 @@ export function findStandardSize(name: string): PageSize | undefined {
   return STANDARD_SIZES.find((s) => s.name === name);
 }
 
+/**
+ * The name of the standard size whose dimensions match `width` × `height`
+ * within `tol` points, or `undefined` (→ a custom size). Lets the dialog open
+ * pre-selected to the page's *current* size instead of a fixed default.
+ */
+export function matchStandardSize(
+  width: number,
+  height: number,
+  tol = 1,
+): string | undefined {
+  return STANDARD_SIZES.find(
+    (s) => Math.abs(s.width - width) <= tol && Math.abs(s.height - height) <= tol,
+  )?.name;
+}
+
 /** A page side must be a positive, finite number of points within the limit. */
 export function isValidDimension(pt: number): boolean {
   return Number.isFinite(pt) && pt > 0 && pt <= MAX_DIMENSION_PT;

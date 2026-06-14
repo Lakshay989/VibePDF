@@ -6,11 +6,20 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
-import { findStandardSize, isValidDimension, STANDARD_SIZES } from "./page-sizes";
+import {
+  findStandardSize,
+  isValidDimension,
+  matchStandardSize,
+  STANDARD_SIZES,
+} from "./page-sizes";
 
 export interface ResizeTarget {
   /** 0-based index of the right-clicked page (the default single-page scope). */
   page: number;
+  /** The page's current width/height in points, so the dialog opens showing
+   *  the size you're changing *from*. */
+  width: number;
+  height: number;
 }
 
 export interface ResizeRequest {
@@ -39,12 +48,15 @@ export function ResizeDialog({ target, pageCount, onApply, onClose }: ResizeDial
   const [preserveAspect, setPreserveAspect] = useState(true);
   const [scope, setScope] = useState<"page" | "all">("page");
 
-  // Reset to defaults whenever a new page is targeted.
+  // Open showing the targeted page's *current* size: pre-select the matching
+  // preset (or "Custom" with the current dimensions). Reset the rest.
   useEffect(() => {
     if (target) {
-      setPreset("A4");
-      setCustomW(612);
-      setCustomH(792);
+      const w = Math.round(target.width);
+      const h = Math.round(target.height);
+      setPreset(matchStandardSize(target.width, target.height) ?? CUSTOM);
+      setCustomW(w);
+      setCustomH(h);
       setPreserveAspect(true);
       setScope("page");
     }
@@ -70,7 +82,9 @@ export function ResizeDialog({ target, pageCount, onApply, onClose }: ResizeDial
             Resize page {target ? target.page + 1 : ""}
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Scale the page content to a new size, in points.
+            Currently {target ? Math.round(target.width) : 0} ×{" "}
+            {target ? Math.round(target.height) : 0} pt. Scale the page content to
+            a new size.
           </Dialog.Description>
 
           <div className="mt-4 flex flex-col gap-3">

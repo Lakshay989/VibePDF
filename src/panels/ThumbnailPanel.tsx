@@ -294,9 +294,25 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
     [documentId, bumpEpoch, setHistory],
   );
 
-  // SPEC: P2-PAGE-010 — resize the targeted page, or every page, to a chosen
-  // size; the backend scales content to fit. Like crop, a page-size change
-  // bumps the edit epoch so the main view + thumbnails reload.
+  // SPEC: P2-PAGE-010 — open the resize dialog with the page's *current* size,
+  // so it shows what you're changing from (read from PDF.js `page.view`, the
+  // same source crop uses).
+  const openResize = useCallback(
+    async (page: number) => {
+      try {
+        const pdfPage = await doc.getPage(page + 1);
+        const [x0, y0, x1, y1] = pdfPage.view;
+        setResizeTarget({ page, width: x1 - x0, height: y1 - y0 });
+      } catch (err) {
+        console.warn("resize open failed", documentId, page, err);
+      }
+    },
+    [doc, documentId],
+  );
+
+  // Resize the targeted page, or every page, to a chosen size; the backend
+  // scales content to fit. Like crop, a page-size change bumps the edit epoch
+  // so the main view + thumbnails reload.
   const applyResize = useCallback(
     async (page: number, req: ResizeRequest) => {
       setResizeTarget(null);
@@ -403,7 +419,7 @@ export function ThumbnailPanel({ doc, documentId, onJump, darkMode }: Props) {
           onRotate={(degrees) => void rotate(menu.page, degrees)}
           onInsert={() => void insert(menu.page)}
           onCrop={() => void openCrop(menu.page)}
-          onResize={() => setResizeTarget({ page: menu.page })}
+          onResize={() => void openResize(menu.page)}
           onDelete={() => void del(menu.page)}
           onClose={() => setMenu(null)}
         />

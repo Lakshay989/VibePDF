@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   findStandardSize,
   isValidDimension,
+  matchStandardSize,
   MAX_DIMENSION_PT,
   STANDARD_SIZES,
 } from "./page-sizes";
@@ -28,6 +29,15 @@ describe("page-sizes", () => {
       "A4",
       "A5",
     ]);
+  });
+
+  it("matches a current page size back to its preset (so the dialog reflects the page)", () => {
+    expect(matchStandardSize(612, 792)).toBe("Letter");
+    expect(matchStandardSize(595.28, 841.89)).toBe("A4");
+    // Within tolerance (PDF.js view values can be fractionally off).
+    expect(matchStandardSize(611.7, 792.3)).toBe("Letter");
+    // A non-standard size → no preset (dialog falls back to Custom).
+    expect(matchStandardSize(500, 700)).toBeUndefined();
   });
 
   it("validates dimensions: positive, finite, within the limit", () => {
