@@ -1263,3 +1263,72 @@ fn write_squiggle(out: &mut String, x0: f32, x1: f32, y: f32, amp: f32) {
     }
     let _ = writeln!(out, "S");
 }
+
+/// SPEC: P3-ANN-001 — remove every text-markup annotation (Highlight / Underline
+/// / `StrikeOut` / Squiggly) from all pages, keeping any other annotations. GCs
+/// the orphaned annotation dicts + their `/AP` streams via `prune_objects`.
+pub fn clear_text_markup(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
+    let mut changed = false;
+
+    for page_id in page_ids {
+        let annots = doc
+            .get_dictionary(page_id)
+            .ok()
+            .and_then(|p| p.get(b"Annots").ok().cloned());
+        let (arr, indirect_id) = match annots {
+            Some(Object::Array(a)) => (a, None),
+            Some(Object::Reference(id)) => (
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default(),
+                Some(id),
+            ),
+            _ => continue,
+        };
+        if arr.is_empty() {
+            continue;
+        }
+
+        let mut kept = Vec::with_capacity(arr.len());
+        let mut removed_any = false;
+        for obj in arr {
+            let is_markup = obj
+                .as_reference()
+                .ok()
+                .and_then(|id| doc.get_dictionary(id).ok())
+                .and_then(|d| d.get(b"Subtype").and_then(Object::as_name).ok())
+                .is_some_and(|n| {
+                    n == b"Highlight" || n == b"Underline" || n == b"StrikeOut" || n == b"Squiggly"
+                });
+            if is_markup {
+                removed_any = true;
+            } else {
+                kept.push(obj);
+            }
+        }
+        if !removed_any {
+            continue;
+        }
+        changed = true;
+
+        match indirect_id {
+            Some(id) => {
+                if let Ok(obj) = doc.get_object_mut(id) {
+                    *obj = Object::Array(kept);
+                }
+            }
+            None => {
+                doc.get_dictionary_mut(page_id)
+                    .map_err(cos_err)?
+                    .set("Annots", Object::Array(kept));
+            }
+        }
+    }
+
+    if changed {
+        doc.prune_objects();
+    }
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}

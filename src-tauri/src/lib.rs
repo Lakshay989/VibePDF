@@ -98,6 +98,7 @@ pub fn run() {
             commands::pdf::pdf_rotate_pages,
             commands::pdf::pdf_resize_pages,
             commands::pdf::pdf_add_text_markup,
+            commands::pdf::pdf_clear_text_markup,
             commands::pdf::pdf_delete_pages,
             commands::pdf::pdf_insert_blank_page,
             commands::pdf::pdf_crop_page,

@@ -38,7 +38,7 @@ use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
-use crate::pdf::annotation::TextMarkupEdit;
+use crate::pdf::annotation::{ClearMarkupEdit, TextMarkupEdit};
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -162,6 +162,10 @@ pub enum Message {
         quads: Vec<[f32; 8]>,
         color: String,
         opacity: f32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-001 — remove all text-markup annotations. Undoable, dirty.
+    ClearTextMarkup {
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
@@ -540,6 +544,24 @@ impl DocumentActorHandle {
                 opacity,
                 reply,
             })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-001 — remove all text-markup annotations. Await-holding
+    /// convenience for tests; IPC uses `clear_text_markup_request`.
+    pub async fn clear_text_markup(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.clear_text_markup_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn clear_text_markup_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ClearTextMarkup { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -998,6 +1020,18 @@ fn run_worker(
                     opacity,
                 };
                 let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ClearTextMarkup { reply } => {
+                // SPEC: P3-ANN-001 — strip all markup; snapshot inverse.
+                let result = match Box::new(ClearMarkupEdit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

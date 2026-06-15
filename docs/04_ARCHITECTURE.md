@@ -300,6 +300,24 @@ webview is **WKWebView**.
   P2-PAGE-002) is the reference implementation. **Do not reach for HTML5 DnD for
   any future in-app drag UI** (page reorder, tab reorder, annotation drag).
 
+- **The PDF.js text layer needs three WKWebView fixes** (P3.B1a — making page
+  text selectable, which markup acts on). All three were silent until exercised:
+  1. **`ReadableStream` has no async iterator.** PDF.js v5 `getTextContent` does
+     `for await (… of streamTextContent())`; WKWebView/Safari doesn't implement
+     `ReadableStream[Symbol.asyncIterator]`, so text extraction throws "undefined
+     is not a function". Polyfilled in `src/polyfills.ts` (first import in
+     `main.tsx`).
+  2. **CSS `round()` may be unsupported.** v5 sizes the text layer with
+     `round(down, var(--total-scale-factor) * Npx, …)`; `text-layer.tsx` pins an
+     explicit px size after `render()` so the layer overlays the canvas exactly.
+  3. **Port the *full* v5 `.textLayer` CSS**, not a minimal subset — the per-span
+     `font-size`/`scaleX` rules (driven by `--font-height`/`--scale-x` that PDF.js
+     sets inline) are what give spans their size; without them a click selects the
+     whole page. In `styles/globals.css`.
+  Plus: `getDocument` must set `standardFontDataUrl`/`cMapUrl` (served from
+  `/pdfjs/`, copied by `scripts/copy-pdfjs-worker.mjs`) so non-embedded standard
+  fonts extract correctly.
+
 ## The render pipeline
 
 PDF.js handles rendering in the WebView for the interactive canvas. PDFium handles rendering on the Rust side for: thumbnails, export-to-image, OCR input, visual diff. We accept rendering them twice. Performance benchmarking has shown this is fine; the two engines are both fast.

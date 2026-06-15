@@ -10,9 +10,9 @@ use std::path::PathBuf;
 
 use lopdf::{Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_text_markup, add_top_level_bookmark, merge_documents, prune_dangling_destinations,
-    read_form_field_names, register_inserted_form_fields, read_top_level_outline_titles,
-    rename_form_fields_with_suffix, reorder_pages, resize_pages,
+    add_text_markup, add_top_level_bookmark, clear_text_markup, merge_documents,
+    prune_dangling_destinations, read_form_field_names, register_inserted_form_fields,
+    read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages, resize_pages,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -129,6 +129,24 @@ fn cos_text_markup_maps_each_subtype() {
         let subtype = doc.get_dictionary(annot).unwrap().get(b"Subtype").unwrap().as_name().unwrap();
         assert_eq!(subtype, expected, "subtype for {input}");
     }
+}
+
+#[test]
+fn cos_clears_text_markup() {
+    let bytes = fixture_bytes("hello.pdf");
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    let with_markup = add_text_markup(&bytes, 0, "highlight", &quads, "#ffd400", 1.0).expect("add");
+
+    let cleared = clear_text_markup(&with_markup).expect("clear");
+    assert_eq!(pdfium_page_count(&cleared), 1);
+
+    let doc = Document::load_mem(&cleared).expect("load");
+    let page_id = *doc.get_pages().get(&1).unwrap();
+    let empty = match doc.get_dictionary(page_id).unwrap().get(b"Annots").and_then(Object::as_array) {
+        Ok(a) => a.is_empty(),
+        Err(_) => true, // no /Annots at all
+    };
+    assert!(empty, "all markup should be removed");
 }
 
 #[test]

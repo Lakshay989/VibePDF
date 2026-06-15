@@ -83,6 +83,11 @@ function collectSelectionGroups(): PageGroup[] {
       const pageEl = pageElementAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
       if (!pageEl) continue;
       const pr = pageEl.getBoundingClientRect();
+      // `getClientRects()` also returns the text-layer container's own
+      // (full-page) rect; a real text line is never close to page-tall, so
+      // drop rects taller than half the page — otherwise they'd highlight the
+      // whole page.
+      if (rect.height > pr.height * 0.5) continue;
       const list = byPage.get(pageEl) ?? [];
       list.push({
         left: rect.left - pr.left,

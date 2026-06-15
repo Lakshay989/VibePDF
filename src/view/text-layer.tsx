@@ -36,12 +36,16 @@ export function PageTextLayer({ doc, pageNumber, scale, rotation }: PageTextLaye
         const textContentSource = await page.getTextContent();
         if (cancelled) return;
         container.replaceChildren();
-        // PDF.js positions spans relative to this custom property.
+        // PDF.js v5 sizes the layer from `--scale-factor` (→ `--total-scale-factor`
+        // in CSS); `render()` sets the width/height itself, so we don't.
         container.style.setProperty("--scale-factor", String(scale));
-        container.style.width = `${Math.floor(viewport.width)}px`;
-        container.style.height = `${Math.floor(viewport.height)}px`;
         layer = new TextLayer({ textContentSource, container, viewport });
         await layer.render();
+        // PDF.js v5 sizes the layer with CSS `round()`, which WKWebView may not
+        // support — pin an explicit px size so the layer exactly overlays the
+        // canvas (mis-sizing throws off where the selectable spans land).
+        container.style.width = `${Math.round(viewport.width)}px`;
+        container.style.height = `${Math.round(viewport.height)}px`;
       } catch (err) {
         if (!cancelled) {
           console.warn("text layer render failed", pageNumber, err);

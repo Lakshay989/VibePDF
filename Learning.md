@@ -4001,6 +4001,69 @@ Preview / Chrome and undoable — the first time we write an *annotation* to a P
 
 ---
 
+### P3.B1 (debug) — making the text layer actually work in WKWebView
+
+#### Problem
+
+Text markup looked done (tests green, `/AP` correct), but in the *real app* you
+couldn't select text at all — and once you could, highlights covered the whole
+page or came out the wrong colour. The PDF.js text layer was fighting WKWebView
+on three fronts, each invisible until exercised. This is the "passing tests ≠
+working feature" lesson, hard.
+
+#### Concepts learned
+
+- **The app isn't Chrome — verify in the actual webview.** Every problem here was
+  WKWebView-specific and *zero* of them showed in jsdom tests or Chrome. The dev
+  console (captured in the vite log) was the only way to see them. When a feature
+  works in tests but not the app, suspect the webview.
+- **`ReadableStream` isn't async-iterable in Safari/WKWebView.** PDF.js v5
+  `getTextContent` does `for await (… of streamTextContent())`; WKWebView throws
+  "undefined is not a function" because `ReadableStream[Symbol.asyncIterator]`
+  doesn't exist. A ~15-line polyfill (wrap a reader as an async iterator) fixes
+  every `for await`-on-a-stream in the app.
+- **Read the error, don't guess.** I burned a round guessing it was font data
+  (`standardFontDataUrl`). The actual message — "undefined is not a function
+  (near '…value of readableStream…')" — pointed straight at the async iterator.
+  Instrument and read the message *first*.
+- **Port the *whole* vendor CSS, not a "minimal" subset.** My hand-rolled
+  `.textLayer` CSS dropped the rule that turns PDF.js's per-span `--font-height`
+  / `--scale-x` variables into `font-size` + `scaleX(...)`. Without it spans had
+  no size, so a click selected the entire page. The fix was copying pdfjs-dist's
+  real `pdf_viewer.css` `.textLayer` rules verbatim. Lesson: when integrating a
+  library's DOM layer, use its CSS as-is — "minimal ports" silently break the
+  parts you didn't understand.
+- **CSS `round()` may be unsupported.** v5 sizes the layer with `round(down,
+  var(--total-scale-factor) * Npx, …)`; pinning an explicit px size after render
+  sidesteps webviews without `round()`.
+- **`Range.getClientRects()` includes container rects.** A text selection
+  returned the line rect *plus* the text-layer's own full-page rect — which
+  became a full-page highlight (and stacked with each new one). Filter rects that
+  are implausibly tall for a text line (> half the page).
+- **Generated assets are scripted, not committed.** `public/pdfjs/` is gitignored
+  and populated by `scripts/copy-pdfjs-worker.mjs` from node_modules; new runtime
+  assets (the standard fonts / cmaps) go in that script, not a 185-file commit.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/polyfills.ts` (+ `main.tsx`) | `ReadableStream` async-iterator polyfill, loaded first. |
+| `src/styles/globals.css` | The full v5 `.textLayer` CSS (span font-size + scaleX). |
+| `src/view/text-layer.tsx` | Set `--scale-factor`; pin explicit px size after render. |
+| `src/view/render-page.ts` | `standardFontDataUrl` / `cMapUrl` on `getDocument`. |
+| `src/tools/text-markup/apply-markup.ts` | Drop the page-tall (container) selection rect. |
+| `scripts/copy-pdfjs-worker.mjs` | Also copy `standard_fonts/` + `cmaps/` into public/. |
+| `src-tauri/src/pdf/cos.rs`, `annotation.rs`, … | `clear_text_markup` + `ClearMarkupEdit` + `pdf_clear_text_markup` + the Clear button. |
+
+#### Further reading
+
+- `ReadableStream` async iteration support (Safari/WebKit) — and the reader-based polyfill.
+- PDF.js `pdf_viewer.css` `.textLayer` rules — the canonical text-layer styling.
+- `getDocument` params (`standardFontDataUrl`, `cMapUrl`, `cMapPacked`) — non-embedded font / CID support.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

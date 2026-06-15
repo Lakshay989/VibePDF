@@ -6,7 +6,7 @@
 // button collapses the page text selection before the click handler runs, so we
 // suppress it to keep the selection alive.
 
-import { addTextMarkup } from "@/ipc/annotations";
+import { addTextMarkup, clearTextMarkup } from "@/ipc/annotations";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
@@ -41,6 +41,15 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       })
       .catch((err: unknown) => console.warn("markup failed", documentId, err));
+  };
+
+  const clearAll = () => {
+    void clearTextMarkup(documentId)
+      .then((history) => {
+        bumpEpoch(documentId);
+        setHistory(documentId, history);
+      })
+      .catch((err: unknown) => console.warn("clear markup failed", documentId, err));
   };
 
   return (
@@ -78,6 +87,16 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
           />
         ))}
       </div>
+      <span className="text-neutral-300 dark:text-neutral-700">|</span>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={clearAll}
+        title="Remove all text markup from the document"
+        className="rounded px-2 py-0.5 text-red-600 hover:bg-neutral-100 dark:text-red-400 dark:hover:bg-neutral-800"
+      >
+        Clear
+      </button>
     </div>
   );
 }

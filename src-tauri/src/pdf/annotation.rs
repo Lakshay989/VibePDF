@@ -11,7 +11,7 @@
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::cos::add_text_markup;
+use crate::pdf::cos::{add_text_markup, clear_text_markup};
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -67,5 +67,32 @@ impl<'a> Edit<PdfDocument<'a>> for TextMarkupEdit {
 
     fn label(&self) -> &'static str {
         "text-markup"
+    }
+}
+
+/// Remove every text-markup annotation from the document (P3.B1b).
+pub struct ClearMarkupEdit;
+
+impl<'a> Edit<PdfDocument<'a>> for ClearMarkupEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = clear_text_markup(&pre_bytes)?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?
+                .load_pdf_from_byte_vec(new_bytes, None)
+                .map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "clear-markup"
     }
 }

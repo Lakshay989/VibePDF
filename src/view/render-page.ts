@@ -32,7 +32,17 @@ export async function loadDocument(
   data: Uint8Array,
 ): Promise<PDFDocumentProxy> {
   configurePdfJsWorker();
-  const task = getDocument({ data });
+  // SPEC: P3-ANN-001 — `getTextContent` (text selection for markup) needs the
+  // standard-14 font data to map glyphs → Unicode; rendering falls back to
+  // built-in metrics, but text extraction throws without these. cmaps cover
+  // CID-keyed fonts. Both are hosted as static assets next to the worker.
+  const origin = window.location.origin;
+  const task = getDocument({
+    data,
+    standardFontDataUrl: new URL("/pdfjs/standard_fonts/", origin).toString(),
+    cMapUrl: new URL("/pdfjs/cmaps/", origin).toString(),
+    cMapPacked: true,
+  });
   return task.promise;
 }
 

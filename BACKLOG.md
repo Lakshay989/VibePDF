@@ -243,7 +243,18 @@ the current roadmap phase. When one is picked up, move it into the relevant
   from the PDF). Editing/selecting/deleting existing annotations + the sidebar
   need a read path (`cos::read_text_markup` → store) — that's **D1**. Reopened
   files still *display* correctly (PDF.js renders their `/AP`); they just aren't
-  editable yet.
+  editable yet. *(A document-wide `Clear markup` button exists; per-annotation
+  delete is D1.)*
+
+- **Overlapping highlights Multiply-blend into mixed colours** (yellow over blue
+  → green). It's standard `/Highlight` behaviour (and how Acrobat looks), but
+  confusing. Options if we want "newest wins": a Normal-blend translucent
+  appearance, or de-duping/merging overlapping quads of the same colour.
+
+- **Dark mode recolours the highlight.** The `/AP` is baked into the canvas,
+  which the dark-mode CSS invert filter then recolours (yellow → blue-ish). Fix
+  by exempting annotation marks from the invert, or compensating the colour —
+  revisit when annotations meet dark mode (shared with the P3.A2 dark-mode item).
 
 ## Real bugs (fix soon — these aren't polish)
 

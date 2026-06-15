@@ -1611,6 +1611,39 @@ Rendering decision: the **PDF.js canvas** renders committed markup from `/AP`
 
 ---
 
+### P3.B1 (debug + Clear) — text layer working in WKWebView (this commit)
+
+```bash
+# No new deps. Fixing why text selection (B1a) didn't work in the real macOS
+# webview, then a Clear-markup button. All issues were WKWebView-specific and
+# invisible in tests — found via the dev console (captured in the vite log):
+#   1. ReadableStream has no async iterator → getTextContent threw. Polyfill in
+#      src/polyfills.ts (imported first in main.tsx).
+#   2. Hand-rolled .textLayer CSS missing the span font-size/scaleX rules → spans
+#      had no size, a click selected the whole page. Ported the full v5 CSS.
+#   3. CSS round() maybe unsupported → pin explicit px layer size after render.
+#   4. getDocument needs standardFontDataUrl/cMapUrl (served from /pdfjs/, copied
+#      by scripts/copy-pdfjs-worker.mjs, now also copies standard_fonts + cmaps).
+#   5. getClientRects() returns the container's full-page rect → filtered in
+#      apply-markup (was highlighting the whole page + stacking).
+
+# Clear markup: cos::clear_text_markup strips all Highlight/Underline/StrikeOut/
+# Squiggly from /Annots (prune_objects GCs them); ClearMarkupEdit +
+# pdf_clear_text_markup + a red "Clear" button (one undoable edit).
+
+npm run check     # tsc + eslint src + clippy ✓
+npm run test      # 173/173
+npm run test:rust # EXIT 0. cos.rs +1 (cos_clears_text_markup). All green.
+
+node scripts/copy-pdfjs-worker.mjs   # worker + 16 standard fonts + 169 cmaps → public/pdfjs/
+```
+
+Human-verified in-app: select text → Highlight lands on it (PDF.js renders the
+`/AP`), ⌘Z removes, Clear wipes all markup. Three WKWebView fixes recorded in
+`docs/04` "WebView quirks" + `Learning.md`. Flipped A2 / B1a / B1b → `[x]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

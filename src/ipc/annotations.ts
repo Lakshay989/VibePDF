@@ -26,3 +26,11 @@ export async function addTextMarkup(
     opacity,
   });
 }
+
+/**
+ * SPEC: P3-ANN-001 — remove all text-markup annotations from the document.
+ * Undoable. Runs on the Rust document actor.
+ */
+export async function clearTextMarkup(id: DocumentId): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_clear_text_markup", { id });
+}
