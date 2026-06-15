@@ -1644,6 +1644,47 @@ Human-verified in-app: select text → Highlight lands on it (PDF.js renders the
 
 ---
 
+### P3.B2a — sticky notes: place / edit / delete + persist (this commit)
+
+```bash
+# No new deps. Second annotation type, first INTERACTIVE one. Backend is lopdf
+# (PDFium can't author a coloured annotation):
+#   cos::add_text_note   → /Text dict: /Contents /T /NM /M /CreationDate
+#                          /Name /Note /C [1 0.82 0] /F 28 /Open false, NO /AP.
+#   cos::update_text_note / delete_annotation  → find by /NM, edit or remove.
+#   helpers: pdf_date_now (D:YYYYMMDDHHmmSSZ, no chrono), append_annotation,
+#            find_annotation_by_nm.
+# annotation.rs: shared cos_edit() + AddNote/UpdateNote/DeleteAnnotation edits
+# (byte-handoff, inverse = RestoreDocEdit). Actor msgs + 3 pdf_* commands.
+# Frontend: notes have no /AP, so they are OVERLAY-rendered by a new HTML
+# NoteLayer (sibling of the SVG AnnotationLayer, on top) from the store — NOT the
+# canvas. note-tool.ts (click-to-place), NotePopup.tsx (body + Save + Delete),
+# a "Note" toggle in MarkupToolbar. Placement persists immediately (store id =
+# the /NM); update/delete are their own undoable edits.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   eslint.config.js: added HTMLTextAreaElement to the DOM-globals allowlist.
+#   TS: narrowed example-rect-tool + annotation-layer for the new "note" union
+#   member (filter out notes from the SVG layer).
+npm run test           # 185/185 (+12: notes IPC 4, note-tool 3, NoteLayer 5)
+npm run test:rust      # EXIT 0. text_note.rs: 4 (persists w/ author+NM / update /
+#   delete / undo) + 1 ignored artifact. cos.rs: +2 (note dict shape: /Text /Note
+#   /F 28 + NO /AP; update+delete by /NM).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test text_note note_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-note.pdf (hello.pdf + a note); keeps
+#     /Subtype/Text + /Contents + /NM through the PDFium save.
+```
+
+Rendering decision: notes carry **no `/AP`**, so the HTML `NoteLayer` overlay
+draws the icon + popup from the store (vs markup, which the canvas paints from
+`/AP`). Left `[~]` pending the human in-app ritual (place → type → Save → reopen
+→ edit → Delete → ⌘Z → ⌘S) + cross-reader (Acrobat/Preview/Okular). Reopening a
+saved file does not yet repopulate notes in-app — that's **B2b**.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

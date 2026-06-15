@@ -299,6 +299,87 @@ pub async fn pdf_clear_text_markup(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-002 — add a sticky note (`/Text` annotation) at `(x, y)` on
+/// `page` (0-based). `note_id` becomes its `/NM` (the update/delete handle).
+/// Undoable; returns the new history availability.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // flat args are the IPC contract.
+pub async fn pdf_add_text_note(
+    state: State<'_, AppState>,
+    id: String,
+    note_id: String,
+    page: i32,
+    x: f32,
+    y: f32,
+    content: String,
+    author: String,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_note_request(note_id, page, x, y, content, author)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-002 — update the body of the note with `/NM == note_id`.
+#[tauri::command]
+pub async fn pdf_update_text_note(
+    state: State<'_, AppState>,
+    id: String,
+    note_id: String,
+    content: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.update_note_request(note_id, content)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-002 — delete the annotation with `/NM == note_id`.
+#[tauri::command]
+pub async fn pdf_delete_annotation(
+    state: State<'_, AppState>,
+    id: String,
+    note_id: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.delete_annotation_request(note_id)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

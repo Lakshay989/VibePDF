@@ -21,6 +21,7 @@ import {
   IDLE,
   type MarkupAnnotation,
   type PageGeometry,
+  type RectAnnotation,
   type PdfRect,
   pdfToScreen,
   type Quad,
@@ -134,8 +135,13 @@ export function AnnotationLayer({
     else setDraft(null);
   };
 
-  const pageAnnotations = annotations.filter((a) => a.page === page);
-  const draftHere = draft && draft.page === page ? draft : null;
+  // Notes carry no `/AP` and are drawn by the HTML `NoteLayer` overlay, not as
+  // SVG shapes — skip them here so a note never reaches the rect `Shape` branch.
+  const pageAnnotations = annotations.filter(
+    (a): a is RectAnnotation | MarkupAnnotation => a.page === page && a.type !== "note",
+  );
+  const draftHere =
+    draft && draft.page === page && draft.type !== "note" ? draft : null;
 
   return (
     <svg

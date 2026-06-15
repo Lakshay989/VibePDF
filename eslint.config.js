@@ -30,6 +30,7 @@ export default [
         HTMLImageElement: "readonly",
         HTMLInputElement: "readonly",
         HTMLSelectElement: "readonly",
+        HTMLTextAreaElement: "readonly",
         RegExpExecArray: "readonly",
         requestAnimationFrame: "readonly",
         WheelEvent: "readonly",

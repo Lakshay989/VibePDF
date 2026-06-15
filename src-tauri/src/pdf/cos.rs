@@ -1332,3 +1332,200 @@ pub fn clear_text_markup(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
     doc.save_to(&mut buf)?;
     Ok(buf)
 }
+
+/// Current time as a PDF date string `D:YYYYMMDDHHmmSSZ` (Hinnant's
+/// civil-from-days, so no date-library dependency).
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+fn pdf_date_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let day = (secs / 86_400) as i64;
+    let tod = secs % 86_400;
+    let (hh, mm, ss) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+    let z = day + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    format!("D:{year:04}{m:02}{d:02}{hh:02}{mm:02}{ss:02}Z")
+}
+
+/// Append `annot_id` to `page_id`'s `/Annots` (array, indirect array, or absent).
+fn append_annotation(
+    doc: &mut Document,
+    page_id: ObjectId,
+    annot_id: ObjectId,
+) -> Result<(), CommandError> {
+    let existing = doc
+        .get_dictionary(page_id)
+        .map_err(cos_err)?
+        .get(b"Annots")
+        .ok()
+        .cloned();
+    match existing {
+        Some(Object::Reference(arr_id)) => {
+            if let Ok(Object::Array(arr)) = doc.get_object_mut(arr_id) {
+                arr.push(Object::Reference(annot_id));
+            } else {
+                return Err(CommandError::InvalidInput("malformed /Annots".into()));
+            }
+        }
+        Some(Object::Array(mut arr)) => {
+            arr.push(Object::Reference(annot_id));
+            doc.get_dictionary_mut(page_id)
+                .map_err(cos_err)?
+                .set("Annots", Object::Array(arr));
+        }
+        _ => {
+            doc.get_dictionary_mut(page_id)
+                .map_err(cos_err)?
+                .set("Annots", Object::Array(vec![Object::Reference(annot_id)]));
+        }
+    }
+    Ok(())
+}
+
+/// The object id of the annotation whose `/NM` (name) equals `nm`, scanning all
+/// pages. `/NM` is the stable handle the frontend uses to target update/delete.
+fn find_annotation_by_nm(doc: &Document, nm: &str) -> Option<ObjectId> {
+    for page_id in doc.get_pages().values() {
+        let annots = doc.get_dictionary(*page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+        let arr = match annots {
+            Some(Object::Array(a)) => a,
+            Some(Object::Reference(id)) => {
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+            }
+            _ => continue,
+        };
+        for obj in arr {
+            let Ok(id) = obj.as_reference() else { continue };
+            let matches = doc
+                .get_dictionary(id)
+                .ok()
+                .and_then(|d| d.get(b"NM").and_then(Object::as_str).ok())
+                .is_some_and(|s| s == nm.as_bytes());
+            if matches {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// SPEC: P3-ANN-002 — add a sticky note (`/Text` annotation) at `(x, y)` on
+/// `page` (0-based) with `content`, `author` (`/T`), a timestamp, and `note_id`
+/// as `/NM`. No `/AP` — readers draw their own note icon from `/Name`.
+pub fn add_text_note(
+    bytes: &[u8],
+    note_id: &str,
+    page: usize,
+    x: f32,
+    y: f32,
+    content: &str,
+    author: &str,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let date = pdf_date_now();
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Text".to_vec()));
+    annot.set(
+        "Rect",
+        Object::Array(vec![
+            Object::Real(x),
+            Object::Real(y),
+            Object::Real(x + 18.0),
+            Object::Real(y + 18.0),
+        ]),
+    );
+    annot.set("Contents", Object::string_literal(content));
+    annot.set("T", Object::string_literal(author));
+    annot.set("NM", Object::string_literal(note_id));
+    annot.set("M", Object::string_literal(date.clone()));
+    annot.set("CreationDate", Object::string_literal(date));
+    annot.set("Name", Object::Name(b"Note".to_vec()));
+    annot.set("C", Object::Array(vec![Object::Real(1.0), Object::Real(0.82), Object::Real(0.0)]));
+    annot.set("F", Object::Integer(28)); // Print | NoZoom | NoRotate
+    annot.set("Open", Object::Boolean(false));
+    annot.set("P", Object::Reference(page_id));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// SPEC: P3-ANN-002 — update the note with `/NM == note_id`: new `/Contents` and
+/// a fresh `/M` (modification date).
+pub fn update_text_note(bytes: &[u8], note_id: &str, content: &str) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let id = find_annotation_by_nm(&doc, note_id)
+        .ok_or_else(|| CommandError::InvalidInput(format!("note not found: {note_id}")))?;
+    let date = pdf_date_now();
+    let dict = doc.get_dictionary_mut(id).map_err(cos_err)?;
+    dict.set("Contents", Object::string_literal(content));
+    dict.set("M", Object::string_literal(date));
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// SPEC: P3-ANN-002 — delete the annotation with `/NM == note_id` from its page's
+/// `/Annots`; GCs it (+ any owned objects) via `prune_objects`. No-op if absent.
+pub fn delete_annotation(bytes: &[u8], note_id: &str) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let Some(target) = find_annotation_by_nm(&doc, note_id) else {
+        return Ok(bytes.to_vec());
+    };
+
+    let page_ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
+    for page_id in page_ids {
+        let existing = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+        let (arr, indirect_id) = match existing {
+            Some(Object::Array(a)) => (a, None),
+            Some(Object::Reference(id)) => (
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default(),
+                Some(id),
+            ),
+            _ => continue,
+        };
+        if !arr.iter().any(|o| o.as_reference().ok() == Some(target)) {
+            continue;
+        }
+        let kept: Vec<Object> = arr
+            .into_iter()
+            .filter(|o| o.as_reference().ok() != Some(target))
+            .collect();
+        match indirect_id {
+            Some(id) => {
+                if let Ok(obj) = doc.get_object_mut(id) {
+                    *obj = Object::Array(kept);
+                }
+            }
+            None => {
+                doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Annots", Object::Array(kept));
+            }
+        }
+    }
+
+    doc.prune_objects();
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}

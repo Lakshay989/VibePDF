@@ -4064,6 +4064,76 @@ working feature" lesson, hard.
 
 ---
 
+### P3.B2a — sticky notes (place / edit / delete + persist)
+
+#### Problem
+
+A sticky note is the second annotation type, and the first one that is
+*interactive after it lands*: you place an icon, click it to open a popup, edit
+the body, and delete it. We needed all of that to persist into the PDF as a
+standard `/Text` annotation that other readers understand — while reusing the
+undo/actor plumbing from the markup write.
+
+#### Concepts learned
+
+- **PDF `/Text` annotation** — the "sticky note" of the PDF spec: a fixed-size
+  icon plus a popup. Key dict entries: `/Contents` (body), `/T` (author/title),
+  `/M` + `/CreationDate` (timestamps), `/Name` (which icon — `/Note`, `/Comment`,
+  …), `/C` (colour), `/Open` (popup open by default?), and `/F` (flags).
+- **Annotation flags `/F`** — a bitfield. We set `28` = `Print`(4) + `NoZoom`(8)
+  + `NoRotate`(16): the icon prints, stays a constant on-screen size as you zoom,
+  and doesn't rotate with the page. That `NoZoom` is why we render the overlay
+  icon at a **fixed pixel size**, not scaled by the zoom factor.
+- **Why a note carries NO `/AP`** — unlike markup, where we *generate* an
+  appearance stream so the PDF.js canvas can draw it, a reader is expected to draw
+  the note icon itself from `/Name`. If we also shipped an `/AP` we'd either
+  double-draw or fight the reader's own icon. So: no `/AP`, and **we** draw the
+  icon in an HTML overlay.
+- **Canvas-rendered vs overlay-rendered annotations** — the project now has both
+  paths. Markup → bake an `/AP`, reload, let the canvas paint it (the store is
+  *not* the source). Notes → no `/AP`, so the `NoteLayer` HTML overlay paints the
+  icon + popup from the annotation store. Picking the right path per annotation
+  type is the core design call here.
+- **Stable id ↔ `/NM`** — to edit or delete *this* note later we need to find it
+  again. We use the frontend store's id as the annotation's `/NM` (name) and look
+  it up with `find_annotation_by_nm`. The id is generated once at placement and is
+  the single handle shared by the store and the PDF.
+- **Optimistic UI with rollback** — placement adds the icon to the store
+  immediately (so it appears instantly) and fires the actor write in the
+  background; if the write rejects, we remove the icon. Store and PDF stay in
+  lockstep from the first frame.
+- **A civil date without `chrono`** — `pdf_date_now` formats `D:YYYYMMDDHHmmSSZ`
+  from a Unix timestamp using Howard Hinnant's `days_from_civil` algorithm
+  inverted, avoiding a new dependency for one date string.
+- **`pointer-events` parent/child override** — the overlay container is
+  `pointer-events: none` when idle (so page scroll / text selection pass
+  through), but the icons and popup set `pointer-events: auto`, so they're still
+  clickable. A child can re-enable hit-testing its parent disabled.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_text_note` / `update_text_note` / `delete_annotation` + `pdf_date_now` / `append_annotation` / `find_annotation_by_nm` (lopdf). |
+| `src-tauri/src/pdf/annotation.rs` | `cos_edit` helper + `AddNoteEdit` / `UpdateNoteEdit` / `DeleteAnnotationEdit`. |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | Actor messages + commands `pdf_add_text_note` / `pdf_update_text_note` / `pdf_delete_annotation`. |
+| `src/ipc/notes.ts` | Typed IPC wrappers for the three note commands. |
+| `src/tools/sticky-note/note-tool.ts` | Click-to-place reducer + `noteDraftAt` + default author / colour. |
+| `src/view/note-layer.tsx` | HTML overlay: draws note icons, places + persists, hosts the popup. |
+| `src/view/NotePopup.tsx` | Controlled popup editor (body + Save + Delete). |
+| `src/view/annotation-layer.tsx` | Skip `note` annotations (the overlay owns them). |
+| `src/view/PageVirtualizer.tsx` | Mount `NoteLayer` above the SVG layer. |
+| `src/app/MarkupToolbar.tsx` | The **Note** tool toggle. |
+| `src-tauri/tests/text_note.rs`, `tests/cos.rs` | Round-trip + dict-shape tests; the `Sample PDFs` artifact. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.4 (Text annotations) and §12.5.3 (annotation flags `/F`).
+- Howard Hinnant, "chrono-Compatible Low-Level Date Algorithms" (`days_from_civil`).
+- CSS `pointer-events` — parent `none` + child `auto` hit-testing.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

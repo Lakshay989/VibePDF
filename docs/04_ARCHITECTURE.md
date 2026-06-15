@@ -135,6 +135,18 @@ annotation is drawn in the main view by **PDF.js** (write → epoch reload → t
 canvas renders the `/AP`), consistent with every other edit; the annotation
 overlay stays draft/selection-only.
 
+**Two rendering paths, chosen per annotation type.** Markup is *canvas-rendered*
+(above). Sticky notes (P3.B2a, `cos::add_text_note`) are different: a `/Text`
+annotation deliberately carries **no `/AP`** — by convention a reader draws the
+note icon itself from `/Name`, so shipping an `/AP` would double-draw. So notes
+are *overlay-rendered*: a dedicated HTML layer (`src/view/note-layer.tsx`,
+mounted on top of the SVG `annotation-layer`) paints the icon and its editable
+popup from the annotation store, and the store id doubles as the annotation's
+`/NM` so later edit/delete edits (`update_text_note` / `delete_annotation`) find
+the right one. Rule of thumb: **if we author an `/AP`, the canvas renders it; if
+we don't, an overlay must.** Note edits use the shared `cos_edit` helper in
+`pdf/annotation.rs` (snapshot → cos transform → reload; inverse `RestoreDocEdit`).
+
 **The two libraries never share a live handle.** A structural edit is a pass
 over **serialized bytes** between PDFium passes:
 
@@ -271,9 +283,13 @@ React overlay survives — and the outer flow element stays the scroll anchor).
 Between them sits the **text layer** (`src/view/text-layer.tsx`, P3.B1a) — PDF.js's
 `TextLayer`, transparent selectable spans that make page text selectable. Text
 markup (highlight/underline/…) is **selection-driven** (read `getSelection()` →
-`/QuadPoints`), so it bypasses the pointer lifecycle. Per-page stacking, bottom
-to top: **canvas → text layer → annotation overlay** (the overlay is
-click-through when idle, so selection reaches the text layer beneath).
+`/QuadPoints`), so it bypasses the pointer lifecycle. On top of the SVG overlay
+sits the **note layer** (`src/view/note-layer.tsx`, P3.B2a) — an HTML overlay for
+sticky notes, which (carrying no `/AP`) the canvas can't paint; it draws the note
+icons + popup from the store. Per-page stacking, bottom to top: **canvas → text
+layer → annotation (SVG) overlay → note (HTML) overlay** (both overlays are
+click-through when idle, so selection reaches the text layer beneath; only the
+note icons/popup and a live tool capture pointer events).
 
 **Backend events** (pages changed, form fields modified, etc.) are pushed via
 Tauri's event system; the frontend listens and updates the relevant store. The

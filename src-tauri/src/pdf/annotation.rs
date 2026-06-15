@@ -11,10 +11,33 @@
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::cos::{add_text_markup, clear_text_markup};
+use crate::pdf::cos::{
+    add_text_markup, add_text_note, clear_text_markup, delete_annotation, update_text_note,
+};
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
+
+/// Apply a pure `&[u8] → Vec<u8>` cos transform to the live document as an
+/// undoable edit: snapshot the bytes (the inverse), run `f`, reload/replace the
+/// document. Shared by the note add/update/delete edits.
+fn cos_edit<'a>(
+    doc: &mut PdfDocument<'a>,
+    f: impl FnOnce(&[u8]) -> Result<Vec<u8>, CommandError>,
+) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+    let pre_bytes = {
+        let _guard = pdfium_lock()?;
+        doc.save_to_bytes().map_err(CommandError::from)?
+    };
+    let new_bytes = f(&pre_bytes)?;
+    {
+        let _guard = pdfium_lock()?;
+        *doc = pdfium()?
+            .load_pdf_from_byte_vec(new_bytes, None)
+            .map_err(CommandError::from)?;
+    }
+    Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+}
 
 /// Add a text-markup annotation over `quads` (each `[x1..y4]` PDF pts) on `page`.
 pub struct TextMarkupEdit {
@@ -94,5 +117,69 @@ impl<'a> Edit<PdfDocument<'a>> for ClearMarkupEdit {
 
     fn label(&self) -> &'static str {
         "clear-markup"
+    }
+}
+
+/// SPEC: P3-ANN-002 — add a sticky note (`/Text` annotation) at `(x, y)`.
+pub struct AddNoteEdit {
+    pub note_id: String,
+    pub page: i32,
+    pub x: f32,
+    pub y: f32,
+    pub content: String,
+    pub author: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for AddNoteEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_text_note(bytes, &self.note_id, page, self.x, self.y, &self.content, &self.author)
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "add-note"
+    }
+}
+
+/// SPEC: P3-ANN-002 — update a note's body (`/Contents`) by `/NM`.
+pub struct UpdateNoteEdit {
+    pub note_id: String,
+    pub content: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for UpdateNoteEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        cos_edit(doc, |bytes| update_text_note(bytes, &self.note_id, &self.content))
+    }
+
+    fn label(&self) -> &'static str {
+        "update-note"
+    }
+}
+
+/// SPEC: P3-ANN-002 — delete the annotation with `/NM == note_id`.
+pub struct DeleteAnnotationEdit {
+    pub note_id: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for DeleteAnnotationEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        cos_edit(doc, |bytes| delete_annotation(bytes, &self.note_id))
+    }
+
+    fn label(&self) -> &'static str {
+        "delete-annotation"
     }
 }

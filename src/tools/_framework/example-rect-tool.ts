@@ -27,14 +27,14 @@ export const exampleRectTool: AnnotationTool = {
 
   onPointerMove(draft: AnnotationDraft, pt: PagePoint): AnnotationDraft {
     // This tool only ever produces rect drafts; the guard narrows the union.
-    if (draft.type === "markup") return draft;
+    if (draft.type !== "rectangle" && draft.type !== "ellipse") return draft;
     // Anchor (x0,y0) stays put; the moving corner is (x1,y1). Not normalized
     // mid-drag, so the anchor survives a drag back across itself.
     return { ...draft, rect: { ...draft.rect, x1: pt.x, y1: pt.y } };
   },
 
   onPointerUp(draft: AnnotationDraft, pt: PagePoint): AnnotationDraft | null {
-    if (draft.type === "markup") return draft;
+    if (draft.type !== "rectangle" && draft.type !== "ellipse") return draft;
     const rect = normalizeRect({ ...draft.rect, x1: pt.x, y1: pt.y });
     // Discard a zero-area click (no drag).
     if (rect.x1 - rect.x0 < 1 && rect.y1 - rect.y0 < 1) return null;

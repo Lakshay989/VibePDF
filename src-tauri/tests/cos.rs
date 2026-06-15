@@ -10,9 +10,10 @@ use std::path::PathBuf;
 
 use lopdf::{Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_text_markup, add_top_level_bookmark, clear_text_markup, merge_documents,
-    prune_dangling_destinations, read_form_field_names, register_inserted_form_fields,
-    read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages, resize_pages,
+    add_text_markup, add_text_note, add_top_level_bookmark, clear_text_markup, delete_annotation,
+    merge_documents, prune_dangling_destinations, read_form_field_names,
+    register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
+    reorder_pages, resize_pages, update_text_note,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -156,6 +157,55 @@ fn cos_text_markup_rejects_bad_input() {
     assert!(add_text_markup(&bytes, 0, "bogus", &quads, "#ffd400", 1.0).is_err());
     assert!(add_text_markup(&bytes, 0, "highlight", &[], "#ffd400", 1.0).is_err());
     assert!(add_text_markup(&bytes, 0, "highlight", &quads, "nothex", 1.0).is_err());
+}
+
+/// SPEC: P3-ANN-002 — add_text_note writes a `/Text` annotation dict with the
+/// stable `/NM`, author `/T`, body `/Contents`, `/Name /Note`, `/F 28`, and
+/// deliberately NO `/AP` (the reader draws the icon from `/Name`). Reopens in
+/// PDFium.
+#[test]
+fn cos_text_note_dict_shape() {
+    let bytes = fixture_bytes("hello.pdf");
+    let out = add_text_note(&bytes, "nm-1", 0, 120.0, 650.0, "hello body", "Ada").expect("note");
+
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let doc = Document::load_mem(&out).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let annots = doc
+        .get_dictionary(page_id)
+        .unwrap()
+        .get(b"Annots")
+        .and_then(Object::as_array)
+        .expect("Annots array");
+    assert_eq!(annots.len(), 1);
+
+    let note = doc.get_dictionary(annots[0].as_reference().unwrap()).unwrap();
+    assert_eq!(note.get(b"Subtype").unwrap().as_name().unwrap(), b"Text");
+    assert_eq!(note.get(b"Name").unwrap().as_name().unwrap(), b"Note");
+    assert_eq!(note.get(b"NM").and_then(Object::as_str).unwrap(), b"nm-1");
+    assert_eq!(note.get(b"T").and_then(Object::as_str).unwrap(), b"Ada");
+    assert_eq!(note.get(b"Contents").and_then(Object::as_str).unwrap(), b"hello body");
+    assert_eq!(note.get(b"F").and_then(Object::as_i64).unwrap(), 28);
+    assert!(note.get(b"AP").is_err(), "a note must NOT carry an /AP — the reader draws the icon");
+}
+
+#[test]
+fn cos_note_update_and_delete_by_nm() {
+    let bytes = fixture_bytes("hello.pdf");
+    let with_note = add_text_note(&bytes, "n", 0, 120.0, 650.0, "before", "A").expect("add");
+
+    let updated = update_text_note(&with_note, "n", "after").expect("update");
+    let doc = Document::load_mem(&updated).expect("load");
+    let page_id = *doc.get_pages().get(&1).unwrap();
+    let note = doc
+        .get_dictionary(doc.get_dictionary(page_id).unwrap().get(b"Annots").and_then(Object::as_array).unwrap()[0].as_reference().unwrap())
+        .unwrap();
+    assert_eq!(note.get(b"Contents").and_then(Object::as_str).unwrap(), b"after");
+
+    let deleted = delete_annotation(&updated, "n").expect("delete");
+    assert_eq!(page_annot_count(&deleted, 0), 0, "the note is gone after delete");
+    assert_eq!(pdfium_page_count(&deleted), 1);
 }
 
 /// A PDF number (Integer/Real) as f32, for reading a MediaBox in a test.

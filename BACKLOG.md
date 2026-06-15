@@ -256,6 +256,26 @@ the current roadmap phase. When one is picked up, move it into the relevant
   by exempting annotation marks from the invert, or compensating the colour —
   revisit when annotations meet dark mode (shared with the P3.A2 dark-mode item).
 
+## From P3.B2a (sticky notes)
+
+- **Reopened files don't show their notes in-app** — the annotation store is
+  in-session only, so notes round-trip to *other readers* but vanish from our own
+  overlay on reload. This is **B2b** (`cos::read_text_notes` → `pdf_read_text_notes`
+  → seed the store on `loadDoc`). The next step; tracked there, noted here so the
+  limitation isn't a surprise.
+- **Placing a note then cancelling leaves an empty note.** Placement persists
+  immediately (empty `/Contents`); closing the popup without typing keeps it. Make
+  a just-placed-then-cancelled note self-delete (track "pending until first save"),
+  or only persist on first save. Two undo entries (place + first edit) collapse to
+  one if we switch to persist-on-first-save.
+- **Popup closes only via ✕ / Save / Esc** — no outside-click-to-dismiss. Add a
+  document-level pointer listener (icons/popup already `stopPropagation`).
+- **Author is a fixed `"VibePDF User"`.** No per-user identity yet; thread a real
+  author through `ToolOptions`/settings when identity lands (also feeds D2 replies).
+- **Note icon is a fixed 18px hit target** anchored at the click's lower-left;
+  it doesn't visually match the reader's own icon glyph. Fine for now; revisit if
+  placement feels off against Acrobat/Preview.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

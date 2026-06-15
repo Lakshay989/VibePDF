@@ -38,7 +38,9 @@ use crate::pdf::document::{
     collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
-use crate::pdf::annotation::{ClearMarkupEdit, TextMarkupEdit};
+use crate::pdf::annotation::{
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, TextMarkupEdit, UpdateNoteEdit,
+};
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -166,6 +168,27 @@ pub enum Message {
     },
     /// SPEC: P3-ANN-001 — remove all text-markup annotations. Undoable, dirty.
     ClearTextMarkup {
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-002 — add a sticky note (`/Text`) at `(x, y)` on `page`.
+    AddNote {
+        note_id: String,
+        page: i32,
+        x: f32,
+        y: f32,
+        content: String,
+        author: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-002 — update a note's body by `/NM`.
+    UpdateNote {
+        note_id: String,
+        content: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-002 — delete the annotation with `/NM == note_id`.
+    DeleteAnnotation {
+        note_id: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
@@ -562,6 +585,74 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ClearTextMarkup { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-002 — add a sticky note. Await-holding convenience for tests.
+    pub async fn add_note(
+        &self,
+        note_id: String,
+        page: i32,
+        x: f32,
+        y: f32,
+        content: String,
+        author: String,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_note_request(note_id, page, x, y, content, author)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_note_request(
+        &self,
+        note_id: String,
+        page: i32,
+        x: f32,
+        y: f32,
+        content: String,
+        author: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddNote { note_id, page, x, y, content, author, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-002 — update a note's body. Await-holding for tests.
+    pub async fn update_note(&self, note_id: String, content: String) -> Result<HistoryState, CommandError> {
+        let rx = self.update_note_request(note_id, content)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn update_note_request(
+        &self,
+        note_id: String,
+        content: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::UpdateNote { note_id, content, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-002 — delete an annotation by `/NM`. Await-holding for tests.
+    pub async fn delete_annotation(&self, note_id: String) -> Result<HistoryState, CommandError> {
+        let rx = self.delete_annotation_request(note_id)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn delete_annotation_request(
+        &self,
+        note_id: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::DeleteAnnotation { note_id, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1032,6 +1123,43 @@ fn run_worker(
             Message::ClearTextMarkup { reply } => {
                 // SPEC: P3-ANN-001 — strip all markup; snapshot inverse.
                 let result = match Box::new(ClearMarkupEdit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddNote { note_id, page, x, y, content, author, reply } => {
+                // SPEC: P3-ANN-002 — add a /Text note; snapshot inverse.
+                let edit = AddNoteEdit { note_id, page, x, y, content, author };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::UpdateNote { note_id, content, reply } => {
+                let edit = UpdateNoteEdit { note_id, content };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::DeleteAnnotation { note_id, reply } => {
+                let edit = DeleteAnnotationEdit { note_id };
+                let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

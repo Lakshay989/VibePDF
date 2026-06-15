@@ -26,8 +26,11 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const color = useToolStore((s) => s.options.color);
   const opacity = useToolStore((s) => s.options.opacity);
   const setOptions = useToolStore((s) => s.setOptions);
+  const activeTool = useToolStore((s) => s.activeTool);
+  const setActiveTool = useToolStore((s) => s.setActiveTool);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
+  const noteActive = activeTool === "sticky-note";
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -87,6 +90,20 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
           />
         ))}
       </div>
+      <span className="text-neutral-300 dark:text-neutral-700">|</span>
+      <button
+        type="button"
+        onClick={() => setActiveTool(noteActive ? null : "sticky-note")}
+        title="Place a sticky note (click on the page)"
+        aria-label="Sticky note tool"
+        aria-pressed={noteActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (noteActive ? "bg-amber-200 dark:bg-amber-300/30" : "")
+        }
+      >
+        Note
+      </button>
       <span className="text-neutral-300 dark:text-neutral-700">|</span>
       <button
         type="button"

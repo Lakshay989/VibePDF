@@ -8,6 +8,7 @@ export type {
   AnnotationDraft,
   MarkupAnnotation,
   MarkupSubtype,
+  NoteAnnotation,
   PagePoint,
   PdfRect,
   Quad,

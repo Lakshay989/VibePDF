@@ -81,11 +81,21 @@ export interface MarkupAnnotation extends AnnotationBase {
   quads: Quad[];
 }
 
+/** A sticky note (P3.B2) — a PDF `/Text` annotation: an icon at `point` whose
+ *  popup shows the editable `content`. `author` is the note's `/T`. */
+export interface NoteAnnotation extends AnnotationBase {
+  type: "note";
+  /** Icon anchor (the note's lower-left), in PDF points. */
+  point: { x: number; y: number };
+  content: string;
+  author: string;
+}
+
 /**
  * The committed-annotation union. Grows as concrete tools land (P3.B/C add ink
  * paths, free-text, …).
  */
-export type Annotation = RectAnnotation | MarkupAnnotation;
+export type Annotation = RectAnnotation | MarkupAnnotation | NoteAnnotation;
 
 /** `Omit` that distributes over a union (plain `Omit` collapses to common keys). */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
