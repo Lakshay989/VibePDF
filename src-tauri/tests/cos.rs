@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use lopdf::{Document, Object};
 use vibepdf_lib::pdf::cos::{
     add_text_markup, add_text_note, add_top_level_bookmark, clear_text_markup, delete_annotation,
-    merge_documents, prune_dangling_destinations, read_form_field_names,
+    merge_documents, prune_dangling_destinations, read_form_field_names, read_text_notes,
     register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
     reorder_pages, resize_pages, update_text_note,
 };
@@ -188,6 +188,36 @@ fn cos_text_note_dict_shape() {
     assert_eq!(note.get(b"Contents").and_then(Object::as_str).unwrap(), b"hello body");
     assert_eq!(note.get(b"F").and_then(Object::as_i64).unwrap(), 28);
     assert!(note.get(b"AP").is_err(), "a note must NOT carry an /AP — the reader draws the icon");
+}
+
+/// SPEC: P3-ANN-002 (re-openable) — read_text_notes is the inverse of
+/// add_text_note: it returns each `/Text` note in page order with the `/NM`,
+/// 0-based page, `/Rect` lower-left, `/Contents`, and `/T`.
+#[test]
+fn cos_reads_text_notes() {
+    let bytes = fixture_bytes("bookmarks.pdf"); // 6 pages
+    let one = add_text_note(&bytes, "a", 0, 100.0, 700.0, "first", "Ada").expect("add 1");
+    let two = add_text_note(&one, "b", 2, 50.0, 60.0, "second", "Bo").expect("add 2");
+
+    let notes = read_text_notes(&two).expect("read");
+    assert_eq!(notes.len(), 2);
+
+    let a = notes.iter().find(|n| n.nm == "a").expect("note a");
+    assert_eq!(a.page, 0);
+    assert_eq!((a.x, a.y), (100.0, 700.0));
+    assert_eq!(a.content, "first");
+    assert_eq!(a.author, "Ada");
+
+    let b = notes.iter().find(|n| n.nm == "b").expect("note b");
+    assert_eq!(b.page, 2);
+    assert_eq!((b.x, b.y), (50.0, 60.0));
+    assert_eq!(b.content, "second");
+    assert_eq!(b.author, "Bo");
+}
+
+#[test]
+fn cos_reads_no_notes_from_plain_pdf() {
+    assert!(read_text_notes(&fixture_bytes("hello.pdf")).expect("read").is_empty());
 }
 
 #[test]

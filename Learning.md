@@ -4134,6 +4134,70 @@ undo/actor plumbing from the markup write.
 
 ---
 
+### P3.B2b — notes as a projection of the PDF (re-openable + undo-safe)
+
+#### Problem
+
+B2a's note overlay was an *in-session cache*: it only knew about notes placed
+this session. So a saved-then-reopened file showed no notes in-app (only other
+readers saw them), and an actor-level ⌘Z left a *ghost* — the PDF lost the note
+but the overlay kept drawing its icon. The spec says notes "SHALL be
+re-openable"; both gaps had to close.
+
+#### Concepts learned
+
+- **Source of truth vs. projection.** The architecture rule is "the actor owns
+  every byte." A frontend store that the actor doesn't drive is a *cache*, and
+  caches drift. The fix is to treat the store as a **projection**: re-derive it
+  from the PDF whenever the PDF could have changed, so the two can't disagree. We
+  stopped *mutating* the note store in lockstep and started *replacing* it from a
+  read.
+- **Read path as the inverse of the write path.** `cos::read_text_notes` is the
+  mirror image of `add_text_note`: walk each page's `/Annots`, keep `/Subtype
+  /Text`, pull `/NM`, `/Rect` lower-left, `/Contents`, `/T` back out into a
+  `NoteData`. Round-trip tests assert *write then read* returns what you wrote.
+- **A read-only actor message.** Edits snapshot → transform → reload and push an
+  undo entry; a *query* (`ReadNotes`) just serializes the live doc under the
+  PDFium lock and parses it — no `dirty`, no history. Modeled on `GetBytes`. Keeps
+  "all bytes flow through the actor" intact without pretending a read is an edit.
+- **Choosing a re-sync trigger.** What signals "the PDF's notes might have
+  changed"? Document identity (open/restore/tab-switch) and the **edit epoch** —
+  a monotonic per-doc counter already bumped by every reload-edit, including
+  undo/redo. Keying the effect on `[documentId, epoch]` covers all of them with
+  no new plumbing, and decouples the re-sync from the undo/redo code itself.
+- **Deliberately *not* signaling.** Note *placement* skips the epoch bump on
+  purpose: the icon is added optimistically and persisted in the background, and a
+  re-sync firing mid-flight could read the PDF before the write landed and drop
+  the new note. Knowing which actions should *not* invalidate a projection is as
+  important as knowing which should.
+- **Replace, don't append.** `replaceNotes` swaps only the `note`-type
+  annotations for a doc and keeps the rest — so re-syncing notes never disturbs
+  other annotation types, and a stale icon can't survive a re-read.
+- **Synthesizing a stable id.** Edits target a note by `/NM`. A note authored
+  elsewhere may have none, so we synthesize `obj-<num>-<gen>` from its object id —
+  stable within a load, enough to render, and a later edit writes a real `/NM`.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `read_text_notes` + the `NoteData` DTO (serde, the inverse of `add_text_note`). |
+| `src-tauri/src/pdf/actor.rs` | Read-only `ReadNotes` message + `read_notes` handle (serialize → lopdf-parse). |
+| `src-tauri/src/commands/pdf.rs`, `lib.rs` | `pdf_read_text_notes` command + registration. |
+| `src/ipc/notes.ts` | `NoteData` type + `readTextNotes` wrapper. |
+| `src/state/annotation-store.ts` | `replaceNotes` — swap a doc's notes, keep other types. |
+| `src/app/use-notes-sync.ts` | Hook: read → map → `replaceNotes` on `[documentId, epoch]`. |
+| `src/app/App.tsx` | Mount `useNotesSync` beside `useHistory`. |
+| `src-tauri/tests/{cos,text_note}.rs`, FE `notes` / `annotation-store` / `use-notes-sync` | Read-back, undo/redo, projection-replace tests. |
+
+#### Further reading
+
+- "Projection" / read model (CQRS) — deriving a queryable view from a source of truth.
+- React `useEffect` dependency keys as invalidation signals; `renderHook` + `waitFor` for async-effect tests.
+- PDF 32000-1:2008 §12.5.2 (annotation `/Rect`, `/NM`).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

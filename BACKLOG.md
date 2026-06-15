@@ -258,11 +258,10 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From P3.B2a (sticky notes)
 
-- **Reopened files don't show their notes in-app** — the annotation store is
-  in-session only, so notes round-trip to *other readers* but vanish from our own
-  overlay on reload. This is **B2b** (`cos::read_text_notes` → `pdf_read_text_notes`
-  → seed the store on `loadDoc`). The next step; tracked there, noted here so the
-  limitation isn't a surprise.
+- ✅ **DONE 2026-06-15 (P3.B2b) — reopened files now show their notes in-app**,
+  and an actor ⌘Z no longer leaves a ghost icon. `cos::read_text_notes` →
+  `pdf_read_text_notes` → `useNotesSync` makes the overlay a *projection of the
+  PDF*, re-synced on open and on every edit-epoch bump (incl. undo/redo).
 - **Placing a note then cancelling leaves an empty note.** Placement persists
   immediately (empty `/Contents`); closing the popup without typing keeps it. Make
   a just-placed-then-cancelled note self-delete (track "pending until first save"),
@@ -275,6 +274,24 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **Note icon is a fixed 18px hit target** anchored at the click's lower-left;
   it doesn't visually match the reader's own icon glyph. Fine for now; revisit if
   placement feels off against Acrobat/Preview.
+
+## From P3.B2b (read notes on open)
+
+- **`createdAt` is `0` for read-back notes** — `read_text_notes` doesn't parse
+  `/CreationDate`//`/M` into epoch ms. The overlay doesn't use it, but the D1
+  sidebar (date column / sort) will; parse the `D:YYYYMMDD…` form (inverse of
+  `pdf_date_now`) when D1 lands.
+- **Foreign `/Contents`//`/T` aren't decoded** — only ASCII/UTF-8 round-trips;
+  UTF-16BE (BOM) and PDFDocEncoding from other editors render as mojibake. Add a
+  decoder if we want to faithfully show notes authored in Acrobat with non-ASCII.
+- **Re-sync re-reads on *every* edit-epoch bump**, including markup edits that
+  don't touch notes (each is a full `save_to_bytes` + lopdf parse). Cheap today;
+  gate to notes-affecting epochs (or diff by `/NM` set) if it ever shows up.
+- **Optimistic-placement vs re-sync race (narrow).** Placement deliberately
+  doesn't bump the epoch, but an *unrelated* epoch bump landing between the
+  optimistic store-add and the `addTextNote` resolving could momentarily drop the
+  new icon; the next re-sync restores it. Single-user-synchronous, self-healing —
+  revisit only if it's ever observed.
 
 ## Real bugs (fix soon — these aren't polish)
 

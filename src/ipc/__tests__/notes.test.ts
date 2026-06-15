@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
-import { addTextNote, deleteAnnotation, updateTextNote } from "@/ipc/notes";
+import { addTextNote, deleteAnnotation, readTextNotes, updateTextNote } from "@/ipc/notes";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -51,5 +51,13 @@ describe("notes IPC", () => {
     mockInvoke.mockResolvedValueOnce({ canUndo: true, canRedo: true });
     const h = await addTextNote("doc-1", "nm-1", 0, 1, 2, "x", "A");
     expect(h).toEqual({ canUndo: true, canRedo: true });
+  });
+
+  it("readTextNotes marshals id and returns the note array", async () => {
+    const rows = [{ nm: "n1", page: 0, x: 10, y: 20, content: "hi", author: "Ada" }];
+    mockInvoke.mockResolvedValueOnce(rows);
+    const notes = await readTextNotes("doc-1");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_read_text_notes", { id: "doc-1" });
+    expect(notes).toEqual(rows);
   });
 });

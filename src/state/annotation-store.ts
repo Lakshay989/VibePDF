@@ -12,7 +12,7 @@
 import { create } from "zustand";
 
 import type { DocumentId } from "@/ipc/pdf";
-import type { Annotation, AnnotationDraft } from "@/tools/_framework/types";
+import type { Annotation, AnnotationDraft, NoteAnnotation } from "@/tools/_framework/types";
 
 // Stable empty array so the per-document selector doesn't churn on a miss.
 const EMPTY: readonly Annotation[] = Object.freeze([]);
@@ -34,6 +34,12 @@ interface AnnotationState {
 
   /** Commit a draft: stamps `id` + `createdAt`, appends it, returns it. */
   add: (id: DocumentId, draft: AnnotationDraft) => Annotation;
+  /**
+   * Replace a document's `note` annotations with `notes`, preserving any other
+   * annotation types. Used by P3.B2b to project the PDF's notes into the overlay
+   * on open and re-sync after undo/redo — the store becomes a view of the actor.
+   */
+  replaceNotes: (id: DocumentId, notes: NoteAnnotation[]) => void;
   /** Merge a patch into an existing annotation. */
   update: (id: DocumentId, annId: string, patch: Partial<Annotation>) => void;
   /** Remove an annotation; clears the selection if it was selected. */
@@ -59,6 +65,12 @@ export const useAnnotationStore = create<AnnotationState>((set) => ({
     }));
     return annotation;
   },
+
+  replaceNotes: (id, notes) =>
+    set((s) => {
+      const others = (s.byDoc[id] ?? []).filter((a) => a.type !== "note");
+      return { byDoc: { ...s.byDoc, [id]: [...others, ...notes] } };
+    }),
 
   update: (id, annId, patch) =>
     set((s) => {

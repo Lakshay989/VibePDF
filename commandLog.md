@@ -1685,6 +1685,37 @@ saved file does not yet repopulate notes in-app — that's **B2b**.
 
 ---
 
+### P3.B2b — notes as a PDF projection: re-open + undo-safe (this commit)
+
+```bash
+# No new deps. NO new write path — a READ path that makes the note overlay a
+# projection of the PDF (was an in-session cache). Fixes two B2a gaps: reopened
+# files showed no notes in-app, and actor ⌘Z left a ghost icon.
+#   cos::read_text_notes(bytes) -> Vec<NoteData{nm,page,x,y,content,author}>
+#     — inverse of add_text_note; walks /Annots, keeps /Subtype /Text.
+#   actor ReadNotes (READ-ONLY, like GetBytes: serialize under PDFium lock →
+#     lopdf-parse; no edit, no history). command pdf_read_text_notes.
+# Frontend: useNotesSync(documentId) reads + replaceNotes (new store action that
+#   swaps only note-type annots) keyed on [documentId, edit-epoch] — fires on
+#   open/restore/tab AND every reload-edit (undo/redo bump the epoch). Mounted in
+#   App.tsx beside useHistory. Placement does NOT bump the epoch (keeps the
+#   optimistic icon). Notes without /NM get a synthesized obj-<n>-<g> id.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy: backtick PDFDocEncoding (doc_markdown); allow cast_precision_loss on
+#   rect_lower_left (i64 Rect int → f32; coords are MediaBox-bounded).
+npm run test           # 191/191 (+6: readTextNotes 1, replaceNotes 1, useNotesSync 4)
+npm run test:rust      # EXIT 0. text_note.rs +4 (read-back-after-reopen / update+
+#   delete reflected / empty on plain / undo+redo tracked). cos.rs +2 (reads notes
+#   in page order w/ correct fields / empty on plain pdf).
+```
+
+No new write-path artifact (read-only step). The human ritual reuses the B2a
+artifact `Sample PDFs/vibepdf-verify-note.pdf`: reopen it in VibePDF → the note
+icon + body return. Left `[~]` pending that + the ⌘Z-hides / ⌘⇧Z-restores check.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

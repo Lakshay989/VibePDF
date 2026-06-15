@@ -147,6 +147,16 @@ the right one. Rule of thumb: **if we author an `/AP`, the canvas renders it; if
 we don't, an overlay must.** Note edits use the shared `cos_edit` helper in
 `pdf/annotation.rs` (snapshot → cos transform → reload; inverse `RestoreDocEdit`).
 
+Because the note overlay is *not* the source of truth, it's kept a **projection
+of the PDF** (P3.B2b): `cos::read_text_notes` (a read-only `ReadNotes` actor
+query, serialize-then-lopdf-parse like `GetBytes`) feeds `pdf_read_text_notes`,
+and the frontend `useNotesSync` hook re-reads + `replaceNotes` whenever the
+document id or its **edit epoch** changes. That single reactive seam makes saved
+notes re-openable in-app *and* keeps undo/redo honest (an actor-level undo bumps
+the epoch, so the overlay re-syncs rather than stranding a ghost icon). Placement
+deliberately doesn't bump the epoch, so the optimistic icon isn't clobbered before
+its write lands.
+
 **The two libraries never share a live handle.** A structural edit is a pass
 over **serialized bytes** between PDFium passes:
 

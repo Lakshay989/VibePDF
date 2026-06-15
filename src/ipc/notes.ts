@@ -51,3 +51,25 @@ export async function deleteAnnotation(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_delete_annotation", { id, noteId });
 }
+
+/** A sticky note read back out of the PDF. Mirrors `cos::NoteData` (Rust). */
+export interface NoteData {
+  /** The note's `/NM` (stable id); a synthesized `obj-<n>-<g>` if it had none. */
+  nm: string;
+  /** 0-based page index. */
+  page: number;
+  /** `/Rect` lower-left, in PDF points. */
+  x: number;
+  y: number;
+  content: string;
+  author: string;
+}
+
+/**
+ * SPEC: P3-ANN-002 (re-openable) — read every sticky note out of the open
+ * document. Read-only (no undo entry); used to project the PDF's notes into the
+ * overlay store on open and after undo/redo. Runs on the Rust document actor.
+ */
+export async function readTextNotes(id: DocumentId): Promise<NoteData[]> {
+  return invoke<NoteData[]>("pdf_read_text_notes", { id });
+}

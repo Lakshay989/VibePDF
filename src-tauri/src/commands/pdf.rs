@@ -5,6 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
+use crate::pdf::cos::NoteData;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
@@ -375,6 +376,30 @@ pub async fn pdf_delete_annotation(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.delete_annotation_request(note_id)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-002 (re-openable) — read every sticky note (`/Text` annotation)
+/// out of the open document so the frontend can project them into its note
+/// overlay on open and after undo/redo. Read-only; no edit, no history entry.
+#[tauri::command]
+pub async fn pdf_read_text_notes(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<NoteData>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_notes_request()?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

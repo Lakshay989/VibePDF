@@ -1,8 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { AnnotationDraft } from "@/tools/_framework/types";
+import type { AnnotationDraft, NoteAnnotation } from "@/tools/_framework/types";
 
 import { useAnnotationStore } from "../annotation-store";
+
+const note = (id: string, content = ""): NoteAnnotation => ({
+  id,
+  type: "note",
+  page: 0,
+  point: { x: 100, y: 700 },
+  content,
+  author: "Ada",
+  color: "#ffd200",
+  opacity: 1,
+  createdAt: 0,
+});
 
 const draft = (): AnnotationDraft => ({
   type: "rectangle",
@@ -52,6 +64,23 @@ describe("annotation store", () => {
 
     expect(useAnnotationStore.getState().byDoc["doc-1"]).toBeUndefined();
     expect(useAnnotationStore.getState().byDoc["doc-2"]).toHaveLength(1);
+  });
+
+  it("replaceNotes swaps the doc's notes but keeps other annotation types", () => {
+    const store = useAnnotationStore.getState();
+    const rect = store.add("doc-1", draft()); // a non-note annotation
+    store.replaceNotes("doc-1", [note("n1", "hello"), note("n2")]);
+
+    const list = useAnnotationStore.getState().byDoc["doc-1"] ?? [];
+    expect(list.filter((a) => a.type === "note")).toHaveLength(2);
+    // The rectangle survived the note replacement.
+    expect(list.some((a) => a.id === rect.id)).toBe(true);
+
+    // A second replace fully supersedes the previous notes.
+    useAnnotationStore.getState().replaceNotes("doc-1", [note("n3")]);
+    const after = useAnnotationStore.getState().byDoc["doc-1"] ?? [];
+    expect(after.filter((a) => a.type === "note").map((a) => a.id)).toEqual(["n3"]);
+    expect(after.some((a) => a.id === rect.id)).toBe(true);
   });
 
   it("tracks the live draft and selection", () => {

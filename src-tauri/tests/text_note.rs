@@ -112,6 +112,83 @@ async fn note_delete_removes_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[tokio::test]
+async fn notes_read_back_after_reopen() {
+    let dir = temp_subdir();
+    let out = dir.join("reopen.pdf");
+
+    // Author a note, persist, then drop the actor entirely.
+    {
+        let id = uuid::Uuid::new_v4();
+        let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+        handle
+            .add_note("keep".into(), 0, 120.0, 700.0, "remember me".into(), "Ada".into())
+            .await
+            .expect("add");
+        handle.save(Some(out.clone())).await.expect("save");
+    }
+
+    // Reopen the saved file in a fresh actor — the note must be re-openable.
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, out.clone(), None).expect("reopen");
+    let notes = handle.read_notes().await.expect("read");
+    assert_eq!(notes.len(), 1);
+    let n = &notes[0];
+    assert_eq!(n.nm, "keep");
+    assert_eq!(n.page, 0);
+    assert_eq!(n.content, "remember me");
+    assert_eq!(n.author, "Ada");
+    assert_eq!((n.x, n.y), (120.0, 700.0));
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn read_notes_reflects_update_and_delete() {
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    handle.add_note("n".into(), 0, 100.0, 700.0, "before".into(), "T".into()).await.expect("add");
+    handle.update_note("n".into(), "after".into()).await.expect("update");
+    let notes = handle.read_notes().await.expect("read after update");
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].content, "after");
+
+    handle.delete_annotation("n".into()).await.expect("delete");
+    assert!(handle.read_notes().await.expect("read after delete").is_empty());
+
+    drop(handle);
+}
+
+#[tokio::test]
+async fn read_notes_empty_on_plain_pdf() {
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+    assert!(handle.read_notes().await.expect("read").is_empty());
+    drop(handle);
+}
+
+/// SPEC: P3-ANN-002 (re-openable) — undo of an add must leave no note on read,
+/// and redo must bring it back. This is what the frontend's epoch-driven re-sync
+/// relies on to keep the overlay honest after ⌘Z / ⌘⇧Z.
+#[tokio::test]
+async fn read_notes_tracks_undo_and_redo() {
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    handle.add_note("n".into(), 0, 100.0, 700.0, "hi".into(), "T".into()).await.expect("add");
+    assert_eq!(handle.read_notes().await.expect("read").len(), 1);
+
+    handle.undo().await.expect("undo");
+    assert!(handle.read_notes().await.expect("read after undo").is_empty());
+
+    handle.redo().await.expect("redo");
+    assert_eq!(handle.read_notes().await.expect("read after redo").len(), 1);
+
+    drop(handle);
+}
+
 /// Writes a note-bearing PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual (Acrobat / Preview / Okular). Ignored; run on demand:
 ///   cargo test --test text_note note_writes_verification_artifact -- --ignored

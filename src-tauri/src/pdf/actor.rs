@@ -41,6 +41,7 @@ use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, TextMarkupEdit, UpdateNoteEdit,
 };
+use crate::pdf::cos::{read_text_notes, NoteData};
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -190,6 +191,12 @@ pub enum Message {
     DeleteAnnotation {
         note_id: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-002 (re-openable) — read every sticky note out of the live
+    /// document. Read-only (no edit, no history); the frontend projects the
+    /// result into its note overlay on open and after undo/redo.
+    ReadNotes {
+        reply: oneshot::Sender<Result<Vec<NoteData>, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
     /// `source_path` into the open document at `index`. Undoable, marks dirty.
@@ -653,6 +660,24 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::DeleteAnnotation { note_id, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-002 (re-openable) — read every sticky note. Await-holding
+    /// convenience for tests; IPC uses `read_notes_request`.
+    pub async fn read_notes(&self) -> Result<Vec<NoteData>, CommandError> {
+        let rx = self.read_notes_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_notes_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<Vec<NoteData>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadNotes { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1167,6 +1192,14 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::ReadNotes { reply } => {
+                // Read-only: serialize under the shared PDFium lock (same path as
+                // GetBytes), then parse the notes out of the bytes with lopdf.
+                let result = pdfium_lock()
+                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
+                    .and_then(|bytes| read_text_notes(&bytes));
                 let _ = reply.send(result);
             }
             Message::InsertFromPdf { source_path, pages, index, reply } => {

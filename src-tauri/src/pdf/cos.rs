@@ -1529,3 +1529,93 @@ pub fn delete_annotation(bytes: &[u8], note_id: &str) -> Result<Vec<u8>, Command
     doc.save_to(&mut buf)?;
     Ok(buf)
 }
+
+/// A sticky note read back out of a PDF (P3.B2b). The inverse of the fields
+/// [`add_text_note`] writes: `nm` is `/NM` (the stable handle), `page` is
+/// 0-based, `(x, y)` is the `/Rect` lower-left, and `content` / `author` are
+/// `/Contents` / `/T`. Serialized to the frontend, which projects it into the
+/// note overlay store.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteData {
+    pub nm: String,
+    pub page: usize,
+    pub x: f32,
+    pub y: f32,
+    pub content: String,
+    pub author: String,
+}
+
+/// SPEC: P3-ANN-002 (re-openable clause) — read every `/Text` annotation
+/// (sticky note) out of the document, in page order. The inverse of
+/// [`add_text_note`]; lets the frontend rebuild its note overlay from the PDF on
+/// open (and re-sync after undo/redo) so saved notes are re-openable in-app.
+///
+/// A note authored elsewhere may lack `/NM`; we synthesize a stable fallback id
+/// from its object id so it still renders (and a later edit writes a real `/NM`).
+/// Only ASCII `/Contents` / `/T` are decoded faithfully — UTF-16BE /
+/// `PDFDocEncoding` is out of scope (we only guarantee round-trip of notes we
+/// wrote).
+pub fn read_text_notes(bytes: &[u8]) -> Result<Vec<NoteData>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut notes = Vec::new();
+
+    // `get_pages` is a BTreeMap keyed by 1-based page number, so iteration is
+    // already in page order; the 0-based index is `page_no - 1`.
+    for (page_no, page_id) in doc.get_pages() {
+        let page = (page_no - 1) as usize;
+        let annots = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+        let arr = match annots {
+            Some(Object::Array(a)) => a,
+            Some(Object::Reference(id)) => {
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+            }
+            _ => continue,
+        };
+        for obj in arr {
+            let Ok(id) = obj.as_reference() else { continue };
+            let Ok(dict) = doc.get_dictionary(id) else { continue };
+            if dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(&b"Text"[..]) {
+                continue;
+            }
+            let (x, y) = rect_lower_left(dict);
+            let nm = dict.get(b"NM").and_then(Object::as_str).ok().map_or_else(
+                || format!("obj-{}-{}", id.0, id.1),
+                |s| String::from_utf8_lossy(s).into_owned(),
+            );
+            notes.push(NoteData {
+                nm,
+                page,
+                x,
+                y,
+                content: str_field(dict, b"Contents"),
+                author: str_field(dict, b"T"),
+            });
+        }
+    }
+    Ok(notes)
+}
+
+/// A PDF string field as a lossy UTF-8 `String`, or `""` when absent.
+fn str_field(dict: &Dictionary, key: &[u8]) -> String {
+    dict.get(key)
+        .and_then(Object::as_str)
+        .ok()
+        .map_or_else(String::new, |s| String::from_utf8_lossy(s).into_owned())
+}
+
+/// The `(x, y)` lower-left of an annotation's `/Rect`, or `(0, 0)` if malformed.
+/// Page coordinates are small (bounded by `/MediaBox`), so an `i64`-typed Rect
+/// integer fits an `f32` without meaningful loss.
+#[allow(clippy::cast_precision_loss)]
+fn rect_lower_left(dict: &Dictionary) -> (f32, f32) {
+    let Ok(rect) = dict.get(b"Rect").and_then(Object::as_array) else {
+        return (0.0, 0.0);
+    };
+    let num = |i: usize| match rect.get(i) {
+        Some(Object::Real(r)) => *r,
+        Some(Object::Integer(n)) => *n as f32,
+        _ => 0.0,
+    };
+    (num(0), num(1))
+}

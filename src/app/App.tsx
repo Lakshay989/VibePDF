@@ -5,6 +5,7 @@ import { RecoveryDialog } from "@/app/RecoveryDialog";
 import { basename } from "@/app/paths";
 import { useFileOpen } from "@/app/use-file-open";
 import { useHistory } from "@/app/use-history";
+import { useNotesSync } from "@/app/use-notes-sync";
 import { useRecovery } from "@/app/use-recovery";
 import { useSave } from "@/app/use-save";
 import { useSessionRestore } from "@/app/use-session-restore";
@@ -57,6 +58,10 @@ export function App() {
 
   // SPEC: P2-PAGE-003 / session history — Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z.
   const { canUndo, canRedo, undo, redo } = useHistory(current?.id);
+
+  // SPEC: P3-ANN-002 (re-openable) — project the PDF's sticky notes into the
+  // overlay on open and re-sync after undo/redo.
+  useNotesSync(current?.id);
 
   // One status line: a save message takes precedence over an open message
   // when both are live (both auto-dismiss in 3s, so overlap is brief).
