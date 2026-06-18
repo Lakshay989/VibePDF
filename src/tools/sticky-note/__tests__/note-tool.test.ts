@@ -11,7 +11,18 @@ import {
   stickyNoteTool,
 } from "@/tools/sticky-note/note-tool";
 
-const ctx = { documentId: "doc-1", options: { color: "#000", opacity: 1, strokeWidth: 2 } };
+const ctx = {
+  documentId: "doc-1",
+  options: {
+    color: "#000",
+    opacity: 1,
+    strokeWidth: 2,
+    fontFamily: "Helvetica" as const,
+    fontSize: 14,
+    bold: false,
+    italic: false,
+  },
+};
 
 describe("noteDraftAt", () => {
   it("builds an empty note anchored at the point with the note colour", () => {

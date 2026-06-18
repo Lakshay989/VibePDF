@@ -1736,6 +1736,44 @@ of an existing note (both click inside the popup) work too.
 
 ---
 
+### P3.B3a — free-text boxes, uniform style (this commit)
+
+```bash
+# No new deps. Third annotation type — typed text drawn via a generated /AP
+# (like markup, canvas-rendered):
+#   cos::add_free_text → /Subtype /FreeText + /Rect /Contents /DA /F 4 /P + an /AP
+#     form XObject whose stream draws the text (BT /F1 <size> Tf … TL <x> <y> Td
+#     (line) Tj T* … ET) with a self-contained base-14 /Font (no AcroForm /DR
+#     needed). Helpers base_font (12 base-14 names) + pdf_escape (\ ( ) ).
+#   FreeTextEdit (annotation.rs, via cos_edit) + AddFreeText actor msg +
+#     pdf_add_free_text command.
+# Frontend: ToolOptions += fontFamily/fontSize/bold/italic. FreeTextLayer (new
+#   HTML overlay) = drag-to-box + a transient <textarea> editor; on Add → IPC →
+#   bumpEpoch → the CANVAS renders the /AP (overlay holds no committed boxes).
+#   "Text" toggle + font/size/B/I controls in MarkupToolbar.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy: renamed locals in free_text_appearance_content (many_single_char_names).
+#   TS: updated the two ToolOptions test fixtures (lifecycle, note-tool) for the
+#   new fields; dropped a stale jsx-a11y eslint-disable (rule not configured).
+npm run test           # 201/201 (+10: addFreeText 2, free-text helpers 4, FreeTextLayer 4)
+npm run test:rust      # EXIT 0. free_text.rs: 3 (persists through save / undo removes
+#   / rejects empty rect) + 1 ignored artifact. cos.rs: +4 (writes annot+/AP / font
+#   variants / escapes+splits lines / rejects empty rect + bad font).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --test free_text free_text_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-freetext.pdf (hello.pdf + a Times-Bold red box);
+#     keeps /Subtype/FreeText + /AP through the PDFium save.
+```
+
+Rendering decision: the committed box has an `/AP`, so the **PDF.js canvas** draws
+it (consistent with markup). Left `[~]` pending the human in-app check that the
+canvas renders the FreeText `/AP` (the key unknown — overlay fallback ready) +
+cross-reader (Acrobat/Preview/Okular). Rich text / underline / re-edit are **B3b**.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

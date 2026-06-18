@@ -39,7 +39,7 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, TextMarkupEdit, UpdateNoteEdit,
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, TextMarkupEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{read_text_notes, NoteData};
 use crate::pdf::reorder::ReorderEdit;
@@ -197,6 +197,19 @@ pub enum Message {
     /// result into its note overlay on open and after undo/redo.
     ReadNotes {
         reply: oneshot::Sender<Result<Vec<NoteData>, CommandError>>,
+    },
+    /// SPEC: P3-ANN-003 — add a free-text box at `rect` on `page` with a
+    /// generated `/AP`. Undoable; marks dirty; replies with history availability.
+    AddFreeText {
+        page: i32,
+        rect: [f32; 4],
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
     /// `source_path` into the open document at `index`. Undoable, marks dirty.
@@ -678,6 +691,54 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadNotes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-003 — add a free-text box. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_free_text(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx =
+            self.add_free_text_request(page, rect, text, font_family, font_size, color, bold, italic)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_free_text_request(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddFreeText {
+                page,
+                rect,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                reply,
+            })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1200,6 +1261,37 @@ fn run_worker(
                 let result = pdfium_lock()
                     .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
                     .and_then(|bytes| read_text_notes(&bytes));
+                let _ = reply.send(result);
+            }
+            Message::AddFreeText {
+                page,
+                rect,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                reply,
+            } => {
+                let edit = FreeTextEdit {
+                    page,
+                    rect,
+                    text,
+                    font_family,
+                    font_size,
+                    color,
+                    bold,
+                    italic,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::InsertFromPdf { source_path, pages, index, reply } => {

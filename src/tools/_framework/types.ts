@@ -39,14 +39,24 @@ export type ToolId =
   | "stamp"
   | "measure";
 
+/** A base-14 font family the free-text tool can request. */
+export type FontFamily = "Helvetica" | "Times" | "Courier";
+
 /** Shared, user-configurable style for the active tool. */
 export interface ToolOptions {
-  /** Stroke / markup colour, hex (`#rrggbb`). */
+  /** Stroke / markup / text colour, hex (`#rrggbb`). */
   color: string;
   /** 0..1. */
   opacity: number;
   /** Stroke width in points. */
   strokeWidth: number;
+  /** Free-text font family (P3.B3). */
+  fontFamily: FontFamily;
+  /** Free-text font size in points. */
+  fontSize: number;
+  /** Free-text bold / italic (base-14 variant). */
+  bold: boolean;
+  italic: boolean;
 }
 
 /** Fields every annotation carries. */

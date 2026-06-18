@@ -4198,6 +4198,73 @@ re-openable"; both gaps had to close.
 
 ---
 
+### P3.B3a — free-text boxes (drawing text into a PDF)
+
+#### Problem
+
+The third annotation type writes *typed text* into the page — a box you size,
+fill with text, and style (font, size, colour, bold/italic). Unlike a note (an
+icon) or markup (a shape over existing text), the appearance is glyphs we have to
+draw ourselves, and the text has to render in every reader.
+
+#### Concepts learned
+
+- **PDF `/FreeText` annotation** — a box of text. Key entries: `/Rect` (the box),
+  `/Contents` (the plain text), `/DA` (default appearance — a tiny graphics
+  snippet: font + size + colour), and an `/AP` appearance stream that *draws* the
+  text. We generate the `/AP` so it looks identical everywhere.
+- **A text-drawing content stream.** Inside the `/AP` form XObject, text is drawn
+  with PDF text operators: `BT`/`ET` (begin/end text), `Tf` (set font + size),
+  `rg` (fill colour), `Td` (set the start position = first baseline), `TL` +
+  `T*` (leading + next-line), and `Tj` (show a string). One `Tj` per line; `T*`
+  between lines. Coordinates are bottom-up, so the first baseline sits near the
+  *top* of the box (`y1 − size`).
+- **The base-14 fonts.** Every PDF reader ships 14 standard fonts (Helvetica,
+  Times, Courier families + Symbol/ZapfDingbats). Referencing one
+  (`/BaseFont /Helvetica-Bold`) needs **no font embedding** — which is why B3a
+  restricts to those and maps family+bold+italic to the right PostScript name
+  (e.g. Times+B+I → `Times-BoldItalic`). Embedding arbitrary fonts is a much
+  bigger job (font subsetting) — deferred.
+- **A self-contained appearance.** The `/AP` form carries its *own* `/Resources
+  /Font`, so display never depends on the document's AcroForm `/DR`. `/DA` is
+  still written (the spec wants it; a reader that *regenerates* appearance uses
+  it) but is best-effort — `/AP` is the primary path.
+- **Escaping a PDF literal string.** Text inside `( … )` must escape `\`, `(`,
+  `)` (else the parser miscounts parens). A one-pass `pdf_escape` handles it; the
+  cos test feeds `a(b)\c` and asserts `a\(b\)\\c`.
+- **Same rendering split as markup, plus a transient editor.** Because the box
+  has an `/AP`, the **canvas** draws it (write → epoch reload). So the overlay
+  (`FreeTextLayer`) holds *no committed boxes* — only the live drag-preview and
+  the `<textarea>` you type into. The editor is throwaway; the PDF is the record.
+- **Drag gesture → two coordinate spaces.** The drag is captured in screen px (for
+  the preview + the editor's CSS position) and converted to PDF points (for the
+  write). A click (sub-threshold drag) is grown to a default box so you always get
+  something usable — `withDefaultSize`.
+- **Re-applying an earlier lesson.** The editor sets `pointer-events: auto`
+  up-front — the same trap that bit the note popup (an overlay child inherits the
+  container's `none`). Lessons compound only if you apply them.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_free_text` + the `/AP` text stream, `base_font`, `pdf_escape`. |
+| `src-tauri/src/pdf/annotation.rs` | `FreeTextEdit` (byte-handoff via `cos_edit`). |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | `AddFreeText` message + `pdf_add_free_text`. |
+| `src/ipc/freetext.ts` | `addFreeText` typed wrapper. |
+| `src/tools/free-text/free-text.ts` | Font catalog, CSS mapping, screen-rect math. |
+| `src/view/free-text-layer.tsx` | Drag-to-box + the transient `<textarea>` editor; commit via IPC. |
+| `src/app/MarkupToolbar.tsx`, `src/state/tool-store.ts`, `types.ts` | The **Text** tool + font/size/B/I controls + `ToolOptions` fields. |
+| `src-tauri/tests/free_text.rs`, `tests/cos.rs`, FE `freetext`/`free-text`/`free-text-layer` | Round-trip, font-variant, escaping, overlay-wiring tests. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.7.3.3 (`/DA`), §12.5.6.6 (FreeText), §9.6.2 (the standard-14 fonts).
+- PDF text-showing operators (`BT`/`Td`/`TL`/`T*`/`Tj`/`Tf`).
+- WinAnsi / StandardEncoding — why base-14 fonts only render a Latin range.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -8,12 +8,12 @@
 
 use std::path::PathBuf;
 
-use lopdf::{Document, Object};
+use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_text_markup, add_text_note, add_top_level_bookmark, clear_text_markup, delete_annotation,
-    merge_documents, prune_dangling_destinations, read_form_field_names, read_text_notes,
-    register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
-    reorder_pages, resize_pages, update_text_note,
+    add_free_text, add_text_markup, add_text_note, add_top_level_bookmark, clear_text_markup,
+    delete_annotation, merge_documents, prune_dangling_destinations, read_form_field_names,
+    read_text_notes, register_inserted_form_fields, read_top_level_outline_titles,
+    rename_form_fields_with_suffix, reorder_pages, resize_pages, update_text_note,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -236,6 +236,104 @@ fn cos_note_update_and_delete_by_nm() {
     let deleted = delete_annotation(&updated, "n").expect("delete");
     assert_eq!(page_annot_count(&deleted, 0), 0, "the note is gone after delete");
     assert_eq!(pdfium_page_count(&deleted), 1);
+}
+
+/// The single annotation dict on page 1 of `bytes`, plus its `/AP /N` stream
+/// content + the BaseFont of its appearance font resource.
+fn first_annot_with_ap(bytes: &[u8]) -> (Dictionary, String, String) {
+    let doc = Document::load_mem(bytes).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let annot_ref = doc
+        .get_dictionary(page_id)
+        .unwrap()
+        .get(b"Annots")
+        .and_then(Object::as_array)
+        .unwrap()[0]
+        .as_reference()
+        .unwrap();
+    let annot = doc.get_dictionary(annot_ref).unwrap().clone();
+    let n = annot
+        .get(b"AP")
+        .and_then(Object::as_dict)
+        .unwrap()
+        .get(b"N")
+        .unwrap()
+        .as_reference()
+        .unwrap();
+    let stream = doc.get_object(n).and_then(Object::as_stream).unwrap();
+    let content = String::from_utf8_lossy(&stream.content).into_owned();
+    let base_font = stream
+        .dict
+        .get(b"Resources")
+        .and_then(Object::as_dict)
+        .unwrap()
+        .get(b"Font")
+        .and_then(Object::as_dict)
+        .unwrap()
+        .get(b"F1")
+        .and_then(Object::as_dict)
+        .unwrap()
+        .get(b"BaseFont")
+        .and_then(Object::as_name)
+        .map(|n| String::from_utf8_lossy(n).into_owned())
+        .unwrap();
+    (annot, content, base_font)
+}
+
+/// SPEC: P3-ANN-003 — add_free_text writes a `/FreeText` dict (`/Contents`,
+/// `/DA`) plus a generated `/AP` whose stream draws the text (`BT … Tj … ET`),
+/// and the result reopens in PDFium.
+#[test]
+fn cos_add_free_text_writes_annot_with_ap() {
+    let bytes = fixture_bytes("hello.pdf");
+    let out = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 700.0], "Hello", "Helvetica", 14.0, "#ff0000", false, false)
+        .expect("free text");
+
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let (annot, content, base_font) = first_annot_with_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"FreeText");
+    assert_eq!(annot.get(b"Contents").and_then(Object::as_str).unwrap(), b"Hello");
+    assert!(annot.get(b"DA").is_ok(), "a /DA default appearance is present");
+    assert!(content.contains("BT") && content.contains("Tj") && content.contains("ET"), "{content}");
+    assert!(content.contains("(Hello) Tj"), "draws the text: {content}");
+    assert_eq!(base_font, "Helvetica");
+}
+
+#[test]
+fn cos_free_text_font_variants() {
+    let bytes = fixture_bytes("hello.pdf");
+    for (family, bold, italic, expected) in [
+        ("Helvetica", true, false, "Helvetica-Bold"),
+        ("Times", true, true, "Times-BoldItalic"),
+        ("Times", false, false, "Times-Roman"),
+        ("Courier", false, true, "Courier-Oblique"),
+    ] {
+        let out = add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", family, 12.0, "#000000", bold, italic)
+            .unwrap_or_else(|e| panic!("{family} b={bold} i={italic}: {e}"));
+        let (_, _, base_font) = first_annot_with_ap(&out);
+        assert_eq!(base_font, expected, "{family} bold={bold} italic={italic}");
+    }
+}
+
+#[test]
+fn cos_free_text_escapes_and_splits_lines() {
+    let bytes = fixture_bytes("hello.pdf");
+    let out = add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 80.0], "a(b)\\c\nsecond", "Helvetica", 12.0, "#000000", false, false)
+        .expect("free text");
+    let (_, content, _) = first_annot_with_ap(&out);
+    // Parens + backslash escaped in the literal string.
+    assert!(content.contains("(a\\(b\\)\\\\c) Tj"), "escaping: {content}");
+    // The newline becomes a T* before the second line.
+    assert!(content.contains("T*"), "newline → T*: {content}");
+    assert!(content.contains("(second) Tj"), "second line: {content}");
+}
+
+#[test]
+fn cos_free_text_rejects_empty_rect_and_bad_font() {
+    let bytes = fixture_bytes("hello.pdf");
+    assert!(add_free_text(&bytes, 0, [10.0, 10.0, 10.0, 40.0], "x", "Helvetica", 12.0, "#000000", false, false).is_err());
+    assert!(add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", "Comic Sans", 12.0, "#000000", false, false).is_err());
 }
 
 /// A PDF number (Integer/Real) as f32, for reading a MediaBox in a test.

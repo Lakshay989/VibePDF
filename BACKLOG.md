@@ -293,6 +293,24 @@ the current roadmap phase. When one is picked up, move it into the relevant
   new icon; the next re-sync restores it. Single-user-synchronous, self-healing —
   revisit only if it's ever observed.
 
+## From P3.B3a (free-text boxes)
+
+- **No rich text / underline (`/RC` + `/DS`)** — B3a is one uniform style per box.
+  Mixed runs/colours, underline, and the XHTML-subset rich-content appearance are
+  **B3b** (the deferred half of P3-ANN-003).
+- **No auto-wrap** — the `/AP` honors explicit `\n` only; the editor's soft-wrap
+  won't match if the user relies on it. Measure-and-wrap in the `/AP` is B3b.
+- **No re-edit of a committed box** — once added, you can ⌘Z but not double-click
+  to edit (needs a read-back like B2b). Lands with B3b / the D1 sidebar.
+- **Base-14 / ASCII-WinAnsi only** — no font embedding, no non-Latin scripts; the
+  three families (Helvetica/Times/Courier) render the Latin range. Embedding +
+  subsetting is a separate, larger effort.
+- **`/DA` carries no AcroForm `/DR`** — a reader that *regenerates* appearance
+  (ignoring `/AP`) may fall back to a default font. `/AP` is the primary path;
+  add the font to `/DR` if a target reader is found to regenerate.
+- **Committing drops the tool to idle** — you re-pick **Text** for each box. Keep
+  the tool armed for multiple boxes if it feels tedious in practice.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

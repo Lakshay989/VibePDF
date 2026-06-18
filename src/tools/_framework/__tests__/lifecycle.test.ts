@@ -7,7 +7,15 @@ import type { PagePoint } from "../types";
 
 const ctx: ToolContext = {
   documentId: "doc-1",
-  options: { color: "#ff0000", opacity: 0.5, strokeWidth: 3 },
+  options: {
+    color: "#ff0000",
+    opacity: 0.5,
+    strokeWidth: 3,
+    fontFamily: "Helvetica",
+    fontSize: 14,
+    bold: false,
+    italic: false,
+  },
 };
 const pt = (x: number, y: number): PagePoint => ({ page: 0, x, y });
 

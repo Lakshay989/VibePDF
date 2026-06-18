@@ -12,6 +12,11 @@ const DEFAULT_OPTIONS: ToolOptions = {
   color: "#ffd400",
   opacity: 1,
   strokeWidth: 2,
+  // Free-text defaults (P3.B3); other tools ignore these.
+  fontFamily: "Helvetica",
+  fontSize: 14,
+  bold: false,
+  italic: false,
 };
 
 interface ToolState {

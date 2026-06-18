@@ -10,6 +10,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { renderPageOnDoc } from "@/view/render-page";
 import { AnnotationLayer } from "@/view/annotation-layer";
+import { FreeTextLayer } from "@/view/free-text-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PageTextLayer } from "@/view/text-layer";
 import { LruCache } from "@/view/page-cache";
@@ -480,6 +481,14 @@ function PageSlot({
         rotation={rotation}
       />
       <NoteLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <FreeTextLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

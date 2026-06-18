@@ -147,6 +147,17 @@ the right one. Rule of thumb: **if we author an `/AP`, the canvas renders it; if
 we don't, an overlay must.** Note edits use the shared `cos_edit` helper in
 `pdf/annotation.rs` (snapshot → cos transform → reload; inverse `RestoreDocEdit`).
 
+**Free-text (P3.B3a)** sits on the *canvas* side of that split: `cos::add_free_text`
+writes a `/FreeText` box whose generated `/AP` *draws the text* (PDF text
+operators — `BT`/`Tf`/`Td`/`Tj`/`ET` — over a self-contained base-14 `/Font`
+resource), so the PDF.js canvas renders it like markup (write → `bumpEpoch`
+reload). The twist is input: text needs an editor, so `src/view/free-text-layer.tsx`
+is a *transient* overlay — it holds no committed boxes, only the live drag-preview
+and a positioned `<textarea>`; on commit it persists through the actor and the
+canvas takes over. So the overlay catalogue is now: notes (persistent overlay,
+no `/AP`), free-text (transient editor overlay, canvas-rendered `/AP`), markup
+(no overlay, canvas-rendered `/AP`).
+
 Because the note overlay is *not* the source of truth, it's kept a **projection
 of the PDF** (P3.B2b): `cos::read_text_notes` (a read-only `ReadNotes` actor
 query, serialize-then-lopdf-parse like `GetBytes`) feeds `pdf_read_text_notes`,

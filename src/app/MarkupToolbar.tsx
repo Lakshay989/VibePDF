@@ -10,7 +10,8 @@ import { addTextMarkup, clearTextMarkup } from "@/ipc/annotations";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
-import type { MarkupSubtype } from "@/tools/_framework";
+import type { FontFamily, MarkupSubtype } from "@/tools/_framework";
+import { FONT_FAMILIES } from "@/tools/free-text/free-text";
 import { applyMarkupToSelection } from "@/tools/text-markup/apply-markup";
 
 const SUBTYPES: { id: MarkupSubtype; label: string; title: string }[] = [
@@ -28,9 +29,14 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const setOptions = useToolStore((s) => s.setOptions);
   const activeTool = useToolStore((s) => s.activeTool);
   const setActiveTool = useToolStore((s) => s.setActiveTool);
+  const fontFamily = useToolStore((s) => s.options.fontFamily);
+  const fontSize = useToolStore((s) => s.options.fontSize);
+  const bold = useToolStore((s) => s.options.bold);
+  const italic = useToolStore((s) => s.options.italic);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const noteActive = activeTool === "sticky-note";
+  const textActive = activeTool === "free-text";
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -104,6 +110,68 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       >
         Note
       </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(textActive ? null : "free-text")}
+        title="Add a text box (drag on the page)"
+        aria-label="Free-text tool"
+        aria-pressed={textActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (textActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Text
+      </button>
+      {textActive ? (
+        <div className="flex items-center gap-1">
+          <select
+            aria-label="Font family"
+            value={fontFamily}
+            onChange={(e) => setOptions({ fontFamily: e.target.value as FontFamily })}
+            className="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-600"
+          >
+            {FONT_FAMILIES.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            aria-label="Font size"
+            min={6}
+            max={144}
+            value={fontSize}
+            onChange={(e) => setOptions({ fontSize: Number(e.target.value) || fontSize })}
+            className="w-12 rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-600"
+          />
+          <button
+            type="button"
+            onClick={() => setOptions({ bold: !bold })}
+            aria-label="Bold"
+            aria-pressed={bold}
+            className={
+              "rounded px-1.5 py-0.5 text-xs font-bold hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+              (bold ? "bg-blue-200 dark:bg-blue-300/30" : "")
+            }
+          >
+            B
+          </button>
+          <button
+            type="button"
+            onClick={() => setOptions({ italic: !italic })}
+            aria-label="Italic"
+            aria-pressed={italic}
+            className={
+              "rounded px-1.5 py-0.5 text-xs italic hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+              (italic ? "bg-blue-200 dark:bg-blue-300/30" : "")
+            }
+          >
+            I
+          </button>
+        </div>
+      ) : null}
       <span className="text-neutral-300 dark:text-neutral-700">|</span>
       <button
         type="button"

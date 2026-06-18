@@ -1201,6 +1201,159 @@ fn markup_appearance_content(subtype: &str, quads: &[[f32; 8]], (r, g, b): (f32,
     content
 }
 
+/// SPEC: P3-ANN-003 — add a free-text annotation: a `/FreeText` box at `rect`
+/// holding `text` in a base-14 font, plus a generated `/AP` appearance so it
+/// renders in every reader (`PDFium` can't author this). One uniform style
+/// (family / size / colour / bold / italic); underline + rich text are B3b.
+#[allow(clippy::too_many_arguments)]
+pub fn add_free_text(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    color: &str,
+    bold: bool,
+    italic: bool,
+) -> Result<Vec<u8>, CommandError> {
+    let (r, g, b) = parse_hex_color(color)?;
+    let base = base_font(font_family, bold, italic)?;
+    let size = font_size.max(1.0);
+    let [x0, y0, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0) {
+        return Err(CommandError::InvalidInput("free-text rect is empty".into()));
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let rect_obj =
+        Object::Array(vec![Object::Real(x0), Object::Real(y0), Object::Real(x1), Object::Real(y1)]);
+
+    // Appearance, drawn in absolute page coords (BBox == Rect, identity matrix).
+    let content = free_text_appearance_content(rect, text, size, (r, g, b));
+
+    // The appearance's own font resource — `/AP` is self-contained, so display
+    // doesn't depend on an AcroForm `/DR`.
+    let mut font = Dictionary::new();
+    font.set("Type", Object::Name(b"Font".to_vec()));
+    font.set("Subtype", Object::Name(b"Type1".to_vec()));
+    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    let mut fonts = Dictionary::new();
+    fonts.set("F1", Object::Dictionary(font));
+    let mut resources = Dictionary::new();
+    resources.set("Font", Object::Dictionary(fonts));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    // `/DA` (default appearance) — required by spec; best-effort fallback for a
+    // reader that regenerates appearance instead of using `/AP`.
+    let da = format!("/F1 {size:.2} Tf {r:.4} {g:.4} {b:.4} rg");
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"FreeText".to_vec()));
+    annot.set("Rect", rect_obj);
+    annot.set("Contents", Object::string_literal(text));
+    annot.set("DA", Object::string_literal(da));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The `/AP` content stream for a free-text box: each line of `text` drawn
+/// top-anchored inside `rect`, inset 2pt, with 1.2×size leading. Honors explicit
+/// newlines only — auto-wrap is B3b.
+fn free_text_appearance_content(
+    rect: [f32; 4],
+    text: &str,
+    size: f32,
+    (r, g, b): (f32, f32, f32),
+) -> String {
+    use std::fmt::Write as _;
+    let [x0, _y0, _x1, y1] = rect;
+    let leading = size * 1.2;
+    let tx = x0 + 2.0; // small left inset
+    let y_top = y1 - size; // first baseline a little below the top edge
+
+    let mut out = String::new();
+    let _ = writeln!(out, "q");
+    let _ = writeln!(out, "BT");
+    let _ = writeln!(out, "/F1 {size:.2} Tf");
+    let _ = writeln!(out, "{leading:.2} TL");
+    let _ = writeln!(out, "{r:.4} {g:.4} {b:.4} rg");
+    let _ = writeln!(out, "{tx:.2} {y_top:.2} Td");
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            let _ = writeln!(out, "T*");
+        }
+        let _ = writeln!(out, "({}) Tj", pdf_escape(line));
+    }
+    let _ = writeln!(out, "ET");
+    let _ = writeln!(out, "Q");
+    out
+}
+
+/// Map a UI font family + bold/italic to its base-14 PostScript name.
+fn base_font(family: &str, bold: bool, italic: bool) -> Result<&'static str, CommandError> {
+    let name = match (family, bold, italic) {
+        ("Helvetica", false, false) => "Helvetica",
+        ("Helvetica", true, false) => "Helvetica-Bold",
+        ("Helvetica", false, true) => "Helvetica-Oblique",
+        ("Helvetica", true, true) => "Helvetica-BoldOblique",
+        ("Times", false, false) => "Times-Roman",
+        ("Times", true, false) => "Times-Bold",
+        ("Times", false, true) => "Times-Italic",
+        ("Times", true, true) => "Times-BoldItalic",
+        ("Courier", false, false) => "Courier",
+        ("Courier", true, false) => "Courier-Bold",
+        ("Courier", false, true) => "Courier-Oblique",
+        ("Courier", true, true) => "Courier-BoldOblique",
+        (other, _, _) => {
+            return Err(CommandError::InvalidInput(format!("unknown font family: {other}")))
+        }
+    };
+    Ok(name)
+}
+
+/// Escape a PDF literal-string body (`\`, `(`, `)`). Non-ASCII passes through —
+/// base-14 fonts only render the ASCII/WinAnsi range (documented limit).
+fn pdf_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '(' => out.push_str("\\("),
+            ')' => out.push_str("\\)"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Parse `#rrggbb` into RGB components in 0..=1.
 #[allow(clippy::cast_precision_loss)] // 0..=255 → f32 is exact.
 fn parse_hex_color(hex: &str) -> Result<(f32, f32, f32), CommandError> {
