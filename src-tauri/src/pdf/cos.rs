@@ -1354,6 +1354,164 @@ fn pdf_escape(s: &str) -> String {
     out
 }
 
+/// SPEC: P3-ANN-004 — add a shape annotation: `/Square` for a rectangle or
+/// `/Circle` for an ellipse, bounded by `rect`, with a generated `/AP` so it
+/// renders in every reader (`PDFium` can't author a coloured shape). Stroke +
+/// optional fill + opacity + border width. Lines/arrows/polygons are C1b.
+#[allow(clippy::too_many_arguments)]
+pub fn add_shape(
+    bytes: &[u8],
+    page: usize,
+    kind: &str,
+    rect: [f32; 4],
+    stroke: &str,
+    fill: Option<&str>,
+    opacity: f32,
+    stroke_width: f32,
+) -> Result<Vec<u8>, CommandError> {
+    let subtype: &[u8] = match kind {
+        "rectangle" => b"Square",
+        "ellipse" => b"Circle",
+        other => return Err(CommandError::InvalidInput(format!("unknown shape kind: {other}"))),
+    };
+    let (sr, sg, sb) = parse_hex_color(stroke)?;
+    let fill_rgb = fill.map(parse_hex_color).transpose()?;
+    let opacity = opacity.clamp(0.0, 1.0);
+    let width = stroke_width.max(0.0);
+    let [x0, y0, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0) {
+        return Err(CommandError::InvalidInput("shape rect is empty".into()));
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let rect_obj =
+        Object::Array(vec![Object::Real(x0), Object::Real(y0), Object::Real(x1), Object::Real(y1)]);
+
+    let content = shape_appearance_content(kind, rect, (sr, sg, sb), fill_rgb, width);
+
+    // Opacity lives on an ExtGState shared by stroke + fill in the appearance.
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut bs = Dictionary::new();
+    bs.set("W", Object::Real(width));
+    bs.set("S", Object::Name(b"S".to_vec())); // solid border
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(subtype.to_vec()));
+    annot.set("Rect", rect_obj);
+    annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
+    if let Some((fr, fg, fb)) = fill_rgb {
+        annot.set("IC", Object::Array(vec![Object::Real(fr), Object::Real(fg), Object::Real(fb)]));
+    }
+    annot.set("CA", Object::Real(opacity));
+    annot.set("BS", Object::Dictionary(bs));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The `/AP` content stream for a shape, drawn in absolute page coords (the
+/// form's `BBox` == `Rect`). The path is inset by half the stroke width so the
+/// stroke stays inside `/Rect`. An ellipse is the standard 4-Bézier (kappa)
+/// approximation. Fill uses `/GS` opacity via the resource set on the form.
+fn shape_appearance_content(
+    kind: &str,
+    rect: [f32; 4],
+    (sr, sg, sb): (f32, f32, f32),
+    fill: Option<(f32, f32, f32)>,
+    width: f32,
+) -> String {
+    use std::fmt::Write as _;
+    let [x0, y0, x1, y1] = rect;
+    let hw = width / 2.0;
+    let (ix0, iy0, ix1, iy1) = (x0 + hw, y0 + hw, x1 - hw, y1 - hw);
+
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    let _ = writeln!(out, "{width:.2} w");
+    let _ = writeln!(out, "{sr:.4} {sg:.4} {sb:.4} RG");
+    if let Some((fr, fg, fb)) = fill {
+        let _ = writeln!(out, "{fr:.4} {fg:.4} {fb:.4} rg");
+    }
+    // Paint operator: fill+stroke (B), fill only (f), or stroke only (S).
+    let paint = match (fill.is_some(), width > 0.0) {
+        (true, true) => "B",
+        (true, false) => "f",
+        (false, _) => "S",
+    };
+
+    if kind == "rectangle" {
+        let _ = writeln!(out, "{ix0:.2} {iy0:.2} {:.2} {:.2} re", ix1 - ix0, iy1 - iy0);
+        let _ = writeln!(out, "{paint}");
+    } else {
+        // Ellipse as four cubic Béziers (kappa ≈ 0.5523), starting at the right
+        // anchor and going counter-clockwise: right→top→left→bottom→right.
+        let cx = (ix0 + ix1) / 2.0;
+        let cy = (iy0 + iy1) / 2.0;
+        let rx = (ix1 - ix0) / 2.0;
+        let ry = (iy1 - iy0) / 2.0;
+        let kx = rx * 0.552_284_8;
+        let ky = ry * 0.552_284_8;
+        let _ = writeln!(out, "{:.2} {:.2} m", cx + rx, cy);
+        let _ = writeln!(
+            out,
+            "{:.2} {:.2} {:.2} {:.2} {:.2} {:.2} c",
+            cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry
+        );
+        let _ = writeln!(
+            out,
+            "{:.2} {:.2} {:.2} {:.2} {:.2} {:.2} c",
+            cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy
+        );
+        let _ = writeln!(
+            out,
+            "{:.2} {:.2} {:.2} {:.2} {:.2} {:.2} c",
+            cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry
+        );
+        let _ = writeln!(
+            out,
+            "{:.2} {:.2} {:.2} {:.2} {:.2} {:.2} c",
+            cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy
+        );
+        let _ = writeln!(out, "h");
+        let _ = writeln!(out, "{paint}");
+    }
+    out
+}
+
 /// Parse `#rrggbb` into RGB components in 0..=1.
 #[allow(clippy::cast_precision_loss)] // 0..=255 → f32 is exact.
 fn parse_hex_color(hex: &str) -> Result<(f32, f32, f32), CommandError> {

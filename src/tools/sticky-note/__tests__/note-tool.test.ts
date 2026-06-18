@@ -17,6 +17,7 @@ const ctx = {
     color: "#000",
     opacity: 1,
     strokeWidth: 2,
+    fillColor: null,
     fontFamily: "Helvetica" as const,
     fontSize: 14,
     bold: false,

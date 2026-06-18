@@ -11,6 +11,7 @@ const ctx: ToolContext = {
     color: "#ff0000",
     opacity: 0.5,
     strokeWidth: 3,
+    fillColor: null,
     fontFamily: "Helvetica",
     fontSize: 14,
     bold: false,

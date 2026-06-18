@@ -12,6 +12,8 @@ const DEFAULT_OPTIONS: ToolOptions = {
   color: "#ffd400",
   opacity: 1,
   strokeWidth: 2,
+  // Shapes start unfilled (P3.C1).
+  fillColor: null,
   // Free-text defaults (P3.B3); other tools ignore these.
   fontFamily: "Helvetica",
   fontSize: 14,

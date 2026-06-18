@@ -50,6 +50,8 @@ export interface ToolOptions {
   opacity: number;
   /** Stroke width in points. */
   strokeWidth: number;
+  /** Shape interior colour (P3.C1), hex; `null` = no fill. */
+  fillColor: string | null;
   /** Free-text font family (P3.B3). */
   fontFamily: FontFamily;
   /** Free-text font size in points. */

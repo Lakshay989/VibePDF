@@ -46,6 +46,7 @@ beforeEach(() => {
       color: "#112233",
       opacity: 1,
       strokeWidth: 2,
+      fillColor: null,
       fontFamily: "Times",
       fontSize: 18,
       bold: true,

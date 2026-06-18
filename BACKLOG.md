@@ -332,6 +332,23 @@ the current roadmap phase. When one is picked up, move it into the relevant
   parse), including edits that don't change annotations. Cheap today; gate to
   annotation-affecting epochs if it shows up on large files.
 
+## From P3.C1a (shapes — rectangle + ellipse)
+
+- **No line / arrow / polygon** — C1a is the two drag-to-size closed shapes.
+  `/Line` (+`/LE` arrowheads), `/PolyLine`, `/Polygon` and the polygon's
+  multi-click gesture are **C1b**.
+- **No select / delete / edit of a committed shape** — shared with markup &
+  free-text; lands with the D1 read-back + per-annotation delete follow-up.
+- **Axis-aligned only** — shapes are drawn to an axis-aligned `/Rect`; no rotation
+  handle.
+- **Solid border only** — no dashed (`/BS /D`) or cloud (`/BE`) borders, no
+  rounded-rectangle corners.
+- **Ellipse is a 4-Bézier approximation** (kappa) — visually exact but not a true
+  conic; fine, note it if a reader complains.
+- **The A2 annotation overlay's committed-shape `Shape` renderer is now unused**
+  in production (committed shapes are canvas-drawn). Kept for the live-draft
+  preview + a possible optimistic-render path; revisit if it bit-rots.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

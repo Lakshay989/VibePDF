@@ -10,9 +10,9 @@ use std::path::PathBuf;
 
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_free_text, add_text_markup, add_text_note, add_top_level_bookmark, clear_text_markup,
-    delete_annotation, merge_documents, prune_dangling_destinations, read_annotations,
-    read_form_field_names, read_text_notes, register_inserted_form_fields,
+    add_free_text, add_shape, add_text_markup, add_text_note, add_top_level_bookmark,
+    clear_text_markup, delete_annotation, merge_documents, prune_dangling_destinations,
+    read_annotations, read_form_field_names, read_text_notes, register_inserted_form_fields,
     read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages, resize_pages,
     update_text_note,
 };
@@ -335,6 +335,71 @@ fn cos_free_text_rejects_empty_rect_and_bad_font() {
     let bytes = fixture_bytes("hello.pdf");
     assert!(add_free_text(&bytes, 0, [10.0, 10.0, 10.0, 40.0], "x", "Helvetica", 12.0, "#000000", false, false).is_err());
     assert!(add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", "Comic Sans", 12.0, "#000000", false, false).is_err());
+}
+
+/// The single annotation dict on page 1 + its `/AP /N` stream content (no font
+/// lookup — for shapes, which use an `ExtGState` resource, not a `/Font`).
+fn first_annot_and_ap(bytes: &[u8]) -> (Dictionary, String) {
+    let doc = Document::load_mem(bytes).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let annot_ref = doc
+        .get_dictionary(page_id)
+        .unwrap()
+        .get(b"Annots")
+        .and_then(Object::as_array)
+        .unwrap()[0]
+        .as_reference()
+        .unwrap();
+    let annot = doc.get_dictionary(annot_ref).unwrap().clone();
+    let n = annot.get(b"AP").and_then(Object::as_dict).unwrap().get(b"N").unwrap().as_reference().unwrap();
+    let stream = doc.get_object(n).and_then(Object::as_stream).unwrap();
+    (annot, String::from_utf8_lossy(&stream.content).into_owned())
+}
+
+/// SPEC: P3-ANN-004 — add_shape writes `/Square` for a rectangle and `/Circle`
+/// for an ellipse, each with `/C` + a generated `/AP`, and reopens in PDFium.
+#[test]
+fn cos_add_shape_writes_square_and_circle() {
+    let bytes = fixture_bytes("hello.pdf");
+
+    let sq = add_shape(&bytes, 0, "rectangle", [100.0, 600.0, 300.0, 700.0], "#ff0000", None, 1.0, 2.0)
+        .expect("rectangle");
+    assert_eq!(pdfium_page_count(&sq), 1);
+    let (annot, ap) = first_annot_and_ap(&sq);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Square");
+    assert!(annot.get(b"C").and_then(Object::as_array).is_ok(), "stroke /C present");
+    assert!(ap.contains(" re") && ap.contains('S'), "rectangle path: {ap}");
+
+    let ci = add_shape(&bytes, 0, "ellipse", [100.0, 600.0, 300.0, 700.0], "#0000ff", None, 1.0, 2.0)
+        .expect("ellipse");
+    let (annot, ap) = first_annot_and_ap(&ci);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Circle");
+    assert!(ap.contains(" c\n") && ap.contains('h'), "ellipse Béziers: {ap}");
+}
+
+#[test]
+fn cos_shape_fill_sets_ic_unfilled_omits_it() {
+    let bytes = fixture_bytes("hello.pdf");
+
+    let filled = add_shape(&bytes, 0, "rectangle", [10.0, 10.0, 110.0, 60.0], "#000000", Some("#00ff00"), 1.0, 2.0)
+        .expect("filled");
+    let (annot, ap) = first_annot_and_ap(&filled);
+    assert!(annot.get(b"IC").and_then(Object::as_array).is_ok(), "interior colour /IC present");
+    assert!(ap.contains("rg"), "fill colour set: {ap}");
+    assert!(ap.contains('B'), "fill+stroke paint op: {ap}");
+
+    let unfilled = add_shape(&bytes, 0, "rectangle", [10.0, 10.0, 110.0, 60.0], "#000000", None, 1.0, 2.0)
+        .expect("unfilled");
+    let (annot, ap) = first_annot_and_ap(&unfilled);
+    assert!(annot.get(b"IC").is_err(), "no /IC when unfilled");
+    assert!(!ap.contains(" rg"), "no fill colour op: {ap}");
+}
+
+#[test]
+fn cos_shape_rejects_bad_kind_and_empty_rect() {
+    let bytes = fixture_bytes("hello.pdf");
+    assert!(add_shape(&bytes, 0, "triangle", [0.0, 0.0, 10.0, 10.0], "#000000", None, 1.0, 1.0).is_err());
+    assert!(add_shape(&bytes, 0, "rectangle", [10.0, 10.0, 10.0, 50.0], "#000000", None, 1.0, 1.0).is_err());
 }
 
 /// SPEC: P3-ANN-008 — read_annotations surfaces every supported kind (markup /

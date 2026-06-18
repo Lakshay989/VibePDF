@@ -35,8 +35,12 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const italic = useToolStore((s) => s.options.italic);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
+  const fillColor = useToolStore((s) => s.options.fillColor);
   const noteActive = activeTool === "sticky-note";
   const textActive = activeTool === "free-text";
+  const rectActive = activeTool === "rectangle";
+  const ellipseActive = activeTool === "ellipse";
+  const shapeActive = rectActive || ellipseActive;
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -170,6 +174,65 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
           >
             I
           </button>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => setActiveTool(rectActive ? null : "rectangle")}
+        title="Draw a rectangle (drag on the page)"
+        aria-label="Rectangle tool"
+        aria-pressed={rectActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (rectActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Rectangle
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(ellipseActive ? null : "ellipse")}
+        title="Draw an ellipse (drag on the page)"
+        aria-label="Ellipse tool"
+        aria-pressed={ellipseActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (ellipseActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Ellipse
+      </button>
+      {shapeActive ? (
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-neutral-400">Fill</span>
+          <button
+            type="button"
+            onClick={() => setOptions({ fillColor: null })}
+            aria-label="No fill"
+            aria-pressed={fillColor === null}
+            title="No fill"
+            className={
+              "h-4 w-4 rounded-full border border-neutral-300 bg-white text-[8px] leading-none text-neutral-400 dark:border-neutral-600 " +
+              (fillColor === null ? "ring-2 ring-blue-500 ring-offset-1" : "")
+            }
+          >
+            ∅
+          </button>
+          {COLORS.map((c) => (
+            <button
+              key={`fill-${c}`}
+              type="button"
+              onClick={() => setOptions({ fillColor: c })}
+              aria-label={`Fill colour ${c}`}
+              aria-pressed={fillColor === c}
+              title={c}
+              style={{ backgroundColor: c }}
+              className={
+                "h-4 w-4 rounded-full border border-neutral-300 dark:border-neutral-600 " +
+                (fillColor === c ? "ring-2 ring-blue-500 ring-offset-1" : "")
+              }
+            />
+          ))}
         </div>
       ) : null}
       <span className="text-neutral-300 dark:text-neutral-700">|</span>

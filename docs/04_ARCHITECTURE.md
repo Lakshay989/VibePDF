@@ -158,6 +158,15 @@ canvas takes over. So the overlay catalogue is now: notes (persistent overlay,
 no `/AP`), free-text (transient editor overlay, canvas-rendered `/AP`), markup
 (no overlay, canvas-rendered `/AP`).
 
+**Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
+`/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated
+`/AP` (a path painted `S`/`f`/`B`; the ellipse is the standard four-Bézier kappa
+approximation). C1a also *completes* the A2 overlay's promise: the
+`annotation-layer` was built with a draft/preview lifecycle that committed to the
+store as a placeholder — it now **registers the shape tools and persists** the
+committed draft through the actor (`addShape` → `bumpEpoch` → canvas), keeping
+only the in-progress draft in the store. Line/arrow/polygon are C1b.
+
 **Reading annotations back (P3.D1).** `cos::read_annotations` is the one read that
 spans *all* kinds: it walks every page's `/Annots`, whitelists the six subtypes we
 author, and returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,

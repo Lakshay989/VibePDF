@@ -105,6 +105,7 @@ pub fn run() {
             commands::pdf::pdf_read_text_notes,
             commands::pdf::pdf_read_annotations,
             commands::pdf::pdf_add_free_text,
+            commands::pdf::pdf_add_shape,
             commands::pdf::pdf_delete_pages,
             commands::pdf::pdf_insert_blank_page,
             commands::pdf::pdf_crop_page,

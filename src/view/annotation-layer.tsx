@@ -14,9 +14,13 @@
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 
+import { addShape } from "@/ipc/shapes";
 import { useAnnotationStore, useDocAnnotations } from "@/state/annotation-store";
+import { useEditEpochStore } from "@/state/edit-epoch-store";
+import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
 import {
+  type AnnotationDraft,
   getTool,
   IDLE,
   type MarkupAnnotation,
@@ -25,11 +29,17 @@ import {
   type PdfRect,
   pdfToScreen,
   type Quad,
+  registerTool,
   type ScreenPoint,
   screenToPdf,
   stepTool,
   type ToolSession,
 } from "@/tools/_framework";
+import { shapeTools } from "@/tools/shapes/shape-tools";
+
+// Register the shape tools once, when this module loads. The overlay is their
+// host: it drives the gesture and persists the committed draft (below).
+for (const tool of shapeTools) registerTool(tool);
 
 export interface AnnotationLayerProps {
   documentId: string;
@@ -58,6 +68,8 @@ export function AnnotationLayer({
   const setDraft = useAnnotationStore((s) => s.setDraft);
   const addAnnotation = useAnnotationStore((s) => s.add);
   const select = useAnnotationStore((s) => s.select);
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const setHistory = useHistoryStore((s) => s.setHistory);
 
   const activeTool = useToolStore((s) => s.activeTool);
   const options = useToolStore((s) => s.options);
@@ -131,8 +143,36 @@ export function AnnotationLayer({
       { documentId, options },
     );
     sessionRef.current = r.session;
-    if (r.committed) addAnnotation(documentId, r.committed);
+    if (r.committed) commitDraft(r.committed);
     else setDraft(null);
+  };
+
+  // Persist a committed draft. Shapes (rectangle/ellipse) are written to the PDF
+  // via the actor (lopdf builds the `/AP`); the canvas then renders them on the
+  // epoch reload — so the store holds only the in-progress draft, not committed
+  // shapes. Any non-shape draft falls back to the store (preview-only tools).
+  const commitDraft = (committed: AnnotationDraft) => {
+    if (committed.type !== "rectangle" && committed.type !== "ellipse") {
+      addAnnotation(documentId, committed);
+      return;
+    }
+    const { rect } = committed;
+    setDraft(null);
+    addShape(
+      documentId,
+      committed.page,
+      committed.type,
+      [rect.x0, rect.y0, rect.x1, rect.y1],
+      options.color,
+      options.fillColor,
+      options.opacity,
+      options.strokeWidth,
+    )
+      .then((h) => {
+        bumpEpoch(documentId);
+        setHistory(documentId, h);
+      })
+      .catch((err: unknown) => console.warn("add shape failed", documentId, err));
   };
 
   // Notes carry no `/AP` and are drawn by the HTML `NoteLayer` overlay, not as

@@ -1809,6 +1809,41 @@ free-text are deferred (BACKLOG) — they need durable `/NM` handles.
 
 ---
 
+### P3.C1a — shapes: rectangle + ellipse (this commit)
+
+```bash
+# No new deps. Drag-to-size shapes, canvas-rendered via a generated /AP. Also the
+# A2→C1 step: the annotation-layer commit now PERSISTS (was store-only).
+#   cos::add_shape → /Square (rect) | /Circle (ellipse): /Rect /C (+/IC fill) /CA
+#     /BS/W + /AP (re…S/B for rect; 4-Bézier kappa ellipse), inset by ½ stroke.
+#   ShapeEdit (annotation.rs) + AddShape actor msg + pdf_add_shape command.
+# Frontend: ToolOptions += fillColor (string|null). shape-tools.ts
+#   (makeDragRectTool → rectangleTool/ellipseTool). annotation-layer registers
+#   them at module load + commit → addShape IPC → bumpEpoch (NOT the store).
+#   Rectangle/Ellipse toggles + a fill control in MarkupToolbar.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy: named the ellipse coords (cx/cy/rx/ry/kx/ky) to dodge
+#   many_single_char_names; buffer `out` not `c`.
+#   TS: added fillColor:null to 3 ToolOptions test fixtures.
+npm run test           # 226/226 (+9: addShape 3, shape-tools 6; annotation-layer
+#   commit test rewritten to assert the IPC persist, not a store add)
+npm run test:rust      # EXIT 0. shapes.rs: 3 (persists through save / undo removes
+#   / rejects empty rect) + 1 ignored artifact. cos.rs: +3 (Square+Circle w/ /AP /
+#   fill sets /IC + unfilled omits it / rejects bad kind+empty rect).
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test shapes \
+  shape_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-shapes.pdf (a filled rect + a filled ellipse).
+```
+
+Rendering decision: shapes have an `/AP`, so the **canvas** draws them (like
+markup/free-text). Left `[~]` pending the human in-app canvas-render check +
+cross-reader. Line/arrow/polygon are **C1b**; select/delete is the D1 follow-up.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

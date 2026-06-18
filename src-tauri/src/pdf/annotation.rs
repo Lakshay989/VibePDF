@@ -12,7 +12,7 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_text_markup, add_text_note, clear_text_markup, delete_annotation,
+    add_free_text, add_shape, add_text_markup, add_text_note, clear_text_markup, delete_annotation,
     update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -222,5 +222,43 @@ impl<'a> Edit<PdfDocument<'a>> for FreeTextEdit {
 
     fn label(&self) -> &'static str {
         "free-text"
+    }
+}
+
+/// SPEC: P3-ANN-004 — add a shape annotation (`/Square` or `/Circle`) at `rect`
+/// on `page` with a generated `/AP`.
+pub struct ShapeEdit {
+    pub page: i32,
+    pub kind: String,
+    pub rect: [f32; 4],
+    pub stroke: String,
+    pub fill: Option<String>,
+    pub opacity: f32,
+    pub stroke_width: f32,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for ShapeEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_shape(
+                bytes,
+                page,
+                &self.kind,
+                self.rect,
+                &self.stroke,
+                self.fill.as_deref(),
+                self.opacity,
+                self.stroke_width,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "shape"
     }
 }

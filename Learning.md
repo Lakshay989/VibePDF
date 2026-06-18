@@ -4325,6 +4325,70 @@ presents them as a managed list.
 
 ---
 
+### P3.C1a — shape annotations (and the A2 overlay finally persists)
+
+#### Problem
+
+A2 shipped the drawing framework — a pointer-gesture lifecycle, a draft store,
+and an SVG renderer — but its commit only added to an in-memory store; nothing
+reached the PDF. C1a is where that framework becomes real: drag a rectangle or
+ellipse and it's written to the document.
+
+#### Concepts learned
+
+- **PDF shape annotations.** `/Square` (a rectangle) and `/Circle` (an ellipse)
+  are bounded by `/Rect`, with `/C` (stroke colour), `/IC` (interior/fill colour),
+  `/CA` (opacity), and `/BS << /W >>` (border width). We also generate the `/AP`
+  so every reader paints them identically.
+- **No ellipse primitive in PDF.** Path drawing has lines (`l`), rectangles
+  (`re`), and cubic Béziers (`c`) — but no ellipse. A circle/ellipse is the
+  classic **four-Bézier approximation**: four quarter-arcs whose control points
+  sit `kappa·r ≈ 0.5523·r` from each axis endpoint. Visually exact to well under a
+  pixel.
+- **Paint operators encode fill vs stroke.** After building the path you choose:
+  `S` (stroke), `f` (fill), or `B` (fill *then* stroke). We pick based on whether
+  a fill colour is set and the width is non-zero — and **inset the path by half
+  the stroke width** so the stroke stays inside `/Rect` (a stroke straddles its
+  path).
+- **A factory for near-identical tools.** Rectangle and ellipse are the *same*
+  gesture (press-drag-release) differing only in the draft's `type`, so one
+  `makeDragRectTool(kind)` produces both — the anchor stays put while dragging,
+  the rect normalizes only on commit (so dragging back across the origin still
+  works).
+- **The A2 → C1 evolution (the real lesson).** A2 deliberately committed to a
+  *store* as a placeholder ("persistence arrives in B1/C1"). C1a fulfils it: the
+  `annotation-layer`'s commit now **persists via the actor** (`addShape` → `/AP` →
+  `bumpEpoch` → the canvas draws it) and the store holds only the *in-progress
+  draft*. The committed shape is never in the store — same canvas-vs-overlay split
+  as markup/free-text. Recognizing when scaffolding should be *replaced* (not
+  extended) is the call here; its one A2 test was updated to assert the IPC
+  persist, not a store add.
+- **Module-load side effects for registration.** The shape tools register into the
+  global tool registry at module-evaluation time (`for (…) registerTool(…)` at the
+  top of `annotation-layer`), so they're available the moment the overlay mounts —
+  no per-render registration.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_shape` (`/Square`/`/Circle` + `/AP`) + the Bézier-ellipse appearance. |
+| `src-tauri/src/pdf/annotation.rs` | `ShapeEdit` (byte-handoff via `cos_edit`). |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | `AddShape` message + `pdf_add_shape`. |
+| `src/ipc/shapes.ts` | `addShape` typed wrapper. |
+| `src/tools/shapes/shape-tools.ts` | `rectangleTool` + `ellipseTool` (a drag-rect factory). |
+| `src/view/annotation-layer.tsx` | Registers the shape tools; commit now persists via IPC. |
+| `src/app/MarkupToolbar.tsx`, `src/state/tool-store.ts`, `types.ts` | Rectangle/Ellipse toggles + a fill control + `ToolOptions.fillColor`. |
+| `src-tauri/tests/shapes.rs`, `tests/cos.rs`, FE `shapes`/`shape-tools`/`annotation-layer` | Round-trip, fill-vs-stroke, reducer, and commit-persists tests. |
+
+#### Further reading
+
+- Bézier circle approximation and the magic constant kappa (≈ 0.5523).
+- PDF 32000-1:2008 §8.5.3 (path-painting operators), §12.5.6.8 (Square/Circle annotations), §12.5.4 (`/BS` border style).
+- The "replace the scaffold" instinct — when a placeholder implementation should be swapped out, not built upon.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

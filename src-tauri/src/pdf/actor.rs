@@ -39,7 +39,8 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, TextMarkupEdit, UpdateNoteEdit,
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, ShapeEdit, TextMarkupEdit,
+    UpdateNoteEdit,
 };
 use crate::pdf::cos::{read_annotations, read_text_notes, AnnotationInfo, NoteData};
 use crate::pdf::reorder::ReorderEdit;
@@ -214,6 +215,18 @@ pub enum Message {
         color: String,
         bold: bool,
         italic: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
+    /// generated `/AP`. Undoable; marks dirty.
+    AddShape {
+        page: i32,
+        kind: String,
+        rect: [f32; 4],
+        stroke: String,
+        fill: Option<String>,
+        opacity: f32,
+        stroke_width: f32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
@@ -759,6 +772,50 @@ impl DocumentActorHandle {
                 color,
                 bold,
                 italic,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-004 — add a shape annotation. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_shape(
+        &self,
+        page: i32,
+        kind: String,
+        rect: [f32; 4],
+        stroke: String,
+        fill: Option<String>,
+        opacity: f32,
+        stroke_width: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_shape_request(page, kind, rect, stroke, fill, opacity, stroke_width)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_shape_request(
+        &self,
+        page: i32,
+        kind: String,
+        rect: [f32; 4],
+        stroke: String,
+        fill: Option<String>,
+        opacity: f32,
+        stroke_width: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddShape {
+                page,
+                kind,
+                rect,
+                stroke,
+                fill,
+                opacity,
+                stroke_width,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -1312,6 +1369,27 @@ fn run_worker(
                     bold,
                     italic,
                 };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddShape {
+                page,
+                kind,
+                rect,
+                stroke,
+                fill,
+                opacity,
+                stroke_width,
+                reply,
+            } => {
+                let edit = ShapeEdit { page, kind, rect, stroke, fill, opacity, stroke_width };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

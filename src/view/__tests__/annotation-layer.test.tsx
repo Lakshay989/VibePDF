@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
+vi.mock("@/ipc/shapes", () => ({
+  addShape: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+}));
+
+import { addShape } from "@/ipc/shapes";
 import { useAnnotationStore } from "@/state/annotation-store";
 import { useToolStore } from "@/state/tool-store";
 import { clearTools, registerTool, type Annotation } from "@/tools/_framework";
-import { exampleRectTool } from "@/tools/_framework/example-rect-tool";
+import { rectangleTool } from "@/tools/shapes/shape-tools";
 import { AnnotationLayer } from "@/view/annotation-layer";
 
 const DOC = "doc-1";
@@ -76,8 +81,9 @@ describe("AnnotationLayer", () => {
     expect(draft?.getAttribute("stroke-dasharray")).toBe("4 4");
   });
 
-  it("commits an annotation from pointer down → move → up with the rect tool active", () => {
-    registerTool(exampleRectTool);
+  it("persists a shape (not the store) on pointer down → move → up", () => {
+    registerTool(rectangleTool);
+    // Default options: stroke #ffd400, no fill, opacity 1, width 2.
     useToolStore.setState({ activeTool: "rectangle" });
     const { container } = render(layer());
     const svg = container.querySelector("svg") as Element;
@@ -86,12 +92,19 @@ describe("AnnotationLayer", () => {
     fireEvent.pointerMove(svg, { clientX: 110, clientY: 120, pointerId: 1 });
     fireEvent.pointerUp(svg, { clientX: 110, clientY: 120, pointerId: 1 });
 
-    const list = useAnnotationStore.getState().byDoc[DOC];
-    expect(list).toHaveLength(1);
     // down (10,20)→PDF(10,772), up (110,120)→PDF(110,672), normalized.
-    const committed = list?.[0];
-    if (!committed || !("rect" in committed)) throw new Error("expected a rect annotation");
-    expect(committed.rect).toEqual({ x0: 10, y0: 672, x1: 110, y1: 772 });
+    expect(addShape).toHaveBeenCalledWith(
+      DOC,
+      0,
+      "rectangle",
+      [10, 672, 110, 772],
+      "#ffd400",
+      null,
+      1,
+      2,
+    );
+    // The committed shape lives in the PDF (canvas), not the store.
+    expect(useAnnotationStore.getState().byDoc[DOC] ?? []).toHaveLength(0);
     expect(useAnnotationStore.getState().draft).toBeNull();
   });
 
