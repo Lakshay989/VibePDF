@@ -12,6 +12,7 @@ import { renderPageOnDoc } from "@/view/render-page";
 import { AnnotationLayer } from "@/view/annotation-layer";
 import { FreeTextLayer } from "@/view/free-text-layer";
 import { NoteLayer } from "@/view/note-layer";
+import { SelectionHighlightLayer } from "@/view/selection-highlight-layer";
 import { PageTextLayer } from "@/view/text-layer";
 import { LruCache } from "@/view/page-cache";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
@@ -490,6 +491,13 @@ function PageSlot({
       />
       <FreeTextLayer
         documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <SelectionHighlightLayer
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}
         displayedHeight={natural.height}

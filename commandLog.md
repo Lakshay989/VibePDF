@@ -1774,6 +1774,41 @@ cross-reader (Acrobat/Preview/Okular). Rich text / underline / re-edit are **B3b
 
 ---
 
+### P3.D1 — annotation sidebar (read-only list) (this commit)
+
+```bash
+# No new deps. First READ-over-all-kinds: the inverse projection that lets you
+# see/search/filter/jump-to every annotation.
+#   cos::read_annotations → Vec<AnnotationInfo{id (lopdf obj id), page, kind,
+#     rect, contents, author, modified}>; whitelists 6 subtypes, parse_pdf_date
+#     for /M (inverse of pdf_date_now). actor ReadAnnotations (read-only, like
+#     ReadNotes). command pdf_read_annotations.
+# Frontend: AnnotationPanel (re-reads on [documentId, epoch]); pure
+#   annotation-filter (search + type/author/date + group-by-page); view-store
+#   showAnnotations + a toolbar toggle; annotation-selection-store +
+#   SelectionHighlightLayer (dashed box from the read /Rect); click → scrollToPage.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   eslint: memoized `all = list ?? []` (exhaustive-deps; array identity churned
+#   the useMemos).
+npm run test           # 217/217 (+16: annotations IPC 3, annotation-filter 8, panel 5)
+npm run test:rust      # EXIT 0. cos.rs +2 (reads all kinds w/ fields+date / skips
+#   links + empty on plain). read_annotations.rs: 3 (reads all / reflects undo /
+#   empty) + 1 ignored demo artifact.
+
+# Sidebar demo artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test read_annotations \
+  writes_sidebar_demo_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-annots.pdf (a highlight + a note + a free-text).
+```
+
+Read-only step (no write path). Left `[~]` pending the human in-app pass (add the
+three kinds → toggle Annotations → grouped list, search + filters narrow, click →
+scroll + dashed highlight). Per-annotation delete/edit + author/date on markup/
+free-text are deferred (BACKLOG) — they need durable `/NM` handles.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

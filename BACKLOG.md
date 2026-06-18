@@ -311,6 +311,27 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **Committing drops the tool to idle** — you re-pick **Text** for each box. Keep
   the tool armed for multiple boxes if it feels tedious in practice.
 
+## From P3.D1 (annotation sidebar)
+
+- **No per-annotation delete / edit from the sidebar** — D1 is read-only.
+  Deleting/editing a specific annotation needs a **durable handle**; markup &
+  free-text carry no `/NM` (only notes do). Next annotation-management step:
+  enrich `add_text_markup`/`add_free_text` to write `/NM` (+ `/T` author + `/M`
+  date), add `cos::delete_annotation`-style removal by `/NM` for all kinds, and
+  wire a Delete (and re-edit) into the sidebar rows.
+- **Markup & free-text show no author/date** — we don't write `/T`/`/M` on them,
+  so the author/date columns are blank and those filters effectively only bite
+  notes. Fixed by the same `/T`+`/M` enrichment above.
+- **Selection handle is the lopdf object id** — stable within a load but not
+  across a save/edit, so the sidebar selection (and its highlight) clears on the
+  next edit. Fine for read-only navigation; the durable `/NM` handle above makes
+  it survive.
+- **Date filter is a single "modified after"** — no calendar range / "between".
+  Add a range if users ask.
+- **The list re-reads the whole PDF on every edit epoch** (serialize + lopdf
+  parse), including edits that don't change annotations. Cheap today; gate to
+  annotation-affecting epochs if it shows up on large files.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

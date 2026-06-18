@@ -4265,6 +4265,66 @@ draw ourselves, and the text has to render in every reader.
 
 ---
 
+### P3.D1 — the annotation sidebar (reading them all back)
+
+#### Problem
+
+We could *write* three annotation kinds (markup, notes, free-text) but had no
+way to *see what's in a document* — to list, search, filter, and jump to
+annotations. D1 is the first feature that reads **every** kind back out and
+presents them as a managed list.
+
+#### Concepts learned
+
+- **A unified read over a heterogeneous collection.** `/Annots` mixes subtypes
+  (Highlight, Text, FreeText, plus Link/Widget/Popup we *don't* own). The read
+  whitelists the six we surface and maps each `/Subtype` to a `kind` tag — turning
+  a ragged object graph into one flat, uniform `AnnotationInfo` list the UI can
+  treat alike.
+- **Parsing a PDF date.** `/M` is `D:YYYYMMDDHHmmSS` + optional offset. Parsing it
+  to epoch-ms is the inverse of the `pdf_date_now` we wrote in B2a — same
+  Hinnant `days_from_civil` algorithm, run forward. Tolerate junk → `None`.
+- **Read model vs. write model, again.** Like B2b's note projection, the panel
+  re-reads on `[documentId, epoch]`, so the list always reflects the PDF after
+  any edit/undo. The actor query is read-only (no history) — a *query*, not a
+  *command*.
+- **A stable-enough handle.** Markup/free-text carry no `/NM`, so the list keys
+  each row on the lopdf **object id** (`"5 0"`). Stable within a load — enough to
+  track selection and draw a highlight — but not across a save, which is exactly
+  why per-annotation *delete* (which needs a durable handle) is deferred.
+- **Pure filter/group, testable without a DOM.** Search + filter (type/author/
+  date) + group-by-page live in `annotation-filter.ts` as pure functions; the
+  React panel is a thin shell over them. The 8 helper tests need no render.
+- **A cross-cutting selection channel.** The sidebar (top of the tree) and the
+  per-page highlight overlay (deep in the page list) don't share a parent, so a
+  tiny zustand store (`annotation-selection-store`, like `tool-store`) carries the
+  selected annotation — *including its `/Rect`*, so the overlay needs no second
+  lookup to draw the box.
+- **Reusing the navigation seam.** "Click → scroll to page" is just the existing
+  `PageVirtualizerHandle.scrollToPage` that the outline/thumbnail panels already
+  call — new feature, no new plumbing.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `read_annotations` + the `AnnotationInfo` DTO + `parse_pdf_date`. |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | Read-only `ReadAnnotations` + `pdf_read_annotations`. |
+| `src/ipc/annotations.ts` | `readAnnotations` + the `AnnotationInfo`/`AnnotationKind` types. |
+| `src/panels/annotation-filter.ts` | Pure search / filter / group-by-page / distinct helpers. |
+| `src/panels/AnnotationPanel.tsx` | The sidebar: read on epoch, render grouped + filtered, click → jump + select. |
+| `src/state/annotation-selection-store.ts` | The selected annotation (carries its `/Rect`). |
+| `src/view/selection-highlight-layer.tsx` | Per-page dashed box over the selected annotation. |
+| `src/state/view-store.ts`, `ZoomToolbar.tsx`, `PdfViewer.tsx` | The sidebar toggle + mount. |
+
+#### Further reading
+
+- CQRS read models / projections — a query-shaped view over a write-shaped store.
+- PDF 32000-1:2008 §12.5.2 (annotation dictionaries, `/Subtype`, `/M`), §7.9.4 (dates).
+- React: lifting cross-cutting UI state into a store vs. prop-drilling.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -11,9 +11,10 @@ use std::path::PathBuf;
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
     add_free_text, add_text_markup, add_text_note, add_top_level_bookmark, clear_text_markup,
-    delete_annotation, merge_documents, prune_dangling_destinations, read_form_field_names,
-    read_text_notes, register_inserted_form_fields, read_top_level_outline_titles,
-    rename_form_fields_with_suffix, reorder_pages, resize_pages, update_text_note,
+    delete_annotation, merge_documents, prune_dangling_destinations, read_annotations,
+    read_form_field_names, read_text_notes, register_inserted_form_fields,
+    read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages, resize_pages,
+    update_text_note,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -334,6 +335,41 @@ fn cos_free_text_rejects_empty_rect_and_bad_font() {
     let bytes = fixture_bytes("hello.pdf");
     assert!(add_free_text(&bytes, 0, [10.0, 10.0, 10.0, 40.0], "x", "Helvetica", 12.0, "#000000", false, false).is_err());
     assert!(add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", "Comic Sans", 12.0, "#000000", false, false).is_err());
+}
+
+/// SPEC: P3-ANN-008 — read_annotations surfaces every supported kind (markup /
+/// note / free-text) with its page + contents, in page order.
+#[test]
+fn cos_reads_all_annotation_kinds() {
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    let with_hl = add_text_markup(&fixture_bytes("hello.pdf"), 0, "highlight", &quads, "#ffd400", 1.0)
+        .expect("markup");
+    let with_note = add_text_note(&with_hl, "n1", 0, 100.0, 600.0, "my note", "Ada").expect("note");
+    let all = add_free_text(&with_note, 0, [50.0, 400.0, 250.0, 440.0], "boxed", "Helvetica", 12.0, "#000000", false, false)
+        .expect("free text");
+
+    let infos = read_annotations(&all).expect("read");
+    let kinds: Vec<&str> = infos.iter().map(|a| a.kind.as_str()).collect();
+    assert!(kinds.contains(&"highlight"), "{kinds:?}");
+    assert!(kinds.contains(&"note"), "{kinds:?}");
+    assert!(kinds.contains(&"freetext"), "{kinds:?}");
+    assert!(infos.iter().all(|a| a.page == 0), "all on page 0");
+
+    let note = infos.iter().find(|a| a.kind == "note").unwrap();
+    assert_eq!(note.contents, "my note");
+    assert_eq!(note.author, "Ada");
+    // A note carries /M, which parses to a plausible recent epoch (> 2020).
+    assert!(note.modified.is_some_and(|m| m > 1_577_836_800_000), "modified: {:?}", note.modified);
+
+    let ft = infos.iter().find(|a| a.kind == "freetext").unwrap();
+    assert_eq!(ft.contents, "boxed");
+}
+
+#[test]
+fn cos_read_annotations_skips_links_and_is_empty_on_plain_pdf() {
+    // links.pdf's page-1 /Link is not a surfaced kind.
+    assert!(read_annotations(&fixture_bytes("links.pdf")).expect("read").iter().all(|a| a.kind != "link"));
+    assert!(read_annotations(&fixture_bytes("hello.pdf")).expect("read").is_empty());
 }
 
 /// A PDF number (Integer/Real) as f32, for reading a MediaBox in a test.

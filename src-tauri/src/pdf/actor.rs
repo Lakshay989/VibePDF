@@ -41,7 +41,7 @@ use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, TextMarkupEdit, UpdateNoteEdit,
 };
-use crate::pdf::cos::{read_text_notes, NoteData};
+use crate::pdf::cos::{read_annotations, read_text_notes, AnnotationInfo, NoteData};
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -197,6 +197,11 @@ pub enum Message {
     /// result into its note overlay on open and after undo/redo.
     ReadNotes {
         reply: oneshot::Sender<Result<Vec<NoteData>, CommandError>>,
+    },
+    /// SPEC: P3-ANN-008 — read every supported annotation for the sidebar list.
+    /// Read-only; the panel pulls on open and after each edit epoch.
+    ReadAnnotations {
+        reply: oneshot::Sender<Result<Vec<AnnotationInfo>, CommandError>>,
     },
     /// SPEC: P3-ANN-003 — add a free-text box at `rect` on `page` with a
     /// generated `/AP`. Undoable; marks dirty; replies with history availability.
@@ -691,6 +696,23 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadNotes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-008 — read every supported annotation. Await-holding for tests.
+    pub async fn read_annotations(&self) -> Result<Vec<AnnotationInfo>, CommandError> {
+        let rx = self.read_annotations_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_annotations_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<Vec<AnnotationInfo>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadAnnotations { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1261,6 +1283,12 @@ fn run_worker(
                 let result = pdfium_lock()
                     .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
                     .and_then(|bytes| read_text_notes(&bytes));
+                let _ = reply.send(result);
+            }
+            Message::ReadAnnotations { reply } => {
+                let result = pdfium_lock()
+                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
+                    .and_then(|bytes| read_annotations(&bytes));
                 let _ = reply.send(result);
             }
             Message::AddFreeText {

@@ -1772,3 +1772,123 @@ fn rect_lower_left(dict: &Dictionary) -> (f32, f32) {
     };
     (num(0), num(1))
 }
+
+/// The four `/Rect` components `[x0, y0, x1, y1]`, or zeros if malformed.
+#[allow(clippy::cast_precision_loss)]
+fn rect_bounds(dict: &Dictionary) -> [f32; 4] {
+    let Ok(rect) = dict.get(b"Rect").and_then(Object::as_array) else {
+        return [0.0; 4];
+    };
+    let num = |i: usize| match rect.get(i) {
+        Some(Object::Real(r)) => *r,
+        Some(Object::Integer(n)) => *n as f32,
+        _ => 0.0,
+    };
+    [num(0), num(1), num(2), num(3)]
+}
+
+/// One annotation as the sidebar (P3.D1) sees it: a stable-within-this-load `id`
+/// (the lopdf object id), its 0-based `page`, a `kind` tag, `/Rect` bounds (for
+/// the selection highlight), `/Contents`, `/T` (author), and `/M` parsed to epoch
+/// millis. Serialized to the frontend annotation panel.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationInfo {
+    pub id: String,
+    pub page: usize,
+    pub kind: String,
+    pub rect: [f32; 4],
+    pub contents: String,
+    pub author: String,
+    pub modified: Option<i64>,
+}
+
+/// Map an annotation `/Subtype` to the sidebar `kind`, or `None` for subtypes we
+/// don't surface (links, form widgets, popups, …).
+fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
+    match subtype {
+        b"Highlight" => Some("highlight"),
+        b"Underline" => Some("underline"),
+        b"StrikeOut" => Some("strikeout"),
+        b"Squiggly" => Some("squiggly"),
+        b"Text" => Some("note"),
+        b"FreeText" => Some("freetext"),
+        _ => None,
+    }
+}
+
+/// SPEC: P3-ANN-008 — read every (supported) annotation out of the document, in
+/// page order, for the annotation sidebar. Read-only; the inverse of nothing in
+/// particular — it surfaces whatever the write paths put on the page. Foreign
+/// subtypes (`/Link`, `/Widget`, `/Popup`, …) are skipped.
+pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut out = Vec::new();
+
+    for (page_no, page_id) in doc.get_pages() {
+        let page = (page_no - 1) as usize;
+        let annots = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+        let arr = match annots {
+            Some(Object::Array(a)) => a,
+            Some(Object::Reference(id)) => {
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+            }
+            _ => continue,
+        };
+        for obj in arr {
+            let Ok(id) = obj.as_reference() else { continue };
+            let Ok(dict) = doc.get_dictionary(id) else { continue };
+            let Some(kind) = dict.get(b"Subtype").and_then(Object::as_name).ok().and_then(annotation_kind)
+            else {
+                continue;
+            };
+            out.push(AnnotationInfo {
+                id: format!("{} {}", id.0, id.1),
+                page,
+                kind: kind.to_owned(),
+                rect: rect_bounds(dict),
+                contents: str_field(dict, b"Contents"),
+                author: str_field(dict, b"T"),
+                modified: dict.get(b"M").and_then(Object::as_str).ok().and_then(parse_pdf_date),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Parse a PDF date string (`D:YYYYMMDDHHmmSS…`, the form [`pdf_date_now`] writes)
+/// into epoch milliseconds. Time-of-day is optional; anything malformed → `None`.
+/// The inverse of `pdf_date_now`'s civil-from-days, using Hinnant's
+/// `days_from_civil`.
+#[allow(clippy::cast_possible_wrap)]
+fn parse_pdf_date(raw: &[u8]) -> Option<i64> {
+    let s = std::str::from_utf8(raw).ok()?;
+    let s = s.strip_prefix("D:").unwrap_or(s);
+    let digits: &str = s.get(..14).or_else(|| s.get(..8))?;
+    if !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let part = |a: usize, b: usize| digits.get(a..b).and_then(|t| t.parse::<i64>().ok());
+    let year = part(0, 4)?;
+    let month = part(4, 6)?;
+    let day = part(6, 8)?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let (hh, mm, ss) = if digits.len() >= 14 {
+        (part(8, 10)?, part(10, 12)?, part(12, 14)?)
+    } else {
+        (0, 0, 0)
+    };
+
+    // Hinnant days_from_civil.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    Some((days * 86_400 + hh * 3600 + mm * 60 + ss) * 1000)
+}

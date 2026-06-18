@@ -158,6 +158,17 @@ canvas takes over. So the overlay catalogue is now: notes (persistent overlay,
 no `/AP`), free-text (transient editor overlay, canvas-rendered `/AP`), markup
 (no overlay, canvas-rendered `/AP`).
 
+**Reading annotations back (P3.D1).** `cos::read_annotations` is the one read that
+spans *all* kinds: it walks every page's `/Annots`, whitelists the six subtypes we
+author, and returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,
+author, `/M`-as-epoch). A read-only `ReadAnnotations` actor query feeds
+`pdf_read_annotations`; the `AnnotationPanel` sidebar re-reads on
+`[documentId, edit-epoch]` (the same projection cadence as the note overlay), so
+the list tracks edits/undo. Selection is a cross-cutting store
+(`annotation-selection-store`) carrying the clicked annotation's `/Rect`, which a
+per-page `SelectionHighlightLayer` draws as a dashed box — giving "select" visible
+feedback for canvas-drawn kinds that have no overlay of their own.
+
 Because the note overlay is *not* the source of truth, it's kept a **projection
 of the PDF** (P3.B2b): `cos::read_text_notes` (a read-only `ReadNotes` actor
 query, serialize-then-lopdf-parse like `GetBytes`) feeds `pdf_read_text_notes`,

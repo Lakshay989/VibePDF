@@ -34,3 +34,36 @@ export async function addTextMarkup(
 export async function clearTextMarkup(id: DocumentId): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_clear_text_markup", { id });
 }
+
+/** The annotation kinds the sidebar surfaces. Mirrors `cos::annotation_kind`. */
+export type AnnotationKind =
+  | "highlight"
+  | "underline"
+  | "strikeout"
+  | "squiggly"
+  | "note"
+  | "freetext";
+
+/** One annotation as the sidebar sees it. Mirrors `cos::AnnotationInfo` (Rust). */
+export interface AnnotationInfo {
+  /** Stable within this load (the lopdf object id) — used to track selection. */
+  id: string;
+  /** 0-based page index. */
+  page: number;
+  kind: AnnotationKind;
+  /** `/Rect` bounds `[x0, y0, x1, y1]` in PDF points (for the selection highlight). */
+  rect: [number, number, number, number];
+  contents: string;
+  author: string;
+  /** `/M` parsed to epoch milliseconds, or null when absent/unparsable. */
+  modified: number | null;
+}
+
+/**
+ * SPEC: P3-ANN-008 — read every supported annotation out of the open document
+ * for the sidebar list. Read-only (no undo entry); the panel pulls this on open
+ * and after each edit epoch. Runs on the Rust document actor.
+ */
+export async function readAnnotations(id: DocumentId): Promise<AnnotationInfo[]> {
+  return invoke<AnnotationInfo[]>("pdf_read_annotations", { id });
+}

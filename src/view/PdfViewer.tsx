@@ -22,6 +22,7 @@ import { mergeDocuments } from "@/ipc/merge";
 import { insertPagesFromPdf } from "@/ipc/insert-from";
 import { useHistoryStore } from "@/state/history-store";
 import { useDarkMode } from "@/app/use-dark-mode";
+import { AnnotationPanel } from "@/panels/AnnotationPanel";
 import { OutlinePanel } from "@/panels/OutlinePanel";
 import { ThumbnailPanel } from "@/panels/ThumbnailPanel";
 import { useViewStore } from "@/state/view-store";
@@ -61,6 +62,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const setFitMode = useViewStore((s) => s.setFitMode);
   const showOutline = useViewStore((s) => s.showOutline);
   const showThumbnails = useViewStore((s) => s.showThumbnails);
+  const showAnnotations = useViewStore((s) => s.showAnnotations);
   const darkMode = useDarkMode();
 
   // SPEC: edit-preview pipeline — bumped on every edit/undo/redo; drives
@@ -436,6 +438,14 @@ export function PdfViewer({ documentId, path }: Props) {
         {showOutline && doc ? (
           <OutlinePanel
             doc={doc}
+            onJump={(page) => virtRef.current?.scrollToPage(page)}
+          />
+        ) : null}
+        {showAnnotations && doc ? (
+          <AnnotationPanel
+            key={documentId}
+            documentId={documentId}
+            epoch={epoch}
             onJump={(page) => virtRef.current?.scrollToPage(page)}
           />
         ) : null}

@@ -48,6 +48,8 @@ export function ZoomToolbar({
   const toggleOutline = useViewStore((s) => s.toggleOutline);
   const showThumbnails = useViewStore((s) => s.showThumbnails);
   const toggleThumbnails = useViewStore((s) => s.toggleThumbnails);
+  const showAnnotations = useViewStore((s) => s.showAnnotations);
+  const toggleAnnotations = useViewStore((s) => s.toggleAnnotations);
 
   // SPEC: P1-VIEW-010 — light / dark / system theme. "Dark" inverts the
   // page for night reading; this control lets the user choose instead of
@@ -98,6 +100,19 @@ export function ZoomToolbar({
         }
       >
         Outline
+      </button>
+      <button
+        type="button"
+        onClick={toggleAnnotations}
+        aria-label="Toggle annotations sidebar"
+        aria-pressed={showAnnotations}
+        title="Toggle annotations list"
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (showAnnotations ? "bg-neutral-200 dark:bg-neutral-800" : "")
+        }
+      >
+        Annotations
       </button>
       <span className="text-neutral-300 dark:text-neutral-700">|</span>
       <button

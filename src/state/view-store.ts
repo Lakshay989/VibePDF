@@ -11,11 +11,13 @@ interface ViewState {
   fitMode: FitMode | null;
   showThumbnails: boolean;
   showOutline: boolean;
+  showAnnotations: boolean;
   setZoom: (z: number) => void;
   setFitMode: (m: FitMode) => void;
   setView: (next: { zoom: number; fitMode: FitMode | null }) => void;
   toggleThumbnails: () => void;
   toggleOutline: () => void;
+  toggleAnnotations: () => void;
 }
 
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
@@ -25,9 +27,11 @@ export const useViewStore = create<ViewState>((set) => ({
   fitMode: "fit-page",
   showThumbnails: true,
   showOutline: false,
+  showAnnotations: false,
   setZoom: (z) => set({ zoom: clampZoom(z), fitMode: null }),
   setFitMode: (m) => set({ fitMode: m }),
   setView: ({ zoom, fitMode }) => set({ zoom: clampZoom(zoom), fitMode }),
   toggleThumbnails: () => set((s) => ({ showThumbnails: !s.showThumbnails })),
   toggleOutline: () => set((s) => ({ showOutline: !s.showOutline })),
+  toggleAnnotations: () => set((s) => ({ showAnnotations: !s.showAnnotations })),
 }));
