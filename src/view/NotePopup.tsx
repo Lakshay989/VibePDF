@@ -44,7 +44,12 @@ export function NotePopup({ note, left, top, onSave, onDelete, onClose }: NotePo
       role="dialog"
       aria-label="Sticky note"
       onPointerDown={stop}
-      style={{ left, top }}
+      // `pointer-events: auto` is essential: the NoteLayer container is
+      // `pointer-events: none` when no tool is active (so clicks fall through to
+      // the text layer), and this popup is its child. Without this, clicks into
+      // the textarea / Save pass straight through and steal focus, so you can't
+      // type — only the programmatic autofocus appeared to work.
+      style={{ left, top, pointerEvents: "auto" }}
       className="absolute z-10 w-56 rounded border border-neutral-300 bg-amber-50 p-2 text-sm shadow-lg dark:border-neutral-600 dark:bg-amber-100"
     >
       <div className="mb-1 flex items-center justify-between">

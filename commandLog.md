@@ -1716,6 +1716,26 @@ icon + body return. Left `[~]` pending that + the ⌘Z-hides / ⌘⇧Z-restores 
 
 ---
 
+### P3.B2a (fix) — note popup was click-through (this commit)
+
+```bash
+# In-app verification of B2a surfaced a real bug: a newly-placed note auto-
+# focused (programmatic) but you couldn't click into the textarea or hit Save —
+# clicks fell through to the text layer and stole focus. Cause: after placement
+# we drop the tool to idle, which sets the NoteLayer container to
+# `pointer-events: none`; the popup is a child and inherited it. The icons set
+# `pointer-events: auto` but the popup didn't. Fix: NotePopup root opts back in
+# with `pointerEvents: "auto"`. Regression test added to note-layer.test.tsx.
+
+npm run check   # tsc + eslint src + clippy ✓
+npm run test    # note-layer 5/5 (incl. the new pointer-events assertion); 191 total
+```
+
+Human-verified in-app: place note → click in → type → Save works; edit + delete
+of an existing note (both click inside the popup) work too.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

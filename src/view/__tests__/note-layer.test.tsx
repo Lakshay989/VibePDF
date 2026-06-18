@@ -77,6 +77,10 @@ describe("NoteLayer", () => {
     const popup = container.querySelector('[role="dialog"]');
     expect(popup).not.toBeNull();
     expect((popup?.querySelector("textarea") as HTMLTextAreaElement).value).toBe("hello");
+    // Regression: the popup MUST opt back into pointer events — the NoteLayer
+    // container is `pointer-events: none` when idle, so without this the textarea
+    // and Save would be click-through (you couldn't type or save).
+    expect((popup as HTMLElement).style.pointerEvents).toBe("auto");
   });
 
   it("places + persists a note when the note tool is active", () => {
