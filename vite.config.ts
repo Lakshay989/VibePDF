@@ -22,7 +22,9 @@ export default defineConfig(async () => ({
     hmr: host
       ? { protocol: "ws", host, port: 1421 }
       : undefined,
-    watch: { ignored: ["**/src-tauri/**"] },
+    // Don't reload on changes to the git-ignored sample-PDF folders (the
+    // downloaded corpus + scratch can be large and shouldn't drive HMR).
+    watch: { ignored: ["**/src-tauri/**", "**/Sample PDFs/**", "**/TestPDFs/**"] },
   },
   // PDF.js ships its worker as an ESM file. Vite needs to know not to
   // pre-bundle it; the worker is loaded by URL at runtime from /public.
