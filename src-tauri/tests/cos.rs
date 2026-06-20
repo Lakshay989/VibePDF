@@ -10,8 +10,9 @@ use std::path::PathBuf;
 
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_free_text, add_line, add_shape, add_text_markup, add_text_note, add_top_level_bookmark,
-    clear_text_markup, delete_annotation, merge_documents, prune_dangling_destinations,
+    add_free_text, add_line, add_polygon, add_shape, add_text_markup, add_text_note,
+    add_top_level_bookmark, clear_text_markup, delete_annotation, merge_documents,
+    prune_dangling_destinations,
     read_annotations, read_form_field_names, read_free_text, read_text_notes,
     register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
     reorder_pages, resize_pages, update_free_text, update_text_note,
@@ -507,6 +508,57 @@ fn cos_line_listed_and_deletable() {
     assert_eq!(infos[0].kind, "line");
     let after = delete_annotation(&out, &infos[0].id).expect("delete");
     assert!(read_annotations(&after).expect("re-read").is_empty());
+}
+
+/// SPEC: P3-ANN-004 — add_polygon writes a `/Polygon` (with `/Vertices` + `/NM`)
+/// and an `/AP` that closes (`h`) + fills; reopens in PDFium.
+#[test]
+fn cos_add_polygon_writes_vertices_and_ap() {
+    let pts = [[100.0_f32, 700.0], [200.0, 700.0], [150.0, 620.0]];
+    let out = add_polygon(&fixture_bytes("hello.pdf"), 0, true, &pts, "#ff0000", Some("#ffeeee"), 1.0, 2.0)
+        .expect("polygon");
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Polygon");
+    assert_eq!(annot.get(b"Vertices").and_then(Object::as_array).unwrap().len(), 6);
+    assert!(annot.get(b"NM").is_ok(), "stable handle present");
+    assert!(annot.get(b"IC").and_then(Object::as_array).is_ok(), "fill → /IC");
+    assert!(ap.contains("100.00 700.00 m"), "moves to v0: {ap}");
+    assert!(ap.contains("h\n"), "closes the path: {ap}");
+    assert!(ap.contains("B\n"), "fill + stroke: {ap}");
+}
+
+#[test]
+fn cos_polyline_is_open_and_unfilled() {
+    let pts = [[10.0_f32, 10.0], [110.0, 60.0], [210.0, 10.0]];
+    // A polyline ignores fill, is open, and strokes only.
+    let out = add_polygon(&fixture_bytes("hello.pdf"), 0, false, &pts, "#000000", Some("#00ff00"), 1.0, 2.0)
+        .expect("polyline");
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"PolyLine");
+    assert!(annot.get(b"IC").is_err(), "polyline carries no /IC");
+    assert!(!ap.contains("h\n"), "open path — not closed: {ap}");
+    assert!(ap.contains("S\n"), "stroke only: {ap}");
+}
+
+#[test]
+fn cos_polygon_listed_and_deletable() {
+    let pts = [[100.0_f32, 700.0], [200.0, 700.0], [150.0, 620.0]];
+    let out = add_polygon(&fixture_bytes("hello.pdf"), 0, true, &pts, "#000000", None, 1.0, 2.0)
+        .expect("polygon");
+    let infos = read_annotations(&out).expect("read");
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].kind, "polygon");
+    let after = delete_annotation(&out, &infos[0].id).expect("delete");
+    assert!(read_annotations(&after).expect("re-read").is_empty());
+}
+
+#[test]
+fn cos_polygon_rejects_too_few_points() {
+    let b = fixture_bytes("hello.pdf");
+    assert!(add_polygon(&b, 0, true, &[[0.0, 0.0], [10.0, 10.0]], "#000000", None, 1.0, 2.0).is_err());
+    assert!(add_polygon(&b, 0, false, &[[0.0, 0.0]], "#000000", None, 1.0, 2.0).is_err());
 }
 
 #[test]

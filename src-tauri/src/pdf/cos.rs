@@ -1780,6 +1780,134 @@ fn line_appearance_content(
     out
 }
 
+/// SPEC: P3-ANN-004 — add a polygon (`closed`, `/Polygon`) or polyline (`!closed`,
+/// `/PolyLine`) through `points`, with a generated `/AP`. A closed polygon can be
+/// filled; a polyline is stroke-only. Stroke colour / opacity / width.
+#[allow(clippy::too_many_arguments)]
+pub fn add_polygon(
+    bytes: &[u8],
+    page: usize,
+    closed: bool,
+    points: &[[f32; 2]],
+    stroke: &str,
+    fill: Option<&str>,
+    opacity: f32,
+    stroke_width: f32,
+) -> Result<Vec<u8>, CommandError> {
+    let min_pts = if closed { 3 } else { 2 };
+    if points.len() < min_pts {
+        return Err(CommandError::InvalidInput(format!("needs at least {min_pts} points")));
+    }
+    let (sr, sg, sb) = parse_hex_color(stroke)?;
+    let fill_rgb = if closed { fill.map(parse_hex_color).transpose()? } else { None };
+    let opacity = opacity.clamp(0.0, 1.0);
+    let width = stroke_width.max(0.0);
+    let subtype: &[u8] = if closed { b"Polygon" } else { b"PolyLine" };
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    // `/BBox` covers every vertex + half the stroke width (the `/AP` clips to it).
+    let pad = width.max(1.0);
+    let bx0 = points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min) - pad;
+    let by0 = points.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min) - pad;
+    let bx1 = points.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max) + pad;
+    let by1 = points.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max) + pad;
+    let rect_obj =
+        Object::Array(vec![Object::Real(bx0), Object::Real(by0), Object::Real(bx1), Object::Real(by1)]);
+
+    let vertices: Vec<Object> =
+        points.iter().flat_map(|p| [Object::Real(p[0]), Object::Real(p[1])]).collect();
+
+    let content = polygon_appearance_content(closed, points, (sr, sg, sb), fill_rgb, width);
+
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut bs = Dictionary::new();
+    bs.set("W", Object::Real(width));
+    bs.set("S", Object::Name(b"S".to_vec()));
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(subtype.to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set("Vertices", Object::Array(vertices));
+    annot.set("Rect", rect_obj);
+    annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
+    if let Some((fr, fg, fb)) = fill_rgb {
+        annot.set("IC", Object::Array(vec![Object::Real(fr), Object::Real(fg), Object::Real(fb)]));
+    }
+    annot.set("CA", Object::Real(opacity));
+    annot.set("BS", Object::Dictionary(bs));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The `/AP` content stream for a polygon/polyline: `m` to the first vertex,
+/// `l` to the rest; `h` closes a polygon; paint fill+stroke / fill / stroke.
+fn polygon_appearance_content(
+    closed: bool,
+    points: &[[f32; 2]],
+    (sr, sg, sb): (f32, f32, f32),
+    fill: Option<(f32, f32, f32)>,
+    width: f32,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    let _ = writeln!(out, "{width:.2} w");
+    let _ = writeln!(out, "{sr:.4} {sg:.4} {sb:.4} RG");
+    if let Some((fr, fg, fb)) = fill {
+        let _ = writeln!(out, "{fr:.4} {fg:.4} {fb:.4} rg");
+    }
+    if let Some(&[fx, fy]) = points.first() {
+        let _ = writeln!(out, "{fx:.2} {fy:.2} m");
+    }
+    for p in &points[1..] {
+        let _ = writeln!(out, "{:.2} {:.2} l", p[0], p[1]);
+    }
+    if closed {
+        let _ = writeln!(out, "h");
+    }
+    let paint = match (closed && fill.is_some(), width > 0.0) {
+        (true, true) => "B",
+        (true, false) => "f",
+        (false, _) => "S",
+    };
+    let _ = writeln!(out, "{paint}");
+    out
+}
+
 /// The `/AP` content stream for a shape, drawn in absolute page coords (the
 /// form's `BBox` == `Rect`). The path is inset by half the stroke width so the
 /// stroke stays inside `/Rect`. An ellipse is the standard 4-Bézier (kappa)
@@ -2326,6 +2454,8 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
         b"Square" => Some("rectangle"),
         b"Circle" => Some("ellipse"),
         b"Line" => Some("line"),
+        b"Polygon" => Some("polygon"),
+        b"PolyLine" => Some("polyline"),
         _ => None,
     }
 }

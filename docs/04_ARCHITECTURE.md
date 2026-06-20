@@ -163,8 +163,16 @@ writes a `/Line` (`/L [x1 y1 x2 y2]`, `/C`, `/BS /W`, `/NM`, plus `/LE [/None
 /OpenArrow]` for an arrow) with a generated `/AP` that strokes the segment and an
 arrowhead V; the `/BBox` is padded for the head + stroke width. The drag tools
 (`line-tools.ts`) and a `LineShape` draft renderer plug into the same
-`annotation-layer` lifecycle the rect/ellipse tools use; polygons (a multi-click
-gesture) are C1b₂.
+`annotation-layer` lifecycle the rect/ellipse tools use.
+
+**Polygons (P3.C1b₂)** are the first tool whose gesture is *not* a drag —
+multi-click (click each vertex, double-click to finish). Rather than extend the
+generic `stepTool` lifecycle with a multi-click mode (a new framework pattern),
+the polygon follows the note/free-text precedent: a **self-contained overlay**
+(`src/view/polygon-layer.tsx`) owns the gesture (vertices in local state,
+rubber-band preview, Enter/Esc) and commits via `cos::add_polygon` (a `/Polygon`
+or `/PolyLine` with a generated `/AP`). Generalizing into a shared multi-click
+lifecycle is deferred until a third such tool exists (the rule of three).
 
 **Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
 `/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated

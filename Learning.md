@@ -4563,6 +4563,62 @@ line isn't a box — it's two points — and an arrow needs a head. This is the 
 
 ---
 
+### P3.C1b₂ — polygons (a multi-click gesture, the first non-drag tool)
+
+#### Problem
+
+Every drawing tool so far was a single drag (down→move→up). A polygon is the
+first **multi-click** shape — click each vertex, double-click to finish. That
+doesn't fit the drag lifecycle at all, which forced an architecture choice.
+
+#### Concepts learned
+
+- **When NOT to generalize the framework.** The generic `stepTool` lifecycle is a
+  drag state machine. The tempting move was to extend the tool *contract* with
+  multi-click events — a new framework pattern. Instead, following the precedent
+  set by notes (click-to-place) and free-text (drag+editor), the polygon got its
+  **own self-contained overlay** (`PolygonLayer`) that owns the gesture directly.
+  No contract change, no architecture-doc gate, lower risk. Generalize only when a
+  *third* multi-click tool actually arrives — not on the first.
+- **The `/Polygon` + `/PolyLine` annotations.** `/Vertices [x1 y1 x2 y2 …]` is the
+  geometry; a polygon is closed (and fillable), a polyline open. The `/AP` is the
+  same path either way — `m` to the first vertex, `l` to each next — with `h`
+  (closepath) for the polygon, then `B`/`f`/`S` to fill-and-stroke / fill / stroke.
+- **Multi-click gesture mechanics.** Each `pointerdown` appends a vertex; a
+  `pointermove` updates a rubber-band edge to the cursor (plus a faint closing edge
+  back to the first vertex). The classic trap: a **double-click fires two
+  `pointerdown`s**, so the finish would add a stray duplicate vertex — defused by
+  *deduping* a click that lands within a few px of the last vertex. Enter finishes,
+  Esc cancels, and those key handlers are bound **only while a draft is in
+  progress** so they don't hijack the page otherwise.
+- **Vertices in document space.** The vertices are stored in PDF points (not screen
+  px) so they survive a scroll or zoom mid-draw; only the live cursor is in screen
+  space. Convert on click in, on render out.
+- **Spec honesty on `/PolyLine`.** P3-ANN-004 says "polygons," not "polylines." The
+  backend supports open polylines via a `closed` flag (and it's cos-tested), but
+  the **UI exposes only Polygon** — shipping the unspec'd open variant would be
+  silently extending the spec. The flag makes it a one-line follow-up once the spec
+  gains the word.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_polygon` (+ `polygon_appearance_content`); `/Polygon`/`/PolyLine` kinds. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `PolygonEdit` + `AddPolygon` + `pdf_add_polygon`. |
+| `src/view/polygon-layer.tsx` | The self-contained multi-click overlay (vertices, rubber-band, Enter/Esc, commit). |
+| `src/ipc/polygons.ts` | `addPolygon` wrapper. |
+| `src/view/PageVirtualizer.tsx`, `MarkupToolbar.tsx`, `ipc/annotations.ts`, `annotation-filter.ts` | Mount the layer; Polygon toggle + fill; sidebar kind/label. |
+| `src-tauri/tests/polygons.rs`, `tests/cos.rs`, FE `polygons`/`polygon-layer` | Round-trips, open-vs-closed, and the gesture wiring. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.9 (Polygon / Polyline annotations) + §8.5.3.1 (closepath `h`).
+- "Don't add an abstraction until the third case" — the rule of three for framework changes.
+- Pointer vs. double-click event ordering in the DOM (why finish dedupes).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

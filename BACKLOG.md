@@ -363,11 +363,16 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From P3.C1a / C1b₁ (shapes)
 
-- ✅ **DONE 2026-06-20 (C1b₁) — line + arrow** (`/Line` + `/LE` open-arrow, drag
-  gesture). **Still deferred (C1b₂): polygon + polyline** (`/Polygon` / `/PolyLine`
-  via `/Vertices`, the **multi-click** add-vertex gesture). Also deferred: arrowhead
-  **style** options (start ending / closed / diamond / circle — only end OpenArrow
-  now); editing a line's geometry (delete + redraw); Shift-angle-snap.
+- ✅ **DONE 2026-06-20 (C1b₁) — line + arrow** (`/Line` + `/LE` open-arrow, drag).
+- ✅ **DONE 2026-06-20 (C1b₂) — polygon** (`/Polygon`, multi-click add-vertex via a
+  self-contained `PolygonLayer`). **Completes the C1 shapes track.** Deferred:
+  **polyline (open)** — the cos `closed` flag + `/PolyLine` path are built and
+  tested, but the UI exposes only Polygon because **P3-ANN-004 says "polygons", not
+  "polylines"** (add the word to the spec to flip on a Polyline toggle); arrowhead
+  **style** options (only end OpenArrow); editing a line/polygon's **geometry**
+  (delete + redraw); snap-to-first-vertex / angle-snap / even-odd fill /
+  self-intersection cleanup; a shared **multi-click lifecycle** in the tool
+  framework (left until a third multi-click tool appears).
 - **No select / delete / edit of a committed shape** — shared with markup &
   free-text; lands with the D1 read-back + per-annotation delete follow-up.
 - **Axis-aligned only** — shapes are drawn to an axis-aligned `/Rect`; no rotation

@@ -1959,6 +1959,43 @@ in-app + cross-reader pass.
 
 ---
 
+### P3.C1b₂ — polygon (multi-click) (this commit)
+
+```bash
+# No new deps. The first NON-drag tool. Completes the C1 shapes track.
+#   cos::add_polygon → /Polygon (closed, fillable) | /PolyLine (open) via /Vertices
+#     + /C (+/IC fill) /CA /BS/W /NM + a generated /AP (m→l…, h to close, B/f/S
+#     paint); /BBox padded for the stroke width. annotation_kind += /Polygon →
+#     "polygon", /PolyLine → "polyline".
+#   PolygonEdit + AddPolygon actor msg + pdf_add_polygon (points: Vec<[f32;2]>).
+# Frontend: NO framework change — multi-click doesn't fit the drag lifecycle, so a
+#   self-contained PolygonLayer (like Note/FreeText layers) owns the gesture:
+#   click adds a vertex (deduping the dbl-click's 2nd down), move = rubber-band,
+#   dbl-click/Enter finishes → addPolygon → bumpEpoch, Esc cancels. Vertices stored
+#   in PDF points. Polygon toolbar toggle + fill control; AnnotationKind +=
+#   polygon/polyline. Spec: polygon matches P3-ANN-004; POLYLINE not exposed in UI
+#   (spec says "polygons"; the cos `closed` flag is built+tested for later).
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy: slice-pattern the first vertex (index_refutable_slice).
+#   eslint: ReactPointerEvent<Element> not SVGSVGElement (not in the globals list).
+npm run test           # 245/245 (+7: polygons IPC 2, polygon-layer 5)
+npm run test:rust      # EXIT 0. cos.rs +4 (polygon /Vertices+/AP+h+fill / polyline
+#   open+unfilled / listed+deletable / rejects <3|<2). polygons.rs: 3 (polygon+
+#   polyline persist / undo removes / rejects too few) + 1 ignored artifact.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test polygons \
+  polygon_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-polygon.pdf (a filled 5-gon).
+```
+
+Self-contained overlay over a framework change (the "rule of three" — no shared
+multi-click lifecycle until a third such tool appears). Left `[~]` pending the
+human in-app + cross-reader pass. Polyline UI + vertex editing deferred (BACKLOG).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

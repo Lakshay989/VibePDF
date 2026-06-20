@@ -39,8 +39,8 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, LineEdit, ShapeEdit,
-    TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, LineEdit, PolygonEdit,
+    ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{read_annotations, read_free_text, read_text_notes, AnnotationInfo, FreeTextData, NoteData};
 use crate::pdf::reorder::ReorderEdit;
@@ -257,6 +257,18 @@ pub enum Message {
         y2: f32,
         arrow: bool,
         stroke: String,
+        opacity: f32,
+        stroke_width: f32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-004 — add a polygon / polyline annotation with a generated
+    /// `/AP`. Undoable; marks dirty.
+    AddPolygon {
+        page: i32,
+        closed: bool,
+        points: Vec<[f32; 2]>,
+        stroke: String,
+        fill: Option<String>,
         opacity: f32,
         stroke_width: f32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
@@ -968,6 +980,50 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P3-ANN-004 — add a polygon / polyline. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_polygon(
+        &self,
+        page: i32,
+        closed: bool,
+        points: Vec<[f32; 2]>,
+        stroke: String,
+        fill: Option<String>,
+        opacity: f32,
+        stroke_width: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_polygon_request(page, closed, points, stroke, fill, opacity, stroke_width)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_polygon_request(
+        &self,
+        page: i32,
+        closed: bool,
+        points: Vec<[f32; 2]>,
+        stroke: String,
+        fill: Option<String>,
+        opacity: f32,
+        stroke_width: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddPolygon {
+                page,
+                closed,
+                points,
+                stroke,
+                fill,
+                opacity,
+                stroke_width,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). Await-holding
     /// convenience for tests; IPC uses `delete_pages_request`.
     pub async fn delete_pages(&self, pages: Vec<i32>) -> Result<HistoryState, CommandError> {
@@ -1583,6 +1639,18 @@ fn run_worker(
             }
             Message::AddLine { page, x1, y1, x2, y2, arrow, stroke, opacity, stroke_width, reply } => {
                 let edit = LineEdit { page, x1, y1, x2, y2, arrow, stroke, opacity, stroke_width };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddPolygon { page, closed, points, stroke, fill, opacity, stroke_width, reply } => {
+                let edit = PolygonEdit { page, closed, points, stroke, fill, opacity, stroke_width };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

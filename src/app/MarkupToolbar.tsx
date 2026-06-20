@@ -54,6 +54,8 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const shapeActive = rectActive || ellipseActive;
   const lineActive = activeTool === "line";
   const arrowActive = activeTool === "arrow";
+  const polygonActive = activeTool === "polygon";
+  const fillable = shapeActive || polygonActive;
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -241,7 +243,20 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       >
         Arrow
       </button>
-      {shapeActive ? (
+      <button
+        type="button"
+        onClick={() => setActiveTool(polygonActive ? null : "polygon")}
+        title="Draw a polygon (click each vertex, double-click to finish)"
+        aria-label="Polygon tool"
+        aria-pressed={polygonActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (polygonActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Polygon
+      </button>
+      {fillable ? (
         <div className="flex items-center gap-1">
           <span className="text-xs text-neutral-400">Fill</span>
           <button

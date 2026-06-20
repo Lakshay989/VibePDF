@@ -12,8 +12,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_line, add_shape, add_text_markup, add_text_note, clear_text_markup,
-    delete_annotation, update_free_text, update_text_note,
+    add_free_text, add_line, add_polygon, add_shape, add_text_markup, add_text_note,
+    clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
@@ -301,6 +301,43 @@ impl<'a> Edit<PdfDocument<'a>> for LineEdit {
 
     fn label(&self) -> &'static str {
         "line"
+    }
+}
+
+/// SPEC: P3-ANN-004 — add a polygon / polyline annotation with a generated `/AP`.
+pub struct PolygonEdit {
+    pub page: i32,
+    pub closed: bool,
+    pub points: Vec<[f32; 2]>,
+    pub stroke: String,
+    pub fill: Option<String>,
+    pub opacity: f32,
+    pub stroke_width: f32,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for PolygonEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_polygon(
+                bytes,
+                page,
+                self.closed,
+                &self.points,
+                &self.stroke,
+                self.fill.as_deref(),
+                self.opacity,
+                self.stroke_width,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "polygon"
     }
 }
 
