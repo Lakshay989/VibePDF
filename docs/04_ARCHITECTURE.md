@@ -174,6 +174,20 @@ rubber-band preview, Enter/Esc) and commits via `cos::add_polygon` (a `/Polygon`
 or `/PolyLine` with a generated `/AP`). Generalizing into a shared multi-click
 lifecycle is deferred until a third such tool exists (the rule of three).
 
+**Freehand ink (P3.C2)** is the second non-`stepTool` gesture. It *is* a drag,
+but — unlike the rect/line tools, which only need a start and an end — it captures
+the whole sampled path plus per-sample pressure, so it too gets a **self-contained
+overlay** (`src/view/ink-layer.tsx`) that owns pointer-capture and accumulates the
+stroke. **Smoothing lives on the frontend** (`src/tools/ink/ink.ts`: `simplify`
+drops jitter, then `catmullRomResample` interpolates an even, dense Catmull-Rom
+spline); the smoothed path is persisted by `cos::add_ink` as an `/Ink` (`/InkList`,
+`/C`, `/CA`, `/BS /W`) with a generated `/AP`. The `/AP` is a **variable-width
+filled ribbon** (the centreline offset by ±`ink_half_width(pressure)` along each
+averaged normal, filled non-zero) — pressure modulation that renders in every
+viewer because it's a fill, and that degrades to a constant-width band when the
+device reports a uniform pressure (a mouse's constant `0.5`). The `/BBox` pads by
+the *max* half-width in the stroke so a hard press isn't clipped.
+
 **Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
 `/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated
 `/AP` (a path painted `S`/`f`/`B`; the ellipse is the standard four-Bézier kappa
@@ -184,8 +198,9 @@ committed draft through the actor (`addShape` → `bumpEpoch` → canvas), keepi
 only the in-progress draft in the store. Line/arrow/polygon are C1b.
 
 **Reading annotations back (P3.D1).** `cos::read_annotations` is the one read that
-spans *all* kinds: it walks every page's `/Annots`, whitelists the six subtypes we
-author, and returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,
+spans *all* kinds: it walks every page's `/Annots`, whitelists the subtypes we
+author (markup, note, free-text, shapes, line/arrow, polygon/polyline, ink), and
+returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,
 author, `/M`-as-epoch). A read-only `ReadAnnotations` actor query feeds
 `pdf_read_annotations`; the `AnnotationPanel` sidebar re-reads on
 `[documentId, edit-epoch]` (the same projection cadence as the note overlay), so

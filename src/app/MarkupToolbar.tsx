@@ -55,6 +55,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const lineActive = activeTool === "line";
   const arrowActive = activeTool === "arrow";
   const polygonActive = activeTool === "polygon";
+  const inkActive = activeTool === "ink";
   const fillable = shapeActive || polygonActive;
 
   const apply = (subtype: MarkupSubtype) => {
@@ -255,6 +256,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Polygon
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(inkActive ? null : "ink")}
+        title="Freehand pen (draw, release to finish)"
+        aria-label="Pen tool"
+        aria-pressed={inkActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (inkActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Pen
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

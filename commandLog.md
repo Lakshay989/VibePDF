@@ -1996,6 +1996,46 @@ human in-app + cross-reader pass. Polyline UI + vertex editing deferred (BACKLOG
 
 ---
 
+### P3.C2 — freehand ink with smoothing (this commit)
+
+```bash
+# No new deps. The pen tool. Smoothing lives in the FRONTEND, the /AP is a ribbon.
+#   src/tools/ink/ink.ts: simplify (drop <1pt jitter) → catmullRomResample
+#     (interpolating Catmull-Rom spline, even ~3pt spacing; pressure LINEARLY
+#     interpolated so it can't overshoot [0,1]). Pure + DOM-free.
+#   cos::add_ink → /Ink (/InkList one sub-path, /C /CA /BS/W /NM) + a generated /AP
+#     that's a VARIABLE-WIDTH FILLED RIBBON: centreline ±ink_half_width(pressure)
+#     along each averaged normal, filled non-zero (f). /BBox padded by the MAX
+#     half-width (a hard press exceeds base width → would clip otherwise).
+#     annotation_kind += /Ink → "ink". InkEdit + AddInk + pdf_add_ink
+#     (points: Vec<[f32;3]> = [x,y,pressure]).
+# Frontend: NO framework change — a drag, but it needs the WHOLE path + per-sample
+#   pressure (stepTool is start+end only), so a self-contained InkLayer (like
+#   PolygonLayer) owns pointer-capture, dedups sub-px samples, previews the raw
+#   path, smooths on release → addInk → bumpEpoch. Pen toolbar toggle;
+#   AnnotationKind += ink. Spec: P3-ANN-005 (pressure "where available"; a
+#   mouse/trackpad reports a constant 0.5 → uniform width).
+
+npm run check          # tsc + eslint src + clippy ✓ (clean first pass)
+npm run test           # 259/259 (+14: smoothing 9, ink IPC 2, ink-layer 3)
+npm run test:rust      # EXIT 0. cos.rs +4 (ink /InkList+/AP ribbon / pressure
+#   widens the Rect / listed+deletable / rejects a tap|coincident). ink.rs: 3
+#   (persist / undo removes / rejects a tap) + 1 ignored artifact.
+# A real bug a test caught: padding /BBox by `width` (as line/polygon do) clipped a
+#   full-pressure ribbon; pad must be the max half-width in the stroke.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test ink \
+  ink_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-ink.pdf (a pressure-modulated sine wave).
+```
+
+Frontend smoothing + a fill-based ribbon (renders everywhere; uniform pressure =
+constant width). Left `[~]` pending the human in-app + cross-reader pass.
+Multi-stroke /InkList grouping, eraser, and a Bézier /AP deferred (BACKLOG).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

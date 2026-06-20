@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_free_text, add_line, add_polygon, add_shape, add_text_markup, add_text_note,
+    add_free_text, add_ink, add_line, add_polygon, add_shape, add_text_markup, add_text_note,
     add_top_level_bookmark, clear_text_markup, delete_annotation, merge_documents,
     prune_dangling_destinations,
     read_annotations, read_form_field_names, read_free_text, read_text_notes,
@@ -559,6 +559,65 @@ fn cos_polygon_rejects_too_few_points() {
     let b = fixture_bytes("hello.pdf");
     assert!(add_polygon(&b, 0, true, &[[0.0, 0.0], [10.0, 10.0]], "#000000", None, 1.0, 2.0).is_err());
     assert!(add_polygon(&b, 0, false, &[[0.0, 0.0]], "#000000", None, 1.0, 2.0).is_err());
+}
+
+/// SPEC: P3-ANN-005 — add_ink writes an `/Ink` (with `/InkList` + `/NM`) and a
+/// filled-ribbon `/AP`; reopens in PDFium.
+#[test]
+fn cos_add_ink_writes_inklist_and_ap() {
+    let pts = [[100.0_f32, 700.0, 0.5], [150.0, 690.0, 0.5], [200.0, 700.0, 0.5]];
+    let out = add_ink(&fixture_bytes("hello.pdf"), 0, &pts, "#ff0000", 1.0, 2.0).expect("ink");
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Ink");
+    assert!(annot.get(b"NM").is_ok(), "stable handle present");
+    // /InkList is an array of sub-paths; one stroke == one sub-array of 6 numbers.
+    let ink_list = annot.get(b"InkList").and_then(Object::as_array).unwrap();
+    assert_eq!(ink_list.len(), 1, "one sub-path");
+    assert_eq!(ink_list[0].as_array().unwrap().len(), 6, "3 points × (x,y)");
+    // The /AP is a filled ribbon: a colour-fill (`rg`), a closed outline (`h`),
+    // and a non-zero fill (`f`) — not a stroke.
+    assert!(ap.contains("rg"), "fill colour set: {ap}");
+    assert!(ap.contains("h\n"), "ribbon outline closes: {ap}");
+    assert!(ap.contains("f\n"), "filled (not stroked): {ap}");
+}
+
+/// Higher pressure ⇒ a wider ribbon ⇒ a taller `/Rect` for the same centreline.
+#[test]
+fn cos_ink_pressure_widens_the_ribbon() {
+    let line = [[100.0_f32, 500.0, 0.0], [300.0, 500.0, 0.0]];
+    let light: Vec<[f32; 3]> = line.iter().map(|p| [p[0], p[1], 0.1]).collect();
+    let heavy: Vec<[f32; 3]> = line.iter().map(|p| [p[0], p[1], 1.0]).collect();
+
+    let rect_h = |bytes: &[u8]| -> f32 {
+        let (annot, _) = first_annot_and_ap(bytes);
+        let r = annot.get(b"Rect").and_then(Object::as_array).unwrap();
+        (r[3].as_float().unwrap() - r[1].as_float().unwrap()).abs()
+    };
+    let l = add_ink(&fixture_bytes("hello.pdf"), 0, &light, "#000000", 1.0, 4.0).expect("light");
+    let h = add_ink(&fixture_bytes("hello.pdf"), 0, &heavy, "#000000", 1.0, 4.0).expect("heavy");
+    assert!(rect_h(&h) > rect_h(&l), "heavy {} should exceed light {}", rect_h(&h), rect_h(&l));
+}
+
+#[test]
+fn cos_ink_listed_and_deletable() {
+    let pts = [[10.0_f32, 10.0, 0.5], [110.0, 60.0, 0.5], [210.0, 10.0, 0.5]];
+    let out = add_ink(&fixture_bytes("hello.pdf"), 0, &pts, "#000000", 1.0, 2.0).expect("ink");
+    let infos = read_annotations(&out).expect("read");
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].kind, "ink");
+    let after = delete_annotation(&out, &infos[0].id).expect("delete");
+    assert!(read_annotations(&after).expect("re-read").is_empty());
+}
+
+#[test]
+fn cos_ink_rejects_too_few_distinct_points() {
+    let b = fixture_bytes("hello.pdf");
+    // One point, and three coincident points (collapse to one after dedupe).
+    assert!(add_ink(&b, 0, &[[5.0, 5.0, 0.5]], "#000000", 1.0, 2.0).is_err());
+    let same = [[5.0_f32, 5.0, 0.5], [5.0, 5.0, 0.5], [5.0, 5.0, 0.5]];
+    assert!(add_ink(&b, 0, &same, "#000000", 1.0, 2.0).is_err());
 }
 
 #[test]

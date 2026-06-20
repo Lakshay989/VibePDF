@@ -11,6 +11,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { renderPageOnDoc } from "@/view/render-page";
 import { AnnotationLayer } from "@/view/annotation-layer";
 import { FreeTextLayer } from "@/view/free-text-layer";
+import { InkLayer } from "@/view/ink-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PolygonLayer } from "@/view/polygon-layer";
 import { SelectionHighlightLayer } from "@/view/selection-highlight-layer";
@@ -499,6 +500,14 @@ function PageSlot({
         rotation={rotation}
       />
       <PolygonLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <InkLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

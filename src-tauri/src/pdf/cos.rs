@@ -1908,6 +1908,188 @@ fn polygon_appearance_content(
     out
 }
 
+/// SPEC: P3-ANN-005 — add a freehand `/Ink` annotation through `points`
+/// (`[x, y, pressure]` in page coords; smoothing already applied on the
+/// frontend), with a generated `/AP`. Pressure modulates the stroke width: the
+/// `/AP` is a *filled ribbon* — the centreline offset by ±`base_width·f(pressure)/2`
+/// along each local normal — so it renders identically in every viewer (it is
+/// just a fill) and a uniform pressure (mouse/trackpad report a constant `0.5`)
+/// degrades to a constant-width stroke. One stroke == one annotation for now.
+pub fn add_ink(
+    bytes: &[u8],
+    page: usize,
+    points: &[[f32; 3]],
+    color: &str,
+    opacity: f32,
+    base_width: f32,
+) -> Result<Vec<u8>, CommandError> {
+    // Drop points coincident with their predecessor — a zero-length segment has
+    // no normal and would blow up the ribbon offset.
+    let pts: Vec<[f32; 3]> = dedupe_ink_points(points);
+    if pts.len() < 2 {
+        return Err(CommandError::InvalidInput("ink needs at least 2 distinct points".into()));
+    }
+    let (cr, cg, cb) = parse_hex_color(color)?;
+    let opacity = opacity.clamp(0.0, 1.0);
+    let width = base_width.max(0.1);
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    // `/BBox` covers every vertex + the widest half-stroke the ribbon reaches
+    // (the `/AP` form clips to it, so an under-pad would shave a hard press).
+    let pad = pts.iter().map(|p| ink_half_width(p[2], width)).fold(1.0_f32, f32::max);
+    let bx0 = pts.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min) - pad;
+    let by0 = pts.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min) - pad;
+    let bx1 = pts.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max) + pad;
+    let by1 = pts.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max) + pad;
+    let rect_obj =
+        Object::Array(vec![Object::Real(bx0), Object::Real(by0), Object::Real(bx1), Object::Real(by1)]);
+
+    // `/InkList` is an array of sub-paths; one stroke == one flat `[x y x y …]`.
+    let ink_path: Vec<Object> =
+        pts.iter().flat_map(|p| [Object::Real(p[0]), Object::Real(p[1])]).collect();
+
+    let content = ink_appearance_content(&pts, (cr, cg, cb), width);
+
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut bs = Dictionary::new();
+    bs.set("W", Object::Real(width));
+    bs.set("S", Object::Name(b"S".to_vec()));
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Ink".to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set("InkList", Object::Array(vec![Object::Array(ink_path)]));
+    annot.set("Rect", rect_obj);
+    annot.set("C", Object::Array(vec![Object::Real(cr), Object::Real(cg), Object::Real(cb)]));
+    annot.set("CA", Object::Real(opacity));
+    annot.set("BS", Object::Dictionary(bs));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Drop points within `< 0.01pt` of their predecessor (x/y only). Pressure is
+/// carried through from the surviving point.
+fn dedupe_ink_points(points: &[[f32; 3]]) -> Vec<[f32; 3]> {
+    let mut out: Vec<[f32; 3]> = Vec::with_capacity(points.len());
+    for &p in points {
+        match out.last() {
+            Some(&last) if (p[0] - last[0]).hypot(p[1] - last[1]) < 0.01 => {}
+            _ => out.push(p),
+        }
+    }
+    out
+}
+
+/// The half-width contributed by a sample's pressure. A reported pressure of
+/// `0.5` (the neutral value mice/trackpads emit) maps to the base half-width;
+/// the range `[0,1]` fans out to `[0.4, 1.3]×` so a hard press is visibly fatter
+/// without a feather-light touch vanishing.
+fn ink_half_width(pressure: f32, base_width: f32) -> f32 {
+    let p = if pressure <= 0.0 { 0.5 } else { pressure.clamp(0.0, 1.0) };
+    base_width * 0.5 * (0.4 + 1.8 * p)
+}
+
+/// The unit normal `(-uy, ux)` of segment `a → b`, or `None` if degenerate.
+fn segment_normal(a: [f32; 3], b: [f32; 3]) -> Option<(f32, f32)> {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = dx.hypot(dy);
+    if len < f32::EPSILON {
+        return None;
+    }
+    Some((-dy / len, dx / len))
+}
+
+/// The `/AP` content stream for an ink stroke: a filled ribbon around the
+/// smoothed centreline. For each sample we average the normals of its adjacent
+/// segments and offset ±`ink_half_width(pressure)`, producing a left edge and a
+/// right edge; the filled outline is `left… + right(reversed)`. Nonzero-winding
+/// (`f`) so a self-crossing loop fills solid rather than punching a hole.
+fn ink_appearance_content(points: &[[f32; 3]], (cr, cg, cb): (f32, f32, f32), base_width: f32) -> String {
+    use std::fmt::Write as _;
+
+    // Per-sample normal = average of the adjacent segment normals (carry the last
+    // valid one across degenerate segments so a backtrack doesn't drop a point).
+    let n = points.len();
+    let mut normals: Vec<(f32, f32)> = Vec::with_capacity(n);
+    let mut prev_seg: Option<(f32, f32)> = None;
+    for i in 0..n {
+        let before = if i > 0 { segment_normal(points[i - 1], points[i]) } else { None };
+        let after = if i + 1 < n { segment_normal(points[i], points[i + 1]) } else { None };
+        let here = match (before.or(prev_seg), after) {
+            (Some(a), Some(b)) => {
+                let (sx, sy) = (a.0 + b.0, a.1 + b.1);
+                let len = sx.hypot(sy);
+                if len < f32::EPSILON { b } else { (sx / len, sy / len) }
+            }
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => (0.0, 1.0),
+        };
+        if let Some(seg) = after.or(before) {
+            prev_seg = Some(seg);
+        }
+        normals.push(here);
+    }
+
+    let mut left: Vec<(f32, f32)> = Vec::with_capacity(n);
+    let mut right: Vec<(f32, f32)> = Vec::with_capacity(n);
+    for (i, &p) in points.iter().enumerate() {
+        let hw = ink_half_width(p[2], base_width);
+        let (nx, ny) = normals[i];
+        left.push((p[0] + nx * hw, p[1] + ny * hw));
+        right.push((p[0] - nx * hw, p[1] - ny * hw));
+    }
+
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    let _ = writeln!(out, "{cr:.4} {cg:.4} {cb:.4} rg");
+    let (fx, fy) = left[0];
+    let _ = writeln!(out, "{fx:.2} {fy:.2} m");
+    for &(x, y) in &left[1..] {
+        let _ = writeln!(out, "{x:.2} {y:.2} l");
+    }
+    for &(x, y) in right.iter().rev() {
+        let _ = writeln!(out, "{x:.2} {y:.2} l");
+    }
+    let _ = writeln!(out, "h");
+    let _ = writeln!(out, "f");
+    out
+}
+
 /// The `/AP` content stream for a shape, drawn in absolute page coords (the
 /// form's `BBox` == `Rect`). The path is inset by half the stroke width so the
 /// stroke stays inside `/Rect`. An ellipse is the standard 4-Bézier (kappa)
@@ -2456,6 +2638,7 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
         b"Line" => Some("line"),
         b"Polygon" => Some("polygon"),
         b"PolyLine" => Some("polyline"),
+        b"Ink" => Some("ink"),
         _ => None,
     }
 }

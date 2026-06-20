@@ -622,6 +622,38 @@ pub async fn pdf_add_polygon(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-005 — add a freehand `/Ink` annotation through `points`
+/// (`[x, y, pressure]`, smoothed frontend-side) on `page` (0-based). Undoable;
+/// runs on the actor.
+#[tauri::command]
+pub async fn pdf_add_ink(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    points: Vec<[f32; 3]>,
+    color: String,
+    opacity: f32,
+    base_width: f32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_ink_request(page, points, color, opacity, base_width)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

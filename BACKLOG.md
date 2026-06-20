@@ -385,6 +385,27 @@ the current roadmap phase. When one is picked up, move it into the relevant
   in production (committed shapes are canvas-drawn). Kept for the live-draft
   preview + a possible optimistic-render path; revisit if it bit-rots.
 
+## From P3.C2 (freehand ink)
+
+- ✅ **DONE 2026-06-20 (C2, P3-ANN-005) — freehand ink** (`/Ink`, drag) with
+  frontend Catmull-Rom smoothing and a pressure-modulated **variable-width filled
+  ribbon** `/AP`, via a self-contained `InkLayer`. Deferred:
+- **One stroke == one `/Ink`** — no multi-stroke grouping. Adobe collects several
+  strokes drawn before a commit into one annotation's `/InkList` (an array of
+  sub-paths). We already write `/InkList` as a one-element array, so this is a
+  capture-side change (debounce the commit, accumulate sub-paths) not a format one.
+- **No eraser / partial-stroke edit** — and no in-canvas select-and-reshape; ink
+  is delete-and-redraw, shared with the markup/shape select/edit follow-up.
+- **Bézier (`c`) `/AP` deferred** — the ribbon connects dense resampled points with
+  straight `l` segments. Smooth enough at ~3pt spacing; revisit only if the dense
+  `/InkList` + content stream proves too large for big scribbles (then emit
+  Catmull-Rom-to-Bézier `c` ops and a sparser path).
+- **Fixed pressure→width curve** — `ink_half_width` maps `[0,1] → [0.4,1.3]×` base
+  width with no user control (no min/max-width or sensitivity setting), and no
+  velocity-based width. A pen-settings panel would expose it.
+- **Round/flat caps** — the ribbon ends are flat (square across the normal); no
+  rounded pen cap. Cosmetic.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

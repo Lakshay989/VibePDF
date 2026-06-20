@@ -4619,6 +4619,74 @@ doesn't fit the drag lifecycle at all, which forced an architecture choice.
 
 ---
 
+### P3.C2 — freehand ink (smoothing + a variable-width ribbon)
+
+#### Problem
+
+A pen tool. The user drags; we capture a stream of pointer samples and store them
+as a PDF `/Ink` annotation "with smoothing applied" and pressure support. Two
+sub-problems hide here: the raw input is noisy and unevenly spaced (it must be
+*smoothed*), and pressure has to become something a PDF can actually draw.
+
+#### Concepts learned
+
+- **Where smoothing belongs: the frontend.** A pointer device emits a jittery,
+  variable-rate point stream. The roadmap (and the named test) put smoothing in
+  the frontend, which also keeps the Rust `/AP` writer dumb. The pipeline is
+  **simplify → resample**: `simplify` drops any sample within ~1pt of the last
+  kept one (removing high-frequency tremor while preserving the endpoints), then
+  `catmullRomResample` lays an even, dense spline through the survivors.
+- **Catmull-Rom splines.** An *interpolating* cubic — the curve passes *through*
+  every control point (unlike a Bézier, which only touches its endpoints). Each
+  segment uses four controls `P0..P3`; endpoints are clamped by duplicating the
+  first/last point. A neat property of the uniform (tension-½) basis: at `t=0` it
+  returns `P1` and at `t=1` it returns `P2` *exactly*, so resampling never drifts
+  off the captured path. Pressure is interpolated **linearly** (a Catmull-Rom on
+  pressure could overshoot out of `[0,1]`).
+- **Pressure → geometry: a filled ribbon, not a stroked line.** A PDF stroke
+  (`S`) is constant-width; it can't taper. To make pressure visible we instead
+  *fill* a ribbon: walk the centreline, offset each point by ±`halfWidth·f(p)`
+  along the local **normal** (the unit perpendicular, averaged across a vertex's
+  two adjacent segments), and fill the `left… + right(reversed)` outline. Because
+  it's just a fill it renders identically in every viewer, and a uniform pressure
+  (a mouse reports a constant `0.5`) collapses to a constant-width band — so the
+  "ignored otherwise" case falls out for free instead of being a separate path.
+- **The BBox-clips-the-AP gotcha, again.** A form `/AP` clips to its `/BBox`. The
+  ribbon reaches ±`maxHalfWidth` past the centreline, and at full pressure that
+  exceeds the base stroke width — so padding the BBox by `width` (as the line /
+  polygon writers do) would shave a hard press. The pad must be the **max**
+  half-width actually present in the stroke. A unit test (`heavy` Rect taller than
+  `light`) pins this.
+- **Degenerate normals.** A zero-length segment has no direction, so no normal —
+  dedupe coincident samples first, and carry the last valid segment normal across
+  a backtrack so a sharp reversal doesn't drop a point.
+- **Drag ≠ the drag lifecycle.** `stepTool` models a drag as *start + end* (rect,
+  line). Ink is also a drag, but it needs *every* intermediate sample plus
+  per-sample pressure — so, like `PolygonLayer`, it's a self-contained `InkLayer`
+  that owns pointer-capture and accumulates the path itself. (The rule of three
+  holds: still no shared "stream capture" lifecycle in the framework.)
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/tools/ink/ink.ts` | Pure smoothing: `simplify` + `catmullRomResample` + `smoothInk`. |
+| `src/view/ink-layer.tsx` | Self-contained drag overlay: capture, dedup, preview, smooth-on-release, commit. |
+| `src/ipc/ink.ts` | `addInk` wrapper. |
+| `src-tauri/src/pdf/cos.rs` | `add_ink` (+ `ink_appearance_content` ribbon, `ink_half_width`, `segment_normal`, `dedupe_ink_points`); `/Ink` kind. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `InkEdit` + `AddInk` + `pdf_add_ink`. |
+| `src/view/PageVirtualizer.tsx`, `MarkupToolbar.tsx`, `ipc/annotations.ts`, `annotation-filter.ts` | Mount the layer; Pen toggle; sidebar kind/label. |
+| `src-tauri/tests/ink.rs`, `tests/cos.rs`, FE `smoothing`/`ink`/`ink-layer` | Round-trip, pressure-widens-ribbon, the smoothing maths, and the gesture wiring. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.4 (Ink annotations, `/InkList`).
+- Catmull-Rom splines (interpolating cubics) and the tension-½ uniform basis.
+- "Stroke outlining" / variable-width strokes as filled ribbons (vs. a constant-width `S`).
+- `PointerEvent.pressure` and `setPointerCapture` (why a mouse reads `0.5`).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

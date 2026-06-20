@@ -47,7 +47,8 @@ export type AnnotationKind =
   | "ellipse"
   | "line"
   | "polygon"
-  | "polyline";
+  | "polyline"
+  | "ink";
 
 /**
  * SPEC: P3-ANN-012 — delete the annotation with the given `handle` (its `/NM`,
