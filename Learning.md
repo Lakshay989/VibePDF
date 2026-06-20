@@ -4389,6 +4389,62 @@ ellipse and it's written to the document.
 
 ---
 
+### P3.D1d — select + delete annotations (the payoff of a stable identity)
+
+#### Problem
+
+You could *add* highlights, free-text, and shapes but never *remove* one (only
+⌘Z right after). The verification sweep made it the top complaint. Deleting "that
+specific annotation" needs a way to **name** it.
+
+#### Concepts learned
+
+- **A stable identity unlocks management.** The whole feature reduced to one
+  thing: give every annotation a durable name. PDF's `/NM` (annotation name) is
+  exactly that. Notes already had one; stamping a `uuid` `/NM` on markup /
+  free-text / shapes made them all addressable — and then *delete already
+  existed* (`cos::delete_annotation`, built for notes, finds by `/NM`). The hard
+  part wasn't the delete; it was the identity.
+- **Server-side vs client-side ids.** Notes' `/NM` is generated on the *frontend*
+  because the overlay tracks the note by it before it's saved. Markup/shapes
+  aren't tracked client-side, so their `/NM` is generated **server-side** in
+  `cos` — which meant *zero* IPC/signature changes to the add paths. Choosing
+  where an id is born depends on who needs to know it, and when.
+- **A handle with a fallback scheme.** `read_annotations` returns the `/NM` when
+  present, else a synthesized `obj:<num> <gen>` (the lopdf object id, prefixed so
+  the two are unambiguous). `delete_annotation` branches on the `obj:` prefix.
+  This makes *our* annotations robustly deletable (stable `/NM`) while still
+  best-effort-deleting foreign ones — a graceful-degradation seam.
+- **A test caught a latent gap.** The integration test expected 4 annotations and
+  got 3: `annotation_kind` (written in D1, *before* shapes existed in C1a) never
+  mapped `/Square`/`/Circle`, so shapes were silently absent from the sidebar.
+  Features built in sequence drift; a cross-feature test is what surfaces it.
+- **Delete needs no new machinery because of the projection.** One
+  `deleteAnnotation` → `bumpEpoch` reloads the canvas (the `/AP` vanishes),
+  re-reads the sidebar, and re-syncs the note overlay (`useNotesSync`) — all off
+  the existing edit-epoch projection. The pieces composed.
+- **Keyboard-delete must respect focus.** A global Delete-key handler has to
+  no-op while you're typing in the search box or a popup — gate on
+  `document.activeElement` being an input/textarea/contenteditable.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `docs/02_PRODUCT_SPEC.md` | New **P3-ANN-012** (select + delete). |
+| `src-tauri/src/pdf/cos.rs` | `/NM` on markup/free-text/shape; `read_annotations` returns it (+ `obj:` fallback); `delete_annotation` deletes by either; `annotation_kind` += Square/Circle. |
+| `src/ipc/annotations.ts` | `AnnotationKind` += rectangle/ellipse; re-export `deleteAnnotation`. |
+| `src/panels/AnnotationPanel.tsx` | Row ✕ + Delete-key handler → `deleteAnnotation` → epoch refresh + clear selection. |
+| `src-tauri/tests/annotation_delete.rs`, `tests/cos.rs`, FE `AnnotationPanel` | Delete-by-`/NM`, by `obj:`, undo, and the row/key wiring. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.2 — the `/NM` (annotation name) entry.
+- Stable identifiers as the precondition for CRUD on a collection.
+- Global keyboard handlers + `document.activeElement` focus-guarding in React.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

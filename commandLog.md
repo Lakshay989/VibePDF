@@ -1844,6 +1844,36 @@ cross-reader. Line/arrow/polygon are **C1b**; select/delete is the D1 follow-up.
 
 ---
 
+### P3.D1d — select + delete annotations (P3-ANN-012) (this commit)
+
+```bash
+# No new deps, no new IPC. From the 2026-06-18 sweep: couldn't remove a committed
+# free-text/shape. Keystone = a stable identity:
+#   cos::add_text_markup / add_free_text / add_shape now stamp /NM = uuid (notes
+#     already had one). read_annotations returns /NM as the handle (else
+#     obj:<num> <gen>). The EXISTING cos::delete_annotation deletes by /NM, now
+#     also by obj:<...> (parse_object_id). annotation_kind += Square/Circle, so
+#     shapes finally show in the sidebar (D1 predated C1a — they were invisible).
+# Frontend: AnnotationKind += rectangle/ellipse; AnnotationPanel row ✕ + Delete-
+#   key (focus-guarded) → deleteAnnotation (reused) → setHistory + bumpEpoch →
+#   canvas reload drops the /AP, list + note overlay re-sync via the epoch.
+# Spec: added P3-ANN-012 to docs/02 (human-approved).
+
+npm run check          # tsc + eslint src + clippy ✓
+npm run test           # 228/228 (+2 AnnotationPanel: row-delete + Delete-key)
+npm run test:rust      # EXIT 0. cos.rs +4 (annotations carry /NM + delete by it /
+#   delete by object-id fallback / [shapes now surfaced via the kinds map]).
+#   annotation_delete.rs: 2 (delete each kind through the actor / delete undoable).
+```
+
+A test caught a latent bug: `annotation_kind` (written in D1, before C1a) never
+mapped `/Square`/`/Circle`, so shapes were absent from the sidebar — fixed here.
+Left `[~]` pending the human in-app pass (shapes now listed; select → ✕/Delete
+removes from page + list; ⌘Z; ⌘S). Edit-a-committed-shape + in-canvas select are
+still deferred (BACKLOG).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

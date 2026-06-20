@@ -125,6 +125,9 @@ THE system SHALL support importing and exporting annotations as XFDF and FDF fil
 ### P3-ANN-011 — Flatten
 WHEN the user chooses "flatten annotations," THE system SHALL render all annotations into the page content streams permanently. The result SHALL not be undoable from a saved file (only from session history).
 
+### P3-ANN-012 — Select and delete annotations
+WHEN the user selects an annotation (via the annotation list) and invokes delete, THE system SHALL remove that annotation from the PDF as an undoable edit.
+
 ---
 
 ## P4 — Content editing

@@ -6,9 +6,9 @@
 // `SelectionHighlightLayer`). Like the note overlay it re-reads on the edit epoch
 // so the list stays in step with edits/undo. No PDF bytes are touched here.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { type AnnotationInfo, readAnnotations } from "@/ipc/annotations";
+import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import type { DocumentId } from "@/ipc/pdf";
 import {
   type AnnotationFilter,
@@ -20,6 +20,17 @@ import {
   kindLabel,
 } from "@/panels/annotation-filter";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
+import { useEditEpochStore } from "@/state/edit-epoch-store";
+import { useHistoryStore } from "@/state/history-store";
+
+/** True when keyboard focus is in a text input — so a Delete key edits text,
+ *  not the selected annotation. */
+function isEditingText(): boolean {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
 
 interface Props {
   documentId: DocumentId;
@@ -31,8 +42,40 @@ interface Props {
 export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
   const [list, setList] = useState<AnnotationInfo[] | null>(null);
   const [filter, setFilter] = useState<AnnotationFilter>(EMPTY_FILTER);
-  const selectedId = useAnnotationSelectionStore((s) => s.selected?.id ?? null);
+  const selected = useAnnotationSelectionStore((s) => s.selected);
   const select = useAnnotationSelectionStore((s) => s.select);
+  const setHistory = useHistoryStore((s) => s.setHistory);
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const selectedId = selected?.id ?? null;
+
+  // SPEC: P3-ANN-012 — delete an annotation by its handle, clear the selection,
+  // and refresh: bumping the epoch reloads the canvas (its /AP is gone) and
+  // re-reads this list; a note's overlay icon clears via its own epoch re-sync.
+  const remove = useCallback(
+    (info: AnnotationInfo) => {
+      select(null);
+      deleteAnnotation(documentId, info.id)
+        .then((h) => {
+          setHistory(documentId, h);
+          bumpEpoch(documentId);
+        })
+        .catch((err: unknown) => console.warn("delete annotation failed", documentId, err));
+    },
+    [documentId, select, setHistory, bumpEpoch],
+  );
+
+  // Delete / Backspace removes the selected annotation (unless typing in a field).
+  useEffect(() => {
+    if (!selected) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === "Delete" || e.key === "Backspace") && !isEditingText()) {
+        e.preventDefault();
+        remove(selected);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, remove]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,7 +190,7 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
                 </div>
                 <ul className="space-y-0.5">
                   {group.items.map((info) => (
-                    <li key={info.id}>
+                    <li key={info.id} className="group flex items-stretch gap-1">
                       <button
                         type="button"
                         onClick={() => {
@@ -157,7 +200,7 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
                         aria-label={`${kindLabel(info.kind)} on page ${info.page + 1}`}
                         aria-current={info.id === selectedId}
                         className={
-                          "w-full rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900 " +
+                          "min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900 " +
                           (info.id === selectedId ? "bg-blue-100 dark:bg-blue-900/40" : "")
                         }
                       >
@@ -177,6 +220,19 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
                         {info.author ? (
                           <div className="truncate text-[11px] text-neutral-500">{info.author}</div>
                         ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(info)}
+                        aria-label={`Delete ${kindLabel(info.kind)} on page ${info.page + 1}`}
+                        title="Delete annotation"
+                        className={
+                          "shrink-0 rounded px-2 text-neutral-400 hover:bg-red-100 hover:text-red-600 " +
+                          "focus:opacity-100 group-hover:opacity-100 dark:hover:bg-red-900/40 " +
+                          (info.id === selectedId ? "opacity-100" : "opacity-0")
+                        }
+                      >
+                        ✕
                       </button>
                     </li>
                   ))}

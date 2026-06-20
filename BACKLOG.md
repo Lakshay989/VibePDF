@@ -334,14 +334,12 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From the 2026-06-18 verification sweep (annotation UX feedback)
 
-- **Per-annotation select / delete / edit is the top ask.** The user hit this on
-  free-text (#2) and shapes (#4): once committed you can only ⌘Z, not click to
-  select / delete / edit. Markup has only a document-wide **Clear** (which removing
-  *everything* is expected, but a per-item path is wanted). This is the
-  "annotation management" feature — the D1 sidebar already selects + highlights, so
-  it wants a **Delete** (and re-edit), which needs durable `/NM` handles on
-  markup/free-text/shapes (notes already have them). **High priority** — promote
-  to a `steps/` entry next.
+- ✅ **DONE 2026-06-18 (P3.D1d, P3-ANN-012) — per-annotation select + delete.**
+  Every annotation now carries a `/NM`; the sidebar row has a ✕ and Delete/Backspace
+  removes the selected one (undoable). Shapes are now listed too (the kinds map was
+  missing `/Square`+`/Circle`). **Still deferred:** *edit* of a committed
+  free-text/shape (notes are already editable); in-canvas click-to-select (sidebar
+  only); annotations saved *before* this step lack `/NM` (best-effort `obj:` delete).
 - ✅ **DONE 2026-06-18 — fuller colour palette incl. black/white.** Was 5 pastels;
   now 8 basics (black, red, amber, yellow, green, blue, purple, white) shared by
   markup stroke, free-text colour, and shape stroke/fill. A native

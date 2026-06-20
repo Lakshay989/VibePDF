@@ -42,7 +42,17 @@ export type AnnotationKind =
   | "strikeout"
   | "squiggly"
   | "note"
-  | "freetext";
+  | "freetext"
+  | "rectangle"
+  | "ellipse";
+
+/**
+ * SPEC: P3-ANN-012 — delete the annotation with the given `handle` (its `/NM`,
+ * or an `obj:<num> <gen>` id for one authored elsewhere). Undoable; runs on the
+ * Rust document actor. Re-exported here so the annotation panel needn't import
+ * from `ipc/notes` — the command is generic over annotation kind.
+ */
+export { deleteAnnotation } from "@/ipc/notes";
 
 /** One annotation as the sidebar sees it. Mirrors `cos::AnnotationInfo` (Rust). */
 export interface AnnotationInfo {

@@ -11,6 +11,8 @@ export const KIND_LABELS: Record<AnnotationKind, string> = {
   squiggly: "Squiggly",
   note: "Note",
   freetext: "Free text",
+  rectangle: "Rectangle",
+  ellipse: "Ellipse",
 };
 
 export function kindLabel(kind: AnnotationKind): string {

@@ -178,6 +178,17 @@ the list tracks edits/undo. Selection is a cross-cutting store
 per-page `SelectionHighlightLayer` draws as a dashed box — giving "select" visible
 feedback for canvas-drawn kinds that have no overlay of their own.
 
+**Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
+Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it
+server-side for markup/free-text/shapes, the frontend already did for notes), so
+`read_annotations` returns it as the delete handle and the existing
+`cos::delete_annotation` removes any annotation by it (a missing-`/NM` foreign
+annotation falls back to an `obj:<num> <gen>` object-id handle). The sidebar's ✕
+/ Delete-key calls `pdf_delete_annotation` → `bumpEpoch`, and the whole projection
+re-syncs: the canvas reload drops the `/AP`, the list re-reads, and a note's
+overlay icon clears via `useNotesSync`. No new IPC and no new overlay — the
+identity was the only missing piece.
+
 Because the note overlay is *not* the source of truth, it's kept a **projection
 of the PDF** (P3.B2b): `cos::read_text_notes` (a read-only `ReadNotes` actor
 query, serialize-then-lopdf-parse like `GetBytes`) feeds `pdf_read_text_notes`,

@@ -8,13 +8,15 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 vi.mock("@/ipc/annotations", async (orig) => ({
   ...(await orig<typeof import("@/ipc/annotations")>()),
   readAnnotations: vi.fn(),
+  deleteAnnotation: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
-import { type AnnotationInfo, readAnnotations } from "@/ipc/annotations";
+import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import { AnnotationPanel } from "@/panels/AnnotationPanel";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
 
 const mockRead = vi.mocked(readAnnotations);
+const mockDelete = vi.mocked(deleteAnnotation);
 
 const rows: AnnotationInfo[] = [
   { id: "h1", page: 0, kind: "highlight", rect: [10, 20, 110, 30], contents: "important", author: "Bo", modified: null },
@@ -69,6 +71,28 @@ describe("AnnotationPanel", () => {
     fireEvent.click(chip as Element);
     expect(container.textContent).toContain("hello world");
     expect(container.textContent).not.toContain("important");
+  });
+
+  it("deletes a row: calls deleteAnnotation with its handle and clears selection", async () => {
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
+    await waitFor(() => expect(container.textContent).toContain("hello world"));
+
+    // Select then delete the note row.
+    fireEvent.click(container.querySelector('button[aria-label="Note on page 3"]') as Element);
+    expect(useAnnotationSelectionStore.getState().selected?.id).toBe("n1");
+
+    fireEvent.click(container.querySelector('button[aria-label="Delete Note on page 3"]') as Element);
+    expect(mockDelete).toHaveBeenCalledWith("doc-1", "n1");
+    expect(useAnnotationSelectionStore.getState().selected).toBeNull();
+  });
+
+  it("deletes the selected annotation on the Delete key", async () => {
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
+    await waitFor(() => expect(container.textContent).toContain("important"));
+
+    fireEvent.click(container.querySelector('button[aria-label="Highlight on page 1"]') as Element);
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(mockDelete).toHaveBeenCalledWith("doc-1", "h1");
   });
 
   it("shows an empty state with no annotations", async () => {

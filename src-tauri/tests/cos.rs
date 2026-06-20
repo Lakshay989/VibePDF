@@ -430,6 +430,59 @@ fn cos_reads_all_annotation_kinds() {
     assert_eq!(ft.contents, "boxed");
 }
 
+/// SPEC: P3-ANN-012 — every annotation our writers create carries a stable
+/// `/NM`, which `read_annotations` returns as the delete handle, and
+/// `delete_annotation` removes by it.
+#[test]
+fn cos_annotations_carry_nm_and_delete_by_it() {
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    let a = add_text_markup(&fixture_bytes("hello.pdf"), 0, "highlight", &quads, "#ffd400", 1.0).unwrap();
+    let b = add_free_text(&a, 0, [50.0, 400.0, 250.0, 440.0], "x", "Helvetica", 12.0, "#000000", false, false).unwrap();
+    let all = add_shape(&b, 0, "rectangle", [60.0, 200.0, 260.0, 300.0], "#000000", None, 1.0, 2.0).unwrap();
+
+    let infos = read_annotations(&all).expect("read");
+    assert_eq!(infos.len(), 3);
+    // Each handle is a real /NM (a uuid), not an `obj:` fallback.
+    assert!(infos.iter().all(|i| !i.id.starts_with("obj:")), "{infos:?}");
+
+    let hl = infos.iter().find(|i| i.kind == "highlight").unwrap().id.clone();
+    let after = delete_annotation(&all, &hl).expect("delete");
+    let left = read_annotations(&after).expect("re-read");
+    assert_eq!(left.len(), 2, "only the highlight is gone");
+    assert!(!left.iter().any(|i| i.kind == "highlight"));
+    assert_eq!(pdfium_page_count(&after), 1);
+}
+
+/// SPEC: P3-ANN-012 — an annotation lacking `/NM` (e.g. authored elsewhere) is
+/// surfaced with an `obj:<num> <gen>` handle and deletable by it.
+#[test]
+fn cos_delete_by_object_id_fallback() {
+    let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
+    let bytes = add_text_markup(&fixture_bytes("hello.pdf"), 0, "highlight", &quads, "#ffd400", 1.0).unwrap();
+
+    // Strip the /NM so read_annotations must fall back to an object-id handle.
+    let mut doc = Document::load_mem(&bytes).expect("load");
+    let page_id = *doc.get_pages().get(&1).unwrap();
+    let annot_ref = doc
+        .get_dictionary(page_id)
+        .unwrap()
+        .get(b"Annots")
+        .and_then(Object::as_array)
+        .unwrap()[0]
+        .as_reference()
+        .unwrap();
+    doc.get_dictionary_mut(annot_ref).unwrap().remove(b"NM");
+    let mut stripped = Vec::new();
+    doc.save_to(&mut stripped).expect("save");
+
+    let infos = read_annotations(&stripped).expect("read");
+    assert_eq!(infos.len(), 1);
+    assert!(infos[0].id.starts_with("obj:"), "expected obj fallback, got {}", infos[0].id);
+
+    let after = delete_annotation(&stripped, &infos[0].id).expect("delete");
+    assert!(read_annotations(&after).expect("re-read").is_empty(), "the annotation is gone");
+}
+
 #[test]
 fn cos_read_annotations_skips_links_and_is_empty_on_plain_pdf() {
     // links.pdf's page-1 /Link is not a surfaced kind.

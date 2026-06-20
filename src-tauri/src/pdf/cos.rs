@@ -1124,6 +1124,7 @@ pub fn add_text_markup(
     let mut annot = Dictionary::new();
     annot.set("Type", Object::Name(b"Annot".to_vec()));
     annot.set("Subtype", Object::Name(pdf_subtype.to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string())); // stable delete handle
     annot.set("Rect", rect_obj);
     annot.set("QuadPoints", Object::Array(quad_points));
     annot.set("C", Object::Array(vec![Object::Real(r), Object::Real(g), Object::Real(b)]));
@@ -1270,6 +1271,7 @@ pub fn add_free_text(
     let mut annot = Dictionary::new();
     annot.set("Type", Object::Name(b"Annot".to_vec()));
     annot.set("Subtype", Object::Name(b"FreeText".to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string())); // stable delete handle
     annot.set("Rect", rect_obj);
     annot.set("Contents", Object::string_literal(text));
     annot.set("DA", Object::string_literal(da));
@@ -1425,6 +1427,7 @@ pub fn add_shape(
     let mut annot = Dictionary::new();
     annot.set("Type", Object::Name(b"Annot".to_vec()));
     annot.set("Subtype", Object::Name(subtype.to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string())); // stable delete handle
     annot.set("Rect", rect_obj);
     annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
     if let Some((fr, fg, fb)) = fill_rgb {
@@ -1797,11 +1800,26 @@ pub fn update_text_note(bytes: &[u8], note_id: &str, content: &str) -> Result<Ve
     Ok(buf)
 }
 
-/// SPEC: P3-ANN-002 — delete the annotation with `/NM == note_id` from its page's
-/// `/Annots`; GCs it (+ any owned objects) via `prune_objects`. No-op if absent.
-pub fn delete_annotation(bytes: &[u8], note_id: &str) -> Result<Vec<u8>, CommandError> {
+/// Parse an `obj:<num> <gen>` handle's body (`"<num> <gen>"`) into an `ObjectId`.
+fn parse_object_id(s: &str) -> Option<ObjectId> {
+    let mut parts = s.split_whitespace();
+    let num = parts.next()?.parse::<u32>().ok()?;
+    let gen = parts.next()?.parse::<u16>().ok()?;
+    Some((num, gen))
+}
+
+/// SPEC: P3-ANN-002 / P3-ANN-012 — delete the annotation identified by `handle`
+/// from its page's `/Annots`; GCs it (+ any owned objects) via `prune_objects`.
+/// No-op if absent. `handle` is either a `/NM` (the stable name our writers
+/// stamp on every annotation) or, for an annotation that lacks one, the
+/// `obj:<num> <gen>` object id `read_annotations` synthesized.
+pub fn delete_annotation(bytes: &[u8], handle: &str) -> Result<Vec<u8>, CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
-    let Some(target) = find_annotation_by_nm(&doc, note_id) else {
+    let target = match handle.strip_prefix("obj:") {
+        Some(obj) => parse_object_id(obj),
+        None => find_annotation_by_nm(&doc, handle),
+    };
+    let Some(target) = target else {
         return Ok(bytes.to_vec());
     };
 
@@ -1971,6 +1989,8 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
         b"Squiggly" => Some("squiggly"),
         b"Text" => Some("note"),
         b"FreeText" => Some("freetext"),
+        b"Square" => Some("rectangle"),
+        b"Circle" => Some("ellipse"),
         _ => None,
     }
 }
@@ -2000,8 +2020,15 @@ pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandErro
             else {
                 continue;
             };
+            // Prefer the stable `/NM` (every annotation we write has one) as the
+            // delete handle; fall back to a `obj:<num> <gen>` object id for
+            // annotations authored elsewhere that lack a name.
+            let handle = dict.get(b"NM").and_then(Object::as_str).ok().map_or_else(
+                || format!("obj:{} {}", id.0, id.1),
+                |nm| String::from_utf8_lossy(nm).into_owned(),
+            );
             out.push(AnnotationInfo {
-                id: format!("{} {}", id.0, id.1),
+                id: handle,
                 page,
                 kind: kind.to_owned(),
                 rect: rect_bounds(dict),
