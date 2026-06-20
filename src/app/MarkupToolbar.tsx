@@ -21,7 +21,18 @@ const SUBTYPES: { id: MarkupSubtype; label: string; title: string }[] = [
   { id: "squiggly", label: "Squiggly", title: "Squiggly underline selected text" },
 ];
 
-const COLORS = ["#ffd400", "#7dd957", "#5ac8fa", "#ff8a8a", "#d09bff"];
+// A basic palette including black + white. Shared by markup stroke, free-text
+// colour, and shape stroke/fill.
+const COLORS = [
+  "#000000",
+  "#e11d48",
+  "#f59e0b",
+  "#ffd400",
+  "#22c55e",
+  "#3b82f6",
+  "#a855f7",
+  "#ffffff",
+];
 
 export function MarkupToolbar({ documentId }: { documentId: string }) {
   const color = useToolStore((s) => s.options.color);

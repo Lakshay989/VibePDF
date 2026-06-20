@@ -332,6 +332,31 @@ the current roadmap phase. When one is picked up, move it into the relevant
   parse), including edits that don't change annotations. Cheap today; gate to
   annotation-affecting epochs if it shows up on large files.
 
+## From the 2026-06-18 verification sweep (annotation UX feedback)
+
+- **Per-annotation select / delete / edit is the top ask.** The user hit this on
+  free-text (#2) and shapes (#4): once committed you can only ⌘Z, not click to
+  select / delete / edit. Markup has only a document-wide **Clear** (which removing
+  *everything* is expected, but a per-item path is wanted). This is the
+  "annotation management" feature — the D1 sidebar already selects + highlights, so
+  it wants a **Delete** (and re-edit), which needs durable `/NM` handles on
+  markup/free-text/shapes (notes already have them). **High priority** — promote
+  to a `steps/` entry next.
+- ✅ **DONE 2026-06-18 — fuller colour palette incl. black/white.** Was 5 pastels;
+  now 8 basics (black, red, amber, yellow, green, blue, purple, white) shared by
+  markup stroke, free-text colour, and shape stroke/fill. A native
+  `<input type="color">` for *arbitrary* colours is still a nice follow-up
+  (skipped for now — markup's selection-preserving `onMouseDown preventDefault`
+  fights the native picker, so it needs care).
+
+## From P3.B3a (free-text boxes) — sweep follow-ups
+
+- **Oversized text is clipped to the box** (#3). The `/AP` form's `BBox == Rect`,
+  so a font too big for the dragged box gets cut off. Fix: size the committed
+  `/Rect` to the content (height = lines × leading + padding; width = longest
+  line via text metrics), or grow the editor box as you type and commit that
+  size. Until then, drag a bigger box for big text.
+
 ## From P3.C1a (shapes — rectangle + ellipse)
 
 - **No line / arrow / polygon** — C1a is the two drag-to-size closed shapes.
