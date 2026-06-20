@@ -1874,6 +1874,23 @@ still deferred (BACKLOG).
 
 ---
 
+### P3.B3a (fix) — free-text no longer clipped by a large font (this commit)
+
+```bash
+# Sweep finding #3: a font taller than the dragged box was cut off, because the
+# /AP form clips to BBox == Rect. Fix in cos::add_free_text: grow the box DOWN
+# (top edge fixed) to fit line_count × leading + descender padding. The editor
+# <textarea> also grows to >= ~1.4 line-heights so a big font is visible while
+# typing. Width/no-wrap still a documented limit (B3b).
+
+npm run check     # tsc + eslint src + clippy ✓
+npm run test      # 228/228 (free-text-layer 4 still green)
+npm run test:rust # cos.rs +1 (grows_box_to_fit_large_font: 48pt in a 20pt box →
+#   /Rect height ≥ 110pt, top fixed at 700).
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

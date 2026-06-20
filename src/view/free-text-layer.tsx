@@ -185,7 +185,9 @@ export function FreeTextLayer({
             placeholder="Type text…"
             style={{
               width: "100%",
-              height: editor.rect.height,
+              // At least ~1.4 line-heights tall so a large font is visible while
+              // typing (the committed box grows to fit on the backend too).
+              height: Math.max(editor.rect.height, options.fontSize * scale * 1.4),
               resize: "none",
               border: "1px solid #2563eb",
               outline: "none",

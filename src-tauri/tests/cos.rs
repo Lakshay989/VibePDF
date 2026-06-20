@@ -330,6 +330,32 @@ fn cos_free_text_escapes_and_splits_lines() {
     assert!(content.contains("(second) Tj"), "second line: {content}");
 }
 
+/// SPEC: P3-ANN-003 — a font taller than the dragged box grows the box downward
+/// (top edge fixed) so the `/AP` (clipped to `BBox == Rect`) doesn't cut text off.
+#[test]
+fn cos_free_text_grows_box_to_fit_large_font() {
+    let bytes = fixture_bytes("hello.pdf");
+    // 48pt over two lines in a 20pt-tall box (y 680..700) would clip badly.
+    let out = add_free_text(&bytes, 0, [100.0, 680.0, 300.0, 700.0], "Big\nText", "Helvetica", 48.0, "#000000", false, false)
+        .expect("free text");
+    let doc = Document::load_mem(&out).expect("load");
+    let page_id = *doc.get_pages().get(&1).unwrap();
+    let annot_ref = doc
+        .get_dictionary(page_id)
+        .unwrap()
+        .get(b"Annots")
+        .and_then(Object::as_array)
+        .unwrap()[0]
+        .as_reference()
+        .unwrap();
+    let rect = doc.get_dictionary(annot_ref).unwrap().get(b"Rect").and_then(Object::as_array).unwrap();
+    let (y0, y1) = (num(&rect[1]), num(&rect[3]));
+    // 2 lines × 48×1.2 leading ≈ 115pt — the box must have grown well past 20pt.
+    assert!(y1 - y0 >= 110.0, "box should grow to fit the text: height {}", y1 - y0);
+    // The top edge stays where the user dragged it.
+    assert!((y1 - 700.0).abs() < 0.5, "top fixed at 700, got {y1}");
+}
+
 #[test]
 fn cos_free_text_rejects_empty_rect_and_bad_font() {
     let bytes = fixture_bytes("hello.pdf");

@@ -349,11 +349,12 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From P3.B3a (free-text boxes) — sweep follow-ups
 
-- **Oversized text is clipped to the box** (#3). The `/AP` form's `BBox == Rect`,
-  so a font too big for the dragged box gets cut off. Fix: size the committed
-  `/Rect` to the content (height = lines × leading + padding; width = longest
-  line via text metrics), or grow the editor box as you type and commit that
-  size. Until then, drag a bigger box for big text.
+- ✅ **DONE 2026-06-18 — oversized text no longer clipped vertically** (#3).
+  `add_free_text` grows the box downward (top edge fixed) to fit `lines × leading +
+  descender padding` at the chosen size; the editor textarea also grows to ≥ ~1.4
+  line-heights so a big font is visible while typing. **Still open:** *horizontal*
+  clipping of a single line wider than the box — needs text metrics or auto-wrap
+  (the latter is B3b); for now drag a wider box.
 
 ## From P3.C1a (shapes — rectangle + ellipse)
 

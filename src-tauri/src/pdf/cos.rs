@@ -1221,10 +1221,20 @@ pub fn add_free_text(
     let (r, g, b) = parse_hex_color(color)?;
     let base = base_font(font_family, bold, italic)?;
     let size = font_size.max(1.0);
-    let [x0, y0, x1, y1] = rect;
-    if !(x1 > x0 && y1 > y0) {
+    let [x0, y0_in, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0_in) {
         return Err(CommandError::InvalidInput("free-text rect is empty".into()));
     }
+
+    // The `/AP` form clips to `BBox == Rect`, so a font taller than the dragged
+    // box would cut the text off. Grow the box DOWNWARD (top edge fixed) to fit
+    // every line at this size, with a little descender padding. Width isn't
+    // auto-fit — long lines still need a wider box (no wrap; that's B3b).
+    let leading = size * 1.2;
+    let line_count = u16::try_from(text.split('\n').count().max(1)).unwrap_or(u16::MAX);
+    let needed_height = f32::from(line_count) * leading + size * 0.35;
+    let y0 = (y1 - needed_height).min(y0_in);
+    let rect = [x0, y0, x1, y1];
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
