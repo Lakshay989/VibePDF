@@ -12,9 +12,9 @@ use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
     add_free_text, add_shape, add_text_markup, add_text_note, add_top_level_bookmark,
     clear_text_markup, delete_annotation, merge_documents, prune_dangling_destinations,
-    read_annotations, read_form_field_names, read_text_notes, register_inserted_form_fields,
-    read_top_level_outline_titles, rename_form_fields_with_suffix, reorder_pages, resize_pages,
-    update_text_note,
+    read_annotations, read_form_field_names, read_free_text, read_text_notes,
+    register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
+    reorder_pages, resize_pages, update_free_text, update_text_note,
 };
 use vibepdf_lib::pdf::document::open_pdf;
 
@@ -354,6 +354,56 @@ fn cos_free_text_grows_box_to_fit_large_font() {
     assert!(y1 - y0 >= 110.0, "box should grow to fit the text: height {}", y1 - y0);
     // The top edge stays where the user dragged it.
     assert!((y1 - 700.0).abs() < 0.5, "top fixed at 700, got {y1}");
+}
+
+/// SPEC: P3-ANN-013 — read_free_text round-trips the text + style our writer
+/// stamped (so the editor opens faithfully pre-filled).
+#[test]
+fn cos_read_free_text_round_trips_style() {
+    let bytes = fixture_bytes("hello.pdf");
+    let out = add_free_text(&bytes, 0, [100.0, 560.0, 300.0, 640.0], "Hi\nThere", "Times", 18.0, "#cc1133", true, false)
+        .expect("free text");
+    let nm = read_annotations(&out).expect("read")[0].id.clone();
+
+    let data = read_free_text(&out, &nm).expect("read ft").expect("some");
+    assert_eq!(data.text, "Hi\nThere");
+    assert_eq!(data.font_family, "Times");
+    assert!(data.bold && !data.italic);
+    assert!((data.font_size - 18.0).abs() < 0.5, "size {}", data.font_size);
+    assert_eq!(data.color, "#cc1133");
+    // None for a non-existent / non-free-text handle.
+    assert!(read_free_text(&out, "nope").expect("read").is_none());
+}
+
+/// SPEC: P3-ANN-013 — update_free_text rewrites text + style in place and keeps
+/// the same `/NM` (so the sidebar selection / identity survives).
+#[test]
+fn cos_update_free_text_changes_text_keeps_nm() {
+    let bytes = fixture_bytes("hello.pdf");
+    let out = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 640.0], "before", "Helvetica", 14.0, "#000000", false, false)
+        .expect("add");
+    let nm = read_annotations(&out).expect("read")[0].id.clone();
+
+    let updated = update_free_text(&out, &nm, "after edited", "Times", 20.0, "#ff0000", false, true)
+        .expect("update");
+    assert_eq!(pdfium_page_count(&updated), 1);
+
+    let data = read_free_text(&updated, &nm).expect("read").expect("some");
+    assert_eq!(data.text, "after edited");
+    assert_eq!(data.font_family, "Times");
+    assert!(data.italic && !data.bold);
+    assert!((data.font_size - 20.0).abs() < 0.5);
+    assert_eq!(data.color, "#ff0000");
+
+    // The /NM is unchanged: the (only) annotation still has the same handle.
+    let ids: Vec<String> = read_annotations(&updated).expect("read").into_iter().map(|a| a.id).collect();
+    assert_eq!(ids, vec![nm]);
+}
+
+#[test]
+fn cos_update_free_text_rejects_unknown_nm() {
+    let bytes = add_free_text(&fixture_bytes("hello.pdf"), 0, [10.0, 10.0, 200.0, 60.0], "x", "Helvetica", 12.0, "#000000", false, false).unwrap();
+    assert!(update_free_text(&bytes, "no-such-nm", "y", "Helvetica", 12.0, "#000000", false, false).is_err());
 }
 
 #[test]

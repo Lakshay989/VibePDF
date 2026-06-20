@@ -1891,6 +1891,39 @@ npm run test:rust # cos.rs +1 (grows_box_to_fit_large_font: 48pt in a 20pt box �
 
 ---
 
+### P3.D1e — edit a free-text box in place (P3-ANN-013) (this commit)
+
+```bash
+# No new deps. The "update" half of the sweep (#2): re-edit a committed free-text.
+#   cos::read_free_text(nm) → parse text + style back (/Contents, /Rect; size+colour
+#     from /DA; family+bold/italic from the /AP /BaseFont — inverse of base_font).
+#   cos::update_free_text(nm, …) → rewrite /Contents + /Rect (grow-to-fit) + /DA +
+#     /AP IN PLACE, preserving /NM; old /AP GC'd by prune_objects. add_free_text
+#     refactored to share free_text_appearance + grow_free_text_rect.
+#   UpdateFreeTextEdit + read-only ReadFreeText + UpdateFreeText actor msgs +
+#     pdf_read_free_text / pdf_update_free_text.
+# Frontend: annotation-edit-store (sidebar → FreeTextLayer request channel). The
+#   sidebar ✎ reads the box + posts a request; the page's FreeTextLayer claims it,
+#   opens the editor pre-filled (sets the toolbar to the box's style), commits via
+#   updateFreeText (the editor grew one field, editNm; commit branches on it).
+# Spec: added P3-ANN-013 to docs/02 (human-approved).
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy: merged font_from_base Helvetica arm into the wildcard (match_same_arms);
+#   allow cast on rgb_to_hex.
+npm run test           # 232/232 (+4: freetext IPC 2, free-text-layer edit 1,
+#   AnnotationPanel edit 1)
+npm run test:rust      # EXIT 0. cos.rs +3 (DA/BaseFont style round-trip / update
+#   keeps /NM / rejects unknown nm). free_text_edit.rs: 2 (edit round-trips + undo
+#   restores / read None for a non-free-text handle).
+```
+
+Update-in-place (not delete+re-add) so the `/NM` — and the sidebar
+selection/identity — survives the edit. Shape style re-edit + in-canvas
+double-click are deferred (BACKLOG). Left `[~]` pending the human in-app pass.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

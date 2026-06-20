@@ -4445,6 +4445,66 @@ specific annotation" needs a way to **name** it.
 
 ---
 
+### P3.D1e — editing a free-text box in place (read it back, rewrite it)
+
+#### Problem
+
+You could add and delete a free-text box but not *fix a typo* in one — only
+delete-and-retype. Editing means two new things: reading the annotation's current
+state back into an editor, and rewriting it without changing its identity.
+
+#### Concepts learned
+
+- **Round-tripping a write.** To pre-fill the editor we parse back what we wrote:
+  `/Contents` (trivial), size + colour from the `/DA` string (`/F1 18 Tf r g b
+  rg`), and family/bold/italic from the `/AP` font's `/BaseFont` (an *inverse* of
+  the `base_font` map). A writer and its reader are a matched pair — the reader is
+  only as robust as the format the writer guarantees, so we only promise fidelity
+  for boxes *we* authored (foreign ones fall back to defaults).
+- **Update in place vs delete-and-re-add.** We chose update-in-place
+  (`update_free_text` finds the annot by `/NM` and rewrites `/Contents` + `/Rect`
+  + `/DA` + `/AP`) so the **`/NM` survives** — the sidebar selection, any future
+  reference, and identity stay stable. Delete-and-re-add would have been simpler
+  but would mint a new id every edit.
+- **GC the orphan.** Swapping in a new `/AP` stream leaves the old one unreferenced;
+  `prune_objects()` collects it so the file doesn't bloat with every edit.
+- **Refactor when a second caller appears.** `add_free_text` and `update_free_text`
+  share the appearance-stream + font-resource build and the grow-to-fit — so that
+  logic moved into `free_text_appearance` / `grow_free_text_rect` helpers. The
+  second caller is what justifies the extraction (not speculation).
+- **A request channel, not a callback.** The sidebar (top of the tree) and the
+  per-page `FreeTextLayer` (deep in it) don't share a parent, so "edit this box"
+  travels through a tiny store (`annotation-edit-store`): the sidebar *posts* a
+  request; the matching page's layer *claims* it (opens the editor) and *clears*
+  it. Same shape as the selection store — a one-shot mailbox.
+- **Faithful preview = set the tool to the box's style.** On entering edit mode we
+  push the box's font/size/colour into the toolbar options, so the live `<textarea>`
+  preview matches the committed result *and* the user can tweak the style from the
+  same controls.
+- **Reusing the create editor for edit.** The editor grew one field — `editNm`
+  (null for a new box, the `/NM` for an edit) — and `commit` branches on it
+  (`addFreeText` vs `updateFreeText`). One UI, two intents.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `read_free_text` (parse text+style) + `update_free_text` (rewrite by `/NM`) + the shared `free_text_appearance`/`grow_free_text_rect` + `parse_da`/`font_from_base`. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `UpdateFreeTextEdit` + read-only `ReadFreeText` + `UpdateFreeText` + the two commands. |
+| `src/ipc/freetext.ts` | `FreeTextData` + `readFreeText` / `updateFreeText`. |
+| `src/state/annotation-edit-store.ts` | The sidebar → `FreeTextLayer` edit-request channel. |
+| `src/panels/AnnotationPanel.tsx` | The ✎ pencil: read the box → post the edit request. |
+| `src/view/free-text-layer.tsx` | Claim the request → open the editor pre-filled → commit via `updateFreeText`. |
+| `src-tauri/tests/free_text_edit.rs`, `tests/cos.rs`, FE `freetext`/`free-text-layer`/`AnnotationPanel` | Style round-trip, `/NM`-preserving update, and the UI wiring. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.7.3.3 (`/DA` default-appearance string grammar).
+- Round-trip / property-based testing: write-then-read should be the identity.
+- Mediator/one-shot request channels between distant React subtrees.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

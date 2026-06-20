@@ -7,13 +7,14 @@
 // commit we persist through the actor and drop the tool; the canvas then renders
 // the result. Pointer events, not HTML5 DnD (WKWebView; docs/04).
 
-import { type PointerEvent as ReactPointerEvent, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
-import { addFreeText, type FreeTextRect } from "@/ipc/freetext";
+import { addFreeText, type FreeTextRect, updateFreeText } from "@/ipc/freetext";
+import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
-import { type PageGeometry, type ScreenPoint, screenToPdf } from "@/tools/_framework";
+import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
 import {
   cssFontFamily,
   normalizeScreenRect,
@@ -37,6 +38,8 @@ export interface FreeTextLayerProps {
 interface Editor {
   rect: ScreenRect;
   pdfRect: FreeTextRect;
+  /** Set when re-editing an existing box (its `/NM`); null for a new box. */
+  editNm: string | null;
 }
 
 export function FreeTextLayer({
@@ -50,8 +53,11 @@ export function FreeTextLayer({
   const activeTool = useToolStore((s) => s.activeTool);
   const options = useToolStore((s) => s.options);
   const setActiveTool = useToolStore((s) => s.setActiveTool);
+  const setOptions = useToolStore((s) => s.setOptions);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const editRequest = useAnnotationEditStore((s) => s.editing);
+  const clearEdit = useAnnotationEditStore((s) => s.clearEdit);
 
   const [start, setStart] = useState<ScreenPoint | null>(null);
   const [current, setCurrent] = useState<ScreenPoint | null>(null);
@@ -106,8 +112,44 @@ export function FreeTextLayer({
     setStart(null);
     setCurrent(null);
     setText("");
-    setEditor({ rect, pdfRect });
+    setEditor({ rect, pdfRect, editNm: null });
   };
+
+  // SPEC: P3-ANN-013 — claim an edit request for this page: open the editor at
+  // the box's location, pre-filled with its text + style.
+  useEffect(() => {
+    if (!editRequest || editRequest.page !== page) return;
+    const { data, nm } = editRequest;
+    const swp = (((rotation % 180) + 180) % 180) === 90;
+    const g: PageGeometry = {
+      page,
+      width: swp ? displayedHeight : displayedWidth,
+      height: swp ? displayedWidth : displayedHeight,
+      scale,
+      rotation,
+    };
+    const tl = pdfToScreen({ page, x: data.rect[0], y: data.rect[3] }, g);
+    const br = pdfToScreen({ page, x: data.rect[2], y: data.rect[1] }, g);
+    setText(data.text);
+    setOptions({
+      fontFamily: data.fontFamily,
+      fontSize: data.fontSize,
+      color: data.color,
+      bold: data.bold,
+      italic: data.italic,
+    });
+    setEditor({
+      rect: {
+        left: Math.min(tl.x, br.x),
+        top: Math.min(tl.y, br.y),
+        width: Math.abs(br.x - tl.x),
+        height: Math.abs(br.y - tl.y),
+      },
+      pdfRect: data.rect,
+      editNm: nm,
+    });
+    clearEdit();
+  }, [editRequest, page, scale, rotation, displayedWidth, displayedHeight, setOptions, clearEdit]);
 
   const cancel = () => {
     setEditor(null);
@@ -120,23 +162,35 @@ export function FreeTextLayer({
     const ed = editor;
     cancel();
     if (!ed || !body) return;
-    addFreeText(
-      documentId,
-      page,
-      ed.pdfRect,
-      text,
-      options.fontFamily,
-      options.fontSize,
-      options.color,
-      options.bold,
-      options.italic,
-    )
-      .then((h) => {
-        // The box is now in the PDF; reload so the canvas renders the /AP.
-        bumpEpoch(documentId);
-        setHistory(documentId, h);
-      })
-      .catch((err: unknown) => console.warn("add free-text failed", documentId, err));
+    const done = (h: Parameters<typeof setHistory>[1]) => {
+      // The PDF changed; reload so the canvas renders the new /AP.
+      bumpEpoch(documentId);
+      setHistory(documentId, h);
+    };
+    const fail = (err: unknown) => console.warn("free-text commit failed", documentId, err);
+    const promise = ed.editNm
+      ? updateFreeText(
+          documentId,
+          ed.editNm,
+          text,
+          options.fontFamily,
+          options.fontSize,
+          options.color,
+          options.bold,
+          options.italic,
+        )
+      : addFreeText(
+          documentId,
+          page,
+          ed.pdfRect,
+          text,
+          options.fontFamily,
+          options.fontSize,
+          options.color,
+          options.bold,
+          options.italic,
+        );
+    promise.then(done).catch(fail);
   };
 
   const preview = start && current ? normalizeScreenRect(start, current) : null;

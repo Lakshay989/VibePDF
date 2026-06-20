@@ -6,13 +6,45 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
-import { addFreeText } from "@/ipc/freetext";
+import { addFreeText, readFreeText, updateFreeText } from "@/ipc/freetext";
 
 const mockInvoke = vi.mocked(invoke);
 
 beforeEach(() => {
   mockInvoke.mockReset();
   mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+});
+
+describe("readFreeText / updateFreeText (P3-ANN-013)", () => {
+  it("readFreeText marshals id + nm and returns the data", async () => {
+    const data = {
+      rect: [100, 600, 320, 700],
+      text: "Hi",
+      fontFamily: "Times",
+      fontSize: 18,
+      color: "#ff0000",
+      bold: true,
+      italic: false,
+    };
+    mockInvoke.mockResolvedValueOnce(data);
+    const out = await readFreeText("doc-1", "nm-1");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_read_free_text", { id: "doc-1", nm: "nm-1" });
+    expect(out).toEqual(data);
+  });
+
+  it("updateFreeText marshals id, nm, text, and style", async () => {
+    await updateFreeText("doc-1", "nm-1", "Hello", "Helvetica", 24, "#003399", false, true);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_update_free_text", {
+      id: "doc-1",
+      nm: "nm-1",
+      text: "Hello",
+      fontFamily: "Helvetica",
+      fontSize: 24,
+      color: "#003399",
+      bold: false,
+      italic: true,
+    });
+  });
 });
 
 describe("addFreeText", () => {

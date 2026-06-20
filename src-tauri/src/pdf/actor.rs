@@ -40,9 +40,9 @@ use crate::pdf::document::{
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, ShapeEdit, TextMarkupEdit,
-    UpdateNoteEdit,
+    UpdateFreeTextEdit, UpdateNoteEdit,
 };
-use crate::pdf::cos::{read_annotations, read_text_notes, AnnotationInfo, NoteData};
+use crate::pdf::cos::{read_annotations, read_free_text, read_text_notes, AnnotationInfo, FreeTextData, NoteData};
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -203,6 +203,24 @@ pub enum Message {
     /// Read-only; the panel pulls on open and after each edit epoch.
     ReadAnnotations {
         reply: oneshot::Sender<Result<Vec<AnnotationInfo>, CommandError>>,
+    },
+    /// SPEC: P3-ANN-013 — read one free-text annotation's text + style by `/NM`,
+    /// so the in-place editor opens pre-filled. Read-only.
+    ReadFreeText {
+        nm: String,
+        reply: oneshot::Sender<Result<Option<FreeTextData>, CommandError>>,
+    },
+    /// SPEC: P3-ANN-013 — update a free-text annotation (by `/NM`) in place.
+    /// Undoable; marks dirty.
+    UpdateFreeText {
+        nm: String,
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-003 — add a free-text box at `rect` on `page` with a
     /// generated `/AP`. Undoable; marks dirty; replies with history availability.
@@ -726,6 +744,69 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadAnnotations { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-013 — read one free-text annotation's editable state.
+    pub async fn read_free_text(&self, nm: String) -> Result<Option<FreeTextData>, CommandError> {
+        let rx = self.read_free_text_request(nm)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_free_text_request(
+        &self,
+        nm: String,
+    ) -> Result<oneshot::Receiver<Result<Option<FreeTextData>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadFreeText { nm, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-013 — update a free-text annotation in place. Await-holding.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_free_text(
+        &self,
+        nm: String,
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx =
+            self.update_free_text_request(nm, text, font_family, font_size, color, bold, italic)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_free_text_request(
+        &self,
+        nm: String,
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::UpdateFreeText {
+                nm,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                reply,
+            })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1346,6 +1427,41 @@ fn run_worker(
                 let result = pdfium_lock()
                     .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
                     .and_then(|bytes| read_annotations(&bytes));
+                let _ = reply.send(result);
+            }
+            Message::ReadFreeText { nm, reply } => {
+                let result = pdfium_lock()
+                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
+                    .and_then(|bytes| read_free_text(&bytes, &nm));
+                let _ = reply.send(result);
+            }
+            Message::UpdateFreeText {
+                nm,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                reply,
+            } => {
+                let edit = UpdateFreeTextEdit {
+                    nm,
+                    text,
+                    font_family,
+                    font_size,
+                    color,
+                    bold,
+                    italic,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::AddFreeText {

@@ -128,6 +128,9 @@ WHEN the user chooses "flatten annotations," THE system SHALL render all annotat
 ### P3-ANN-012 — Select and delete annotations
 WHEN the user selects an annotation (via the annotation list) and invokes delete, THE system SHALL remove that annotation from the PDF as an undoable edit.
 
+### P3-ANN-013 — Edit annotations
+WHEN the user edits an existing annotation's content or style (free-text text / font / colour; shape stroke / fill / width), THE system SHALL update it in place as an undoable edit that preserves the annotation's identity (`/NM`).
+
 ---
 
 ## P4 — Content editing

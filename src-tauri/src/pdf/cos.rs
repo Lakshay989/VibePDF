@@ -1221,20 +1221,11 @@ pub fn add_free_text(
     let (r, g, b) = parse_hex_color(color)?;
     let base = base_font(font_family, bold, italic)?;
     let size = font_size.max(1.0);
-    let [x0, y0_in, x1, y1] = rect;
-    if !(x1 > x0 && y1 > y0_in) {
+    let [x0, y0, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0) {
         return Err(CommandError::InvalidInput("free-text rect is empty".into()));
     }
-
-    // The `/AP` form clips to `BBox == Rect`, so a font taller than the dragged
-    // box would cut the text off. Grow the box DOWNWARD (top edge fixed) to fit
-    // every line at this size, with a little descender padding. Width isn't
-    // auto-fit — long lines still need a wider box (no wrap; that's B3b).
-    let leading = size * 1.2;
-    let line_count = u16::try_from(text.split('\n').count().max(1)).unwrap_or(u16::MAX);
-    let needed_height = f32::from(line_count) * leading + size * 0.35;
-    let y0 = (y1 - needed_height).min(y0_in);
-    let rect = [x0, y0, x1, y1];
+    let rect = grow_free_text_rect(rect, text, size);
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
@@ -1246,10 +1237,136 @@ pub fn add_free_text(
         .get(&page_no)
         .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
 
-    let rect_obj =
-        Object::Array(vec![Object::Real(x0), Object::Real(y0), Object::Real(x1), Object::Real(y1)]);
+    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b));
 
-    // Appearance, drawn in absolute page coords (BBox == Rect, identity matrix).
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"FreeText".to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string())); // stable handle
+    annot.set("Rect", rect_array(rect));
+    annot.set("Contents", Object::string_literal(text));
+    annot.set("DA", Object::string_literal(da));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// SPEC: P3-ANN-013 — update an existing free-text annotation (found by `/NM`):
+/// new `text` + style, rewriting `/Contents` + `/Rect` (grown to fit) + `/DA` +
+/// `/AP` while preserving the `/NM` and every other field. The old `/AP` stream
+/// is GC'd by `prune_objects`.
+#[allow(clippy::too_many_arguments)]
+pub fn update_free_text(
+    bytes: &[u8],
+    nm: &str,
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    color: &str,
+    bold: bool,
+    italic: bool,
+) -> Result<Vec<u8>, CommandError> {
+    let (r, g, b) = parse_hex_color(color)?;
+    let base = base_font(font_family, bold, italic)?;
+    let size = font_size.max(1.0);
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let id = find_annotation_by_nm(&doc, nm)
+        .ok_or_else(|| CommandError::InvalidInput(format!("free-text not found: {nm}")))?;
+    let dict = doc.get_dictionary(id).map_err(cos_err)?;
+    if dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(&b"FreeText"[..]) {
+        return Err(CommandError::InvalidInput("annotation is not free-text".into()));
+    }
+    // Keep the top edge + width; grow only downward to fit the new text.
+    let rect = grow_free_text_rect(rect_bounds(dict), text, size);
+
+    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b));
+    let dict = doc.get_dictionary_mut(id).map_err(cos_err)?;
+    dict.set("Contents", Object::string_literal(text));
+    dict.set("Rect", rect_array(rect));
+    dict.set("DA", Object::string_literal(da));
+    dict.set("AP", Object::Dictionary(ap));
+
+    doc.prune_objects(); // drop the now-orphaned old /AP stream
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// A free-text annotation's editable state, read back for the in-place editor.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeTextData {
+    pub rect: [f32; 4],
+    pub text: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+/// SPEC: P3-ANN-013 — read a free-text annotation's text + style by `/NM`, so the
+/// editor can open pre-filled. `None` if there's no such free-text. Style is
+/// parsed from the `/DA` (size + colour) and the `/AP` font `/BaseFont` (family +
+/// bold/italic); a foreign annotation that doesn't match our format falls back to
+/// defaults.
+pub fn read_free_text(bytes: &[u8], nm: &str) -> Result<Option<FreeTextData>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let Some(id) = find_annotation_by_nm(&doc, nm) else { return Ok(None) };
+    let Ok(dict) = doc.get_dictionary(id) else { return Ok(None) };
+    if dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(&b"FreeText"[..]) {
+        return Ok(None);
+    }
+    let da = dict
+        .get(b"DA")
+        .and_then(Object::as_str)
+        .ok()
+        .map_or_else(String::new, |s| String::from_utf8_lossy(s).into_owned());
+    let (font_size, color) = parse_da(&da);
+    let (font_family, bold, italic) = font_from_base(read_ap_base_font(&doc, dict).as_deref());
+    Ok(Some(FreeTextData {
+        rect: rect_bounds(dict),
+        text: str_field(dict, b"Contents"),
+        font_family,
+        font_size,
+        color,
+        bold,
+        italic,
+    }))
+}
+
+/// `[x0,y0,x1,y1]` → a PDF `/Rect` array.
+fn rect_array(rect: [f32; 4]) -> Object {
+    Object::Array(rect.iter().map(|&v| Object::Real(v)).collect())
+}
+
+/// Grow `rect` downward (top edge + width fixed) so `text` at `size` fits the
+/// `/AP` box (which clips to `BBox == Rect`). Never shrinks below the input.
+fn grow_free_text_rect(rect: [f32; 4], text: &str, size: f32) -> [f32; 4] {
+    let [x0, y0_in, x1, y1] = rect;
+    let leading = size * 1.2;
+    let line_count = u16::try_from(text.split('\n').count().max(1)).unwrap_or(u16::MAX);
+    let needed = f32::from(line_count) * leading + size * 0.35;
+    [x0, (y1 - needed).min(y0_in), x1, y1]
+}
+
+/// Build the free-text `/AP` form (added to `doc`) + its `/DA` string for the
+/// given geometry/style. Shared by [`add_free_text`] and [`update_free_text`].
+fn free_text_appearance(
+    doc: &mut Document,
+    rect: [f32; 4],
+    text: &str,
+    base: &str,
+    size: f32,
+    (r, g, b): (f32, f32, f32),
+) -> (Dictionary, String) {
     let content = free_text_appearance_content(rect, text, size, (r, g, b));
 
     // The appearance's own font resource — `/AP` is self-contained, so display
@@ -1267,33 +1384,88 @@ pub fn add_free_text(
     ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
     ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
     ap_dict.set("FormType", Object::Integer(1));
-    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("BBox", rect_array(rect));
     ap_dict.set("Resources", Object::Dictionary(resources));
     let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
 
     let mut ap = Dictionary::new();
     ap.set("N", Object::Reference(ap_id));
-
-    // `/DA` (default appearance) — required by spec; best-effort fallback for a
-    // reader that regenerates appearance instead of using `/AP`.
+    // `/DA` (default appearance) — best-effort fallback for a reader that
+    // regenerates appearance instead of using `/AP`.
     let da = format!("/F1 {size:.2} Tf {r:.4} {g:.4} {b:.4} rg");
+    (ap, da)
+}
 
-    let mut annot = Dictionary::new();
-    annot.set("Type", Object::Name(b"Annot".to_vec()));
-    annot.set("Subtype", Object::Name(b"FreeText".to_vec()));
-    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string())); // stable delete handle
-    annot.set("Rect", rect_obj);
-    annot.set("Contents", Object::string_literal(text));
-    annot.set("DA", Object::string_literal(da));
-    annot.set("F", Object::Integer(4)); // Print
-    annot.set("P", Object::Reference(page_id));
-    annot.set("AP", Object::Dictionary(ap));
-    let annot_id = doc.add_object(Object::Dictionary(annot));
+/// Parse a free-text `/DA` (`/F1 <size> Tf <r> <g> <b> rg`) into `(size, #hex)`.
+/// Defaults on anything we don't recognize.
+fn parse_da(da: &str) -> (f32, String) {
+    let toks: Vec<&str> = da.split_whitespace().collect();
+    let size = toks
+        .iter()
+        .position(|t| *t == "Tf")
+        .and_then(|i| i.checked_sub(1))
+        .and_then(|i| toks.get(i))
+        .and_then(|t| t.parse::<f32>().ok())
+        .unwrap_or(14.0);
+    let color = toks
+        .iter()
+        .position(|t| *t == "rg")
+        .filter(|&i| i >= 3)
+        .and_then(|i| {
+            let r = toks[i - 3].parse::<f32>().ok()?;
+            let g = toks[i - 2].parse::<f32>().ok()?;
+            let b = toks[i - 1].parse::<f32>().ok()?;
+            Some(rgb_to_hex(r, g, b))
+        })
+        .unwrap_or_else(|| "#000000".to_string());
+    (size, color)
+}
 
-    append_annotation(&mut doc, page_id, annot_id)?;
-    let mut buf = Vec::new();
-    doc.save_to(&mut buf)?;
-    Ok(buf)
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..=255 after clamp
+fn rgb_to_hex(r: f32, g: f32, b: f32) -> String {
+    let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", c(r), c(g), c(b))
+}
+
+/// The `/BaseFont` of a free-text annotation's `/AP` font resource, if any.
+fn read_ap_base_font(doc: &Document, annot: &Dictionary) -> Option<String> {
+    let n = annot.get(b"AP").and_then(Object::as_dict).ok()?.get(b"N").ok()?.as_reference().ok()?;
+    let stream = doc.get_object(n).and_then(Object::as_stream).ok()?;
+    let base = stream
+        .dict
+        .get(b"Resources")
+        .and_then(Object::as_dict)
+        .ok()?
+        .get(b"Font")
+        .and_then(Object::as_dict)
+        .ok()?
+        .get(b"F1")
+        .and_then(Object::as_dict)
+        .ok()?
+        .get(b"BaseFont")
+        .and_then(Object::as_name)
+        .ok()?;
+    Some(String::from_utf8_lossy(base).into_owned())
+}
+
+/// Inverse of [`base_font`]: a base-14 PostScript name → `(family, bold, italic)`.
+/// Unknown names fall back to Helvetica regular.
+fn font_from_base(base: Option<&str>) -> (String, bool, bool) {
+    let (family, bold, italic) = match base.unwrap_or("Helvetica") {
+        "Helvetica-Bold" => ("Helvetica", true, false),
+        "Helvetica-Oblique" => ("Helvetica", false, true),
+        "Helvetica-BoldOblique" => ("Helvetica", true, true),
+        "Times-Roman" => ("Times", false, false),
+        "Times-Bold" => ("Times", true, false),
+        "Times-Italic" => ("Times", false, true),
+        "Times-BoldItalic" => ("Times", true, true),
+        "Courier" => ("Courier", false, false),
+        "Courier-Bold" => ("Courier", true, false),
+        "Courier-Oblique" => ("Courier", false, true),
+        "Courier-BoldOblique" => ("Courier", true, true),
+        _ => ("Helvetica", false, false),
+    };
+    (family.to_string(), bold, italic)
 }
 
 /// The `/AP` content stream for a free-text box: each line of `text` drawn

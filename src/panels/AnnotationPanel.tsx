@@ -9,7 +9,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
+import { readFreeText } from "@/ipc/freetext";
 import type { DocumentId } from "@/ipc/pdf";
+import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import {
   type AnnotationFilter,
   distinctAuthors,
@@ -46,7 +48,23 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
   const select = useAnnotationSelectionStore((s) => s.select);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const requestEdit = useAnnotationEditStore((s) => s.requestEdit);
   const selectedId = selected?.id ?? null;
+
+  // SPEC: P3-ANN-013 — re-edit a free-text box: read its text + style, scroll to
+  // it, and post an edit request the page's FreeTextLayer opens pre-filled.
+  const edit = useCallback(
+    (info: AnnotationInfo) => {
+      readFreeText(documentId, info.id)
+        .then((data) => {
+          if (!data) return;
+          onJump(info.page + 1);
+          requestEdit({ nm: info.id, page: info.page, data });
+        })
+        .catch((err: unknown) => console.warn("read free-text failed", documentId, err));
+    },
+    [documentId, onJump, requestEdit],
+  );
 
   // SPEC: P3-ANN-012 — delete an annotation by its handle, clear the selection,
   // and refresh: bumping the epoch reloads the canvas (its /AP is gone) and
@@ -221,6 +239,21 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
                           <div className="truncate text-[11px] text-neutral-500">{info.author}</div>
                         ) : null}
                       </button>
+                      {info.kind === "freetext" ? (
+                        <button
+                          type="button"
+                          onClick={() => edit(info)}
+                          aria-label={`Edit free text on page ${info.page + 1}`}
+                          title="Edit text"
+                          className={
+                            "shrink-0 rounded px-2 text-neutral-400 hover:bg-blue-100 hover:text-blue-600 " +
+                            "focus:opacity-100 group-hover:opacity-100 dark:hover:bg-blue-900/40 " +
+                            (info.id === selectedId ? "opacity-100" : "opacity-0")
+                          }
+                        >
+                          ✎
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => remove(info)}

@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
-use crate::pdf::cos::{AnnotationInfo, NoteData};
+use crate::pdf::cos::{AnnotationInfo, FreeTextData, NoteData};
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
@@ -423,6 +423,61 @@ pub async fn pdf_read_annotations(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.read_annotations_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-013 — read a free-text annotation's editable text + style by
+/// `/NM`, so the in-place editor can open pre-filled. Read-only.
+#[tauri::command]
+pub async fn pdf_read_free_text(
+    state: State<'_, AppState>,
+    id: String,
+    nm: String,
+) -> Result<Option<FreeTextData>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_free_text_request(nm)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-013 — update a free-text annotation (by `/NM`) in place: new
+/// text + style. Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_update_free_text(
+    state: State<'_, AppState>,
+    id: String,
+    nm: String,
+    text: String,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    bold: bool,
+    italic: bool,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.update_free_text_request(nm, text, font_family, font_size, color, bold, italic)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

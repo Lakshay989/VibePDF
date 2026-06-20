@@ -10,13 +10,27 @@ vi.mock("@/ipc/annotations", async (orig) => ({
   readAnnotations: vi.fn(),
   deleteAnnotation: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
+vi.mock("@/ipc/freetext", () => ({
+  readFreeText: vi.fn().mockResolvedValue({
+    rect: [10, 20, 110, 60],
+    text: "cap",
+    fontFamily: "Helvetica",
+    fontSize: 14,
+    color: "#000000",
+    bold: false,
+    italic: false,
+  }),
+}));
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
+import { readFreeText } from "@/ipc/freetext";
 import { AnnotationPanel } from "@/panels/AnnotationPanel";
+import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
 
 const mockRead = vi.mocked(readAnnotations);
 const mockDelete = vi.mocked(deleteAnnotation);
+const mockReadFt = vi.mocked(readFreeText);
 
 const rows: AnnotationInfo[] = [
   { id: "h1", page: 0, kind: "highlight", rect: [10, 20, 110, 30], contents: "important", author: "Bo", modified: null },
@@ -29,6 +43,7 @@ afterEach(() => {
 });
 beforeEach(() => {
   useAnnotationSelectionStore.setState({ selected: null });
+  useAnnotationEditStore.setState({ editing: null });
   mockRead.mockResolvedValue(rows);
 });
 
@@ -93,6 +108,27 @@ describe("AnnotationPanel", () => {
     fireEvent.click(container.querySelector('button[aria-label="Highlight on page 1"]') as Element);
     fireEvent.keyDown(window, { key: "Delete" });
     expect(mockDelete).toHaveBeenCalledWith("doc-1", "h1");
+  });
+
+  it("edits a free-text row: reads it and posts an edit request", async () => {
+    const ft: AnnotationInfo = {
+      id: "f1",
+      page: 0,
+      kind: "freetext",
+      rect: [10, 20, 110, 60],
+      contents: "cap",
+      author: "",
+      modified: null,
+    };
+    mockRead.mockResolvedValueOnce([ft]);
+    const onJump = vi.fn();
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={onJump} />);
+    await waitFor(() => expect(container.textContent).toContain("cap"));
+
+    fireEvent.click(container.querySelector('button[aria-label="Edit free text on page 1"]') as Element);
+    expect(mockReadFt).toHaveBeenCalledWith("doc-1", "f1");
+    await waitFor(() => expect(useAnnotationEditStore.getState().editing?.nm).toBe("f1"));
+    expect(onJump).toHaveBeenCalledWith(1);
   });
 
   it("shows an empty state with no annotations", async () => {

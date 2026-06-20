@@ -8,9 +8,11 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 
 vi.mock("@/ipc/freetext", () => ({
   addFreeText: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  updateFreeText: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
-import { addFreeText } from "@/ipc/freetext";
+import { addFreeText, updateFreeText } from "@/ipc/freetext";
+import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useToolStore } from "@/state/tool-store";
 import { FreeTextLayer } from "@/view/free-text-layer";
@@ -54,6 +56,7 @@ beforeEach(() => {
     },
   });
   useEditEpochStore.setState({ byDoc: {}, edited: {} });
+  useAnnotationEditStore.setState({ editing: null });
 });
 
 describe("FreeTextLayer", () => {
@@ -108,6 +111,39 @@ describe("FreeTextLayer", () => {
     expect(addFreeText).not.toHaveBeenCalled();
     expect(container.querySelector("textarea")).toBeNull();
     expect(useToolStore.getState().activeTool).toBeNull();
+  });
+
+  it("opens pre-filled on an edit request and commits via updateFreeText", () => {
+    useToolStore.setState({ activeTool: null }); // edit doesn't need the tool
+    useAnnotationEditStore.getState().requestEdit({
+      nm: "ft-1",
+      page: 0,
+      data: {
+        rect: [100, 642, 300, 692],
+        text: "Helo",
+        fontFamily: "Times",
+        fontSize: 18,
+        color: "#cc1133",
+        bold: true,
+        italic: false,
+      },
+    });
+    const { container } = render(layer());
+
+    const textarea = container.querySelector(
+      'textarea[aria-label="Free-text annotation"]',
+    ) as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    expect(textarea.value).toBe("Helo");
+    // The toolbar options were set to the box's style for a faithful preview.
+    expect(useToolStore.getState().options.fontFamily).toBe("Times");
+    expect(useToolStore.getState().options.color).toBe("#cc1133");
+
+    fireEvent.change(textarea, { target: { value: "Hello" } });
+    fireEvent.click(container.querySelector('button[aria-label="Add free text"]') as Element);
+
+    expect(updateFreeText).toHaveBeenCalledWith("doc-1", "ft-1", "Hello", "Times", 18, "#cc1133", true, false);
+    expect(addFreeText).not.toHaveBeenCalled();
   });
 
   it("does nothing when the free-text tool is not active", () => {

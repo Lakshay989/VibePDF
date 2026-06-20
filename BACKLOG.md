@@ -337,9 +337,14 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - ✅ **DONE 2026-06-18 (P3.D1d, P3-ANN-012) — per-annotation select + delete.**
   Every annotation now carries a `/NM`; the sidebar row has a ✕ and Delete/Backspace
   removes the selected one (undoable). Shapes are now listed too (the kinds map was
-  missing `/Square`+`/Circle`). **Still deferred:** *edit* of a committed
-  free-text/shape (notes are already editable); in-canvas click-to-select (sidebar
-  only); annotations saved *before* this step lack `/NM` (best-effort `obj:` delete).
+  missing `/Square`+`/Circle`).
+- ✅ **DONE 2026-06-18 (P3.D1e, P3-ANN-013) — edit a free-text box in place.**
+  Sidebar **✎** reopens the box's editor pre-filled (text + style read back from
+  `/DA`+`/BaseFont`); commit rewrites it in place preserving `/NM`. **Still
+  deferred:** **shape** style re-edit (`update_shape` mirrors `update_free_text`);
+  markup re-colour; in-canvas double-click-to-edit (sidebar pencil only);
+  annotations saved *before* the `/NM` change are edit/delete-able only via the
+  best-effort `obj:` fallback.
 - ✅ **DONE 2026-06-18 — fuller colour palette incl. black/white.** Was 5 pastels;
   now 8 basics (black, red, amber, yellow, green, blue, purple, white) shared by
   markup stroke, free-text colour, and shape stroke/fill. A native

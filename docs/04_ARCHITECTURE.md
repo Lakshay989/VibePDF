@@ -189,6 +189,16 @@ re-syncs: the canvas reload drops the `/AP`, the list re-reads, and a note's
 overlay icon clears via `useNotesSync`. No new IPC and no new overlay — the
 identity was the only missing piece.
 
+**Editing a free-text box in place (P3-ANN-013)** is the same `/NM`-keyed update:
+`cos::read_free_text` parses the box's text + style back out (`/DA` for size +
+colour, the `/AP` `/BaseFont` for family/bold/italic — the inverse of the write),
+and `cos::update_free_text` rewrites `/Contents` + `/Rect` + `/DA` + `/AP` in place
+while keeping the `/NM` (the old `/AP` stream is GC'd). The sidebar's ✎ posts an
+*edit request* through `annotation-edit-store` (a one-shot mailbox between the
+distant sidebar and the per-page `FreeTextLayer`), which reuses its create-mode
+editor — pre-filled and with the toolbar set to the box's style — and commits via
+`updateFreeText`. Shape style edit is the same pattern, deferred.
+
 Because the note overlay is *not* the source of truth, it's kept a **projection
 of the PDF** (P3.B2b): `cos::read_text_notes` (a read-only `ReadNotes` actor
 query, serialize-then-lopdf-parse like `GetBytes`) feeds `pdf_read_text_notes`,

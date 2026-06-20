@@ -13,7 +13,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::{
     add_free_text, add_shape, add_text_markup, add_text_note, clear_text_markup, delete_annotation,
-    update_text_note,
+    update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
@@ -260,5 +260,40 @@ impl<'a> Edit<PdfDocument<'a>> for ShapeEdit {
 
     fn label(&self) -> &'static str {
         "shape"
+    }
+}
+
+/// SPEC: P3-ANN-013 — update a free-text annotation (by `/NM`) in place.
+pub struct UpdateFreeTextEdit {
+    pub nm: String,
+    pub text: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for UpdateFreeTextEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        cos_edit(doc, |bytes| {
+            update_free_text(
+                bytes,
+                &self.nm,
+                &self.text,
+                &self.font_family,
+                self.font_size,
+                &self.color,
+                self.bold,
+                self.italic,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "update-free-text"
     }
 }
