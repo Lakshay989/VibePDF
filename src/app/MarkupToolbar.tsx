@@ -52,6 +52,8 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const rectActive = activeTool === "rectangle";
   const ellipseActive = activeTool === "ellipse";
   const shapeActive = rectActive || ellipseActive;
+  const lineActive = activeTool === "line";
+  const arrowActive = activeTool === "arrow";
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -212,6 +214,32 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Ellipse
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(lineActive ? null : "line")}
+        title="Draw a line (drag on the page)"
+        aria-label="Line tool"
+        aria-pressed={lineActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (lineActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Line
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(arrowActive ? null : "arrow")}
+        title="Draw an arrow (drag on the page)"
+        aria-label="Arrow tool"
+        aria-pressed={arrowActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (arrowActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Arrow
       </button>
       {shapeActive ? (
         <div className="flex items-center gap-1">

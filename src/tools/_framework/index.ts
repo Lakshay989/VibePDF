@@ -7,6 +7,7 @@ export type {
   AnnotationBase,
   AnnotationDraft,
   FontFamily,
+  LineAnnotation,
   MarkupAnnotation,
   MarkupSubtype,
   NoteAnnotation,

@@ -103,11 +103,21 @@ export interface NoteAnnotation extends AnnotationBase {
   author: string;
 }
 
+/** A line / arrow (P3.C1b) — a segment from `start` to `end`; `arrow` adds an
+ *  open-arrow head at `end`. Stroke only (no fill). */
+export interface LineAnnotation extends AnnotationBase {
+  type: "line";
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  arrow: boolean;
+  strokeWidth: number;
+}
+
 /**
  * The committed-annotation union. Grows as concrete tools land (P3.B/C add ink
  * paths, free-text, …).
  */
-export type Annotation = RectAnnotation | MarkupAnnotation | NoteAnnotation;
+export type Annotation = RectAnnotation | MarkupAnnotation | NoteAnnotation | LineAnnotation;
 
 /** `Omit` that distributes over a union (plain `Omit` collapses to common keys). */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

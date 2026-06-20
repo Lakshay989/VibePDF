@@ -13,6 +13,7 @@ export const KIND_LABELS: Record<AnnotationKind, string> = {
   freetext: "Free text",
   rectangle: "Rectangle",
   ellipse: "Ellipse",
+  line: "Line",
 };
 
 export function kindLabel(kind: AnnotationKind): string {

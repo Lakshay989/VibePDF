@@ -44,7 +44,8 @@ export type AnnotationKind =
   | "note"
   | "freetext"
   | "rectangle"
-  | "ellipse";
+  | "ellipse"
+  | "line";
 
 /**
  * SPEC: P3-ANN-012 — delete the annotation with the given `handle` (its `/NM`,

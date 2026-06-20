@@ -14,6 +14,7 @@
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 
+import { addLine } from "@/ipc/lines";
 import { addShape } from "@/ipc/shapes";
 import { useAnnotationStore, useDocAnnotations } from "@/state/annotation-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
@@ -35,11 +36,12 @@ import {
   stepTool,
   type ToolSession,
 } from "@/tools/_framework";
+import { lineTools } from "@/tools/shapes/line-tools";
 import { shapeTools } from "@/tools/shapes/shape-tools";
 
-// Register the shape tools once, when this module loads. The overlay is their
-// host: it drives the gesture and persists the committed draft (below).
-for (const tool of shapeTools) registerTool(tool);
+// Register the shape + line tools once, when this module loads. The overlay is
+// their host: it drives the gesture and persists the committed draft (below).
+for (const tool of [...shapeTools, ...lineTools]) registerTool(tool);
 
 export interface AnnotationLayerProps {
   documentId: string;
@@ -152,6 +154,29 @@ export function AnnotationLayer({
   // epoch reload — so the store holds only the in-progress draft, not committed
   // shapes. Any non-shape draft falls back to the store (preview-only tools).
   const commitDraft = (committed: AnnotationDraft) => {
+    const persisted = (h: Parameters<typeof setHistory>[1]) => {
+      bumpEpoch(documentId);
+      setHistory(documentId, h);
+    };
+    if (committed.type === "line") {
+      const { start, end, arrow } = committed;
+      setDraft(null);
+      addLine(
+        documentId,
+        committed.page,
+        start.x,
+        start.y,
+        end.x,
+        end.y,
+        arrow,
+        options.color,
+        options.opacity,
+        options.strokeWidth,
+      )
+        .then(persisted)
+        .catch((err: unknown) => console.warn("add line failed", documentId, err));
+      return;
+    }
     if (committed.type !== "rectangle" && committed.type !== "ellipse") {
       addAnnotation(documentId, committed);
       return;
@@ -168,10 +193,7 @@ export function AnnotationLayer({
       options.opacity,
       options.strokeWidth,
     )
-      .then((h) => {
-        bumpEpoch(documentId);
-        setHistory(documentId, h);
-      })
+      .then(persisted)
       .catch((err: unknown) => console.warn("add shape failed", documentId, err));
   };
 
@@ -215,10 +237,75 @@ export function AnnotationLayer({
           />
         ),
       )}
-      {draftHere && draftHere.type !== "markup" ? (
+      {draftHere && (draftHere.type === "rectangle" || draftHere.type === "ellipse") ? (
         <Shape id="__draft__" shape={draftHere} geo={geo} selected={false} selectable={false} preview />
       ) : null}
+      {draftHere && draftHere.type === "line" ? <LineShape line={draftHere} geo={geo} /> : null}
     </svg>
+  );
+}
+
+/** The live line/arrow draft preview (committed lines are canvas-rendered). */
+function LineShape({
+  line,
+  geo,
+}: {
+  line: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    arrow: boolean;
+    color: string;
+    opacity: number;
+    strokeWidth: number;
+  };
+  geo: PageGeometry;
+}) {
+  const a = pdfToScreen({ page: geo.page, x: line.start.x, y: line.start.y }, geo);
+  const b = pdfToScreen({ page: geo.page, x: line.end.x, y: line.end.y }, geo);
+  const w = Math.max(1, line.strokeWidth * geo.scale);
+
+  let head: string | null = null;
+  if (line.arrow) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1) {
+      const ux = dx / len;
+      const uy = dy / len;
+      const hl = Math.max(8, w * 3);
+      const hw = hl * 0.9;
+      const bx = b.x - ux * hl;
+      const by = b.y - uy * hl;
+      const px = -uy;
+      const py = ux;
+      head = `${bx + (px * hw) / 2},${by + (py * hw) / 2} ${b.x},${b.y} ${bx - (px * hw) / 2},${by - (py * hw) / 2}`;
+    }
+  }
+
+  return (
+    <g>
+      <line
+        x1={a.x}
+        y1={a.y}
+        x2={b.x}
+        y2={b.y}
+        stroke={line.color}
+        strokeWidth={w}
+        opacity={line.opacity}
+        strokeDasharray="4 4"
+        style={{ pointerEvents: "none" }}
+      />
+      {head ? (
+        <polyline
+          points={head}
+          fill="none"
+          stroke={line.color}
+          strokeWidth={w}
+          opacity={line.opacity}
+          style={{ pointerEvents: "none" }}
+        />
+      ) : null}
+    </g>
   );
 }
 

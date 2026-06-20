@@ -158,6 +158,14 @@ canvas takes over. So the overlay catalogue is now: notes (persistent overlay,
 no `/AP`), free-text (transient editor overlay, canvas-rendered `/AP`), markup
 (no overlay, canvas-rendered `/AP`).
 
+**Lines + arrows (P3.C1b₁)** are the first *points-based* shape: `cos::add_line`
+writes a `/Line` (`/L [x1 y1 x2 y2]`, `/C`, `/BS /W`, `/NM`, plus `/LE [/None
+/OpenArrow]` for an arrow) with a generated `/AP` that strokes the segment and an
+arrowhead V; the `/BBox` is padded for the head + stroke width. The drag tools
+(`line-tools.ts`) and a `LineShape` draft renderer plug into the same
+`annotation-layer` lifecycle the rect/ellipse tools use; polygons (a multi-click
+gesture) are C1b₂.
+
 **Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
 `/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated
 `/AP` (a path painted `S`/`f`/`B`; the ellipse is the standard four-Bézier kappa

@@ -1924,6 +1924,41 @@ double-click are deferred (BACKLOG). Left `[~]` pending the human in-app pass.
 
 ---
 
+### P3.C1b₁ — line + arrow annotations (this commit)
+
+```bash
+# No new deps. First POINTS-based shape (C1a was bbox-based). C1b split by gesture:
+# line/arrow = drag (now); polygon = multi-click (C1b₂, deferred).
+#   cos::add_line → /Line dict (/L [x1 y1 x2 y2], /C, /CA, /BS/W, /NM, + /LE
+#     [/None /OpenArrow] for the arrow) + a generated /AP stroking the segment +
+#     an arrowhead V (arrowhead_points aims it back along the segment); /BBox
+#     padded for the head + stroke width. annotation_kind += /Line → "line".
+#   LineEdit + AddLine actor msg + pdf_add_line.
+# Frontend: LineAnnotation draft; line-tools.ts (makeLineTool → line/arrow drag
+#   reducers). annotation-layer registers them, renders the LineShape draft (SVG
+#   line + arrowhead), commits a `line` draft via addLine → bumpEpoch (canvas).
+#   AnnotationKind += "line"; Line + Arrow toolbar toggles.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   TS: guard the nullable onPointerDown return in line-tools.test before narrowing.
+npm run test           # 238/238 (+6: line-tools 3, lines IPC 2, annotation-layer line 1)
+npm run test:rust      # EXIT 0. cos.rs +4 (line+/L+/AP / arrow sets /LE + 2nd
+#   stroke / listed+deletable / rejects zero-length). lines.rs: 2 (line+arrow
+#   persist through save / undo removes) + 1 ignored artifact.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test lines \
+  line_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-lines.pdf (a line + an arrow).
+```
+
+Lines are canvas-rendered from the `/AP` (like the other shapes); the overlay
+draws only the live drag preview. Polygon (multi-click) is **C1b₂**; arrowhead
+style options + line geometry edit are deferred. Left `[~]` pending the human
+in-app + cross-reader pass.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

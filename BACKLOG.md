@@ -361,11 +361,13 @@ the current roadmap phase. When one is picked up, move it into the relevant
   clipping of a single line wider than the box — needs text metrics or auto-wrap
   (the latter is B3b); for now drag a wider box.
 
-## From P3.C1a (shapes — rectangle + ellipse)
+## From P3.C1a / C1b₁ (shapes)
 
-- **No line / arrow / polygon** — C1a is the two drag-to-size closed shapes.
-  `/Line` (+`/LE` arrowheads), `/PolyLine`, `/Polygon` and the polygon's
-  multi-click gesture are **C1b**.
+- ✅ **DONE 2026-06-20 (C1b₁) — line + arrow** (`/Line` + `/LE` open-arrow, drag
+  gesture). **Still deferred (C1b₂): polygon + polyline** (`/Polygon` / `/PolyLine`
+  via `/Vertices`, the **multi-click** add-vertex gesture). Also deferred: arrowhead
+  **style** options (start ending / closed / diamond / circle — only end OpenArrow
+  now); editing a line's geometry (delete + redraw); Shift-angle-snap.
 - **No select / delete / edit of a committed shape** — shared with markup &
   free-text; lands with the D1 read-back + per-annotation delete follow-up.
 - **Axis-aligned only** — shapes are drawn to an axis-aligned `/Rect`; no rotation

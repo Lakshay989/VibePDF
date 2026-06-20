@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_free_text, add_shape, add_text_markup, add_text_note, add_top_level_bookmark,
+    add_free_text, add_line, add_shape, add_text_markup, add_text_note, add_top_level_bookmark,
     clear_text_markup, delete_annotation, merge_documents, prune_dangling_destinations,
     read_annotations, read_form_field_names, read_free_text, read_text_notes,
     register_inserted_form_fields, read_top_level_outline_titles, rename_form_fields_with_suffix,
@@ -469,6 +469,49 @@ fn cos_shape_fill_sets_ic_unfilled_omits_it() {
     let (annot, ap) = first_annot_and_ap(&unfilled);
     assert!(annot.get(b"IC").is_err(), "no /IC when unfilled");
     assert!(!ap.contains(" rg"), "no fill colour op: {ap}");
+}
+
+/// SPEC: P3-ANN-004 — add_line writes a `/Line` (with `/L` + `/NM`) and an `/AP`
+/// stroking the segment; no `/LE` without an arrow. Reopens in PDFium.
+#[test]
+fn cos_add_line_writes_line_with_l_and_ap() {
+    let out = add_line(&fixture_bytes("hello.pdf"), 0, 100.0, 700.0, 300.0, 650.0, false, "#ff0000", 1.0, 2.0)
+        .expect("line");
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Line");
+    assert_eq!(annot.get(b"L").and_then(Object::as_array).unwrap().len(), 4);
+    assert!(annot.get(b"NM").is_ok(), "stable handle present");
+    assert!(annot.get(b"LE").is_err(), "no arrow → no /LE");
+    assert!(ap.contains("100.00 700.00 m"), "starts at p1: {ap}");
+    assert!(ap.contains("300.00 650.00 l"), "draws to p2: {ap}");
+    assert_eq!(ap.matches("S\n").count(), 1, "one stroke, no arrowhead: {ap}");
+}
+
+#[test]
+fn cos_arrow_sets_le_and_draws_head() {
+    let out = add_line(&fixture_bytes("hello.pdf"), 0, 100.0, 700.0, 300.0, 650.0, true, "#000000", 1.0, 2.0)
+        .expect("arrow");
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert!(annot.get(b"LE").and_then(Object::as_array).is_ok(), "/LE present for an arrow");
+    assert_eq!(ap.matches("S\n").count(), 2, "the segment + the arrowhead V: {ap}");
+}
+
+#[test]
+fn cos_line_listed_and_deletable() {
+    let out = add_line(&fixture_bytes("hello.pdf"), 0, 100.0, 700.0, 300.0, 650.0, false, "#000000", 1.0, 2.0)
+        .expect("line");
+    let infos = read_annotations(&out).expect("read");
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].kind, "line");
+    let after = delete_annotation(&out, &infos[0].id).expect("delete");
+    assert!(read_annotations(&after).expect("re-read").is_empty());
+}
+
+#[test]
+fn cos_line_rejects_zero_length() {
+    assert!(add_line(&fixture_bytes("hello.pdf"), 0, 100.0, 700.0, 100.0, 700.0, false, "#000000", 1.0, 2.0).is_err());
 }
 
 #[test]

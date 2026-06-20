@@ -4505,6 +4505,64 @@ state back into an editor, and rewriting it without changing its identity.
 
 ---
 
+### P3.C1b₁ — line + arrow annotations (a points-based shape)
+
+#### Problem
+
+C1a's shapes were bounding-box based (`/Square`, `/Circle` from a `/Rect`). A
+line isn't a box — it's two points — and an arrow needs a head. This is the first
+*points-based* annotation, and it splits the "shapes" feature by **gesture**.
+
+#### Concepts learned
+
+- **The PDF `/Line` annotation.** `/L [x1 y1 x2 y2]` is the geometry; `/LE` is the
+  pair of **line endings** (`[/None /OpenArrow]` puts an open arrowhead at the
+  end). We still generate an `/AP` so it looks identical everywhere — the endings
+  are advisory; the `/AP` is what draws.
+- **Arrowhead geometry.** Given the segment, the unit direction `u` and its
+  perpendicular `p` place the two base corners: back off `headLen` along `u` from
+  the tip, then ±`headWidth/2` along `p`. The same math runs twice — in Rust for
+  the `/AP` *and* in the SVG preview — so the live drag and the committed result
+  match.
+- **`/BBox` must contain the whole drawing.** A form XObject clips to its BBox, so
+  for a line it has to cover the segment **plus** the arrowhead **plus** half the
+  stroke width — not just the two endpoints. Forgetting the arrowhead/stroke pad
+  is the classic "the tip got clipped" bug.
+- **Splitting by interaction, not just data.** Line/arrow are a *drag* (press =
+  start, release = end) — the exact lifecycle C1a's rect/ellipse use, so they slot
+  in via a `makeLineTool` reducer. Polygon is a *multi-click* (add vertex… finish)
+  — a different state machine. Recognizing that the gesture, not the geometry, is
+  the dividing line is why C1b split into line/arrow now and polygon later.
+- **Extending a draft union end-to-end.** A new `line` draft member rippled
+  through: the tool reducer produces it, the `annotation-layer` renders it (a new
+  `LineShape` branch, since `Shape` only knows rects) and commits it (`addLine`),
+  and the sidebar lists it (`annotation_kind` `/Line → "line"`, `AnnotationKind +=
+  "line"`). The compiler walks you through every site — exhaustive unions are a
+  to-do list.
+- **Reuse compounds.** Persisting (`/NM` + `/AP` + `bumpEpoch` → canvas), listing
+  (`read_annotations`), and deleting (the `/NM` handle) all came for free from
+  B/C/D — adding a kind is now mostly the new geometry.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_line` + `arrowhead_points` + `line_appearance_content`; `/Line → "line"` kind. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `LineEdit` + `AddLine` + `pdf_add_line`. |
+| `src/tools/shapes/line-tools.ts` | `lineTool` + `arrowTool` (drag reducers). |
+| `src/ipc/lines.ts` | `addLine` wrapper. |
+| `src/view/annotation-layer.tsx` | Register the line tools; render the `LineShape` draft; commit via `addLine`. |
+| `src/tools/_framework/types.ts`, `MarkupToolbar.tsx`, `ipc/annotations.ts`, `annotation-filter.ts` | `LineAnnotation` + Line/Arrow toggles + the sidebar kind/label. |
+| `src-tauri/tests/lines.rs`, `tests/cos.rs`, FE `line-tools`/`lines`/`annotation-layer` | Round-trips, the arrowhead `/LE`+`/AP`, and the drag/commit wiring. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.7 (Line annotations) + Table 176 (`/LE` line-ending styles).
+- Arrowhead construction from a direction vector + its perpendicular.
+- Discriminated-union exhaustiveness as a refactoring guide.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -1628,6 +1628,158 @@ pub fn add_shape(
     Ok(buf)
 }
 
+/// SPEC: P3-ANN-004 — add a line annotation from `(x1,y1)` to `(x2,y2)` with a
+/// generated `/AP`. `arrow` adds an `/LE` open-arrow ending + an arrowhead in the
+/// appearance. Stroke colour / opacity / width; no fill. Polygons are C1b₂.
+#[allow(clippy::too_many_arguments)]
+pub fn add_line(
+    bytes: &[u8],
+    page: usize,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    arrow: bool,
+    stroke: &str,
+    opacity: f32,
+    stroke_width: f32,
+) -> Result<Vec<u8>, CommandError> {
+    let (sr, sg, sb) = parse_hex_color(stroke)?;
+    let opacity = opacity.clamp(0.0, 1.0);
+    let width = stroke_width.max(0.0);
+    if (x2 - x1).hypot(y2 - y1) < 1.0 {
+        return Err(CommandError::InvalidInput("line is zero-length".into()));
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let head = if arrow { arrowhead_points(x1, y1, x2, y2, width) } else { None };
+
+    // `/BBox` must cover the segment + the arrowhead + half the stroke width
+    // (the `/AP` form clips to it).
+    let pad = width.max(1.0);
+    let mut xs = vec![x1, x2];
+    let mut ys = vec![y1, y2];
+    if let Some((lft, rgt)) = head {
+        xs.push(lft.0);
+        xs.push(rgt.0);
+        ys.push(lft.1);
+        ys.push(rgt.1);
+    }
+    let bx0 = xs.iter().copied().fold(f32::INFINITY, f32::min) - pad;
+    let by0 = ys.iter().copied().fold(f32::INFINITY, f32::min) - pad;
+    let bx1 = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max) + pad;
+    let by1 = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max) + pad;
+    let rect_obj =
+        Object::Array(vec![Object::Real(bx0), Object::Real(by0), Object::Real(bx1), Object::Real(by1)]);
+
+    let content = line_appearance_content(x1, y1, x2, y2, head, (sr, sg, sb), width);
+
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut bs = Dictionary::new();
+    bs.set("W", Object::Real(width));
+    bs.set("S", Object::Name(b"S".to_vec()));
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Line".to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set(
+        "L",
+        Object::Array(vec![Object::Real(x1), Object::Real(y1), Object::Real(x2), Object::Real(y2)]),
+    );
+    annot.set("Rect", rect_obj);
+    annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
+    annot.set("CA", Object::Real(opacity));
+    annot.set("BS", Object::Dictionary(bs));
+    if arrow {
+        annot.set(
+            "LE",
+            Object::Array(vec![Object::Name(b"None".to_vec()), Object::Name(b"OpenArrow".to_vec())]),
+        );
+    }
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The two base corners of an open-arrow head at `(x2,y2)`, aimed back along the
+/// segment from `(x1,y1)`. `None` for a degenerate (zero-length) segment.
+fn arrowhead_points(x1: f32, y1: f32, x2: f32, y2: f32, width: f32) -> Option<((f32, f32), (f32, f32))> {
+    let (dx, dy) = (x2 - x1, y2 - y1);
+    let len = dx.hypot(dy);
+    if len < 1.0 {
+        return None;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let head_len = (width * 3.0).max(8.0);
+    let head_w = head_len * 0.9;
+    let (bx, by) = (x2 - ux * head_len, y2 - uy * head_len);
+    let (px, py) = (-uy, ux); // unit perpendicular
+    let lft = (bx + px * head_w / 2.0, by + py * head_w / 2.0);
+    let rgt = (bx - px * head_w / 2.0, by - py * head_w / 2.0);
+    Some((lft, rgt))
+}
+
+/// The `/AP` content stream for a line: stroke the segment, then (if `head` is
+/// set) stroke an open-arrow `left → end → right` V. Absolute page coords.
+fn line_appearance_content(
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    head: Option<((f32, f32), (f32, f32))>,
+    (sr, sg, sb): (f32, f32, f32),
+    width: f32,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    let _ = writeln!(out, "{width:.2} w");
+    let _ = writeln!(out, "{sr:.4} {sg:.4} {sb:.4} RG");
+    let _ = writeln!(out, "{x1:.2} {y1:.2} m");
+    let _ = writeln!(out, "{x2:.2} {y2:.2} l");
+    let _ = writeln!(out, "S");
+    if let Some((lft, rgt)) = head {
+        let _ = writeln!(out, "{:.2} {:.2} m", lft.0, lft.1);
+        let _ = writeln!(out, "{x2:.2} {y2:.2} l");
+        let _ = writeln!(out, "{:.2} {:.2} l", rgt.0, rgt.1);
+        let _ = writeln!(out, "S");
+    }
+    out
+}
+
 /// The `/AP` content stream for a shape, drawn in absolute page coords (the
 /// form's `BBox` == `Rect`). The path is inset by half the stroke width so the
 /// stroke stays inside `/Rect`. An ellipse is the standard 4-Bézier (kappa)
@@ -2173,6 +2325,7 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
         b"FreeText" => Some("freetext"),
         b"Square" => Some("rectangle"),
         b"Circle" => Some("ellipse"),
+        b"Line" => Some("line"),
         _ => None,
     }
 }

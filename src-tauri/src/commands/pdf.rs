@@ -552,6 +552,42 @@ pub async fn pdf_add_shape(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-004 — add a line (or arrow) annotation from `(x1,y1)` to
+/// `(x2,y2)` on `page` (0-based). Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_line(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    arrow: bool,
+    stroke_color: String,
+    opacity: f32,
+    stroke_width: f32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_line_request(page, x1, y1, x2, y2, arrow, stroke_color, opacity, stroke_width)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

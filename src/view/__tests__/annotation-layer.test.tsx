@@ -4,11 +4,16 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 vi.mock("@/ipc/shapes", () => ({
   addShape: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
+vi.mock("@/ipc/lines", () => ({
+  addLine: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+}));
 
+import { addLine } from "@/ipc/lines";
 import { addShape } from "@/ipc/shapes";
 import { useAnnotationStore } from "@/state/annotation-store";
 import { useToolStore } from "@/state/tool-store";
 import { clearTools, registerTool, type Annotation } from "@/tools/_framework";
+import { arrowTool } from "@/tools/shapes/line-tools";
 import { rectangleTool } from "@/tools/shapes/shape-tools";
 import { AnnotationLayer } from "@/view/annotation-layer";
 
@@ -106,6 +111,21 @@ describe("AnnotationLayer", () => {
     // The committed shape lives in the PDF (canvas), not the store.
     expect(useAnnotationStore.getState().byDoc[DOC] ?? []).toHaveLength(0);
     expect(useAnnotationStore.getState().draft).toBeNull();
+  });
+
+  it("persists an arrow line on pointer down → move → up", () => {
+    registerTool(arrowTool);
+    useToolStore.setState({ activeTool: "arrow" });
+    const { container } = render(layer());
+    const svg = container.querySelector("svg") as Element;
+
+    fireEvent.pointerDown(svg, { clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(svg, { clientX: 300, clientY: 150, pointerId: 1 });
+    fireEvent.pointerUp(svg, { clientX: 300, clientY: 150, pointerId: 1 });
+
+    // down (100,100)→PDF(100,692), up (300,150)→PDF(300,642). Defaults: #ffd400/1/2.
+    expect(addLine).toHaveBeenCalledWith(DOC, 0, 100, 692, 300, 642, true, "#ffd400", 1, 2);
+    expect(useAnnotationStore.getState().byDoc[DOC] ?? []).toHaveLength(0);
   });
 
   it("draws a highlight markup as a polygon", () => {
