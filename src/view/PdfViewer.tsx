@@ -427,8 +427,13 @@ export function PdfViewer({ documentId, path }: Props) {
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (
+          // Key is per-panel, not bare `documentId`: this panel and
+          // `AnnotationPanel` are siblings, so a shared key collides ("two
+          // children with the same key") and React duplicates/omits one — which
+          // showed up as ghost Pages columns. The prefix keeps the remount-on-
+          // document-switch behaviour while staying unique among siblings.
           <ThumbnailPanel
-            key={documentId}
+            key={`thumbnails:${documentId}`}
             doc={doc}
             documentId={documentId}
             darkMode={darkMode}
@@ -443,7 +448,7 @@ export function PdfViewer({ documentId, path }: Props) {
         ) : null}
         {showAnnotations && doc ? (
           <AnnotationPanel
-            key={documentId}
+            key={`annotations:${documentId}`}
             documentId={documentId}
             epoch={epoch}
             onJump={(page) => virtRef.current?.scrollToPage(page)}
