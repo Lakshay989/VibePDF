@@ -10,6 +10,10 @@
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
+/** A click within this many CSS px of the FIRST vertex (with ≥3 points down)
+ *  closes the polygon — the standard "click the start dot to finish" gesture. */
+const CLOSE_PX = 12;
+
 import { addPolygon } from "@/ipc/polygons";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -93,6 +97,16 @@ export function PolygonLayer({
       .catch((err: unknown) => console.warn("add polygon failed", documentId, err));
   };
 
+  // Leaving the polygon tool (picking another tool, or a finished shape)
+  // abandons an in-progress one, so the rubber-band doesn't linger over the page
+  // and the next tool can't inherit a half-drawn shape.
+  useEffect(() => {
+    if (!drawing) {
+      setVertices([]);
+      setCursor(null);
+    }
+  }, [drawing]);
+
   // Enter finishes the polygon; Escape cancels — but only while one is in progress.
   useEffect(() => {
     if (!drawing || vertices.length === 0) return undefined;
@@ -120,6 +134,17 @@ export function PolygonLayer({
   const onPointerDown = (e: ReactPointerEvent<Element>) => {
     if (!drawing) return;
     const screen = layerPoint(e);
+    // Click on/near the first vertex (with ≥3 points down) closes the polygon —
+    // the discoverable "click the start dot to finish" gesture, alongside
+    // double-click / Enter.
+    if (vertices.length >= 3) {
+      const v0 = vertices[0];
+      const v0s = pdfToScreen({ page, x: v0.x, y: v0.y }, geo);
+      if (Math.hypot(v0s.x - screen.x, v0s.y - screen.y) < CLOSE_PX) {
+        finish(vertices);
+        return;
+      }
+    }
     // Skip a click that lands on the previous vertex (the 2nd down of a dbl-click).
     const last = vertices[vertices.length - 1];
     if (last) {
@@ -174,9 +199,22 @@ export function PolygonLayer({
           {cursor && v0 && screenPts.length > 1 ? (
             <line x1={cursor.x} y1={cursor.y} x2={v0.x} y2={v0.y} stroke={options.color} strokeWidth={1} strokeDasharray="2 3" />
           ) : null}
-          {screenPts.map((p, i) => (
-            <circle key={i} cx={p.x} cy={p.y} r={3} fill="#fff" stroke={options.color} strokeWidth={1} />
-          ))}
+          {screenPts.map((p, i) => {
+            // Highlight the first vertex once the shape can close, so it reads as
+            // the "click here to finish" target.
+            const closable = i === 0 && screenPts.length >= 3;
+            return (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={p.y}
+                r={closable ? 6 : 3}
+                fill={closable ? options.color : "#fff"}
+                stroke={options.color}
+                strokeWidth={closable ? 2 : 1}
+              />
+            );
+          })}
         </>
       ) : null}
     </svg>

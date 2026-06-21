@@ -247,7 +247,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       <button
         type="button"
         onClick={() => setActiveTool(polygonActive ? null : "polygon")}
-        title="Draw a polygon (click each vertex, double-click to finish)"
+        title="Draw a polygon (click each vertex; click the first dot, double-click, or Enter to finish; Esc cancels)"
         aria-label="Polygon tool"
         aria-pressed={polygonActive}
         className={

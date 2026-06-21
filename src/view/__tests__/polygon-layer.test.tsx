@@ -3,7 +3,7 @@
 // cancels, and a <3-vertex finish is ignored. IPC is mocked.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
 vi.mock("@/ipc/polygons", () => ({
   addPolygon: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
@@ -103,6 +103,43 @@ describe("PolygonLayer", () => {
 
     expect(addPolygon).not.toHaveBeenCalled();
     expect(useToolStore.getState().activeTool).toBeNull();
+  });
+
+  it("closes when the first vertex is clicked again (≥3 points)", () => {
+    const { container } = render(layer());
+    const svg = container.querySelector("svg") as Element;
+    click(svg, 100, 100);
+    click(svg, 200, 100);
+    click(svg, 150, 180);
+    click(svg, 100, 100); // back on the start dot → close
+
+    expect(addPolygon).toHaveBeenCalledWith(
+      DOC,
+      0,
+      true,
+      [
+        [100, 692],
+        [200, 692],
+        [150, 612],
+      ],
+      "#112233",
+      null,
+      1,
+      2,
+    );
+  });
+
+  it("abandons the in-progress shape when the tool is deactivated", () => {
+    const { container } = render(layer());
+    const svg = container.querySelector("svg") as Element;
+    click(svg, 100, 100);
+    click(svg, 200, 100);
+    expect(container.querySelector("polyline")).not.toBeNull();
+
+    // Switch away from the polygon tool — the rubber-band must not linger.
+    act(() => useToolStore.setState({ activeTool: null }));
+    expect(container.querySelector("polyline")).toBeNull();
+    expect(addPolygon).not.toHaveBeenCalled();
   });
 
   it("does nothing when the polygon tool is not active", () => {
