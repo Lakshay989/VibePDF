@@ -2036,6 +2036,36 @@ Multi-stroke /InkList grouping, eraser, and a Bézier /AP deferred (BACKLOG).
 
 ---
 
+### P3.C2 — in-app verification fixes (four commits)
+
+```bash
+# No deps / scripts. Four UI bugs the human found verifying C2; tests-only repro
+# where possible. Each its own focused commit.
+#  1. Text selection while drawing: PDF.js text spans carry z-index:1 → paint over
+#     the overlay → I-beam + native selection mid-draw. Drawing tools now set the
+#     text layer pointer-events:none (via className, not inline style).
+#  2. Pages sidebar duplicated: ThumbnailPanel + AnnotationPanel are siblings both
+#     keyed `documentId` → React duplicate-key → ghost columns. Distinct keys.
+#     (Console "two children with the same key" was the tell — not HMR.)
+#  3. Date filter: `new Date("YYYY-MM-DD")` parses UTC → hid today's annotations in
+#     +UTC zones. Parse local (`dateInputToMs`) + controlled input + ✕ clear.
+#  4. Polygon: click the first vertex to close (+ highlight it); abandon on tool
+#     switch so the rubber-band doesn't linger.
+#
+# REVERTED (do not ship blind): a canvas double-buffer + doc-swap to kill the
+# per-edit "refresh flash". Sound in principle but skewed page geometry (shapes
+# off-spot, ovals→circles) and I can't iterate on the pixels without computer-use.
+# Restored the known-good render path; flash deferred.
+
+npm run check          # tsc + eslint src + clippy ✓
+npm run test           # 267/267 (+6: text-layer-gating 2, date helpers 4 [polygon +2])
+```
+
+Bug fixes during C2 verification (not a new roadmap step). C2 stays `[~]`; the
+refresh flash is the one open item.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

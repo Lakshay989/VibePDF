@@ -4687,6 +4687,65 @@ sub-problems hide here: the raw input is noisy and unevenly spaced (it must be
 
 ---
 
+### P3.C2 — the in-app verification sweep (four bug fixes)
+
+#### Problem
+
+C2 shipped green on tests but the human's in-app pass surfaced four real UI bugs
+the unit tests couldn't see. Each is a worthwhile lesson on its own.
+
+#### Concepts learned
+
+- **`z-index` defeats DOM order.** PDF.js's text-layer spans carry `z-index: 1`.
+  An element with a positive `z-index` paints **above** a sibling with
+  `z-index: auto` regardless of who comes later in the DOM — so the transparent
+  text spans sat on top of the (later-in-DOM) annotation overlay, stealing the
+  cursor and starting a native text selection while you drew. The fix isn't more
+  z-index whack-a-mole: while a *drawing* tool is active the text layer just goes
+  `pointer-events: none`. (Toggle it via `className`, not an inline `style` prop —
+  the layer sets its `width`/`height` imperatively, and a React-managed `style`
+  would clobber them on the next render.)
+- **React keys must be unique among *siblings*, and a clash is silently
+  destructive.** `ThumbnailPanel` and `AnnotationPanel` are siblings and both used
+  `key={documentId}`. React's warning is explicit: non-unique keys "may cause
+  children to be **duplicated** and/or omitted." It duplicated the Pages sidebar,
+  and the orphaned DOM lingered until a full reload — which sent me chasing an
+  *HMR ghost* red herring before the console's `two children with the same key`
+  pinpointed it. Lesson: when a panel mysteriously duplicates, read the console
+  for a key warning before theorising about the bundler.
+- **`new Date("YYYY-MM-DD")` is UTC; `new Date(y, m-1, d)` is local.** The date
+  filter parsed the picker value as UTC midnight, so in a zone ahead of UTC
+  "modified on or after today" excluded annotations stamped earlier *today*.
+  Build the date from parts to pin it to the local day the user picked. (And a
+  filter you can set but not clear is a trap — add the ✕.)
+- **Don't refactor the core render lifecycle blind.** The "refresh flash" on every
+  edit is real — PdfViewer `setDoc(null)`s on each epoch bump, unmounting the
+  whole page view. The fix (keep the doc mounted and swap a freshly-loaded one in)
+  is sound *in principle*, but my attempt skewed the page-geometry/scale timing
+  and rendered shapes at the wrong spot/aspect (ovals → circles). With no way to
+  watch the result iterate, the right call was to **revert to the known-good
+  render path** and defer — a correct-but-flashy page beats a smooth-but-wrong
+  one. Geometry-sensitive lifecycle changes need eyes on the pixels.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/text-layer.tsx` | `toolUsesTextSelection`; disable the text layer while drawing. |
+| `src/view/ink-layer.tsx` | `preventDefault` + touch-action/user-select none on the gesture. |
+| `src/view/PdfViewer.tsx` | Distinct sibling keys for the two panels. |
+| `src/panels/annotation-filter.ts` | `dateInputToMs` / `msToDateInput` (local-time date parsing). |
+| `src/panels/AnnotationPanel.tsx` | Controlled date input + ✕ clear. |
+| `src/view/polygon-layer.tsx` | Click-first-vertex to close; abandon on tool switch. |
+
+#### Further reading
+
+- CSS stacking contexts & painting order (why `z-index: 1` beats `auto`).
+- React "Rendering Lists" — keys are scoped to siblings; collisions are UB.
+- `Date` parsing: ISO date-only strings are UTC, date-time without offset is local.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -406,6 +406,19 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **Round/flat caps** — the ribbon ends are flat (square across the normal); no
   rounded pen cap. Cosmetic.
 
+## From the P3.C2 verification sweep
+
+- **The per-edit "refresh flash" (deferred — needs eyes on the pixels).** Every
+  annotation add/remove/edit bumps the edit-epoch, and `PdfViewer`'s doc-load
+  effect `setDoc(null)`s on that change — unmounting the whole page view, showing
+  "Opening…", then rebuilding it. So each edit blanks the page (and jumps scroll).
+  The fix is to keep the current doc mounted and **swap a freshly-loaded one in
+  when ready** (doc-level double-buffer), paired with a canvas-level double-buffer
+  in `PageSlot`. A first attempt skewed the page-geometry/scale timing — shapes
+  rendered off-spot, ovals→circles — so it was **reverted** to the known-good
+  path. Redo it with the dev app open so the geometry can be eyeballed while
+  iterating; add a `PageVirtualizer`/`PdfViewer` render test if one is feasible.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was
