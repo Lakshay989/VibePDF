@@ -77,6 +77,9 @@ export function InkLayer({
 
   const onPointerDown = (e: ReactPointerEvent<Element>) => {
     if (!drawing || e.button !== 0) return;
+    // Suppress the browser's native text/drag selection for this gesture, so a
+    // stroke that crosses text (or leaves the page) draws instead of selecting.
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     capturing.current = true;
     const pdf = screenToPdf(layerPoint(e), geo);
@@ -124,7 +127,12 @@ export function InkLayer({
       className="absolute left-0 top-0"
       width={cssWidth}
       height={cssHeight}
-      style={{ pointerEvents: drawing ? "auto" : "none", cursor: drawing ? "crosshair" : undefined }}
+      style={{
+        pointerEvents: drawing ? "auto" : "none",
+        cursor: drawing ? "crosshair" : undefined,
+        touchAction: drawing ? "none" : undefined,
+        userSelect: drawing ? "none" : undefined,
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={finish}

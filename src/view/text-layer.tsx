@@ -11,6 +11,9 @@
 import { useEffect, useRef } from "react";
 import { type PDFDocumentProxy, TextLayer } from "pdfjs-dist";
 
+import { useToolStore } from "@/state/tool-store";
+import type { ToolId } from "@/tools/_framework/types";
+
 export interface PageTextLayerProps {
   doc: PDFDocumentProxy;
   /** 1-based page number. */
@@ -20,8 +23,29 @@ export interface PageTextLayerProps {
   rotation: number;
 }
 
+/**
+ * Whether the active tool operates *on* the page text (so the text layer must
+ * stay selectable). The markup tools act on a text selection, and idle/select
+ * (`null`) lets the user select text to copy. Every other tool *draws* — over a
+ * text run, a selectable layer would steal the pointer (the spans carry
+ * `z-index:1`, painting above the overlay) and a drag would select text instead
+ * of drawing, even escaping to a whole-document selection when it leaves the
+ * page. Those tools get a non-interactive text layer.
+ */
+export function toolUsesTextSelection(tool: ToolId | null): boolean {
+  return (
+    tool === null ||
+    tool === "highlight" ||
+    tool === "underline" ||
+    tool === "strikethrough" ||
+    tool === "squiggly"
+  );
+}
+
 export function PageTextLayer({ doc, pageNumber, scale, rotation }: PageTextLayerProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const activeTool = useToolStore((s) => s.activeTool);
+  const interactive = toolUsesTextSelection(activeTool);
 
   useEffect(() => {
     const container = ref.current;
@@ -59,5 +83,15 @@ export function PageTextLayer({ doc, pageNumber, scale, rotation }: PageTextLaye
     };
   }, [doc, pageNumber, scale, rotation]);
 
-  return <div ref={ref} className="textLayer absolute left-0 top-0" />;
+  // Toggle interactivity via className, never an inline `style` prop: the render
+  // effect sets `width`/`height` imperatively on this same node, and a managed
+  // `style` prop would clobber them on the next re-render.
+  return (
+    <div
+      ref={ref}
+      className={
+        "textLayer absolute left-0 top-0" + (interactive ? "" : " pointer-events-none select-none")
+      }
+    />
+  );
 }
