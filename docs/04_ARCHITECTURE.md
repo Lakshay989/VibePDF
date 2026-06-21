@@ -188,6 +188,18 @@ viewer because it's a fill, and that degrades to a constant-width band when the
 device reports a uniform pressure (a mouse's constant `0.5`). The `/BBox` pads by
 the *max* half-width in the stroke so a hard press isn't clipped.
 
+**Stamps (P3.C3a)** are a click-to-place tool. A toolbar palette
+(`src/tools/stamp/StampPalette.tsx`) arms a stamp — a built-in from the library
+(`stamps.ts`) or a custom text label — into a one-slot `stamp-store`; the
+per-page **self-contained overlay** `src/view/stamp-layer.tsx` reads it and, on a
+click, drops it via `cos::add_stamp`. The result is a `/Stamp` whose generated
+`/AP` draws a coloured border + the bold uppercase label, centred and auto-fit to
+the box (the label width is *estimated* from an average Helvetica-Bold glyph em —
+exact metrics aren't needed for one centred line). `/Name` is informational; the
+`/AP` is what renders. Image stamps (the other half of P3-ANN-006) are C3b. Note:
+**four** annotation overlays now own their own gesture outside `stepTool` (note,
+polygon, ink, stamp) — a shared click/multi-click tool lifecycle is overdue.
+
 **Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
 `/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated
 `/AP` (a path painted `S`/`f`/`B`; the ellipse is the standard four-Bézier kappa
@@ -199,7 +211,8 @@ only the in-progress draft in the store. Line/arrow/polygon are C1b.
 
 **Reading annotations back (P3.D1).** `cos::read_annotations` is the one read that
 spans *all* kinds: it walks every page's `/Annots`, whitelists the subtypes we
-author (markup, note, free-text, shapes, line/arrow, polygon/polyline, ink), and
+author (markup, note, free-text, shapes, line/arrow, polygon/polyline, ink,
+stamp), and
 returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,
 author, `/M`-as-epoch). A read-only `ReadAnnotations` actor query feeds
 `pdf_read_annotations`; the `AnnotationPanel` sidebar re-reads on

@@ -2066,6 +2066,40 @@ refresh flash is the one open item.
 
 ---
 
+### P3.C3a — stamp library + custom text stamps (this commit)
+
+```bash
+# No new deps. /Stamp annotations with a generated /AP. Image stamps split to C3b.
+#   cos::add_stamp → /Stamp (/Name sanitized, /Contents, /C, /CA, /F 4, /P, /NM) +
+#     a generated /AP: ExtGState opacity + bold base-14 /F1; a stroked border
+#     (re S) and the bold UPPERCASE label centred (font size auto-fit to the box
+#     via a 0.62-em Helvetica-Bold advance estimate). annotation_kind += Stamp.
+#   StampEdit + AddStamp actor msg + pdf_add_stamp (rect:[f32;4], text, name, ...).
+# Frontend: NO framework change — click-to-place doesn't fit the drag lifecycle, so
+#   a self-contained StampLayer (like Note/Polygon/Ink) drops the armed stamp on a
+#   click. tools/stamp/stamps.ts (built-in library + stampRectAt), StampPalette
+#   (pick/type → arm in a stamp-store), Stamp toolbar toggle (disarms on tool
+#   change). AnnotationKind += stamp.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy pedantic: hoisted the 0.62 glyph-em to a module const
+#   (items_after_statements) + renamed box w/h → bw/bh (many_single_char_names).
+npm run test           # 275/275 (+8: stamps lib 4, stamp-layer 3, stamps IPC 1)
+npm run test:rust      # EXIT 0. cos.rs +4 (subtype/name/AP, sanitize+uppercase,
+#   listed+deletable, rejects empty text|rect). stamp.rs: 3 (persist / undo
+#   removes / rejects empty) + 1 ignored artifact.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test stamp \
+  stamp_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-stamp.pdf (an APPROVED + a CONFIDENTIAL stamp).
+```
+
+The library + text half of P3-ANN-006. Left `[~]` pending the human in-app +
+cross-reader pass. Image stamps are C3b (image XObject embedding).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

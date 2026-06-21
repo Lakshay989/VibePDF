@@ -15,6 +15,7 @@ import { InkLayer } from "@/view/ink-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PolygonLayer } from "@/view/polygon-layer";
 import { SelectionHighlightLayer } from "@/view/selection-highlight-layer";
+import { StampLayer } from "@/view/stamp-layer";
 import { PageTextLayer } from "@/view/text-layer";
 import { LruCache } from "@/view/page-cache";
 import { DARK_PAGE_FILTER } from "@/view/dark-page-filter";
@@ -508,6 +509,14 @@ function PageSlot({
         rotation={rotation}
       />
       <InkLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <StampLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

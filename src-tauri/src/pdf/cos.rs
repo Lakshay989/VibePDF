@@ -1538,6 +1538,147 @@ fn pdf_escape(s: &str) -> String {
     out
 }
 
+/// Average Helvetica-Bold glyph advance (em) — used to auto-fit + centre a
+/// stamp's single line of uppercase text. Exact metrics aren't needed.
+const STAMP_GLYPH_EM: f32 = 0.62;
+
+/// SPEC: P3-ANN-006 — add a `/Stamp` annotation: a rubber-stamp box (a coloured
+/// border with the bold uppercase `text` auto-fit + centred inside `rect`), with
+/// a generated `/AP` so it renders identically in every reader. `name` is the
+/// (informational) PDF `/Name`; `text` is the visible label + `/Contents`.
+/// Image stamps are C3b.
+pub fn add_stamp(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    text: &str,
+    name: &str,
+    color: &str,
+    opacity: f32,
+) -> Result<Vec<u8>, CommandError> {
+    let label = text.trim();
+    if label.is_empty() {
+        return Err(CommandError::InvalidInput("stamp text is empty".into()));
+    }
+    let [x0, y0, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0) {
+        return Err(CommandError::InvalidInput("stamp rect is empty".into()));
+    }
+    let (r, g, b) = parse_hex_color(color)?;
+    let opacity = opacity.clamp(0.0, 1.0);
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let content = stamp_appearance_content(rect, label, (r, g, b));
+
+    // `/AP` resources: an ExtGState for the stamp's opacity + the bold base-14
+    // font the label is drawn with (self-contained, no AcroForm `/DR` needed).
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut font = Dictionary::new();
+    font.set("Type", Object::Name(b"Font".to_vec()));
+    font.set("Subtype", Object::Name(b"Type1".to_vec()));
+    font.set("BaseFont", Object::Name(b"Helvetica-Bold".to_vec()));
+    let mut fonts = Dictionary::new();
+    fonts.set("F1", Object::Dictionary(font));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+    resources.set("Font", Object::Dictionary(fonts));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_array(rect));
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Stamp".to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string())); // stable handle
+    annot.set("Name", Object::Name(sanitize_stamp_name(name).into_bytes()));
+    annot.set("Rect", rect_array(rect));
+    annot.set("Contents", Object::string_literal(label));
+    annot.set("C", Object::Array(vec![Object::Real(r), Object::Real(g), Object::Real(b)]));
+    annot.set("CA", Object::Real(opacity));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// A PDF `/Name` token for a stamp — ASCII alphanumerics only (drop spaces and
+/// punctuation); falls back to `Draft` when nothing survives. Informational: the
+/// `/AP` is what actually renders.
+fn sanitize_stamp_name(name: &str) -> String {
+    let cleaned: String = name.chars().filter(char::is_ascii_alphanumeric).collect();
+    if cleaned.is_empty() {
+        "Draft".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// The `/AP` content stream for a stamp: a coloured border inset from the box,
+/// with the bold uppercase `label` auto-sized to fit and centred. Absolute page
+/// coords (`BBox == Rect`). Width is estimated with a Helvetica-Bold average
+/// glyph advance — exact metrics aren't needed to centre one line.
+fn stamp_appearance_content(rect: [f32; 4], label: &str, color: (f32, f32, f32)) -> String {
+    use std::fmt::Write as _;
+    let (cr, cg, cb) = color;
+    let [x0, y0, x1, y1] = rect;
+    let bw = x1 - x0;
+    let bh = y1 - y0;
+    let pad = (bh * 0.12).clamp(3.0, 8.0); // border inset
+    let border_w = (bh * 0.04).clamp(1.0, 3.0);
+
+    let upper = label.to_uppercase();
+    let count = u16::try_from(upper.chars().count().max(1)).unwrap_or(u16::MAX);
+    let len = f32::from(count);
+    let text_pad = pad + 4.0;
+    let by_width = (bw - 2.0 * text_pad) / (STAMP_GLYPH_EM * len);
+    let by_height = (bh - 2.0 * pad) * 0.62;
+    let size = by_width.min(by_height).clamp(5.0, 96.0);
+    let text_w = STAMP_GLYPH_EM * size * len;
+    let tx = x0 + (bw - text_w) / 2.0;
+    let baseline = (y0 + y1) / 2.0 - size * 0.34; // centre the cap height
+
+    let (inx, iny, inw, inh) = (x0 + pad, y0 + pad, bw - 2.0 * pad, bh - 2.0 * pad);
+
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    let _ = writeln!(out, "{border_w:.2} w");
+    let _ = writeln!(out, "{cr:.4} {cg:.4} {cb:.4} RG");
+    let _ = writeln!(out, "{cr:.4} {cg:.4} {cb:.4} rg");
+    let _ = writeln!(out, "{inx:.2} {iny:.2} {inw:.2} {inh:.2} re");
+    let _ = writeln!(out, "S");
+    let _ = writeln!(out, "BT");
+    let _ = writeln!(out, "/F1 {size:.2} Tf");
+    let _ = writeln!(out, "{tx:.2} {baseline:.2} Td");
+    let _ = writeln!(out, "({}) Tj", pdf_escape(&upper));
+    let _ = writeln!(out, "ET");
+    out
+}
+
 /// SPEC: P3-ANN-004 — add a shape annotation: `/Square` for a rectangle or
 /// `/Circle` for an ellipse, bounded by `rect`, with a generated `/AP` so it
 /// renders in every reader (`PDFium` can't author a coloured shape). Stroke +
@@ -2639,6 +2780,7 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
         b"Polygon" => Some("polygon"),
         b"PolyLine" => Some("polyline"),
         b"Ink" => Some("ink"),
+        b"Stamp" => Some("stamp"),
         _ => None,
     }
 }

@@ -4746,6 +4746,61 @@ the unit tests couldn't see. Each is a worthwhile lesson on its own.
 
 ---
 
+### P3.C3a — stamp library + custom text stamps
+
+#### Problem
+
+A rubber-stamp tool: a library of built-ins (APPROVED, CONFIDENTIAL, …) plus
+custom text, dropped on the page with a click. The spec line (P3-ANN-006) also
+wants *image* stamps — a separate capability (image embedding) we split into C3b.
+
+#### Concepts learned
+
+- **A `/Stamp` is whatever its `/AP` draws.** PDF defines standard stamp `/Name`s
+  (Approved, Draft, …), but viewers render them inconsistently — so, like every
+  other annotation we author, we supply our own appearance and treat `/Name` as
+  informational. The `/AP` here = a stroked border (`re` `S`) + a centred line of
+  bold text (`BT … Tj … ET`), reusing the free-text font-resource pattern (a
+  self-contained `/Resources /Font /F1` so display doesn't need an AcroForm `/DR`).
+- **Centring text without a metrics table.** Exact glyph widths need the font's
+  metrics; for one centred line we don't need them. A single average-advance
+  constant (~0.62 em for Helvetica-Bold) is enough to *estimate* the label width,
+  pick a font size that fits the box (min of width- and height-fit), and centre it
+  — `tx = x0 + (boxW − textW)/2`, baseline at the box mid-line minus ~0.34·size
+  (half the cap height). Good enough for a stamp; the `/BBox` clips any overflow.
+- **A cross-subtree "armed selection" channel.** The palette (in the toolbar) and
+  the placement layer (deep in the page tree) are far apart. Rather than
+  prop-drill, a tiny zustand `stamp-store` holds the *armed* stamp: the palette
+  writes it, `StampLayer` reads it. Same pattern as the annotation-selection /
+  edit stores — a one-slot store as a decoupled request channel.
+- **Click-to-place is its own gesture (again).** Like the note layer, a stamp is a
+  single click, not a drag — so `StampLayer` is another self-contained overlay
+  (the framework's `stepTool` is still drag-only; rule of three holds at *four*
+  self-contained layers now: note, polygon, ink, stamp — a shared "click/multi-
+  click lifecycle" is overdue and noted in BACKLOG).
+- **Disarm on tool-change.** The polygon-rubber-band lesson, applied up front: the
+  toolbar clears the armed stamp whenever the active tool leaves `"stamp"`, so a
+  later click with another tool can't drop a stale stamp.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_stamp` (+ `stamp_appearance_content`, `sanitize_stamp_name`); `/Stamp` kind. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `StampEdit` + `AddStamp` + `pdf_add_stamp`. |
+| `src/tools/stamp/stamps.ts` | Built-in library + `stampRectAt` placement maths (pure). |
+| `src/tools/stamp/StampPalette.tsx`, `src/state/stamp-store.ts` | Pick/arm a stamp. |
+| `src/view/stamp-layer.tsx`, `src/ipc/stamps.ts` | Click-to-place overlay + `addStamp`. |
+| `src-tauri/tests/stamp.rs`, `tests/cos.rs`, FE `stamps`/`stamp-layer` | Round-trip, name-sanitize, placement, gesture. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.20 (Rubber-stamp annotations, standard `/Name`s).
+- Base-14 font metrics / average character advance (why 0.62 em works for centring).
+- Text showing operators: `BT`/`ET`, `Tf`, `Td`, `Tj`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

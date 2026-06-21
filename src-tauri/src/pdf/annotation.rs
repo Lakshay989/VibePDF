@@ -12,7 +12,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_ink, add_line, add_polygon, add_shape, add_text_markup, add_text_note,
+    add_free_text, add_ink, add_line, add_polygon, add_shape, add_stamp, add_text_markup,
+    add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -365,6 +366,33 @@ impl<'a> Edit<PdfDocument<'a>> for InkEdit {
 
     fn label(&self) -> &'static str {
         "ink"
+    }
+}
+
+/// SPEC: P3-ANN-006 — add a `/Stamp` annotation with a generated `/AP`.
+pub struct StampEdit {
+    pub page: i32,
+    pub rect: [f32; 4],
+    pub text: String,
+    pub name: String,
+    pub color: String,
+    pub opacity: f32,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for StampEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_stamp(bytes, page, self.rect, &self.text, &self.name, &self.color, self.opacity)
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "stamp"
     }
 }
 

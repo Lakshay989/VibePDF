@@ -6,12 +6,16 @@
 // button collapses the page text selection before the click handler runs, so we
 // suppress it to keep the selection alive.
 
+import { useEffect } from "react";
+
 import { addTextMarkup, clearTextMarkup } from "@/ipc/annotations";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
 import type { FontFamily, MarkupSubtype } from "@/tools/_framework";
 import { FONT_FAMILIES } from "@/tools/free-text/free-text";
+import { StampPalette } from "@/tools/stamp/StampPalette";
 import { applyMarkupToSelection } from "@/tools/text-markup/apply-markup";
 
 const SUBTYPES: { id: MarkupSubtype; label: string; title: string }[] = [
@@ -56,7 +60,15 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const arrowActive = activeTool === "arrow";
   const polygonActive = activeTool === "polygon";
   const inkActive = activeTool === "ink";
+  const stampActive = activeTool === "stamp";
   const fillable = shapeActive || polygonActive;
+
+  // Disarm the stamp whenever the stamp tool is left, so a later click with
+  // another tool can't drop a stale stamp (the polygon rubber-band lesson).
+  const armStamp = useStampStore((s) => s.arm);
+  useEffect(() => {
+    if (activeTool !== "stamp") armStamp(null);
+  }, [activeTool, armStamp]);
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -270,6 +282,20 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       >
         Pen
       </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(stampActive ? null : "stamp")}
+        title="Stamp (pick one, then click the page to place it)"
+        aria-label="Stamp tool"
+        aria-pressed={stampActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (stampActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Stamp
+      </button>
+      {stampActive ? <StampPalette /> : null}
       {fillable ? (
         <div className="flex items-center gap-1">
           <span className="text-xs text-neutral-400">Fill</span>

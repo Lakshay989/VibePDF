@@ -17,6 +17,7 @@ export const KIND_LABELS: Record<AnnotationKind, string> = {
   polygon: "Polygon",
   polyline: "Polyline",
   ink: "Ink",
+  stamp: "Stamp",
 };
 
 export function kindLabel(kind: AnnotationKind): string {

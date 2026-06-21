@@ -10,7 +10,8 @@ use std::path::PathBuf;
 
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_free_text, add_ink, add_line, add_polygon, add_shape, add_text_markup, add_text_note,
+    add_free_text, add_ink, add_line, add_polygon, add_shape, add_stamp, add_text_markup,
+    add_text_note,
     add_top_level_bookmark, clear_text_markup, delete_annotation, merge_documents,
     prune_dangling_destinations,
     read_annotations, read_form_field_names, read_free_text, read_text_notes,
@@ -618,6 +619,56 @@ fn cos_ink_rejects_too_few_distinct_points() {
     assert!(add_ink(&b, 0, &[[5.0, 5.0, 0.5]], "#000000", 1.0, 2.0).is_err());
     let same = [[5.0_f32, 5.0, 0.5], [5.0, 5.0, 0.5], [5.0, 5.0, 0.5]];
     assert!(add_ink(&b, 0, &same, "#000000", 1.0, 2.0).is_err());
+}
+
+/// SPEC: P3-ANN-006 — add_stamp writes a `/Stamp` (with `/Name` + `/Contents` +
+/// `/NM`) and a generated `/AP` that strokes a border and draws the label;
+/// reopens in PDFium.
+#[test]
+fn cos_add_stamp_writes_subtype_name_and_ap() {
+    let out = add_stamp(&fixture_bytes("hello.pdf"), 0, [100.0, 600.0, 250.0, 646.0], "Approved", "Approved", "#1e8449", 1.0)
+        .expect("stamp");
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Stamp");
+    assert_eq!(annot.get(b"Name").unwrap().as_name().unwrap(), b"Approved");
+    assert!(annot.get(b"NM").is_ok(), "stable handle present");
+    assert_eq!(annot.get(b"Contents").and_then(Object::as_str).unwrap(), b"Approved");
+    assert!(annot.get(b"C").and_then(Object::as_array).is_ok(), "colour /C present");
+    // The /AP strokes a border (`re` + `S`) and draws the uppercased label.
+    assert!(ap.contains(" re\n") && ap.contains("S\n"), "border path: {ap}");
+    assert!(ap.contains("(APPROVED) Tj"), "uppercased label drawn: {ap}");
+}
+
+#[test]
+fn cos_stamp_sanitizes_name_and_uppercases_custom_text() {
+    // A custom stamp: spaces/punctuation are stripped from the /Name, the label
+    // is uppercased in the /AP, but /Contents keeps the original text.
+    let out = add_stamp(&fixture_bytes("hello.pdf"), 0, [10.0, 10.0, 200.0, 56.0], "Paid in full!", "Paid in full!", "#c0392b", 0.8)
+        .expect("stamp");
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Name").unwrap().as_name().unwrap(), b"Paidinfull");
+    assert_eq!(annot.get(b"Contents").and_then(Object::as_str).unwrap(), b"Paid in full!");
+    assert!(ap.contains("(PAID IN FULL!) Tj"), "uppercased: {ap}");
+}
+
+#[test]
+fn cos_stamp_listed_and_deletable() {
+    let out = add_stamp(&fixture_bytes("hello.pdf"), 0, [100.0, 600.0, 250.0, 646.0], "DRAFT", "Draft", "#555555", 1.0)
+        .expect("stamp");
+    let infos = read_annotations(&out).expect("read");
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].kind, "stamp");
+    let after = delete_annotation(&out, &infos[0].id).expect("delete");
+    assert!(read_annotations(&after).expect("re-read").is_empty());
+}
+
+#[test]
+fn cos_stamp_rejects_empty_text_and_rect() {
+    let b = fixture_bytes("hello.pdf");
+    assert!(add_stamp(&b, 0, [10.0, 10.0, 200.0, 56.0], "   ", "Draft", "#000000", 1.0).is_err());
+    assert!(add_stamp(&b, 0, [10.0, 10.0, 10.0, 10.0], "DRAFT", "Draft", "#000000", 1.0).is_err());
 }
 
 #[test]

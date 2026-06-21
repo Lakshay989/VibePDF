@@ -406,6 +406,28 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **Round/flat caps** — the ribbon ends are flat (square across the normal); no
   rounded pen cap. Cosmetic.
 
+## From P3.C3a (stamps)
+
+- ✅ **DONE 2026-06-21 (C3a, P3-ANN-006) — stamp library + custom text stamps**
+  (`/Stamp` + generated `/AP`, click-to-place via a self-contained `StampLayer`).
+  Deferred:
+- **Image stamps (C3b)** — the other half of P3-ANN-006: custom stamps from an
+  **image** (and image+text). Needs image XObject embedding (read file → `/Image`
+  XObject → `Do` in the `/AP`), a bundled default stamp-image set in
+  `src/assets/stamps/`, and aspect-aware placement.
+- **No resize / move / rotate of a placed stamp** — fixed default size, dropped
+  centred on the click; shared with the markup/shape select-and-edit follow-up.
+- **No persistent custom-stamp manager** — a typed custom label isn't saved for
+  reuse; re-type each time.
+- **Fixed-width centring estimate** — the label is centred with a single average
+  glyph-em (0.62, Helvetica-Bold); very wide/narrow strings sit slightly off-centre.
+  A real metrics table (or measuring with the base-14 widths) would be exact.
+- **A shared click / multi-click tool lifecycle is now overdue.** Four annotation
+  overlays own their own gesture outside `stepTool` (note, polygon, ink, stamp).
+  The "rule of three" is well past — a small framework primitive for click-to-place
+  + multi-click (vertices) would dedupe `NoteLayer`/`PolygonLayer`/`InkLayer`/
+  `StampLayer` boilerplate. Do it before the next such tool (measure, C4).
+
 ## From the P3.C2 verification sweep
 
 - **The per-edit "refresh flash" (deferred — needs eyes on the pixels).** Every
