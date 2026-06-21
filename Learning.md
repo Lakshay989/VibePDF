@@ -4801,6 +4801,60 @@ wants *image* stamps — a separate capability (image embedding) we split into C
 
 ---
 
+### P3.C4a — measurement tools + calibration
+
+#### Problem
+
+Distance / perimeter / area tools that report a real-world value — which needs a
+*calibration* (the page has no inherent scale) and a way to show the number.
+
+#### Concepts learned
+
+- **Calibration is a ratio, captured by example.** A PDF page is just points; to
+  report metres you need "this many points = this real length". The usable UX is
+  *draw a reference, then type its size* — `scale = realLength / referencePoints`
+  (units per point). The headline feature is one division; the rest is plumbing.
+- **Area scales by the square of the length scale.** Distance/perimeter scale
+  linearly (`points · scale`); area is two-dimensional, so it scales by `scale²`
+  (50pt = 1m ⇒ 2500pt² = 1m²). Easy to get wrong; pinned by a test.
+- **The shoelace formula** gives a polygon's area from its vertices —
+  `½|Σ(xᵢyᵢ₊₁ − xᵢ₊₁yᵢ)|`. It's *signed* (encodes winding), so `abs()` it; it's
+  also only valid for a simple (non-self-intersecting) ring — documented as a limit.
+- **Reuse the subtype, distinguish by intent.** A measurement isn't a new PDF
+  annotation type — it's a `/Line`/`/PolyLine`/`/Polygon` carrying a dimension
+  **`/IT`** (`LineDimension`/…). So the geometry + `/AP` reuse the shape writers;
+  the only new bits are the `/IT` tag and a value label baked into `/Contents` +
+  the `/AP`. Read-back keys off `/IT` to surface it as "measure", not the bare
+  shape — the inverse of how we *write* it. (Acrobat's live `/Measure` dict, which
+  would let it re-measure from raw scale, is deferred to C4b; our baked label
+  renders everywhere meanwhile.)
+- **One overlay, two jobs, via a store flag.** Calibration and measurement are
+  the *same* 2-click gesture; a `calibrating` flag in the measure-store switches
+  `MeasureLayer` between "stash the reference length for the dialog" and "persist
+  a measurement". And distance **auto-finishes at 2 clicks** (no double-click) by
+  finishing inline once the new vertex count hits 2 — a small per-mode tweak on
+  the shared multi-click gesture.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/tools/measure/measure.ts` | Pure maths: calibration + distance/perimeter/area + format. |
+| `src/state/measure-store.ts` | Mode + per-doc calibration + the calibrate handshake. |
+| `src/view/measure-layer.tsx` | Multi-click overlay (distance auto-finish, area close, calibrate). |
+| `src/tools/measure/{MeasureControls,CalibrateDialog}.tsx` | Mode/calibrate UI + the scale dialog. |
+| `src-tauri/src/pdf/cos.rs` | `add_measure` (+ `measure_appearance_content`, `is_measurement_intent`). |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `MeasureEdit` + `AddMeasure` + `pdf_add_measure`. |
+| `src-tauri/tests/measure.rs`, `tests/cos.rs`, FE `calibration`/`measure-layer` | Round-trip, `/IT` read-back, the maths, the gesture. |
+
+#### Further reading
+
+- The shoelace (surveyor's) formula for polygon area.
+- PDF 32000-1:2008 §12.5.6.10 + §12.9 (measurement annotations, the `/Measure` dict).
+- Why area scales as the square of a linear scale (dimensional analysis).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

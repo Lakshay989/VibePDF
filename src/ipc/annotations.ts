@@ -49,7 +49,8 @@ export type AnnotationKind =
   | "polygon"
   | "polyline"
   | "ink"
-  | "stamp";
+  | "stamp"
+  | "measure";
 
 /**
  * SPEC: P3-ANN-012 — delete the annotation with the given `handle` (its `/NM`,

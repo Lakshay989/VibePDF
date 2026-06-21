@@ -687,6 +687,42 @@ pub async fn pdf_add_stamp(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-007 — add a measurement annotation (`kind` =
+/// distance|perimeter|area) through `points` (PDF points, 0-based `page`). The
+/// `label` is the pre-computed value (computed against the user's calibration).
+/// Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_measure(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    kind: String,
+    points: Vec<[f32; 2]>,
+    color: String,
+    label: String,
+    opacity: f32,
+    stroke_width: f32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_measure_request(page, kind, points, color, label, opacity, stroke_width)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

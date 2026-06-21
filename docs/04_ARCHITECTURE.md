@@ -196,9 +196,22 @@ click, drops it via `cos::add_stamp`. The result is a `/Stamp` whose generated
 `/AP` draws a coloured border + the bold uppercase label, centred and auto-fit to
 the box (the label width is *estimated* from an average Helvetica-Bold glyph em —
 exact metrics aren't needed for one centred line). `/Name` is informational; the
-`/AP` is what renders. Image stamps (the other half of P3-ANN-006) are C3b. Note:
-**four** annotation overlays now own their own gesture outside `stepTool` (note,
-polygon, ink, stamp) — a shared click/multi-click tool lifecycle is overdue.
+`/AP` is what renders. Image stamps (the other half of P3-ANN-006) are C3b.
+
+**Measurements (P3.C4a)** are distance / perimeter / area tools. The maths is
+pure + frontend (`src/tools/measure/measure.ts`): a *calibration* (units per
+point, captured by drawing a reference and typing its real size) turns point
+geometry into real-world values — area scaling by the **square** of the scale. A
+self-contained `MeasureLayer` reuses the polygon multi-click (distance
+auto-finishes at two clicks); a `calibrating` flag in `measure-store` switches
+the same gesture between capturing a reference and persisting a measurement.
+`cos::add_measure` writes a `/Line` / `/PolyLine` / `/Polygon` carrying a
+dimension **`/IT`**, the value in `/Contents`, and an `/AP` (the geometry plus the
+value label) — so it isn't a new subtype, just a shape with an intent, and
+`read_annotations` keys off `/IT` to surface it as `"measure"`. The PDF `/Measure`
+dict (Acrobat live re-measure) + persisted calibration are C4b. **Five** overlays
+now own a gesture outside `stepTool` (note, polygon, ink, stamp, measure) — a
+shared click/multi-click lifecycle is well overdue (BACKLOG).
 
 **Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
 `/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated
@@ -212,7 +225,7 @@ only the in-progress draft in the store. Line/arrow/polygon are C1b.
 **Reading annotations back (P3.D1).** `cos::read_annotations` is the one read that
 spans *all* kinds: it walks every page's `/Annots`, whitelists the subtypes we
 author (markup, note, free-text, shapes, line/arrow, polygon/polyline, ink,
-stamp), and
+stamp, measure — the last detected by a dimension `/IT` on a line/poly), and
 returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,
 author, `/M`-as-epoch). A read-only `ReadAnnotations` actor query feeds
 `pdf_read_annotations`; the `AnnotationPanel` sidebar re-reads on

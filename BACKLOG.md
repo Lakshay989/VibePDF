@@ -406,6 +406,37 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **Round/flat caps** — the ribbon ends are flat (square across the normal); no
   rounded pen cap. Cosmetic.
 
+## Verification debt (in-app + cross-reader, deferred by the user)
+
+The automated suites (`check` / `test` / `test:rust`) are green; these shipped
+`[~]` features still want a human in-app + cross-reader pass. **2026-06-21 the user
+said "push testing to backlog verify"** — keep shipping, surface these at
+phase-close. Walk `MANUAL_TESTING.md` + the `Sample PDFs/vibepdf-verify-*.pdf`
+artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
+- **C1b₁** line/arrow, **C1b₂** polygon (placement eyeballed 2026-06-21;
+  cross-reader pending), **C2** ink, **C3a** stamps, **C4a** measurements.
+- **D1** sidebar UI, **D1d** select+delete, **D1e** free-text edit-in-place.
+- The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
+  verification debt.
+
+## From P3.C4a (measurement tools)
+
+- ✅ **DONE 2026-06-21 (C4a, P3-ANN-007) — distance/perimeter/area + calibration**
+  (`/IT` dimension annotations + a generated `/AP` label, self-contained
+  `MeasureLayer`). Deferred:
+- **C4b — the PDF `/Measure` dictionary** (`/R` scale ratio, `/X`/`/D`/`/A`
+  number-format arrays) so Acrobat *re-measures live* against raw scale instead of
+  trusting our baked-in label; **persist calibration** across save/reopen (it's
+  session-only frontend state now).
+- **Self-intersecting area is undefined** — shoelace assumes a simple ring; a
+  figure-eight reports a meaningless (partially cancelled) area. No guard.
+- **No vertex editing / ortho / angle-snap**, no per-segment labels on a
+  perimeter, no unit conversion between systems (m↔ft).
+- **A shared `useVertexGesture` is now FIVE copies overdue** — note, polygon, ink,
+  stamp, measure each hand-roll the click/multi-click gesture. Extract the
+  primitive (vertices + rubber-band + Enter/Esc/dbl-click/close-first +
+  auto-finish-at-N) before C5/the next such tool; migrate the existing layers.
+
 ## From P3.C3a (stamps)
 
 - ✅ **DONE 2026-06-21 (C3a, P3-ANN-006) — stamp library + custom text stamps**

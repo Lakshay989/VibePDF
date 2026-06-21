@@ -11,10 +11,12 @@ import { useEffect } from "react";
 import { addTextMarkup, clearTextMarkup } from "@/ipc/annotations";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useMeasureStore } from "@/state/measure-store";
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
 import type { FontFamily, MarkupSubtype } from "@/tools/_framework";
 import { FONT_FAMILIES } from "@/tools/free-text/free-text";
+import { MeasureControls } from "@/tools/measure/MeasureControls";
 import { StampPalette } from "@/tools/stamp/StampPalette";
 import { applyMarkupToSelection } from "@/tools/text-markup/apply-markup";
 
@@ -61,6 +63,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const polygonActive = activeTool === "polygon";
   const inkActive = activeTool === "ink";
   const stampActive = activeTool === "stamp";
+  const measureActive = activeTool === "measure";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -69,6 +72,12 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   useEffect(() => {
     if (activeTool !== "stamp") armStamp(null);
   }, [activeTool, armStamp]);
+
+  // Cancel any in-progress calibration when the measure tool is left.
+  const cancelCalibrating = useMeasureStore((s) => s.cancelCalibrating);
+  useEffect(() => {
+    if (activeTool !== "measure") cancelCalibrating();
+  }, [activeTool, cancelCalibrating]);
 
   const apply = (subtype: MarkupSubtype) => {
     void applyMarkupToSelection({ documentId, subtype, color, opacity }, (page, quads) =>
@@ -296,6 +305,20 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         Stamp
       </button>
       {stampActive ? <StampPalette /> : null}
+      <button
+        type="button"
+        onClick={() => setActiveTool(measureActive ? null : "measure")}
+        title="Measure (distance / perimeter / area; calibrate against a known length)"
+        aria-label="Measure tool"
+        aria-pressed={measureActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (measureActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Measure
+      </button>
+      {measureActive ? <MeasureControls documentId={documentId} /> : null}
       {fillable ? (
         <div className="flex items-center gap-1">
           <span className="text-xs text-neutral-400">Fill</span>

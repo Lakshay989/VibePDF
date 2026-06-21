@@ -2100,6 +2100,44 @@ cross-reader pass. Image stamps are C3b (image XObject embedding).
 
 ---
 
+### P3.C4a — measurement tools + calibration (this commit)
+
+```bash
+# No new deps. Distance/perimeter/area measurements + draw-to-calibrate. The PDF
+# /Measure dict (Acrobat live re-measure) is split to C4b.
+#   cos::add_measure → /Line|/PolyLine|/Polygon with a dimension /IT
+#     (LineDimension/PolyLineDimension/PolygonDimension), /Contents=value, /C,
+#     /CA, /BS/W, /NM + a generated /AP (geometry stroke + the bold value label
+#     centred on the centroid). read_annotations: a measurement /IT reads back as
+#     "measure" (not the bare shape). MeasureEdit + AddMeasure + pdf_add_measure.
+# Frontend: measure MATHS are pure (tools/measure/measure.ts — calibrationScale,
+#   straightDistance/pathLength, polygonArea [shoelace, abs], measureValue [area
+#   scales by scale²], formatMeasurement). A self-contained MeasureLayer reuses
+#   the polygon multi-click; a `calibrating` store flag switches it between
+#   "stash reference length → CalibrateDialog" and "persist measurement"; distance
+#   auto-finishes at 2 clicks. Measure toolbar toggle + MeasureControls.
+#   AnnotationKind += measure.
+
+npm run check          # tsc + eslint src + clippy ✓
+#   clippy pedantic: unnested_or_patterns → Some(b"A" | b"B" | b"C").
+#   eslint: dropped a disable for an unconfigured jsx-a11y rule.
+npm run test           # 289/289 (+14: calibration 9, measure-layer 4, measure IPC 1)
+npm run test:rust      # EXIT 0. cos.rs +4 (distance Line+IT+label, area Polygon
+#   dimension, reads back as "measure"+deletable, rejects bad kind|empty|<min).
+#   measure.rs: 3 (persist 2 / undo removes / rejects bad kind) + 1 ignored.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test measure \
+  measure_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-measure.pdf (a distance + an area).
+```
+
+The three tools + calibration + displayed value (the spec's user-facing half).
+Left `[~]` pending the human in-app + cross-reader pass. The /Measure dict (live
+re-measure) + persisted calibration are C4b.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

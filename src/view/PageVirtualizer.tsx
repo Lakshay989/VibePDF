@@ -15,6 +15,7 @@ import { InkLayer } from "@/view/ink-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PolygonLayer } from "@/view/polygon-layer";
 import { SelectionHighlightLayer } from "@/view/selection-highlight-layer";
+import { MeasureLayer } from "@/view/measure-layer";
 import { StampLayer } from "@/view/stamp-layer";
 import { PageTextLayer } from "@/view/text-layer";
 import { LruCache } from "@/view/page-cache";
@@ -517,6 +518,14 @@ function PageSlot({
         rotation={rotation}
       />
       <StampLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <MeasureLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

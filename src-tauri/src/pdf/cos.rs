@@ -1539,8 +1539,9 @@ fn pdf_escape(s: &str) -> String {
 }
 
 /// Average Helvetica-Bold glyph advance (em) — used to auto-fit + centre a
-/// stamp's single line of uppercase text. Exact metrics aren't needed.
-const STAMP_GLYPH_EM: f32 = 0.62;
+/// single line of label text (stamps, measurement values). Exact metrics aren't
+/// needed for one centred line.
+const HELV_BOLD_EM: f32 = 0.62;
 
 /// SPEC: P3-ANN-006 — add a `/Stamp` annotation: a rubber-stamp box (a coloured
 /// border with the bold uppercase `text` auto-fit + centred inside `rect`), with
@@ -1655,10 +1656,10 @@ fn stamp_appearance_content(rect: [f32; 4], label: &str, color: (f32, f32, f32))
     let count = u16::try_from(upper.chars().count().max(1)).unwrap_or(u16::MAX);
     let len = f32::from(count);
     let text_pad = pad + 4.0;
-    let by_width = (bw - 2.0 * text_pad) / (STAMP_GLYPH_EM * len);
+    let by_width = (bw - 2.0 * text_pad) / (HELV_BOLD_EM * len);
     let by_height = (bh - 2.0 * pad) * 0.62;
     let size = by_width.min(by_height).clamp(5.0, 96.0);
-    let text_w = STAMP_GLYPH_EM * size * len;
+    let text_w = HELV_BOLD_EM * size * len;
     let tx = x0 + (bw - text_w) / 2.0;
     let baseline = (y0 + y1) / 2.0 - size * 0.34; // centre the cap height
 
@@ -2046,6 +2047,166 @@ fn polygon_appearance_content(
         (false, _) => "S",
     };
     let _ = writeln!(out, "{paint}");
+    out
+}
+
+/// SPEC: P3-ANN-007 — add a measurement annotation: a `/Line` (distance),
+/// `/PolyLine` (perimeter), or `/Polygon` (area) carrying a dimension `/IT`
+/// intent, the pre-computed `label` in `/Contents`, and a generated `/AP` that
+/// draws the geometry plus the label centred on it. The value is computed on the
+/// frontend against the user's calibration; the PDF `/Measure` dict (Acrobat live
+/// re-measure) is C4b.
+#[allow(clippy::too_many_arguments)]
+pub fn add_measure(
+    bytes: &[u8],
+    page: usize,
+    kind: &str,
+    points: &[[f32; 2]],
+    color: &str,
+    label: &str,
+    opacity: f32,
+    stroke_width: f32,
+) -> Result<Vec<u8>, CommandError> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(CommandError::InvalidInput("measurement label is empty".into()));
+    }
+    let (subtype, intent, min_pts, closed): (&[u8], &[u8], usize, bool) = match kind {
+        "distance" => (b"Line", b"LineDimension", 2, false),
+        "perimeter" => (b"PolyLine", b"PolyLineDimension", 2, false),
+        "area" => (b"Polygon", b"PolygonDimension", 3, true),
+        other => return Err(CommandError::InvalidInput(format!("unknown measure kind: {other}"))),
+    };
+    if points.len() < min_pts {
+        return Err(CommandError::InvalidInput(format!("{kind} needs at least {min_pts} points")));
+    }
+    let (sr, sg, sb) = parse_hex_color(color)?;
+    let opacity = opacity.clamp(0.0, 1.0);
+    let width = stroke_width.max(0.0);
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    // `/BBox` covers every vertex + the stroke + room for the centred label.
+    let pad = width.max(1.0) + 14.0;
+    let bx0 = points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min) - pad;
+    let by0 = points.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min) - pad;
+    let bx1 = points.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max) + pad;
+    let by1 = points.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max) + pad;
+    let rect_obj =
+        Object::Array(vec![Object::Real(bx0), Object::Real(by0), Object::Real(bx1), Object::Real(by1)]);
+
+    let content = measure_appearance_content(closed, points, (sr, sg, sb), label, width);
+
+    // `/AP` resources: an ExtGState for opacity + the bold base-14 label font.
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut font = Dictionary::new();
+    font.set("Type", Object::Name(b"Font".to_vec()));
+    font.set("Subtype", Object::Name(b"Type1".to_vec()));
+    font.set("BaseFont", Object::Name(b"Helvetica-Bold".to_vec()));
+    let mut fonts = Dictionary::new();
+    fonts.set("F1", Object::Dictionary(font));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+    resources.set("Font", Object::Dictionary(fonts));
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_obj.clone());
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut bs = Dictionary::new();
+    bs.set("W", Object::Real(width));
+    bs.set("S", Object::Name(b"S".to_vec()));
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(subtype.to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set("IT", Object::Name(intent.to_vec())); // measurement intent
+    if kind == "distance" {
+        let [a, b] = [points[0], points[1]];
+        annot.set("L", Object::Array(vec![Object::Real(a[0]), Object::Real(a[1]), Object::Real(b[0]), Object::Real(b[1])]));
+    } else {
+        let vertices: Vec<Object> =
+            points.iter().flat_map(|p| [Object::Real(p[0]), Object::Real(p[1])]).collect();
+        annot.set("Vertices", Object::Array(vertices));
+    }
+    annot.set("Rect", rect_obj);
+    annot.set("Contents", Object::string_literal(label));
+    annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
+    annot.set("CA", Object::Real(opacity));
+    annot.set("BS", Object::Dictionary(bs));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The `/AP` content for a measurement: stroke the path (`m`/`l`, `h` to close an
+/// area), then draw the bold `label` centred on the centroid in the measure
+/// colour. Absolute page coords (`BBox == Rect`).
+fn measure_appearance_content(
+    closed: bool,
+    points: &[[f32; 2]],
+    (sr, sg, sb): (f32, f32, f32),
+    label: &str,
+    width: f32,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    let _ = writeln!(out, "{width:.2} w");
+    let _ = writeln!(out, "{sr:.4} {sg:.4} {sb:.4} RG");
+    if let Some(&[fx, fy]) = points.first() {
+        let _ = writeln!(out, "{fx:.2} {fy:.2} m");
+    }
+    for p in &points[1..] {
+        let _ = writeln!(out, "{:.2} {:.2} l", p[0], p[1]);
+    }
+    if closed {
+        let _ = writeln!(out, "h");
+    }
+    let _ = writeln!(out, "S");
+
+    // Label centred on the centroid (the segment midpoint for a 2-point distance).
+    let n_pts = u16::try_from(points.len().max(1)).unwrap_or(u16::MAX);
+    let n = f32::from(n_pts);
+    let cx = points.iter().map(|p| p[0]).sum::<f32>() / n;
+    let cy = points.iter().map(|p| p[1]).sum::<f32>() / n;
+    let size = 10.0_f32;
+    let chars = u16::try_from(label.chars().count().max(1)).unwrap_or(u16::MAX);
+    let text_w = HELV_BOLD_EM * size * f32::from(chars);
+    let tx = cx - text_w / 2.0;
+    let ty = cy + 3.0; // nudge the label off the line
+
+    let _ = writeln!(out, "{sr:.4} {sg:.4} {sb:.4} rg");
+    let _ = writeln!(out, "BT");
+    let _ = writeln!(out, "/F1 {size:.2} Tf");
+    let _ = writeln!(out, "{tx:.2} {ty:.2} Td");
+    let _ = writeln!(out, "({}) Tj", pdf_escape(label));
+    let _ = writeln!(out, "ET");
     out
 }
 
@@ -2766,6 +2927,15 @@ pub struct AnnotationInfo {
 
 /// Map an annotation `/Subtype` to the sidebar `kind`, or `None` for subtypes we
 /// don't surface (links, form widgets, popups, …).
+/// Whether an annotation carries a measurement dimension `/IT` intent (so a
+/// `/Line`/`/PolyLine`/`/Polygon` should read back as "measure", not the shape).
+fn is_measurement_intent(dict: &Dictionary) -> bool {
+    matches!(
+        dict.get(b"IT").and_then(Object::as_name).ok(),
+        Some(b"LineDimension" | b"PolyLineDimension" | b"PolygonDimension")
+    )
+}
+
 fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
     match subtype {
         b"Highlight" => Some("highlight"),
@@ -2806,10 +2976,14 @@ pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandErro
         for obj in arr {
             let Ok(id) = obj.as_reference() else { continue };
             let Ok(dict) = doc.get_dictionary(id) else { continue };
-            let Some(kind) = dict.get(b"Subtype").and_then(Object::as_name).ok().and_then(annotation_kind)
+            let Some(base_kind) =
+                dict.get(b"Subtype").and_then(Object::as_name).ok().and_then(annotation_kind)
             else {
                 continue;
             };
+            // A measurement reuses /Line/PolyLine/Polygon but carries a dimension
+            // `/IT` intent — surface it as "measure", not the bare shape.
+            let kind = if is_measurement_intent(dict) { "measure" } else { base_kind };
             // Prefer the stable `/NM` (every annotation we write has one) as the
             // delete handle; fall back to a `obj:<num> <gen>` object id for
             // annotations authored elsewhere that lack a name.

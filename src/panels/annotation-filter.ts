@@ -18,6 +18,7 @@ export const KIND_LABELS: Record<AnnotationKind, string> = {
   polyline: "Polyline",
   ink: "Ink",
   stamp: "Stamp",
+  measure: "Measurement",
 };
 
 export function kindLabel(kind: AnnotationKind): string {

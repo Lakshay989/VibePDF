@@ -12,8 +12,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_ink, add_line, add_polygon, add_shape, add_stamp, add_text_markup,
-    add_text_note,
+    add_free_text, add_ink, add_line, add_measure, add_polygon, add_shape, add_stamp,
+    add_text_markup, add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -393,6 +393,44 @@ impl<'a> Edit<PdfDocument<'a>> for StampEdit {
 
     fn label(&self) -> &'static str {
         "stamp"
+    }
+}
+
+/// SPEC: P3-ANN-007 — add a measurement (distance / perimeter / area) annotation
+/// with a generated `/AP`.
+pub struct MeasureEdit {
+    pub page: i32,
+    pub kind: String,
+    pub points: Vec<[f32; 2]>,
+    pub color: String,
+    pub label: String,
+    pub opacity: f32,
+    pub stroke_width: f32,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for MeasureEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_measure(
+                bytes,
+                page,
+                &self.kind,
+                &self.points,
+                &self.color,
+                &self.label,
+                self.opacity,
+                self.stroke_width,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "measure"
     }
 }
 

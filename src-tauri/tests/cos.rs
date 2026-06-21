@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
-    add_free_text, add_ink, add_line, add_polygon, add_shape, add_stamp, add_text_markup,
-    add_text_note,
+    add_free_text, add_ink, add_line, add_measure, add_polygon, add_shape, add_stamp,
+    add_text_markup, add_text_note,
     add_top_level_bookmark, clear_text_markup, delete_annotation, merge_documents,
     prune_dangling_destinations,
     read_annotations, read_form_field_names, read_free_text, read_text_notes,
@@ -669,6 +669,61 @@ fn cos_stamp_rejects_empty_text_and_rect() {
     let b = fixture_bytes("hello.pdf");
     assert!(add_stamp(&b, 0, [10.0, 10.0, 200.0, 56.0], "   ", "Draft", "#000000", 1.0).is_err());
     assert!(add_stamp(&b, 0, [10.0, 10.0, 10.0, 10.0], "DRAFT", "Draft", "#000000", 1.0).is_err());
+}
+
+/// SPEC: P3-ANN-007 — add_measure writes the dimension subtype + `/IT` intent,
+/// the value in `/Contents`, and an `/AP` that strokes the geometry and draws the
+/// label; reopens in PDFium.
+#[test]
+fn cos_measure_distance_writes_line_it_and_label() {
+    let pts = [[100.0_f32, 700.0], [300.0, 700.0]];
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "distance", &pts, "#1f6feb", "4 m", 1.0, 1.5)
+        .expect("distance");
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Line");
+    assert_eq!(annot.get(b"IT").unwrap().as_name().unwrap(), b"LineDimension");
+    assert_eq!(annot.get(b"L").and_then(Object::as_array).unwrap().len(), 4);
+    assert_eq!(annot.get(b"Contents").and_then(Object::as_str).unwrap(), b"4 m");
+    assert!(annot.get(b"NM").is_ok());
+    assert!(ap.contains("100.00 700.00 m") && ap.contains('S'), "draws the segment: {ap}");
+    assert!(ap.contains("(4 m) Tj"), "draws the value label: {ap}");
+}
+
+#[test]
+fn cos_measure_area_is_polygon_dimension() {
+    let pts = [[100.0_f32, 700.0], [200.0, 700.0], [150.0, 620.0]];
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "area", &pts, "#1e8449", "1.2 m\u{b2}", 1.0, 1.5)
+        .expect("area");
+    let (annot, ap) = first_annot_and_ap(&out);
+    assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Polygon");
+    assert_eq!(annot.get(b"IT").unwrap().as_name().unwrap(), b"PolygonDimension");
+    assert_eq!(annot.get(b"Vertices").and_then(Object::as_array).unwrap().len(), 6);
+    assert!(ap.contains("h\n"), "closes the ring: {ap}");
+}
+
+#[test]
+fn cos_measure_reads_back_as_measure_and_deletes() {
+    let pts = [[100.0_f32, 700.0], [240.0, 660.0], [300.0, 700.0]];
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "perimeter", &pts, "#000000", "5 m", 1.0, 1.5)
+        .expect("perimeter");
+    let infos = read_annotations(&out).expect("read");
+    assert_eq!(infos.len(), 1);
+    // A /PolyLine with a dimension /IT surfaces as "measure", not "polyline".
+    assert_eq!(infos[0].kind, "measure");
+    assert_eq!(infos[0].contents, "5 m");
+    let after = delete_annotation(&out, &infos[0].id).expect("delete");
+    assert!(read_annotations(&after).expect("re-read").is_empty());
+}
+
+#[test]
+fn cos_measure_rejects_bad_kind_empty_label_and_too_few_points() {
+    let b = fixture_bytes("hello.pdf");
+    let line = [[0.0_f32, 0.0], [10.0, 10.0]];
+    assert!(add_measure(&b, 0, "volume", &line, "#000000", "x", 1.0, 1.0).is_err());
+    assert!(add_measure(&b, 0, "distance", &line, "#000000", "  ", 1.0, 1.0).is_err());
+    assert!(add_measure(&b, 0, "area", &line, "#000000", "x", 1.0, 1.0).is_err()); // area needs 3
 }
 
 #[test]
