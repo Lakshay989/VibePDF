@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import type { AnnotationInfo } from "@/ipc/annotations";
 import {
+  dateInputToMs,
   distinctAuthors,
   distinctKinds,
   EMPTY_FILTER,
   filterAnnotations,
   groupByPage,
+  msToDateInput,
 } from "@/panels/annotation-filter";
 
 const a = (over: Partial<AnnotationInfo>): AnnotationInfo => ({
@@ -28,6 +30,41 @@ const list: AnnotationInfo[] = [
   a({ id: "2", page: 0, kind: "highlight", contents: "important", author: "Bo" }),
   a({ id: "3", page: 0, kind: "freetext", contents: "a caption", author: "Ada", modified: 5000 }),
 ];
+
+describe("date input helpers", () => {
+  it("parses a date input value as local midnight (not UTC)", () => {
+    const ms = dateInputToMs("2026-06-21");
+    expect(ms).not.toBeNull();
+    const dt = new Date(ms as number);
+    // Local Y/M/D must match the picked day regardless of timezone — a UTC
+    // parse would shift the date in zones west/east of UTC.
+    expect(dt.getFullYear()).toBe(2026);
+    expect(dt.getMonth()).toBe(5); // June (0-based)
+    expect(dt.getDate()).toBe(21);
+    expect(dt.getHours()).toBe(0);
+  });
+
+  it("treats an empty value as no filter", () => {
+    expect(dateInputToMs("")).toBeNull();
+  });
+
+  it("round-trips through msToDateInput in local time", () => {
+    const ms = dateInputToMs("2026-01-05");
+    expect(msToDateInput(ms)).toBe("2026-01-05");
+    expect(msToDateInput(null)).toBe("");
+  });
+
+  it("includes an annotation modified later the same local day", () => {
+    const after = dateInputToMs("2026-06-21") as number;
+    // 14:30 local on the picked day → must pass "modified on or after" the day.
+    const sameDayAfternoon = new Date(2026, 5, 21, 14, 30).getTime();
+    const filtered = filterAnnotations([a({ id: "x", modified: sameDayAfternoon })], {
+      ...EMPTY_FILTER,
+      modifiedAfter: after,
+    });
+    expect(filtered.map((x) => x.id)).toEqual(["x"]);
+  });
+});
 
 describe("filterAnnotations", () => {
   it("returns everything with the empty filter", () => {

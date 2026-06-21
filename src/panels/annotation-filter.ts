@@ -42,6 +42,30 @@ export const EMPTY_FILTER: AnnotationFilter = {
   modifiedAfter: null,
 };
 
+/**
+ * Parse a `<input type="date">` value (`YYYY-MM-DD`) as **local** midnight
+ * epoch-ms; empty → `null`. A bare `new Date("YYYY-MM-DD")` parses as *UTC*
+ * midnight, which in any non-UTC zone shifts the day — so "modified on or after
+ * today" would hide annotations made earlier today. Building from parts pins it
+ * to the local day the user actually picked.
+ */
+export function dateInputToMs(value: string): number | null {
+  if (!value) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d).getTime();
+}
+
+/** Format an epoch-ms as a local `YYYY-MM-DD` for a date input's `value`. */
+export function msToDateInput(ms: number | null): string {
+  if (ms === null) return "";
+  const dt = new Date(ms);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 /** Apply `filter` to `list`, preserving order. */
 export function filterAnnotations(
   list: readonly AnnotationInfo[],

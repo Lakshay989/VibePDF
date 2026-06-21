@@ -14,12 +14,14 @@ import type { DocumentId } from "@/ipc/pdf";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import {
   type AnnotationFilter,
+  dateInputToMs,
   distinctAuthors,
   distinctKinds,
   EMPTY_FILTER,
   filterAnnotations,
   groupByPage,
   kindLabel,
+  msToDateInput,
 } from "@/panels/annotation-filter";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
@@ -181,14 +183,23 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
             type="date"
             aria-label="Modified on or after"
             title="Modified on or after"
+            value={msToDateInput(filter.modifiedAfter)}
             onChange={(e) =>
-              setFilter((f) => ({
-                ...f,
-                modifiedAfter: e.target.value ? new Date(e.target.value).getTime() : null,
-              }))
+              setFilter((f) => ({ ...f, modifiedAfter: dateInputToMs(e.target.value) }))
             }
             className="rounded border border-neutral-300 bg-transparent px-1 py-0.5 text-xs dark:border-neutral-600"
           />
+          {filter.modifiedAfter !== null ? (
+            <button
+              type="button"
+              onClick={() => setFilter((f) => ({ ...f, modifiedAfter: null }))}
+              aria-label="Clear date filter"
+              title="Clear date filter"
+              className="shrink-0 rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            >
+              ✕
+            </button>
+          ) : null}
         </div>
       </div>
 
