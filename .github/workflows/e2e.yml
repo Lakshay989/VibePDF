@@ -15,7 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Same every-3rd-push throttle as ci.yml (see that file's `gate` comment).
+  # E2E is Linux (1x) but slow (app build + tauri-driver compile + xvfb), so we
+  # only spin it up alongside the heavy CI run. PRs always run.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          n=$(git rev-list --count HEAD)
+          if [ $((n % 3)) -eq 0 ]; then run=true; else run=false; fi
+          echo "commit #$n on main -> run=$run (e2e every 3rd push)"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   e2e:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout

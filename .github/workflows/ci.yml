@@ -31,7 +31,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cost throttle: the heavy job runs on macOS, billed at 10x the Linux rate.
+  # Since every gate is also run locally before each push, we don't pay 10x on
+  # *every* direct push to main — only every 3rd commit. PRs always run. This
+  # gate job is Linux (1x) and finishes in seconds, so the two skipped pushes in
+  # each cycle of three cost ~nothing (a skipped `if` job allocates no runner).
+  # To go back to every-push, delete this job + the `needs`/`if` below. To change
+  # the cadence, edit the `% 3` divisor.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history to count commits
+      - id: decide
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT" # always run on PRs
+            exit 0
+          fi
+          n=$(git rev-list --count HEAD)
+          if [ $((n % 3)) -eq 0 ]; then run=true; else run=false; fi
+          echo "commit #$n on main -> run=$run (heavy CI every 3rd push)"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   check-and-test:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout
