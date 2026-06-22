@@ -6,10 +6,12 @@
 // `SelectionHighlightLayer`). Like the note overlay it re-reads on the edit epoch
 // so the list stays in step with edits/undo. No PDF bytes are touched here.
 
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import { readFreeText } from "@/ipc/freetext";
+import { exportAnnotations, importAnnotations } from "@/ipc/interchange";
 import type { DocumentId } from "@/ipc/pdf";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { addReply } from "@/ipc/replies";
@@ -150,6 +152,52 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
     [documentId, setHistory, bumpEpoch],
   );
 
+  // SPEC: P3-ANN-010 — export every annotation to an XFDF sidecar, or import one
+  // back. A transient `note` reports the outcome; import bumps the epoch so the
+  // canvas + this list pick up the recreated annotations.
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!note) return undefined;
+    const t = window.setTimeout(() => setNote(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [note]);
+
+  const doExport = useCallback(() => {
+    void (async () => {
+      try {
+        const path = await saveFileDialog({
+          defaultPath: "annotations.xfdf",
+          filters: [{ name: "XFDF annotations", extensions: ["xfdf"] }],
+        });
+        if (!path) return; // cancelled
+        const n = await exportAnnotations(documentId, path);
+        setNote(`Exported ${n} annotation${n === 1 ? "" : "s"}`);
+      } catch (err) {
+        console.warn("export annotations failed", documentId, err);
+        setNote(err instanceof Error ? err.message : "Export failed");
+      }
+    })();
+  }, [documentId]);
+
+  const doImport = useCallback(() => {
+    void (async () => {
+      try {
+        const selected = await openFileDialog({
+          multiple: false,
+          filters: [{ name: "XFDF annotations", extensions: ["xfdf"] }],
+        });
+        if (selected === null || Array.isArray(selected)) return; // cancelled
+        const h = await importAnnotations(documentId, selected);
+        setHistory(documentId, h);
+        bumpEpoch(documentId);
+        setNote("Annotations imported");
+      } catch (err) {
+        console.warn("import annotations failed", documentId, err);
+        setNote(err instanceof Error ? err.message : "Import failed");
+      }
+    })();
+  }, [documentId, setHistory, bumpEpoch]);
+
   const toggleKind = (kind: (typeof kinds)[number]) =>
     setFilter((f) => ({
       ...f,
@@ -158,10 +206,38 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
 
   return (
     <aside className="flex h-full w-72 flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
-      <header className="border-b border-neutral-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
-        Annotations
-        {list ? <span className="ml-1 text-neutral-400">({shown})</span> : null}
+      <header className="flex items-center gap-2 border-b border-neutral-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
+        <span>
+          Annotations
+          {list ? <span className="ml-1 text-neutral-400">({shown})</span> : null}
+        </span>
+        {/* SPEC: P3-ANN-010 — XFDF interchange. */}
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={doExport}
+            title="Export annotations to XFDF"
+            aria-label="Export annotations"
+            className="rounded px-1.5 py-0.5 text-sm font-normal normal-case hover:bg-neutral-200 dark:hover:bg-neutral-800"
+          >
+            ⬆
+          </button>
+          <button
+            type="button"
+            onClick={doImport}
+            title="Import annotations from XFDF"
+            aria-label="Import annotations"
+            className="rounded px-1.5 py-0.5 text-sm font-normal normal-case hover:bg-neutral-200 dark:hover:bg-neutral-800"
+          >
+            ⬇
+          </button>
+        </div>
       </header>
+      {note ? (
+        <div className="border-b border-neutral-200 bg-neutral-100 px-3 py-1 text-xs text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
+          {note}
+        </div>
+      ) : null}
 
       <div className="space-y-2 border-b border-neutral-200 p-2 dark:border-neutral-800">
         <input

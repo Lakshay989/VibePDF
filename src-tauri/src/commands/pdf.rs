@@ -454,6 +454,57 @@ pub async fn pdf_read_annotations(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-010 — export every annotation in the document to an XFDF file at
+/// `path`. Read-only on the source; returns the count of annotations written.
+#[tauri::command]
+pub async fn pdf_export_annotations(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<usize, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_annotations_request(PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-010 — import annotations from the XFDF file at `path`, added as
+/// one undoable edit. The file is read here (the actor stays byte-pure); the
+/// add itself runs on the actor.
+#[tauri::command]
+pub async fn pdf_import_annotations(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let xfdf = std::fs::read_to_string(&path)
+        .map_err(|e| CommandError::InvalidInput(format!("cannot read {path}: {e}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.import_xfdf_request(xfdf)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-013 — read a free-text annotation's editable text + style by
 /// `/NM`, so the in-place editor can open pre-filled. Read-only.
 #[tauri::command]

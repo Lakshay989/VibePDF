@@ -13,6 +13,14 @@ vi.mock("@/ipc/annotations", async (orig) => ({
 vi.mock("@/ipc/replies", () => ({
   addReply: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
+vi.mock("@/ipc/interchange", () => ({
+  exportAnnotations: vi.fn().mockResolvedValue(2),
+  importAnnotations: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  save: vi.fn().mockResolvedValue("/tmp/out.xfdf"),
+  open: vi.fn().mockResolvedValue("/tmp/in.xfdf"),
+}));
 vi.mock("@/ipc/freetext", () => ({
   readFreeText: vi.fn().mockResolvedValue({
     rect: [10, 20, 110, 60],
@@ -27,7 +35,9 @@ vi.mock("@/ipc/freetext", () => ({
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import { readFreeText } from "@/ipc/freetext";
+import { exportAnnotations, importAnnotations } from "@/ipc/interchange";
 import { addReply } from "@/ipc/replies";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { AnnotationPanel } from "@/panels/AnnotationPanel";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
@@ -160,5 +170,26 @@ describe("AnnotationPanel", () => {
     fireEvent.change(screen.getByLabelText("Reply text"), { target: { value: "thanks" } });
     fireEvent.click(screen.getByRole("button", { name: /^Reply$/ }));
     expect(addReply).toHaveBeenCalledWith("doc-1", "p1", "VibePDF User", "thanks");
+  });
+
+  // SPEC: P3-ANN-010 — XFDF export/import via the header actions.
+  it("exports annotations to a chosen XFDF path", async () => {
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
+    await waitFor(() => expect(container.textContent).toContain("important"));
+
+    fireEvent.click(container.querySelector('button[aria-label="Export annotations"]') as Element);
+    await waitFor(() => expect(saveFileDialog).toHaveBeenCalled());
+    expect(exportAnnotations).toHaveBeenCalledWith("doc-1", "/tmp/out.xfdf");
+    await waitFor(() => expect(container.textContent).toContain("Exported 2 annotations"));
+  });
+
+  it("imports annotations from a chosen XFDF path", async () => {
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
+    await waitFor(() => expect(container.textContent).toContain("important"));
+
+    fireEvent.click(container.querySelector('button[aria-label="Import annotations"]') as Element);
+    await waitFor(() => expect(openFileDialog).toHaveBeenCalled());
+    expect(importAnnotations).toHaveBeenCalledWith("doc-1", "/tmp/in.xfdf");
+    await waitFor(() => expect(container.textContent).toContain("Annotations imported"));
   });
 });

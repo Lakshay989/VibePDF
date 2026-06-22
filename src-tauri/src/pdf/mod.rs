@@ -16,3 +16,4 @@ pub mod restore;
 pub mod rotate;
 pub mod split;
 pub mod undo;
+pub mod xfdf;

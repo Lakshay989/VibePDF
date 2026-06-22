@@ -416,6 +416,9 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - **C1b₁** line/arrow, **C1b₂** polygon (placement eyeballed 2026-06-21;
   cross-reader pending), **C2** ink, **C3a** stamps, **C4a** measurements.
 - **D1** sidebar UI, **D1d** select+delete, **D1e** free-text edit-in-place.
+- **D2** reply threads, **E1** XFDF round-trip (draw → ⬆ Export → delete all →
+  ⬇ Import → restored + reply still threaded; then open the `.xfdf` in Acrobat
+  against the same base PDF — artifacts at `Sample PDFs/vibepdf-verify-xfdf.{pdf,xfdf}`).
 - The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
   verification debt.
 
@@ -434,6 +437,33 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
   shared with notes.
 - **Arbitrary nesting** — threads render one indent level (flat under the root,
   Acrobat-style); deep visual nesting isn't shown even though `/IRT` can chain.
+
+## From P3.E1 (XFDF import / export)
+
+- ✅ **DONE 2026-06-22 (E1, P3-ANN-010) — XFDF round-trip** (export reads raw
+  dicts → XML; import reuses the `add_*` writers + patches `/NM`/`/Contents`/`/T`
+  + wires `/IRT`; hand-rolled XFDF parser, no new dep). Deferred:
+- **E1b — FDF** (import + export). The spec names XFDF *and* FDF; we shipped XFDF
+  only (it's "preferred" and the modern interchange). FDF is COS syntax, so export
+  is cheap via lopdf; import needs an FDF reader. This is why E1 lands `[~]` as
+  honestly spec-partial, not `[x]`.
+- **Free-text font-family / bold-italic fidelity** — import parses size + colour
+  from the `/DA`, but defaults family to Helvetica regular (the XFDF
+  `<defaultappearance>` font ref isn't mapped back to a base-14 family). Geometry +
+  text + size + colour round-trip; the typeface may not.
+- **`<contents-richtext>`** — Acrobat-authored rich-text free-text is dropped to
+  plain `<contents>` on import (we never emit it).
+- **Import is O(N · docsize)** — each annotation is added via a separate
+  `add_*` load→save, then a patch load→save (2–3 full re-serializations per
+  annotation). Fine for normal docs/counts (same per-annotation cost as drawing
+  them); could batch into a single Document pass if a huge doc + many annots ever
+  bites.
+- **Multi-gesture ink** — a foreign `<ink>` with several `<gesture>` sub-paths
+  imports only the **first** gesture (our `add_ink` is one stroke per annot; our
+  own export always emits one). 4-component (CMYK) `/C` colours export as no
+  colour (RGB + gray only).
+- **Importing onto a different base PDF** clamps out-of-range pages and drops
+  orphan replies (parent absent) rather than remapping — logged, not fatal.
 
 ## From P3.C4a (measurement tools)
 

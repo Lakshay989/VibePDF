@@ -104,6 +104,8 @@ pub fn run() {
             commands::pdf::pdf_delete_annotation,
             commands::pdf::pdf_read_text_notes,
             commands::pdf::pdf_read_annotations,
+            commands::pdf::pdf_export_annotations,
+            commands::pdf::pdf_import_annotations,
             commands::pdf::pdf_add_free_text,
             commands::pdf::pdf_read_free_text,
             commands::pdf::pdf_update_free_text,

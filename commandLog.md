@@ -2173,6 +2173,38 @@ right-click menu are deferred (BACKLOG).
 
 ---
 
+### P3.E1 — XFDF import / export (this commit)
+
+No new dependencies (hand-rolled XML parser; that was the whole point — see the
+`/plan` decision). No `cargo add` / `npm install`.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 300/300 (+4: interchange IPC 2, panel export/import 2)
+npm run test:rust      # EXIT 0. xfdf.rs units: 8 (escape, entity decode, float-parse
+#   leniency, collect-known-only + skip unknown, prolog/comment/self-close, malformed
+#   no-panic, subtype map, DA parse). xfdf_roundtrip.rs: 4 (export covers every
+#   subtype, geometry+contents survive a fresh import, reply thread survives,
+#   import is one undoable edit) + 1 ignored artifact.
+
+# PDF write-path artifact (ignored, on demand) → Sample PDFs/ + /tmp:
+cargo test --manifest-path src-tauri/Cargo.toml --test xfdf_roundtrip \
+  xfdf_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-xfdf.pdf (7 annotations) + .xfdf (the export).
+cp "Sample PDFs/vibepdf-verify-xfdf.pdf" /tmp/vibepdf-verify.pdf
+cp "Sample PDFs/vibepdf-verify-xfdf.xfdf" /tmp/vibepdf-verify.xfdf
+sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/x.png   # CoreGraphics opens it → valid
+```
+
+XFDF only (FDF deferred to E1b). Export reads raw dicts; import reuses the
+`add_*` writers + patches `/NM`/`/Contents`/`/T` + wires `/IRT` (two-pass). Left
+`[~]` pending the human in-app round-trip + cross-reader (open the `.xfdf` in
+Acrobat). FDF, freetext font-family fidelity, the O(N·docsize) import re-serialize,
+and `<contents-richtext>` are deferred (BACKLOG).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

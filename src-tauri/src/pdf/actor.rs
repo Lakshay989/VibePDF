@@ -39,11 +39,12 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, InkEdit, LineEdit, MeasureEdit,
-    PolygonEdit, ReplyEdit, StampEdit,
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, ImportXfdfEdit, InkEdit,
+    LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
     ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{read_annotations, read_free_text, read_text_notes, AnnotationInfo, FreeTextData, NoteData};
+use crate::pdf::xfdf::annotations_to_xfdf;
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
 use crate::pdf::rotate::RotateEdit;
@@ -212,6 +213,18 @@ pub enum Message {
     /// Read-only; the panel pulls on open and after each edit epoch.
     ReadAnnotations {
         reply: oneshot::Sender<Result<Vec<AnnotationInfo>, CommandError>>,
+    },
+    /// SPEC: P3-ANN-010 — export every annotation to an XFDF file at `dest`.
+    /// Read-only; replies with the count written.
+    ExportAnnotations {
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<usize, CommandError>>,
+    },
+    /// SPEC: P3-ANN-010 — import the annotations described by an XFDF document as
+    /// one undoable edit; marks dirty.
+    ImportXfdf {
+        xfdf: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-013 — read one free-text annotation's text + style by `/NM`,
     /// so the in-place editor opens pre-filled. Read-only.
@@ -837,6 +850,44 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadAnnotations { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-010 — export every annotation to an XFDF file. Await-holding
+    /// convenience for tests; IPC uses `export_annotations_request`.
+    pub async fn export_annotations(&self, dest: PathBuf) -> Result<usize, CommandError> {
+        let rx = self.export_annotations_request(dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn export_annotations_request(
+        &self,
+        dest: PathBuf,
+    ) -> Result<oneshot::Receiver<Result<usize, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportAnnotations { dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-010 — import annotations from an XFDF document. Await-holding
+    /// convenience for tests; IPC uses `import_xfdf_request`.
+    pub async fn import_xfdf(&self, xfdf: String) -> Result<HistoryState, CommandError> {
+        let rx = self.import_xfdf_request(xfdf)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn import_xfdf_request(
+        &self,
+        xfdf: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ImportXfdf { xfdf, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1723,6 +1774,32 @@ fn run_worker(
                 let result = pdfium_lock()
                     .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
                     .and_then(|bytes| read_annotations(&bytes));
+                let _ = reply.send(result);
+            }
+            Message::ExportAnnotations { dest, reply } => {
+                // SPEC: P3-ANN-010 — read-only: serialize the live doc, build the
+                // XFDF, write the sidecar file. No undo, no dirty change.
+                let result = pdfium_lock()
+                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
+                    .and_then(|bytes| annotations_to_xfdf(&bytes))
+                    .and_then(|(xml, count)| {
+                        std::fs::write(&dest, xml)
+                            .map_err(|e| CommandError::Internal(format!("write xfdf: {e}")))?;
+                        Ok(count)
+                    });
+                let _ = reply.send(result);
+            }
+            Message::ImportXfdf { xfdf, reply } => {
+                // SPEC: P3-ANN-010 — apply the XFDF as one undoable edit; the
+                // inverse is a pre-import byte snapshot (RestoreDocEdit).
+                let result = match Box::new(ImportXfdfEdit { xfdf }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::ReadFreeText { nm, reply } => {

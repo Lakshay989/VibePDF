@@ -30,6 +30,7 @@ vibepdf/
 │   │   │   ├── page.rs           # Page operations
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations
+│   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -244,6 +245,27 @@ skips `/IRT` annotations so a reply isn't drawn as a stray page icon. Threading 
 pure + frontend: `buildThreads` walks `/IRT` chains to a root and nests replies
 flat (orphan- and cycle-safe); the sidebar renders the root row + nested replies +
 an inline composer, and filters operate on roots only.
+
+**XFDF interchange (P3.E1, P3-ANN-010)** lives in **`pdf/xfdf.rs`** — the one place
+that maps between annotation dicts and the XFDF (XML) sidecar Acrobat uses to ship
+markup separately from the PDF. **Export** (`annotations_to_xfdf`, a read-only
+`ExportAnnotations` actor query that writes the file like `extract_pages` writes
+`dest`) walks the raw dicts and emits one element per `/Subtype` with full geometry
++ style (the thin `AnnotationInfo` read model can't round-trip colour/quadpoints/ink,
+so this reads dicts directly). **Import** (`import_xfdf`, an undoable `ImportXfdfEdit`)
+**reuses the canonical `cos::add_*` writers** rather than rebuilding dicts — an
+imported highlight runs the same `/AP`/`/BBox` code as a drawn one — then patches
+back the original `/NM`, `/Contents`, `/T`, and dates (finding the new annotation by
+object-id set-difference, exact because lopdf preserves ids across load→save).
+Preserving `/NM` is what lets reply threads survive: a two-pass import adds
+non-replies first, then replies whose parent name now exists (fixed-point for
+reply-to-a-reply), re-wiring `/IRT`. The whole import is one undoable edit. The XML
+is parsed by a **hand-rolled** subset reader (no parser dependency — see
+`docs/03`/CLAUDE.md's dependency stance): lenient separators on input, strict commas
+on output, clean failure on malformed input. Commands: `pdf_export_annotations` /
+`pdf_import_annotations`; the frontend `src/ipc/interchange.ts` wrappers drive the
+`AnnotationPanel` header's ⬆/⬇ actions through the native save/open dialogs. **FDF
+(the spec's other half) is deferred to E1b.**
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

@@ -4906,6 +4906,70 @@ collaboration loop, persisted in the PDF so other readers see the thread.
 
 ---
 
+### P3.E1 — XFDF import / export (annotation interchange)
+
+#### Problem
+
+Markup is only useful if it can leave the app. **XFDF** (XML Forms Data Format)
+is the file Acrobat and other readers use to ship annotations *separately* from
+the PDF — a reviewer exports their comments, emails the small XML, and the author
+imports them onto their own copy. P3-ANN-010 asks for a round-trip: export every
+annotation, re-import it, get it back identically.
+
+#### Concepts learned
+
+- **A sidecar format, not a PDF.** XFDF is plain XML: an `<annots>` list where
+  each element (`<highlight>`, `<square>`, `<ink>`, `<text>`, …) carries the
+  annotation's geometry + style as attributes (`rect`, `color`, `coords`,
+  `vertices`, …) and its text as a `<contents>` child. Same data a PDF annotation
+  dict holds, re-encoded as XML. Our exporter walks the raw lopdf dicts; the
+  element name is just the lowercased `/Subtype`.
+
+- **"Restored identically" forces a real read model.** The sidebar's
+  `AnnotationInfo` is deliberately thin (no colour, no `/QuadPoints`, no
+  `/InkList`). You can't round-trip geometry through it. So export reads the
+  **raw dicts**, and import had a choice: rebuild dicts by hand, or **reuse the
+  canonical `add_*` writers**. We reused them — an imported highlight runs the
+  exact same `/AP`-and-`/BBox` code as a drawn one, so it renders identically in
+  every reader, and there's no second copy of the appearance maths to drift.
+
+- **Identity is patched, not regenerated.** `add_*` mints a fresh `/NM` and
+  doesn't carry `/Contents`/`/T`. After each add we find the *one new* `/Annots`
+  entry (set difference of object-ids before/after — exact, since lopdf preserves
+  ids across a load→save) and overwrite `/NM`, `/Contents`, `/T`, and the dates
+  from the XFDF. Preserving `/NM` is what lets **reply threads survive**: a reply's
+  `/IRT` points at its parent *by name*, so a two-pass import (all non-replies
+  first, then replies whose parent name now exists, fixed-point for reply-to-a-reply)
+  re-wires the threads. The whole import is **one undoable edit** (a single byte
+  snapshot inverse) — one ⌘Z reverses the lot.
+
+- **Hand-rolled XML, no dependency.** Rather than add a parser crate (the project
+  is dependency-averse), the reader is a ~150-line char-cursor pull parser for the
+  XFDF subset: elements, attributes, self-closing tags, the five named entities +
+  numeric (`&#65;`/`&#x41;`), comments/PIs/DOCTYPE skipped, CDATA handled. It's
+  **lenient on import** (numeric lists split on comma *or* semicolon *or*
+  whitespace, so Acrobat's quirks parse) and **strict on output** (we emit clean
+  comma-separated lists Acrobat reads). Malformed input fails cleanly — never
+  panics — which the unit tests pin down by feeding it garbage.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/xfdf.rs` | `annotations_to_xfdf` (raw dicts → XML) + `import_xfdf` (parse → reuse `add_*` → patch identity → wire `/IRT`) + the XML reader. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ImportXfdfEdit` + `ExportAnnotations`/`ImportXfdf` messages + `pdf_export_annotations`/`pdf_import_annotations`. |
+| `src/ipc/interchange.ts` | `exportAnnotations` / `importAnnotations` typed wrappers. |
+| `src/panels/AnnotationPanel.tsx` | ⬆/⬇ header actions → native save/open dialogs → IPC → epoch reload. |
+| `src-tauri/tests/xfdf_roundtrip.rs`, `xfdf.rs` units, FE `interchange`/`AnnotationPanel` | Full byte round-trip, parser edge cases, IPC marshalling, UI wiring. |
+
+#### Further reading
+
+- Adobe XFDF 3.0 spec (the `<xfdf>`/`<annots>` schema + per-subtype attributes).
+- PDF 32000-1:2008 §12.7.7 (FDF/XFDF) and §12.5 (annotation dictionaries).
+- Recursive-descent / pull parsing of a constrained grammar.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

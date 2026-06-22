@@ -19,6 +19,7 @@ use crate::pdf::cos::{
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
+use crate::pdf::xfdf::import_xfdf;
 
 /// Apply a pure `&[u8] → Vec<u8>` cos transform to the live document as an
 /// undoable edit: snapshot the bytes (the inverse), run `f`, reload/replace the
@@ -486,5 +487,25 @@ impl<'a> Edit<PdfDocument<'a>> for UpdateFreeTextEdit {
 
     fn label(&self) -> &'static str {
         "update-free-text"
+    }
+}
+
+/// SPEC: P3-ANN-010 — import every annotation described by an XFDF document,
+/// added as one undoable edit. Identity (`/NM`) + reply links are preserved by
+/// [`crate::pdf::xfdf::import_xfdf`].
+pub struct ImportXfdfEdit {
+    pub xfdf: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for ImportXfdfEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        cos_edit(doc, |bytes| import_xfdf(bytes, &self.xfdf))
+    }
+
+    fn label(&self) -> &'static str {
+        "import-xfdf"
     }
 }
