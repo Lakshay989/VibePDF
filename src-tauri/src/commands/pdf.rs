@@ -505,6 +505,29 @@ pub async fn pdf_import_annotations(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-011 — flatten every `/AP`-bearing annotation into the page
+/// content streams. Undoable in-session; permanent once saved + reopened.
+#[tauri::command]
+pub async fn pdf_flatten_annotations(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.flatten_annotations_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-013 — read a free-text annotation's editable text + style by
 /// `/NM`, so the in-place editor can open pre-filled. Read-only.
 #[tauri::command]

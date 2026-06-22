@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import { readFreeText } from "@/ipc/freetext";
+import { flattenAnnotations } from "@/ipc/flatten";
 import { exportAnnotations, importAnnotations } from "@/ipc/interchange";
 import type { DocumentId } from "@/ipc/pdf";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
@@ -198,6 +199,26 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
     })();
   }, [documentId, setHistory, bumpEpoch]);
 
+  // SPEC: P3-ANN-011 — flatten bakes appearance-bearing annotations (everything
+  // except /AP-less notes/replies) into the page. Permanent after save, so it's
+  // gated behind an inline confirm.
+  const flattenable = useMemo(() => all.filter((a) => a.kind !== "note").length, [all]);
+  const [confirmFlatten, setConfirmFlatten] = useState(false);
+  const doFlatten = useCallback(() => {
+    setConfirmFlatten(false);
+    select(null);
+    flattenAnnotations(documentId)
+      .then((h) => {
+        setHistory(documentId, h);
+        bumpEpoch(documentId);
+        setNote("Annotations flattened");
+      })
+      .catch((err: unknown) => {
+        console.warn("flatten annotations failed", documentId, err);
+        setNote(err instanceof Error ? err.message : "Flatten failed");
+      });
+  }, [documentId, select, setHistory, bumpEpoch]);
+
   const toggleKind = (kind: (typeof kinds)[number]) =>
     setFilter((f) => ({
       ...f,
@@ -231,8 +252,43 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
           >
             ⬇
           </button>
+          {/* SPEC: P3-ANN-011 — flatten visible markup into the page. */}
+          <button
+            type="button"
+            onClick={() => setConfirmFlatten(true)}
+            disabled={flattenable === 0}
+            title="Flatten annotations into the page (permanent after save)"
+            aria-label="Flatten annotations"
+            className="rounded px-1.5 py-0.5 text-sm font-normal normal-case hover:bg-neutral-200 disabled:opacity-30 dark:hover:bg-neutral-800"
+          >
+            ▦
+          </button>
         </div>
       </header>
+      {confirmFlatten ? (
+        <div className="space-y-1 border-b border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
+          <p>
+            Flatten {flattenable} annotation{flattenable === 1 ? "" : "s"} into the page? They
+            become part of the content and can't be edited after you save.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmFlatten(false)}
+              className="rounded border border-amber-300 px-2 py-0.5 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={doFlatten}
+              className="rounded bg-amber-600 px-2 py-0.5 text-white hover:bg-amber-700"
+            >
+              Flatten
+            </button>
+          </div>
+        </div>
+      ) : null}
       {note ? (
         <div className="border-b border-neutral-200 bg-neutral-100 px-3 py-1 text-xs text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
           {note}

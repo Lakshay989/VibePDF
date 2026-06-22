@@ -2205,6 +2205,38 @@ and `<contents-richtext>` are deferred (BACKLOG).
 
 ---
 
+### P3.E2 — Flatten annotations (this commit)
+
+No new dependencies. (`lopdf` is used in the new integration test — it's already a
+crate dependency and is in scope for integration tests, so no `cargo add`.)
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 302/302 (+2: flatten IPC 1, panel flatten 1)
+npm run test:rust      # EXIT 0. flatten.rs matrix units: 4 (identity when BBox==Rect,
+#   scale+translate onto rect, degenerate bbox skipped, rect-corner ordering).
+#   flatten_annotations.rs: 4 (bakes /AP forms into content + drops those annots
+#   while keeping the /AP-less note; in-session undo restores all; notes kept;
+#   empty-doc safe) + 1 ignored artifact.
+
+# PDF write-path artifact (ignored, on demand) → Sample PDFs/ + /tmp:
+cargo test --manifest-path src-tauri/Cargo.toml --test flatten_annotations \
+  flatten_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-flatten.pdf (highlight + rect + ink baked; a note kept).
+cp "Sample PDFs/vibepdf-verify-flatten.pdf" /tmp/vibepdf-verify.pdf
+sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/x.png   # CoreGraphics opens it → valid
+```
+
+COS flatten (not PDFium-native): register each annot's `/AP` form under page
+`/Resources /XObject`, append `q <BBox→Rect cm> /name Do Q` to `/Contents`, drop
+the annot, prune. `/AP`-less notes/replies kept live. Undoable in-session only
+(snapshot inverse). Left `[~]` pending the human in-app + cross-reader pass.
+PDFium-native flatten, flattening a subset/by-type, and baking note icons are
+deferred (BACKLOG).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

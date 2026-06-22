@@ -6,6 +6,7 @@ pub mod crop;
 pub mod delete_page;
 pub mod document;
 pub mod extract;
+pub mod flatten;
 pub mod insert_from;
 pub mod merge;
 pub mod insert_blank;

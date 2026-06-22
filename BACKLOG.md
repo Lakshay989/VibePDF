@@ -419,6 +419,9 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - **D2** reply threads, **E1** XFDF round-trip (draw → ⬆ Export → delete all →
   ⬇ Import → restored + reply still threaded; then open the `.xfdf` in Acrobat
   against the same base PDF — artifacts at `Sample PDFs/vibepdf-verify-xfdf.{pdf,xfdf}`).
+- **E2** flatten (draw markup → ▦ Flatten → confirm → markup stays visible but
+  leaves the sidebar + isn't selectable → ⌘Z restores → ⌘S, reopen → baked, not
+  selectable; then cross-reader — artifact `Sample PDFs/vibepdf-verify-flatten.pdf`).
 - The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
   verification debt.
 
@@ -464,6 +467,24 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
   colour (RGB + gray only).
 - **Importing onto a different base PDF** clamps out-of-range pages and drops
   orphan replies (parent absent) rather than remapping — logged, not fatal.
+
+## From P3.E2 (flatten annotations)
+
+- ✅ **DONE 2026-06-22 (E2, P3-ANN-011) — flatten** (COS transform: register each
+  annotation's `/AP` form under page `/Resources /XObject`, append a `Do` fragment
+  to `/Contents`, drop the annot, prune; undoable in-session via snapshot). Deferred:
+- **PDFium-native `FPDFPage_Flatten`** — the considered alternative; rejected for
+  the live-handle rule + unsafe FFI. If our COS flatten ever mis-handles an exotic
+  foreign appearance, the native path is the fallback (it also flattens form
+  fields, which we'll need in P5).
+- **Flattening a subset / by type / selection** — spec says *all*; we flatten the
+  whole document. A "flatten selected" or "flatten by kind" is a natural follow-up.
+- **Baking note icons** — `/AP`-less notes + replies are kept live (no appearance
+  to bake). Acrobat's full Flatten stamps a note glyph; we chose not to (would lose
+  the thread text + needs an icon generator). Could add a "bake note icons" option.
+- **No flatten progress UI** — synchronous; a huge doc with thousands of
+  annotations would block briefly (each is just a resource + content append, so
+  it's cheap, but unbounded).
 
 ## From P3.C4a (measurement tools)
 

@@ -17,6 +17,9 @@ vi.mock("@/ipc/interchange", () => ({
   exportAnnotations: vi.fn().mockResolvedValue(2),
   importAnnotations: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
+vi.mock("@/ipc/flatten", () => ({
+  flattenAnnotations: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn().mockResolvedValue("/tmp/out.xfdf"),
   open: vi.fn().mockResolvedValue("/tmp/in.xfdf"),
@@ -35,6 +38,7 @@ vi.mock("@/ipc/freetext", () => ({
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import { readFreeText } from "@/ipc/freetext";
+import { flattenAnnotations } from "@/ipc/flatten";
 import { exportAnnotations, importAnnotations } from "@/ipc/interchange";
 import { addReply } from "@/ipc/replies";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
@@ -191,5 +195,21 @@ describe("AnnotationPanel", () => {
     await waitFor(() => expect(openFileDialog).toHaveBeenCalled());
     expect(importAnnotations).toHaveBeenCalledWith("doc-1", "/tmp/in.xfdf");
     await waitFor(() => expect(container.textContent).toContain("Annotations imported"));
+  });
+
+  // SPEC: P3-ANN-011 — flatten is gated behind a confirm and skips /AP-less notes.
+  it("flattens after confirmation", async () => {
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
+    await waitFor(() => expect(container.textContent).toContain("important"));
+
+    // Open the confirm (the rows include 1 highlight + 1 note → 1 flattenable).
+    fireEvent.click(container.querySelector('button[aria-label="Flatten annotations"]') as Element);
+    expect(container.textContent).toContain("Flatten 1 annotation");
+    expect(flattenAnnotations).not.toHaveBeenCalled();
+
+    // Confirm.
+    fireEvent.click(screen.getByRole("button", { name: /^Flatten$/ }));
+    expect(flattenAnnotations).toHaveBeenCalledWith("doc-1");
+    await waitFor(() => expect(container.textContent).toContain("Annotations flattened"));
   });
 });

@@ -39,8 +39,8 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, ImportXfdfEdit, InkEdit,
-    LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit, ImportXfdfEdit,
+    InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
     ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{read_annotations, read_free_text, read_text_notes, AnnotationInfo, FreeTextData, NoteData};
@@ -224,6 +224,11 @@ pub enum Message {
     /// one undoable edit; marks dirty.
     ImportXfdf {
         xfdf: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-011 — flatten every `/AP`-bearing annotation into the page
+    /// content streams. Undoable in-session; marks dirty.
+    FlattenAnnotations {
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-013 — read one free-text annotation's text + style by `/NM`,
@@ -888,6 +893,24 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ImportXfdf { xfdf, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-011 — flatten annotations into the page content. Await-holding
+    /// convenience for tests; IPC uses `flatten_annotations_request`.
+    pub async fn flatten_annotations(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.flatten_annotations_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn flatten_annotations_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::FlattenAnnotations { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1793,6 +1816,19 @@ fn run_worker(
                 // SPEC: P3-ANN-010 — apply the XFDF as one undoable edit; the
                 // inverse is a pre-import byte snapshot (RestoreDocEdit).
                 let result = match Box::new(ImportXfdfEdit { xfdf }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::FlattenAnnotations { reply } => {
+                // SPEC: P3-ANN-011 — bake annotations into the page content; the
+                // inverse is a pre-flatten byte snapshot (in-session undo only).
+                let result = match Box::new(FlattenEdit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         dirty = true;

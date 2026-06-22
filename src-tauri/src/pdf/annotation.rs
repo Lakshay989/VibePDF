@@ -17,6 +17,7 @@ use crate::pdf::cos::{
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::flatten::flatten_annotations;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 use crate::pdf::xfdf::import_xfdf;
@@ -487,6 +488,24 @@ impl<'a> Edit<PdfDocument<'a>> for UpdateFreeTextEdit {
 
     fn label(&self) -> &'static str {
         "update-free-text"
+    }
+}
+
+/// SPEC: P3-ANN-011 — flatten every `/AP`-bearing annotation into the page
+/// content streams. Undoable in-session (the inverse is a pre-flatten snapshot);
+/// permanent once the file is saved + reopened.
+pub struct FlattenEdit;
+
+impl<'a> Edit<PdfDocument<'a>> for FlattenEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        cos_edit(doc, flatten_annotations)
+    }
+
+    fn label(&self) -> &'static str {
+        "flatten-annotations"
     }
 }
 

@@ -31,6 +31,7 @@ vibepdf/
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations
 │   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
+│   │   │   ├── flatten.rs        # Flatten annotations into page content (P3.E2)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -266,6 +267,23 @@ on output, clean failure on malformed input. Commands: `pdf_export_annotations` 
 `pdf_import_annotations`; the frontend `src/ipc/interchange.ts` wrappers drive the
 `AnnotationPanel` header's ⬆/⬇ actions through the native save/open dialogs. **FDF
 (the spec's other half) is deferred to E1b.**
+
+**Flattening (P3.E2, P3-ANN-011)** lives in **`pdf/flatten.rs`** — a COS transform
+(not PDFium's native `FPDFPage_Flatten`, which would need a shared live handle +
+unsafe FFI, against the cos-on-bytes rule). It *replays* each annotation's existing
+`/AP` appearance form into the page: register the form under the page's
+`/Resources /XObject` (lopdf `add_xobject`), append a self-contained
+`q <BBox→Rect cm> /<name> Do Q` fragment to a new content stream spliced onto
+`/Contents` (the resize edit's append-don't-decode pattern), then drop the
+annotation from `/Annots`; `prune_objects` GCs the orphaned annot dicts while the
+forms survive (the page resources now reference them). The placement matrix is the
+appearance algorithm of §12.5.5 — the identity for our own annotations
+(`BBox == Rect`, no `/Matrix`). A guard clones inherited `/Resources` down before
+`add_xobject` so an empty auto-created dict can't shadow them. It's a `FlattenEdit`
+via `cos_edit`, so the inverse is a pre-flatten snapshot: **undoable in-session,
+gone once saved + reopened** — exactly the spec's wording. `/AP`-less notes/replies
+have no appearance to bake and are **kept live**. Command `pdf_flatten_annotations`;
+the `AnnotationPanel` ▦ action is gated behind an inline confirm.
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

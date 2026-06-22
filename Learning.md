@@ -4970,6 +4970,74 @@ annotation, re-import it, get it back identically.
 
 ---
 
+### P3.E2 — Flatten annotations (baking markup into the page)
+
+#### Problem
+
+An annotation is a *separate* object layered over the page — editable, deletable,
+sometimes ignored by basic viewers or printers. **Flattening** burns it into the
+page's own content so it's permanent and universal: a printed-looking PDF where
+the highlight is just part of the page, not a thing you can click and delete.
+P3-ANN-011 also pins the undo semantics — reversible *in the app*, gone once you
+save and reopen.
+
+#### Concepts learned
+
+- **An annotation already carries its own picture.** Every annotation we draw has
+  an **appearance stream** (`/AP /N`) — a self-contained **form XObject** (a
+  reusable mini content stream with its own `/BBox` + `/Resources`). Flattening
+  doesn't *re-draw* anything; it **replays** that existing form into the page. So
+  the core move is three operators appended to the page content:
+  `q <matrix> cm /Name Do Q` — push state, set the placement transform, **`Do`**
+  (paint the named XObject), pop. `add_xobject` registers the existing form under
+  the page's `/Resources /XObject` so `/Name` resolves; then we drop the
+  annotation from `/Annots`. The form survives `prune_objects` because the page
+  resources now reference it.
+
+- **The placement matrix (PDF §12.5.5).** A form draws in its *own* coordinate
+  space (its `/BBox`, possibly skewed by its `/Matrix`); the annotation says where
+  on the page it goes (its `/Rect`). The `cm` matrix bridges them: transform the
+  BBox by the form Matrix, take that box's bounds, then scale+translate it onto
+  the Rect. For **our** annotations it's the identity (we author `BBox == Rect`,
+  no Matrix) — but doing the general transform means foreign annotations flatten
+  correctly too.
+
+- **Don't decode what you don't have to.** We append a *new* content stream
+  referencing the forms rather than parsing + re-encoding the page's existing
+  content (which can contain operators a decoder chokes on). Same lesson the
+  resize edit learned. Each fragment is its own balanced `q…Q`, so one form's
+  graphics state can't leak into the next or into the page.
+
+- **Resource inheritance is a trap.** A page can *inherit* `/Resources` from the
+  `/Pages` tree instead of owning them. lopdf's `get_or_create_resources` creates
+  an **empty** dict when the page has none — which would **shadow** the inherited
+  fonts/images and break the existing content. So before adding the XObject we
+  clone the effective resources down onto the page when it lacks its own.
+
+- **Undo is the snapshot, not the inverse-op.** Flatten reuses the same
+  `cos_edit` wrapper as every byte transform: the inverse is a **pre-flatten copy
+  of the bytes** (`RestoreDocEdit`). That's *why* the spec's "undoable in-session,
+  not from a saved file" falls out for free — the snapshot lives in the session's
+  history, never in the file. `/AP`-less notes have no picture to bake, so they're
+  left as live annotations (flatten = bake *visible* markup).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/flatten.rs` | The COS transform: per page, register `/AP` forms (`add_xobject`), append `q cm Do Q` fragments, drop annots, prune; §12.5.5 matrix; inherited-resource guard. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `FlattenEdit` + `FlattenAnnotations` message + `pdf_flatten_annotations`. |
+| `src/ipc/flatten.ts` | `flattenAnnotations` typed wrapper. |
+| `src/panels/AnnotationPanel.tsx` | ▦ header action behind an inline confirm (permanent-after-save warning); skips `/AP`-less notes via the client-side count. |
+| `src-tauri/tests/flatten_annotations.rs`, `flatten.rs` units, FE `flatten`/`AnnotationPanel` | Structural bake + undo + notes-kept; matrix maths; IPC + UI. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.5 (appearance streams + the BBox→Rect algorithm) and §8.10 (form XObjects, the `Do` operator).
+- PDFium's `FPDFPage_Flatten` — the native equivalent we deliberately didn't use (live-handle + unsafe-FFI, against the cos-on-bytes architecture).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
