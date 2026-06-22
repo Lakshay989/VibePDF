@@ -116,6 +116,7 @@ pub fn run() {
             commands::pdf::pdf_add_ink,
             commands::pdf::pdf_add_stamp,
             commands::pdf::pdf_add_measure,
+            commands::pdf::pdf_read_measure_calibration,
             commands::pdf::pdf_add_reply,
             commands::pdf::pdf_delete_pages,
             commands::pdf::pdf_insert_blank_page,

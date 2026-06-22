@@ -56,6 +56,7 @@ describe("MeasureLayer", () => {
     click(svg, 300, 100);
 
     // PDF (100,692)→(300,692): 200 pt, uncalibrated → "200 pt".
+    // Uncalibrated default carries unitsPerPoint=1, unit="pt" (for the /Measure dict).
     expect(mockAddMeasure).toHaveBeenCalledWith(
       DOC,
       0,
@@ -68,6 +69,8 @@ describe("MeasureLayer", () => {
       "200 pt",
       1,
       2,
+      1,
+      "pt",
     );
   });
 

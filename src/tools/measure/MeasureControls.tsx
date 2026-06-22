@@ -5,6 +5,7 @@
 import { calibrationFor, useMeasureStore } from "@/state/measure-store";
 import { CalibrateDialog } from "@/tools/measure/CalibrateDialog";
 import { DEFAULT_CALIBRATION, type MeasureKind } from "@/tools/measure/measure";
+import { useCalibrationSync } from "@/tools/measure/use-calibration-sync";
 
 const KINDS: { id: MeasureKind; label: string }[] = [
   { id: "distance", label: "Distance" },
@@ -13,6 +14,8 @@ const KINDS: { id: MeasureKind; label: string }[] = [
 ];
 
 export function MeasureControls({ documentId }: { documentId: string }) {
+  // SPEC: P3-ANN-007 (P3.C4b) — restore a saved calibration when the tool opens.
+  useCalibrationSync(documentId);
   const kind = useMeasureStore((s) => s.kind);
   const setKind = useMeasureStore((s) => s.setKind);
   const calibrating = useMeasureStore((s) => s.calibrating);

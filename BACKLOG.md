@@ -422,6 +422,9 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - **E2** flatten (draw markup → ▦ Flatten → confirm → markup stays visible but
   leaves the sidebar + isn't selectable → ⌘Z restores → ⌘S, reopen → baked, not
   selectable; then cross-reader — artifact `Sample PDFs/vibepdf-verify-flatten.pdf`).
+- **C4b** `/Measure` (Calibrate → measure → ⌘S → reopen → tool stays calibrated
+  without re-calibrating; then open the saved PDF in Acrobat and confirm its
+  measuring tool reports the same value live — artifact `…verify-measure.pdf`).
 - The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
   verification debt.
 
@@ -491,10 +494,17 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - ✅ **DONE 2026-06-21 (C4a, P3-ANN-007) — distance/perimeter/area + calibration**
   (`/IT` dimension annotations + a generated `/AP` label, self-contained
   `MeasureLayer`). Deferred:
-- **C4b — the PDF `/Measure` dictionary** (`/R` scale ratio, `/X`/`/D`/`/A`
-  number-format arrays) so Acrobat *re-measures live* against raw scale instead of
-  trusting our baked-in label; **persist calibration** across save/reopen (it's
-  session-only frontend state now).
+- ✅ **DONE 2026-06-22 (C4b, P3-ANN-007) — `/Measure` dict + persisted calibration**
+  (rectilinear `/Measure` with `/X`/`/D`/`/A` `NumberFormat`s, `/X /C` = scale;
+  `read_measure_calibration` re-seeds the tool on reopen). Deferred:
+- **Angle measurement** (`/T` number format) — no angle tool. **Anisotropic scale**
+  (`/X` ≠ `/Y`) — single uniform scale only. **Page-level `/VP` viewport scale** —
+  we attach `/Measure` to the annotation (Acrobat's measure-markup convention); a
+  `/VP` fallback is the move if a reader ignores annotation-level `/Measure`.
+- **UTF-16 unit labels** — `/Measure` unit strings stay ASCII (`sq ft`); the `²` is
+  only in the on-screen `/AP` label. **XFDF round-trip of `/Measure`** — imported
+  measures get a default `pt` scale (E1's XFDF doesn't carry the calibration).
+- **Editing a measurement's calibration** in place (add-time only).
 - **Self-intersecting area is undefined** — shoelace assumes a simple ring; a
   figure-eight reports a meaningless (partially cancelled) area. No guard.
 - **No vertex editing / ortho / angle-snap**, no per-segment labels on a

@@ -210,10 +210,18 @@ the same gesture between capturing a reference and persisting a measurement.
 `cos::add_measure` writes a `/Line` / `/PolyLine` / `/Polygon` carrying a
 dimension **`/IT`**, the value in `/Contents`, and an `/AP` (the geometry plus the
 value label) — so it isn't a new subtype, just a shape with an intent, and
-`read_annotations` keys off `/IT` to surface it as `"measure"`. The PDF `/Measure`
-dict (Acrobat live re-measure) + persisted calibration are C4b. **Five** overlays
+`read_annotations` keys off `/IT` to surface it as `"measure"`. **Five** overlays
 now own a gesture outside `stepTool` (note, polygon, ink, stamp, measure) — a
 shared click/multi-click lifecycle is well overdue (BACKLOG).
+
+**C4b** completes the interop half: `add_measure` also attaches a rectilinear
+**`/Measure`** dict (§12.9 — `/X`/`/D`/`/A` `NumberFormat`s; `/X /C` *is* the
+calibration, units per point), so Acrobat & co. re-measure *live* against the raw
+geometry rather than trusting our baked `/Contents` label. The `/Measure` dict is
+also how the calibration **persists**: `read_measure_calibration` reads it back,
+and `use-calibration-sync` re-seeds `measure-store` on reopen (guarded so it never
+clobbers an in-session calibration). Unit labels in `/Measure` stay ASCII (`sq ft`)
+to dodge PDF string-encoding pitfalls; the `²` lives only in the `/AP`.
 
 **Shapes (P3.C1a)** are canvas-rendered like markup: `cos::add_shape` writes a
 `/Square` or `/Circle` (`/C` stroke, `/IC` fill, `/CA`, `/BS /W`) with a generated

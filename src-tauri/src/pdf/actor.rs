@@ -43,7 +43,10 @@ use crate::pdf::annotation::{
     InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
     ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
-use crate::pdf::cos::{read_annotations, read_free_text, read_text_notes, AnnotationInfo, FreeTextData, NoteData};
+use crate::pdf::cos::{
+    read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
+    FreeTextData, MeasureCalibration, NoteData,
+};
 use crate::pdf::xfdf::annotations_to_xfdf;
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
@@ -331,7 +334,14 @@ pub enum Message {
         label: String,
         opacity: f32,
         stroke_width: f32,
+        units_per_point: f32,
+        unit: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-007 (P3.C4b) — read a measurement's persisted calibration
+    /// from its `/Measure` dict, to re-seed the tool on reopen. Read-only.
+    ReadMeasureCalibration {
+        reply: oneshot::Sender<Result<Option<MeasureCalibration>, CommandError>>,
     },
     /// SPEC: P2-PAGE-005 — insert `pages` (0-based) of the file at
     /// `source_path` into the open document at `index`. Undoable, marks dirty.
@@ -1227,6 +1237,7 @@ impl DocumentActorHandle {
 
     /// SPEC: P3-ANN-007 — add a measurement. Await-holding for tests.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn add_measure(
         &self,
         page: i32,
@@ -1236,8 +1247,12 @@ impl DocumentActorHandle {
         label: String,
         opacity: f32,
         stroke_width: f32,
+        units_per_point: f32,
+        unit: String,
     ) -> Result<HistoryState, CommandError> {
-        let rx = self.add_measure_request(page, kind, points, color, label, opacity, stroke_width)?;
+        let rx = self.add_measure_request(
+            page, kind, points, color, label, opacity, stroke_width, units_per_point, unit,
+        )?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
@@ -1252,10 +1267,41 @@ impl DocumentActorHandle {
         label: String,
         opacity: f32,
         stroke_width: f32,
+        units_per_point: f32,
+        unit: String,
     ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(Message::AddMeasure { page, kind, points, color, label, opacity, stroke_width, reply })
+            .send(Message::AddMeasure {
+                page,
+                kind,
+                points,
+                color,
+                label,
+                opacity,
+                stroke_width,
+                units_per_point,
+                unit,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
+    /// Await-holding convenience for tests; IPC uses the `_request` form.
+    pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
+        let rx = self.read_measure_calibration_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_measure_calibration_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<Option<MeasureCalibration>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadMeasureCalibration { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1973,8 +2019,29 @@ fn run_worker(
                 };
                 let _ = reply.send(result);
             }
-            Message::AddMeasure { page, kind, points, color, label, opacity, stroke_width, reply } => {
-                let edit = MeasureEdit { page, kind, points, color, label, opacity, stroke_width };
+            Message::AddMeasure {
+                page,
+                kind,
+                points,
+                color,
+                label,
+                opacity,
+                stroke_width,
+                units_per_point,
+                unit,
+                reply,
+            } => {
+                let edit = MeasureEdit {
+                    page,
+                    kind,
+                    points,
+                    color,
+                    label,
+                    opacity,
+                    stroke_width,
+                    units_per_point,
+                    unit,
+                };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
@@ -1983,6 +2050,15 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::ReadMeasureCalibration { reply } => {
+                // SPEC: P3-ANN-007 (P3.C4b) — read-only: serialize, then read the
+                // calibration out of the first /Measure dict (same path as the
+                // other read queries).
+                let result = pdfium_lock()
+                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
+                    .and_then(|bytes| read_measure_calibration(&bytes));
                 let _ = reply.send(result);
             }
             Message::InsertFromPdf { source_path, pages, index, reply } => {

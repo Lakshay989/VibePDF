@@ -409,18 +409,20 @@ fn add_top_level(bytes: &[u8], el: &ParsedAnnot) -> Result<Vec<u8>, CommandError
         }
         "square" => add_shape(bytes, page, "rectangle", el.rect, &color, el.interior.as_deref(), opacity, width),
         "circle" => add_shape(bytes, page, "ellipse", el.rect, &color, el.interior.as_deref(), opacity, width),
+        // Imported measures get a default (uncalibrated) /Measure — XFDF doesn't
+        // carry our calibration, so the baked /Contents label is the source value.
         "line" if el.it.is_some() => {
-            add_measure(bytes, page, "distance", &chunk2(&el.line), &color, &el.contents, opacity, width)
+            add_measure(bytes, page, "distance", &chunk2(&el.line), &color, &el.contents, opacity, width, 1.0, "pt")
         }
         "line" => {
             let [x1, y1, x2, y2] = four(&el.line, el.rect);
             add_line(bytes, page, x1, y1, x2, y2, el.arrow, &color, opacity, width)
         }
         "polyline" if el.it.is_some() => {
-            add_measure(bytes, page, "perimeter", &chunk2(&el.vertices), &color, &el.contents, opacity, width)
+            add_measure(bytes, page, "perimeter", &chunk2(&el.vertices), &color, &el.contents, opacity, width, 1.0, "pt")
         }
         "polygon" if el.it.is_some() => {
-            add_measure(bytes, page, "area", &chunk2(&el.vertices), &color, &el.contents, opacity, width)
+            add_measure(bytes, page, "area", &chunk2(&el.vertices), &color, &el.contents, opacity, width, 1.0, "pt")
         }
         "polyline" => add_polygon(bytes, page, false, &chunk2(&el.vertices), &color, None, opacity, width),
         "polygon" => {

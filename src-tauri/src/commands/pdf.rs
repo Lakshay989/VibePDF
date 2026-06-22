@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
-use crate::pdf::cos::{AnnotationInfo, FreeTextData, NoteData};
+use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData};
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
@@ -803,6 +803,8 @@ pub async fn pdf_add_measure(
     label: String,
     opacity: f32,
     stroke_width: f32,
+    units_per_point: f32,
+    unit: String,
 ) -> Result<HistoryState, CommandError> {
     if page < 0 {
         return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
@@ -817,7 +819,32 @@ pub async fn pdf_add_measure(
         let handle = guard
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
-        handle.add_measure_request(page, kind, points, color, label, opacity, stroke_width)?
+        handle.add_measure_request(
+            page, kind, points, color, label, opacity, stroke_width, units_per_point, unit,
+        )?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration (from
+/// the first `/Measure` dict) so the tool can re-seed itself on reopen. Read-only.
+#[tauri::command]
+pub async fn pdf_read_measure_calibration(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<MeasureCalibration>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_measure_calibration_request()?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

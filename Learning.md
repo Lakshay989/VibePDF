@@ -5038,6 +5038,66 @@ save and reopen.
 
 ---
 
+### P3.C4b — the `/Measure` dictionary (live re-measure interop)
+
+#### Problem
+
+C4a let you calibrate a scale and drew the measured value as a *label*. But that
+label is just baked text — open the PDF in Acrobat and its measuring tool reports
+the raw point distance, not "4 m," because nothing in the file says *what one
+point is worth*. C4b writes that scale in the form readers understand, and makes
+the calibration survive a save/reopen.
+
+#### Concepts learned
+
+- **A `/Measure` dict is the scale, machine-readable.** PDF §12.9: a rectilinear
+  (`/Subtype /RL`) `/Measure` dictionary attached to the annotation carries
+  `NumberFormat` arrays — `/X` (axis: page-units → real units), `/D` (distance
+  display), `/A` (area display). The whole calibration is one number: `/X[0] /C`
+  = real units per point. `/D 100` means "round to 1/100" (our 2-dp). Area works
+  because the reader squares the X scale — matching our `polygonArea · upp²`. Now
+  Acrobat re-measures *live* off the geometry; our baked `/Contents` label is just
+  the fallback.
+
+- **Persisting state = writing it into the artifact, then reading it back.** The
+  calibration lived only in a zustand store (gone on reopen). The fix isn't a
+  separate settings file — it's that **the `/Measure` dict already *is* the
+  persisted calibration**. So "persist across reopen" became: thread the scale to
+  the writer (`add_measure` gained `units_per_point` + `unit`), and add the
+  *inverse* read (`read_measure_calibration` scans for the first `/Measure`,
+  returns `/X /C` + `/U`). A small `useCalibrationSync` hook seeds the store from
+  it on open — **guarded** so it never clobbers a calibration the user set this
+  session (it reads the live store imperatively rather than depending on it, so the
+  effect doesn't re-fire on every calibration change).
+
+- **PDF text strings are byte-encoded, so keep labels ASCII.** The on-screen `²`
+  lives in our `/AP` (WinAnsi font, where `²` is one byte). But a `/Measure` `/U`
+  unit label is a PDF *string*; a UTF-8 `²` (two bytes) would render wrong without
+  UTF-16 machinery. So the area unit in `/Measure` is ASCII (`sq ft`) — a
+  deliberate, documented divergence from the displayed label.
+
+- **Widening a writer ripples through every caller.** Adding two params to
+  `add_measure` broke its callers across the layers (the `MeasureEdit`, the actor
+  message + handler, the command, the XFDF importer, and six test call-sites). The
+  compiler walks you through each — a reminder that an IPC arg list is a contract
+  with N call sites, and "just add a param" is never just one edit.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_measure` +`units_per_point`/`unit`; `measure_dict` (RL + NumberFormats); `MeasureCalibration` + `read_measure_calibration`. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `MeasureEdit` fields + `AddMeasure`/`ReadMeasureCalibration` messages + `pdf_read_measure_calibration`. |
+| `src/ipc/measure.ts` | `addMeasure` +calibration; `readMeasureCalibration`. |
+| `src/view/measure-layer.tsx`, `src/tools/measure/{MeasureControls,use-calibration-sync}` | Pass the calibration at write; re-seed the store on open (no clobber). |
+| `measure.rs` / `cos.rs` / `measure` IPC / `use-calibration-sync` tests | `/Measure` shape, calibration round-trip, IPC marshalling, the seed guard. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.9 (Measurement Properties — `/Measure`, `/NumberFormat`, the `/X`/`/D`/`/A` arrays) and §7.9.2.1 (string object encoding).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

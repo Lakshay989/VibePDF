@@ -47,7 +47,7 @@ async fn build_standard_set(handle: &DocumentActorHandle) -> usize {
         .await
         .expect("ink");
     handle
-        .add_measure(0, "distance".into(), vec![[100.0, 200.0], [260.0, 200.0]], "#ff00ff".into(), "160 pt".into(), 1.0, 1.0)
+        .add_measure(0, "distance".into(), vec![[100.0, 200.0], [260.0, 200.0]], "#ff00ff".into(), "160 pt".into(), 1.0, 1.0, 1.0, "pt".into())
         .await
         .expect("measure");
     handle

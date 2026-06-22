@@ -428,6 +428,8 @@ pub struct MeasureEdit {
     pub label: String,
     pub opacity: f32,
     pub stroke_width: f32,
+    pub units_per_point: f32,
+    pub unit: String,
 }
 
 impl<'a> Edit<PdfDocument<'a>> for MeasureEdit {
@@ -447,6 +449,8 @@ impl<'a> Edit<PdfDocument<'a>> for MeasureEdit {
                 &self.label,
                 self.opacity,
                 self.stroke_width,
+                self.units_per_point,
+                &self.unit,
             )
         })
     }

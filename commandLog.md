@@ -2237,6 +2237,36 @@ deferred (BACKLOG).
 
 ---
 
+### P3.C4b — /Measure dict + persisted calibration (this commit)
+
+No new dependencies. First of the "Phase 3.5" deferred sub-features.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 306/306 (+4: measure IPC +1, readMeasureCalibration +1, use-calibration-sync 3,
+#   measure-layer assertion updated for the 2 new args)
+npm run test:rust      # EXIT 0. measure.rs +2 (writes /Measure dict with /X /C==scale + /U;
+#   calibration round-trips via read_measure_calibration; none-without). cos.rs +1
+#   (/Measure shape + read-back + none). Six existing add_measure call-sites updated
+#   for the +units_per_point/+unit signature (measure.rs, cos.rs, xfdf_roundtrip.rs).
+
+# PDF write-path artifact (ignored, on demand) → Sample PDFs/ + /tmp:
+cargo test --manifest-path src-tauri/Cargo.toml --test measure \
+  measure_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-measure.pdf (2 measures, each carrying a /Measure RL dict).
+cp "Sample PDFs/vibepdf-verify-measure.pdf" /tmp/vibepdf-verify.pdf
+sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/m.png   # CoreGraphics opens it → valid
+```
+
+Attach a rectilinear /Measure dict (/X /C = units-per-point, /D 100 = 2-dp) so
+readers re-measure live; read it back to re-seed the tool on reopen (no clobber
+of an in-session calibration). Imported XFDF measures get a default pt scale.
+Left `[~]` pending the human in-app reopen + Acrobat re-measure pass. Angle
+formats, anisotropic scale, page /VP viewport, and UTF-16 unit labels deferred.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

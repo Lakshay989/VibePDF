@@ -100,6 +100,8 @@ export function MeasureLayer({
       label,
       options.opacity,
       options.strokeWidth,
+      cal.unitsPerPoint,
+      cal.unit,
     )
       .then((h) => {
         bumpEpoch(documentId);

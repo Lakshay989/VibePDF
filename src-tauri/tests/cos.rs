@@ -728,7 +728,7 @@ fn cos_stamp_rejects_empty_text_and_rect() {
 #[test]
 fn cos_measure_distance_writes_line_it_and_label() {
     let pts = [[100.0_f32, 700.0], [300.0, 700.0]];
-    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "distance", &pts, "#1f6feb", "4 m", 1.0, 1.5)
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "distance", &pts, "#1f6feb", "4 m", 1.0, 1.5, 0.02, "m")
         .expect("distance");
     assert_eq!(pdfium_page_count(&out), 1);
 
@@ -745,7 +745,7 @@ fn cos_measure_distance_writes_line_it_and_label() {
 #[test]
 fn cos_measure_area_is_polygon_dimension() {
     let pts = [[100.0_f32, 700.0], [200.0, 700.0], [150.0, 620.0]];
-    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "area", &pts, "#1e8449", "1.2 m\u{b2}", 1.0, 1.5)
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "area", &pts, "#1e8449", "1.2 m\u{b2}", 1.0, 1.5, 0.02, "m")
         .expect("area");
     let (annot, ap) = first_annot_and_ap(&out);
     assert_eq!(annot.get(b"Subtype").unwrap().as_name().unwrap(), b"Polygon");
@@ -757,7 +757,7 @@ fn cos_measure_area_is_polygon_dimension() {
 #[test]
 fn cos_measure_reads_back_as_measure_and_deletes() {
     let pts = [[100.0_f32, 700.0], [240.0, 660.0], [300.0, 700.0]];
-    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "perimeter", &pts, "#000000", "5 m", 1.0, 1.5)
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "perimeter", &pts, "#000000", "5 m", 1.0, 1.5, 0.02, "m")
         .expect("perimeter");
     let infos = read_annotations(&out).expect("read");
     assert_eq!(infos.len(), 1);
@@ -772,9 +772,33 @@ fn cos_measure_reads_back_as_measure_and_deletes() {
 fn cos_measure_rejects_bad_kind_empty_label_and_too_few_points() {
     let b = fixture_bytes("hello.pdf");
     let line = [[0.0_f32, 0.0], [10.0, 10.0]];
-    assert!(add_measure(&b, 0, "volume", &line, "#000000", "x", 1.0, 1.0).is_err());
-    assert!(add_measure(&b, 0, "distance", &line, "#000000", "  ", 1.0, 1.0).is_err());
-    assert!(add_measure(&b, 0, "area", &line, "#000000", "x", 1.0, 1.0).is_err()); // area needs 3
+    assert!(add_measure(&b, 0, "volume", &line, "#000000", "x", 1.0, 1.0, 1.0, "pt").is_err());
+    assert!(add_measure(&b, 0, "distance", &line, "#000000", "  ", 1.0, 1.0, 1.0, "pt").is_err());
+    assert!(add_measure(&b, 0, "area", &line, "#000000", "x", 1.0, 1.0, 1.0, "pt").is_err()); // area needs 3
+}
+
+/// SPEC: P3-ANN-007 (P3.C4b) — add_measure attaches a `/Measure` dict carrying
+/// the calibration, and `read_measure_calibration` reads it back.
+#[test]
+fn cos_measure_writes_and_reads_back_calibration() {
+    use vibepdf_lib::pdf::cos::read_measure_calibration;
+    let pts = [[100.0_f32, 700.0], [300.0, 700.0]];
+    let out = add_measure(&fixture_bytes("hello.pdf"), 0, "distance", &pts, "#000000", "100 ft", 1.0, 1.5, 0.5, "ft")
+        .expect("distance");
+
+    let (annot, _ap) = first_annot_and_ap(&out);
+    let measure = annot.get(b"Measure").and_then(Object::as_dict).expect("a /Measure dict");
+    assert_eq!(measure.get(b"Type").unwrap().as_name().unwrap(), b"Measure");
+    assert_eq!(measure.get(b"Subtype").unwrap().as_name().unwrap(), b"RL");
+    assert!(measure.get(b"X").and_then(Object::as_array).is_ok(), "has /X axis format");
+    assert!(measure.get(b"A").and_then(Object::as_array).is_ok(), "has /A area format");
+
+    let cal = read_measure_calibration(&out).expect("read").expect("a calibration");
+    assert!((cal.units_per_point - 0.5).abs() < 1e-6);
+    assert_eq!(cal.unit, "ft");
+
+    // A plain document has no /Measure → None.
+    assert!(read_measure_calibration(&fixture_bytes("hello.pdf")).expect("read").is_none());
 }
 
 #[test]

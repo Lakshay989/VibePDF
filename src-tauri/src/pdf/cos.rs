@@ -2054,8 +2054,8 @@ fn polygon_appearance_content(
 /// `/PolyLine` (perimeter), or `/Polygon` (area) carrying a dimension `/IT`
 /// intent, the pre-computed `label` in `/Contents`, and a generated `/AP` that
 /// draws the geometry plus the label centred on it. The value is computed on the
-/// frontend against the user's calibration; the PDF `/Measure` dict (Acrobat live
-/// re-measure) is C4b.
+/// frontend against the user's calibration; C4b adds the machine-readable
+/// `/Measure` dict (`units_per_point` + `unit`) so other readers re-measure live.
 #[allow(clippy::too_many_arguments)]
 pub fn add_measure(
     bytes: &[u8],
@@ -2066,6 +2066,8 @@ pub fn add_measure(
     label: &str,
     opacity: f32,
     stroke_width: f32,
+    units_per_point: f32,
+    unit: &str,
 ) -> Result<Vec<u8>, CommandError> {
     let label = label.trim();
     if label.is_empty() {
@@ -2153,6 +2155,9 @@ pub fn add_measure(
     annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
     annot.set("CA", Object::Real(opacity));
     annot.set("BS", Object::Dictionary(bs));
+    // SPEC: P3-ANN-007 (P3.C4b) — the machine-readable scale, so Acrobat & co.
+    // re-measure live against the raw geometry instead of trusting our /Contents.
+    annot.set("Measure", Object::Dictionary(measure_dict(units_per_point, unit)));
     annot.set("F", Object::Integer(4)); // Print
     annot.set("P", Object::Reference(page_id));
     annot.set("AP", Object::Dictionary(ap));
@@ -2162,6 +2167,79 @@ pub fn add_measure(
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// Build a rectilinear `/Measure` dictionary (PDF 32000-1 §12.9) from the
+/// calibration: `units_per_point` real units per default-user-space unit, with
+/// display label `unit`. `/X` carries the whole scale (`/C == units_per_point`);
+/// `/D` (distance) and `/A` (area) format the result to 2 dp (`/D 100`). Area uses
+/// the square of the X scale, matching the frontend's `unitsPerPoint²`. Unit
+/// labels stay ASCII (`sq <unit>`) to avoid PDF text-string encoding pitfalls.
+fn measure_dict(units_per_point: f32, unit: &str) -> Dictionary {
+    let unit = if unit.is_empty() { "pt" } else { unit };
+    let upp = if units_per_point > 0.0 { units_per_point } else { 1.0 };
+
+    let number_format = |label: &str, conversion: f32| {
+        let mut nf = Dictionary::new();
+        nf.set("Type", Object::Name(b"NumberFormat".to_vec()));
+        nf.set("U", Object::string_literal(label));
+        nf.set("C", Object::Real(conversion));
+        nf.set("F", Object::Name(b"D".to_vec())); // decimal (not fractional)
+        nf.set("D", Object::Integer(100)); // precision: 1/100
+        Object::Dictionary(nf)
+    };
+
+    let mut measure = Dictionary::new();
+    measure.set("Type", Object::Name(b"Measure".to_vec()));
+    measure.set("Subtype", Object::Name(b"RL".to_vec())); // rectilinear
+    measure.set("R", Object::string_literal(format!("1 pt = {upp} {unit}")));
+    measure.set("X", Object::Array(vec![number_format(unit, upp)]));
+    measure.set("D", Object::Array(vec![number_format(unit, 1.0)]));
+    measure.set("A", Object::Array(vec![number_format(&format!("sq {unit}"), 1.0)]));
+    measure
+}
+
+/// SPEC: P3-ANN-007 (P3.C4b) — read a measurement annotation's calibration back
+/// out of its `/Measure` dict, so the tool can re-seed itself on reopen instead
+/// of forcing a re-calibrate. Returns the first measurement's scale + unit (the
+/// `/X` `/C` conversion + `/U` label), or `None` if no annotation carries one.
+pub fn read_measure_calibration(bytes: &[u8]) -> Result<Option<MeasureCalibration>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    for page_id in doc.get_pages().values() {
+        let arr = match doc.get_dictionary(*page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned()) {
+            Some(Object::Array(a)) => a,
+            Some(Object::Reference(id)) => {
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+            }
+            _ => continue,
+        };
+        for obj in arr {
+            let Ok(id) = obj.as_reference() else { continue };
+            let Ok(dict) = doc.get_dictionary(id) else { continue };
+            if let Some(cal) = dict.get(b"Measure").and_then(Object::as_dict).ok().and_then(measure_calibration) {
+                return Ok(Some(cal));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// The calibration carried by a `/Measure` dict: its `/X[0]` `/C` (units per
+/// point) + `/U` (unit label). `None` if the dict isn't shaped like ours.
+fn measure_calibration(measure: &Dictionary) -> Option<MeasureCalibration> {
+    let x0 = measure.get(b"X").and_then(Object::as_array).ok()?.first()?.as_dict().ok()?;
+    let units_per_point = match x0.get(b"C").ok()? {
+        Object::Real(r) => *r,
+        #[allow(clippy::cast_precision_loss)]
+        Object::Integer(n) => *n as f32,
+        _ => return None,
+    };
+    let unit = x0
+        .get(b"U")
+        .and_then(Object::as_str)
+        .ok()
+        .map_or_else(|| "pt".to_owned(), |s| String::from_utf8_lossy(s).into_owned());
+    Some(MeasureCalibration { units_per_point, unit })
 }
 
 /// The `/AP` content for a measurement: stroke the path (`m`/`l`, `h` to close an
@@ -3016,6 +3094,17 @@ fn rect_bounds(dict: &Dictionary) -> [f32; 4] {
 /// (the lopdf object id), its 0-based `page`, a `kind` tag, `/Rect` bounds (for
 /// the selection highlight), `/Contents`, `/T` (author), and `/M` parsed to epoch
 /// millis. Serialized to the frontend annotation panel.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeasureCalibration {
+    /// Real-world units per PDF point (the `/Measure` `/X` `/C` conversion).
+    pub units_per_point: f32,
+    /// The unit label (the `/Measure` `/X` `/U`), e.g. `"ft"`.
+    pub unit: String,
+}
+
+/// SPEC: P3-ANN-007 (P3.C4b) — a measurement annotation's persisted calibration,
+/// read back from its `/Measure` dict to re-seed the tool on reopen.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnnotationInfo {
