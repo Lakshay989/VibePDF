@@ -103,7 +103,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   };
 
   return (
-    <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-1 text-sm dark:border-neutral-800">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-1 text-sm dark:border-neutral-800">
       <span className="text-xs uppercase tracking-wide text-neutral-400">Markup</span>
       {SUBTYPES.map((s) => (
         <button

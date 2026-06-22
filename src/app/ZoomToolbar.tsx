@@ -74,7 +74,7 @@ export function ZoomToolbar({
   const selectValue: FitMode | "manual" = fitMode ?? "manual";
 
   return (
-    <div className="flex items-center gap-2 border-b border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-800">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-800">
       <button
         type="button"
         onClick={toggleThumbnails}
