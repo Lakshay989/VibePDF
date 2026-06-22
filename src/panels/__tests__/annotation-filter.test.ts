@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AnnotationInfo } from "@/ipc/annotations";
 import {
+  buildThreads,
   dateInputToMs,
   distinctAuthors,
   distinctKinds,
@@ -22,6 +23,7 @@ const a = (over: Partial<AnnotationInfo>): AnnotationInfo => ({
   contents: "",
   author: "",
   modified: null,
+  inReplyTo: null,
   ...over,
 });
 
@@ -63,6 +65,54 @@ describe("date input helpers", () => {
       modifiedAfter: after,
     });
     expect(filtered.map((x) => x.id)).toEqual(["x"]);
+  });
+});
+
+describe("buildThreads", () => {
+  it("nests replies under their parent, ordered by modified", () => {
+    const items = [
+      a({ id: "root", contents: "question", modified: 100 }),
+      a({ id: "r2", contents: "second reply", inReplyTo: "root", modified: 300 }),
+      a({ id: "r1", contents: "first reply", inReplyTo: "root", modified: 200 }),
+    ];
+    const threads = buildThreads(items);
+    expect(threads).toHaveLength(1);
+    expect(threads[0].root.id).toBe("root");
+    expect(threads[0].replies.map((r) => r.id)).toEqual(["r1", "r2"]); // chronological
+  });
+
+  it("flattens a reply-to-a-reply under the thread root", () => {
+    const items = [
+      a({ id: "root", modified: 1 }),
+      a({ id: "r1", inReplyTo: "root", modified: 2 }),
+      a({ id: "r1a", inReplyTo: "r1", modified: 3 }),
+    ];
+    const threads = buildThreads(items);
+    expect(threads).toHaveLength(1);
+    expect(threads[0].replies.map((r) => r.id)).toEqual(["r1", "r1a"]);
+  });
+
+  it("treats an orphan reply (missing parent) as its own root", () => {
+    const threads = buildThreads([a({ id: "x", inReplyTo: "gone" })]);
+    expect(threads).toHaveLength(1);
+    expect(threads[0].root.id).toBe("x");
+    expect(threads[0].replies).toHaveLength(0);
+  });
+
+  it("is cycle-safe (mutual replies don't loop or drop)", () => {
+    const threads = buildThreads([
+      a({ id: "a", inReplyTo: "b" }),
+      a({ id: "b", inReplyTo: "a" }),
+    ]);
+    // Both survive as roots; the exact rooting is unspecified for malformed input.
+    const ids = threads.flatMap((t) => [t.root.id, ...t.replies.map((r) => r.id)]);
+    expect(new Set(ids)).toEqual(new Set(["a", "b"]));
+  });
+
+  it("each top-level annotation with no replies is its own thread", () => {
+    const threads = buildThreads(list);
+    expect(threads).toHaveLength(3);
+    expect(threads.every((t) => t.replies.length === 0)).toBe(true);
   });
 });
 

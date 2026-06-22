@@ -73,6 +73,9 @@ export interface AnnotationInfo {
   author: string;
   /** `/M` parsed to epoch milliseconds, or null when absent/unparsable. */
   modified: number | null;
+  /** SPEC: P3-ANN-009 — the handle of the annotation this replies to (`/IRT`),
+   *  or null for a top-level annotation. */
+  inReplyTo: string | null;
 }
 
 /**

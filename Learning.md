@@ -4855,6 +4855,57 @@ Distance / perimeter / area tools that report a real-world value — which needs
 
 ---
 
+### P3.D2 — reply threads
+
+#### Problem
+
+Reply to any annotation, with the replies threaded under it — the basic comment
+collaboration loop, persisted in the PDF so other readers see the thread.
+
+#### Concepts learned
+
+- **A reply isn't a new type — it's a link.** Per the PDF spec a reply is just a
+  markup annotation (we use `/Text`, like a note) carrying **`/IRT`** (*in reply
+  to* — a reference to the parent) and `/RT /R` (reply-type = reply). So the write
+  reuses the note machinery; the only new bits are the two keys. Resolving them on
+  read is the inverse: dereference `/IRT` to the parent dict and read *its* handle.
+- **Two filters keep replies in their lane.** A reply is a `/Text`, so without
+  care it leaks in two places: the page note-overlay (`read_text_notes`) would
+  draw it as a stray icon, and the sidebar would list it as a standalone row. Both
+  read paths now check `/IRT`: `read_text_notes` skips replies entirely; the
+  sidebar nests them under their parent instead of listing them top-level. The fix
+  for "where does this annotation belong?" lives at the *read* boundary, once.
+- **Threading is tree-walking with guards.** `buildThreads` finds each reply's
+  thread **root** by walking `inReplyTo` upward, then flattens all descendants
+  under that root (Acrobat shows one indent level, chronological — simpler than
+  arbitrary nesting). Real PDFs are hostile: a reply whose parent was deleted
+  (**orphan**) must still show (treat it as its own root, don't drop data), and a
+  malformed **cycle** (`a→b→a`) must not infinite-loop (a `seen` set caps the
+  walk; each node resolves to self-as-root). Pure + unit-tested in isolation.
+- **Reuse the handle, don't invent IDs.** The reply's parent is addressed by the
+  *same* `/NM`-or-`obj:` handle the sidebar already uses for select/delete — so
+  `add_reply` shares the resolver (`resolve_handle`) with `delete_annotation`, and
+  the existing ✕ deletes a reply for free (it has its own `/NM`). One identity
+  scheme across select / delete / reply.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_reply` + `/IRT` resolution on read (`annot_handle`/`irt_handle`); `read_text_notes` skip. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ReplyEdit` + `AddReply` + `pdf_add_reply`. |
+| `src/ipc/replies.ts`, `src/ipc/annotations.ts` | `addReply` + `AnnotationInfo.inReplyTo`. |
+| `src/panels/annotation-filter.ts` | `buildThreads` (root-walk + flatten, cycle/orphan-safe). |
+| `src/panels/AnnotationPanel.tsx` | Nested replies + inline composer; filters on roots. |
+| `src-tauri/tests/reply_thread.rs`, `tests/cos.rs`, FE `buildThreads`/`replies`/`AnnotationPanel` | Link, read-back, thread maths, send. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.2 + Table 174 (`/IRT`, `/RT`, reply markup annotations).
+- Tree/graph traversal with a visited-set to survive cycles.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

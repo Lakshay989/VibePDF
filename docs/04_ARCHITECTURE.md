@@ -227,13 +227,23 @@ spans *all* kinds: it walks every page's `/Annots`, whitelists the subtypes we
 author (markup, note, free-text, shapes, line/arrow, polygon/polyline, ink,
 stamp, measure — the last detected by a dimension `/IT` on a line/poly), and
 returns a flat `AnnotationInfo` list (kind, page, `/Rect`, contents,
-author, `/M`-as-epoch). A read-only `ReadAnnotations` actor query feeds
-`pdf_read_annotations`; the `AnnotationPanel` sidebar re-reads on
-`[documentId, edit-epoch]` (the same projection cadence as the note overlay), so
-the list tracks edits/undo. Selection is a cross-cutting store
+author, `/M`-as-epoch, plus `inReplyTo` for D2). A read-only `ReadAnnotations`
+actor query feeds `pdf_read_annotations`; the `AnnotationPanel` sidebar re-reads
+on `[documentId, edit-epoch]` (the same projection cadence as the note overlay),
+so the list tracks edits/undo. Selection is a cross-cutting store
 (`annotation-selection-store`) carrying the clicked annotation's `/Rect`, which a
 per-page `SelectionHighlightLayer` draws as a dashed box — giving "select" visible
 feedback for canvas-drawn kinds that have no overlay of their own.
+
+**Reply threads (P3.D2)** add no new annotation type — a reply is a `/Text` linked
+to its parent by **`/IRT`** (per the spec). `cos::add_reply` reuses the note write
++ the shared `resolve_handle` (so the parent is the same `/NM`/`obj:` id the
+sidebar uses, and the existing delete works on a reply); `read_annotations`
+dereferences each `/IRT` to the parent's handle (`inReplyTo`), and `read_text_notes`
+skips `/IRT` annotations so a reply isn't drawn as a stray page icon. Threading is
+pure + frontend: `buildThreads` walks `/IRT` chains to a root and nests replies
+flat (orphan- and cycle-safe); the sidebar renders the root row + nested replies +
+an inline composer, and filters operate on roots only.
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

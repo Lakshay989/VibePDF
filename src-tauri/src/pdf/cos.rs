@@ -2678,6 +2678,103 @@ fn find_annotation_by_nm(doc: &Document, nm: &str) -> Option<ObjectId> {
     None
 }
 
+/// The sidebar handle for an annotation: its stable `/NM`, or a synthesized
+/// `obj:<num> <gen>` for one authored elsewhere that lacks a name. The same id
+/// `delete_annotation` / `add_reply` accept back.
+fn annot_handle(dict: &Dictionary, id: ObjectId) -> String {
+    dict.get(b"NM").and_then(Object::as_str).ok().map_or_else(
+        || format!("obj:{} {}", id.0, id.1),
+        |nm| String::from_utf8_lossy(nm).into_owned(),
+    )
+}
+
+/// SPEC: P3-ANN-009 — resolve an annotation's `/IRT` (a reference to the
+/// annotation it replies to) to that parent's handle, or `None` if it isn't a
+/// reply.
+fn irt_handle(doc: &Document, dict: &Dictionary) -> Option<String> {
+    let parent_ref = dict.get(b"IRT").ok()?.as_reference().ok()?;
+    let parent = doc.get_dictionary(parent_ref).ok()?;
+    Some(annot_handle(parent, parent_ref))
+}
+
+/// Resolve a sidebar `handle` (`/NM` or `obj:<num> <gen>`) to its object id.
+fn resolve_handle(doc: &Document, handle: &str) -> Option<ObjectId> {
+    match handle.strip_prefix("obj:") {
+        Some(obj) => parse_object_id(obj),
+        None => find_annotation_by_nm(doc, handle),
+    }
+}
+
+/// The page object id whose `/Annots` contains `annot_id` (a fallback when an
+/// annotation lacks an explicit `/P` back-reference).
+fn page_of_annotation(doc: &Document, annot_id: ObjectId) -> Option<ObjectId> {
+    for page_id in doc.get_pages().values() {
+        let annots = doc.get_dictionary(*page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+        let arr = match annots {
+            Some(Object::Array(a)) => a,
+            Some(Object::Reference(id)) => {
+                doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+            }
+            _ => continue,
+        };
+        if arr.iter().any(|o| o.as_reference().ok() == Some(annot_id)) {
+            return Some(*page_id);
+        }
+    }
+    None
+}
+
+/// SPEC: P3-ANN-009 — add a reply to the annotation identified by `parent_handle`
+/// (`/NM` or `obj:` id). A `/Text` markup annotation carrying `/IRT` (a reference
+/// to the parent) and `/RT /R` (reply-type = reply), inheriting the parent's
+/// page + `/Rect`. The `/NM` is generated. No `/AP`: a reply lives in the thread,
+/// not as a page icon.
+pub fn add_reply(
+    bytes: &[u8],
+    parent_handle: &str,
+    author: &str,
+    content: &str,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let parent_id = resolve_handle(&doc, parent_handle)
+        .ok_or_else(|| CommandError::InvalidInput(format!("reply target not found: {parent_handle}")))?;
+    let parent = doc.get_dictionary(parent_id).map_err(cos_err)?;
+    let rect = parent
+        .get(b"Rect")
+        .ok()
+        .cloned()
+        .unwrap_or_else(|| Object::Array(vec![Object::Real(0.0); 4]));
+    let page_id = parent
+        .get(b"P")
+        .ok()
+        .and_then(|o| o.as_reference().ok())
+        .or_else(|| page_of_annotation(&doc, parent_id))
+        .ok_or_else(|| CommandError::InvalidInput("reply target page not found".into()))?;
+
+    let date = pdf_date_now();
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Text".to_vec()));
+    annot.set("Rect", rect);
+    annot.set("Contents", Object::string_literal(content));
+    annot.set("T", Object::string_literal(author));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set("M", Object::string_literal(date.clone()));
+    annot.set("CreationDate", Object::string_literal(date));
+    annot.set("Name", Object::Name(b"Comment".to_vec()));
+    annot.set("IRT", Object::Reference(parent_id)); // in-reply-to the parent
+    annot.set("RT", Object::Name(b"R".to_vec())); // reply-type = reply
+    annot.set("F", Object::Integer(28)); // Print | NoZoom | NoRotate
+    annot.set("Open", Object::Boolean(false));
+    annot.set("P", Object::Reference(page_id));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
 /// SPEC: P3-ANN-002 — add a sticky note (`/Text` annotation) at `(x, y)` on
 /// `page` (0-based) with `content`, `author` (`/T`), a timestamp, and `note_id`
 /// as `/NM`. No `/AP` — readers draw their own note icon from `/Name`.
@@ -2853,6 +2950,12 @@ pub fn read_text_notes(bytes: &[u8]) -> Result<Vec<NoteData>, CommandError> {
             if dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(&b"Text"[..]) {
                 continue;
             }
+            // SPEC: P3-ANN-009 — a reply is a `/Text` with `/IRT`; it belongs to
+            // the thread, not the page overlay. Skip it so it isn't drawn as a
+            // standalone note icon.
+            if dict.get(b"IRT").is_ok() {
+                continue;
+            }
             let (x, y) = rect_lower_left(dict);
             let nm = dict.get(b"NM").and_then(Object::as_str).ok().map_or_else(
                 || format!("obj-{}-{}", id.0, id.1),
@@ -2923,6 +3026,9 @@ pub struct AnnotationInfo {
     pub contents: String,
     pub author: String,
     pub modified: Option<i64>,
+    /// SPEC: P3-ANN-009 — the handle of the annotation this one replies to
+    /// (resolved from `/IRT`), or `None` for a top-level annotation.
+    pub in_reply_to: Option<String>,
 }
 
 /// Map an annotation `/Subtype` to the sidebar `kind`, or `None` for subtypes we
@@ -2984,21 +3090,15 @@ pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandErro
             // A measurement reuses /Line/PolyLine/Polygon but carries a dimension
             // `/IT` intent — surface it as "measure", not the bare shape.
             let kind = if is_measurement_intent(dict) { "measure" } else { base_kind };
-            // Prefer the stable `/NM` (every annotation we write has one) as the
-            // delete handle; fall back to a `obj:<num> <gen>` object id for
-            // annotations authored elsewhere that lack a name.
-            let handle = dict.get(b"NM").and_then(Object::as_str).ok().map_or_else(
-                || format!("obj:{} {}", id.0, id.1),
-                |nm| String::from_utf8_lossy(nm).into_owned(),
-            );
             out.push(AnnotationInfo {
-                id: handle,
+                id: annot_handle(dict, id),
                 page,
                 kind: kind.to_owned(),
                 rect: rect_bounds(dict),
                 contents: str_field(dict, b"Contents"),
                 author: str_field(dict, b"T"),
                 modified: dict.get(b"M").and_then(Object::as_str).ok().and_then(parse_pdf_date),
+                in_reply_to: irt_handle(&doc, dict),
             });
         }
     }

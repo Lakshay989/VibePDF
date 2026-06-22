@@ -334,6 +334,32 @@ pub async fn pdf_add_text_note(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-009 — reply to the annotation `parent_id` (its sidebar handle).
+/// Persists a `/Text` linked via `/IRT`. Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_add_reply(
+    state: State<'_, AppState>,
+    id: String,
+    parent_id: String,
+    author: String,
+    content: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_reply_request(parent_id, author, content)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-002 — update the body of the note with `/NM == note_id`.
 #[tauri::command]
 pub async fn pdf_update_text_note(

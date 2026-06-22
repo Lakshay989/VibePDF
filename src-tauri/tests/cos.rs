@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use lopdf::{Dictionary, Document, Object};
 use vibepdf_lib::pdf::cos::{
     add_free_text, add_ink, add_line, add_measure, add_polygon, add_shape, add_stamp,
-    add_text_markup, add_text_note,
+    add_reply, add_text_markup, add_text_note,
     add_top_level_bookmark, clear_text_markup, delete_annotation, merge_documents,
     prune_dangling_destinations,
     read_annotations, read_form_field_names, read_free_text, read_text_notes,
@@ -221,6 +221,57 @@ fn cos_reads_text_notes() {
 #[test]
 fn cos_reads_no_notes_from_plain_pdf() {
     assert!(read_text_notes(&fixture_bytes("hello.pdf")).expect("read").is_empty());
+}
+
+/// SPEC: P3-ANN-009 — add_reply links a `/Text` to its parent via `/IRT` + `/RT
+/// /R`, and `read_annotations` surfaces the child's `inReplyTo` = the parent's
+/// handle. Reopens in PDFium.
+#[test]
+fn cos_reply_links_via_irt_and_surfaces_in_reply_to() {
+    // A note to reply to, then a reply to it.
+    let with_note = add_text_note(&fixture_bytes("hello.pdf"), "parent-nm", 0, 100.0, 700.0, "question?", "Ada")
+        .expect("note");
+    let out = add_reply(&with_note, "parent-nm", "Bo", "an answer").expect("reply");
+    assert_eq!(pdfium_page_count(&out), 1);
+
+    let infos = read_annotations(&out).expect("read");
+    assert_eq!(infos.len(), 2, "the note + its reply");
+    let reply = infos.iter().find(|a| a.contents == "an answer").expect("reply present");
+    assert_eq!(reply.kind, "note"); // a /Text
+    assert_eq!(reply.author, "Bo");
+    assert_eq!(reply.in_reply_to.as_deref(), Some("parent-nm"), "links to the parent /NM");
+    let parent = infos.iter().find(|a| a.id == "parent-nm").expect("parent present");
+    assert_eq!(parent.in_reply_to, None, "the parent is top-level");
+}
+
+/// A reply must NOT surface as a standalone page note (it lives in the thread).
+#[test]
+fn cos_reply_is_not_read_as_a_page_note() {
+    let with_note = add_text_note(&fixture_bytes("hello.pdf"), "p", 0, 100.0, 700.0, "q", "Ada").expect("note");
+    let out = add_reply(&with_note, "p", "Bo", "a").expect("reply");
+    let notes = read_text_notes(&out).expect("read");
+    assert_eq!(notes.len(), 1, "only the parent note, not the reply");
+    assert_eq!(notes[0].nm, "p");
+}
+
+#[test]
+fn cos_reply_to_any_kind_and_deletable() {
+    // Reply to a shape (not just a note), then delete the reply by its /NM.
+    let sq = add_shape(&fixture_bytes("hello.pdf"), 0, "rectangle", [100.0, 600.0, 300.0, 700.0], "#ff0000", None, 1.0, 2.0)
+        .expect("shape");
+    let parent = read_annotations(&sq).expect("read")[0].id.clone();
+    let out = add_reply(&sq, &parent, "Bo", "nice box").expect("reply");
+    let infos = read_annotations(&out).expect("read");
+    let reply = infos.iter().find(|a| a.in_reply_to.is_some()).expect("reply present");
+    assert_eq!(reply.in_reply_to.as_deref(), Some(parent.as_str()));
+    let after = delete_annotation(&out, &reply.id).expect("delete");
+    let left = read_annotations(&after).expect("re-read");
+    assert_eq!(left.len(), 1, "only the parent shape remains");
+}
+
+#[test]
+fn cos_reply_rejects_unknown_parent() {
+    assert!(add_reply(&fixture_bytes("hello.pdf"), "no-such-nm", "Bo", "x").is_err());
 }
 
 #[test]

@@ -12,8 +12,10 @@ import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/an
 import { readFreeText } from "@/ipc/freetext";
 import type { DocumentId } from "@/ipc/pdf";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
+import { addReply } from "@/ipc/replies";
 import {
   type AnnotationFilter,
+  buildThreads,
   dateInputToMs,
   distinctAuthors,
   distinctKinds,
@@ -23,6 +25,7 @@ import {
   kindLabel,
   msToDateInput,
 } from "@/panels/annotation-filter";
+import { DEFAULT_NOTE_AUTHOR } from "@/tools/sticky-note/note-tool";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -114,11 +117,38 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
     };
   }, [documentId, epoch]);
 
+  // SPEC: P3-ANN-009 — group into threads; the filter/list operate on the
+  // top-level roots, with replies nested under their parent.
   const all = useMemo(() => list ?? [], [list]);
-  const authors = useMemo(() => distinctAuthors(all), [all]);
-  const kinds = useMemo(() => distinctKinds(all), [all]);
-  const groups = useMemo(() => groupByPage(filterAnnotations(all, filter)), [all, filter]);
+  const threads = useMemo(() => buildThreads(all), [all]);
+  const roots = useMemo(() => threads.map((t) => t.root), [threads]);
+  const repliesByRoot = useMemo(
+    () => new Map(threads.map((t) => [t.root.id, t.replies] as const)),
+    [threads],
+  );
+  const authors = useMemo(() => distinctAuthors(roots), [roots]);
+  const kinds = useMemo(() => distinctKinds(roots), [roots]);
+  const groups = useMemo(() => groupByPage(filterAnnotations(roots, filter)), [roots, filter]);
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
+
+  // SPEC: P3-ANN-009 — the row whose reply composer is open + its draft text.
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const sendReply = useCallback(
+    (parentId: string, text: string) => {
+      const content = text.trim();
+      setReplyingTo(null);
+      setReplyText("");
+      if (!content) return;
+      addReply(documentId, parentId, DEFAULT_NOTE_AUTHOR, content)
+        .then((h) => {
+          setHistory(documentId, h);
+          bumpEpoch(documentId);
+        })
+        .catch((err: unknown) => console.warn("add reply failed", documentId, err));
+    },
+    [documentId, setHistory, bumpEpoch],
+  );
 
   const toggleKind = (kind: (typeof kinds)[number]) =>
     setFilter((f) => ({
@@ -206,7 +236,7 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
       <div className="flex-1 overflow-auto p-2 text-sm">
         {list === null ? (
           <div className="text-neutral-500">Loading…</div>
-        ) : all.length === 0 ? (
+        ) : roots.length === 0 ? (
           <div className="text-neutral-500">No annotations.</div>
         ) : shown === 0 ? (
           <div className="text-neutral-500">No matches.</div>
@@ -217,69 +247,153 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
                 <div className="mb-1 text-xs font-medium uppercase tracking-wide text-neutral-400">
                   Page {group.page + 1}
                 </div>
-                <ul className="space-y-0.5">
-                  {group.items.map((info) => (
-                    <li key={info.id} className="group flex items-stretch gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          select(info);
-                          onJump(info.page + 1);
-                        }}
-                        aria-label={`${kindLabel(info.kind)} on page ${info.page + 1}`}
-                        aria-current={info.id === selectedId}
-                        className={
-                          "min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900 " +
-                          (info.id === selectedId ? "bg-blue-100 dark:bg-blue-900/40" : "")
-                        }
-                      >
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-xs font-medium text-neutral-500">
-                            {kindLabel(info.kind)}
-                          </span>
-                          {info.modified !== null ? (
-                            <span className="shrink-0 text-[10px] tabular-nums text-neutral-400">
-                              {new Date(info.modified).toLocaleDateString()}
-                            </span>
+                <ul className="space-y-2">
+                  {group.items.map((info) => {
+                    const replies = repliesByRoot.get(info.id) ?? [];
+                    return (
+                      <li key={info.id} className="space-y-1">
+                        <div className="group flex items-stretch gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              select(info);
+                              onJump(info.page + 1);
+                            }}
+                            aria-label={`${kindLabel(info.kind)} on page ${info.page + 1}`}
+                            aria-current={info.id === selectedId}
+                            className={
+                              "min-w-0 flex-1 rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900 " +
+                              (info.id === selectedId ? "bg-blue-100 dark:bg-blue-900/40" : "")
+                            }
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-xs font-medium text-neutral-500">
+                                {kindLabel(info.kind)}
+                              </span>
+                              {info.modified !== null ? (
+                                <span className="shrink-0 text-[10px] tabular-nums text-neutral-400">
+                                  {new Date(info.modified).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="truncate text-neutral-800 dark:text-neutral-200">
+                              {info.contents || <span className="italic text-neutral-400">(no text)</span>}
+                            </div>
+                            {info.author ? (
+                              <div className="truncate text-[11px] text-neutral-500">{info.author}</div>
+                            ) : null}
+                          </button>
+                          {info.kind === "freetext" ? (
+                            <button
+                              type="button"
+                              onClick={() => edit(info)}
+                              aria-label={`Edit free text on page ${info.page + 1}`}
+                              title="Edit text"
+                              className={
+                                "shrink-0 rounded px-2 text-neutral-400 hover:bg-blue-100 hover:text-blue-600 " +
+                                "focus:opacity-100 group-hover:opacity-100 dark:hover:bg-blue-900/40 " +
+                                (info.id === selectedId ? "opacity-100" : "opacity-0")
+                              }
+                            >
+                              ✎
+                            </button>
                           ) : null}
+                          <button
+                            type="button"
+                            onClick={() => remove(info)}
+                            aria-label={`Delete ${kindLabel(info.kind)} on page ${info.page + 1}`}
+                            title="Delete annotation"
+                            className={
+                              "shrink-0 rounded px-2 text-neutral-400 hover:bg-red-100 hover:text-red-600 " +
+                              "focus:opacity-100 group-hover:opacity-100 dark:hover:bg-red-900/40 " +
+                              (info.id === selectedId ? "opacity-100" : "opacity-0")
+                            }
+                          >
+                            ✕
+                          </button>
                         </div>
-                        <div className="truncate text-neutral-800 dark:text-neutral-200">
-                          {info.contents || <span className="italic text-neutral-400">(no text)</span>}
-                        </div>
-                        {info.author ? (
-                          <div className="truncate text-[11px] text-neutral-500">{info.author}</div>
-                        ) : null}
-                      </button>
-                      {info.kind === "freetext" ? (
-                        <button
-                          type="button"
-                          onClick={() => edit(info)}
-                          aria-label={`Edit free text on page ${info.page + 1}`}
-                          title="Edit text"
-                          className={
-                            "shrink-0 rounded px-2 text-neutral-400 hover:bg-blue-100 hover:text-blue-600 " +
-                            "focus:opacity-100 group-hover:opacity-100 dark:hover:bg-blue-900/40 " +
-                            (info.id === selectedId ? "opacity-100" : "opacity-0")
-                          }
-                        >
-                          ✎
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => remove(info)}
-                        aria-label={`Delete ${kindLabel(info.kind)} on page ${info.page + 1}`}
-                        title="Delete annotation"
-                        className={
-                          "shrink-0 rounded px-2 text-neutral-400 hover:bg-red-100 hover:text-red-600 " +
-                          "focus:opacity-100 group-hover:opacity-100 dark:hover:bg-red-900/40 " +
-                          (info.id === selectedId ? "opacity-100" : "opacity-0")
-                        }
-                      >
-                        ✕
-                      </button>
-                    </li>
-                  ))}
+
+                        {/* SPEC: P3-ANN-009 — replies, nested under the root. */}
+                        {replies.map((r) => (
+                          <div
+                            key={r.id}
+                            className="group ml-3 flex items-stretch gap-1 border-l-2 border-neutral-200 pl-2 dark:border-neutral-700"
+                          >
+                            <div className="min-w-0 flex-1 px-1 py-0.5">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-[11px] font-medium text-neutral-500">
+                                  ↳ {r.author || "Reply"}
+                                </span>
+                                {r.modified !== null ? (
+                                  <span className="shrink-0 text-[10px] tabular-nums text-neutral-400">
+                                    {new Date(r.modified).toLocaleDateString()}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-[13px] text-neutral-800 dark:text-neutral-200">
+                                {r.contents || <span className="italic text-neutral-400">(no text)</span>}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => remove(r)}
+                              aria-label={`Delete reply on page ${r.page + 1}`}
+                              title="Delete reply"
+                              className="shrink-0 rounded px-2 text-neutral-400 opacity-0 hover:bg-red-100 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-red-900/40"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+
+                        {/* SPEC: P3-ANN-009 — reply composer / affordance. */}
+                        {replyingTo === info.id ? (
+                          <div className="ml-3 flex flex-col gap-1 pl-2">
+                            <textarea
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              aria-label="Reply text"
+                              placeholder="Write a reply…"
+                              rows={2}
+                              autoFocus
+                              className="w-full rounded border border-neutral-300 bg-transparent px-2 py-1 text-xs dark:border-neutral-600"
+                            />
+                            <div className="flex gap-1">
+                              <button
+                                type="button"
+                                onClick={() => sendReply(info.id, replyText)}
+                                disabled={replyText.trim().length === 0}
+                                className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
+                              >
+                                Reply
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingTo(null);
+                                  setReplyText("");
+                                }}
+                                className="rounded px-2 py-0.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingTo(info.id);
+                              setReplyText("");
+                            }}
+                            className="ml-3 rounded px-2 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-900 dark:hover:text-neutral-200"
+                          >
+                            💬 Reply{replies.length > 0 ? ` (${replies.length})` : ""}
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </li>
             ))}

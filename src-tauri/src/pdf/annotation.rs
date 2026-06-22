@@ -13,7 +13,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::{
     add_free_text, add_ink, add_line, add_measure, add_polygon, add_shape, add_stamp,
-    add_text_markup, add_text_note,
+    add_reply, add_text_markup, add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -146,6 +146,26 @@ impl<'a> Edit<PdfDocument<'a>> for AddNoteEdit {
 
     fn label(&self) -> &'static str {
         "add-note"
+    }
+}
+
+/// SPEC: P3-ANN-009 — reply to an annotation (a `/Text` linked via `/IRT`).
+pub struct ReplyEdit {
+    pub parent_id: String,
+    pub author: String,
+    pub content: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for ReplyEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        cos_edit(doc, |bytes| add_reply(bytes, &self.parent_id, &self.author, &self.content))
+    }
+
+    fn label(&self) -> &'static str {
+        "reply"
     }
 }
 

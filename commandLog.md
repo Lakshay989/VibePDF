@@ -2138,6 +2138,41 @@ re-measure) + persisted calibration are C4b.
 
 ---
 
+### P3.D2 — reply threads (this commit)
+
+```bash
+# No new deps. A reply is a /Text linked to its parent via /IRT (per the spec).
+#   cos::add_reply(parent_handle, author, content) → a /Text with /IRT (ref to
+#     parent) + /RT /R + /Contents/T/M/NM, inheriting the parent's page + /Rect.
+#     No /AP (lives in the thread). read_annotations resolves /IRT → parent handle
+#     (AnnotationInfo.in_reply_to); read_text_notes SKIPS /IRT (no stray page
+#     icon). Shared resolve_handle with delete (same /NM-or-obj: id). ReplyEdit +
+#     AddReply + pdf_add_reply.
+# Frontend: buildThreads (annotation-filter, pure) walks /IRT to a thread root +
+#   nests replies flat/chronological; orphan + cycle safe. AnnotationPanel renders
+#   root + nested replies + an inline Reply composer (the spec's right-click → a
+#   discoverable button instead; menu deferred). AnnotationInfo += inReplyTo.
+
+npm run check          # tsc + eslint src + clippy ✓ (clean)
+#   (existing AnnotationInfo literals in tests gained inReplyTo: null)
+npm run test           # 296/296 (+7: buildThreads 5, replies IPC 1, panel thread 1)
+npm run test:rust      # EXIT 0. cos.rs +4 (links via /IRT + surfaces inReplyTo,
+#   not read as a page note, reply-to-any-kind + deletable, rejects unknown
+#   parent). reply_thread.rs: 3 (persist+link / undo removes only the reply /
+#   rejects unknown parent) + 1 ignored artifact.
+
+# PDF write-path artifact (ignored, on demand):
+cargo test --manifest-path src-tauri/Cargo.toml --test reply_thread \
+  reply_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-reply.pdf (a note + two replies).
+```
+
+Reply threads via /IRT, threaded in the sidebar. Left `[~]` pending the human
+in-app + cross-reader pass. Reply editing + /State (Accepted/Rejected) + a
+right-click menu are deferred (BACKLOG).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

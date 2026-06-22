@@ -119,3 +119,52 @@ export function distinctKinds(list: readonly AnnotationInfo[]): AnnotationKind[]
   const present = new Set(list.map((a) => a.kind));
   return (Object.keys(KIND_LABELS) as AnnotationKind[]).filter((k) => present.has(k));
 }
+
+/** SPEC: P3-ANN-009 — a top-level annotation with its replies. */
+export interface AnnotationThread {
+  root: AnnotationInfo;
+  /** Every descendant (replies, replies-to-replies) flattened under the root,
+   *  ordered by `modified` (Acrobat-style flat thread). */
+  replies: AnnotationInfo[];
+}
+
+/**
+ * Group `list` into threads. A reply is an annotation whose `inReplyTo` points at
+ * another annotation present in `list`; it's flattened under its thread **root**
+ * (walk `inReplyTo` to the top). An orphan reply (parent absent) becomes its own
+ * root so nothing is dropped, and a malformed cycle resolves to self-as-root
+ * (cycle-safe). Order of roots follows the input.
+ */
+export function buildThreads(list: readonly AnnotationInfo[]): AnnotationThread[] {
+  const byId = new Map(list.map((a) => [a.id, a]));
+
+  const rootOf = (a: AnnotationInfo): AnnotationInfo => {
+    const seen = new Set<string>();
+    let cur = a;
+    while (cur.inReplyTo !== null && byId.has(cur.inReplyTo) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = byId.get(cur.inReplyTo) as AnnotationInfo;
+    }
+    return cur;
+  };
+
+  const roots: AnnotationInfo[] = [];
+  const repliesByRoot = new Map<string, AnnotationInfo[]>();
+  for (const a of list) {
+    const root = rootOf(a);
+    if (root.id === a.id) {
+      roots.push(a);
+    } else {
+      const bucket = repliesByRoot.get(root.id) ?? [];
+      bucket.push(a);
+      repliesByRoot.set(root.id, bucket);
+    }
+  }
+
+  return roots.map((root) => ({
+    root,
+    replies: (repliesByRoot.get(root.id) ?? [])
+      .slice()
+      .sort((x, y) => (x.modified ?? 0) - (y.modified ?? 0)),
+  }));
+}

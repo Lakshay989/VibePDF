@@ -40,7 +40,7 @@ use crate::pdf::document::{
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FreeTextEdit, InkEdit, LineEdit, MeasureEdit,
-    PolygonEdit, StampEdit,
+    PolygonEdit, ReplyEdit, StampEdit,
     ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{read_annotations, read_free_text, read_text_notes, AnnotationInfo, FreeTextData, NoteData};
@@ -181,6 +181,14 @@ pub enum Message {
         y: f32,
         content: String,
         author: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-009 — reply to the annotation `parent_id` (a `/Text` linked
+    /// via `/IRT`). Undoable; marks dirty.
+    AddReply {
+        parent_id: String,
+        author: String,
+        content: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-002 — update a note's body by `/NM`.
@@ -732,6 +740,31 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::AddNote { note_id, page, x, y, content, author, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P3-ANN-009 — reply to an annotation. Await-holding for tests.
+    pub async fn add_reply(
+        &self,
+        parent_id: String,
+        author: String,
+        content: String,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_reply_request(parent_id, author, content)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_reply_request(
+        &self,
+        parent_id: String,
+        author: String,
+        content: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddReply { parent_id, author, content, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1631,6 +1664,19 @@ fn run_worker(
             Message::AddNote { note_id, page, x, y, content, author, reply } => {
                 // SPEC: P3-ANN-002 — add a /Text note; snapshot inverse.
                 let edit = AddNoteEdit { note_id, page, x, y, content, author };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddReply { parent_id, author, content, reply } => {
+                // SPEC: P3-ANN-009 — a /Text linked via /IRT; snapshot inverse.
+                let edit = ReplyEdit { parent_id, author, content };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

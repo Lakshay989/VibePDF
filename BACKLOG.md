@@ -419,6 +419,22 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
   verification debt.
 
+## From P3.D2 (reply threads)
+
+- ✅ **DONE 2026-06-22 (D2, P3-ANN-009) — reply threads** (`/Text` linked via
+  `/IRT`, threaded in the sidebar via `buildThreads`). Deferred:
+- **Right-click → Reply** context menu (the spec's example) — shipped an inline
+  **Reply button** instead (more discoverable, consistent with the row's ✎/✕). A
+  context menu could complement it.
+- **Editing a reply's text** — no edit affordance (delete + re-reply for now;
+  `update_text_note` already updates a `/Text` by `/NM`, so it's a small add).
+- **Reply state / status** — Acrobat's `/State` + `/StateModel` (Accepted /
+  Rejected / Cancelled / Completed review marks); no collapse/expand or unread.
+- **Author identity** — replies use the fixed `"VibePDF User"` (no accounts);
+  shared with notes.
+- **Arbitrary nesting** — threads render one indent level (flat under the root,
+  Acrobat-style); deep visual nesting isn't shown even though `/IRT` can chain.
+
 ## From P3.C4a (measurement tools)
 
 - ✅ **DONE 2026-06-21 (C4a, P3-ANN-007) — distance/perimeter/area + calibration**

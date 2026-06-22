@@ -3,12 +3,15 @@
 // IPC is mocked — this asserts the panel's wiring, not the Rust read path.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/ipc/annotations", async (orig) => ({
   ...(await orig<typeof import("@/ipc/annotations")>()),
   readAnnotations: vi.fn(),
   deleteAnnotation: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+}));
+vi.mock("@/ipc/replies", () => ({
+  addReply: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 vi.mock("@/ipc/freetext", () => ({
   readFreeText: vi.fn().mockResolvedValue({
@@ -24,6 +27,7 @@ vi.mock("@/ipc/freetext", () => ({
 
 import { type AnnotationInfo, deleteAnnotation, readAnnotations } from "@/ipc/annotations";
 import { readFreeText } from "@/ipc/freetext";
+import { addReply } from "@/ipc/replies";
 import { AnnotationPanel } from "@/panels/AnnotationPanel";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useAnnotationSelectionStore } from "@/state/annotation-selection-store";
@@ -33,8 +37,8 @@ const mockDelete = vi.mocked(deleteAnnotation);
 const mockReadFt = vi.mocked(readFreeText);
 
 const rows: AnnotationInfo[] = [
-  { id: "h1", page: 0, kind: "highlight", rect: [10, 20, 110, 30], contents: "important", author: "Bo", modified: null },
-  { id: "n1", page: 2, kind: "note", rect: [100, 700, 118, 718], contents: "hello world", author: "Ada", modified: 2000 },
+  { id: "h1", page: 0, kind: "highlight", rect: [10, 20, 110, 30], contents: "important", author: "Bo", modified: null, inReplyTo: null },
+  { id: "n1", page: 2, kind: "note", rect: [100, 700, 118, 718], contents: "hello world", author: "Ada", modified: 2000, inReplyTo: null },
 ];
 
 afterEach(() => {
@@ -119,6 +123,7 @@ describe("AnnotationPanel", () => {
       contents: "cap",
       author: "",
       modified: null,
+      inReplyTo: null,
     };
     mockRead.mockResolvedValueOnce([ft]);
     const onJump = vi.fn();
@@ -135,5 +140,25 @@ describe("AnnotationPanel", () => {
     mockRead.mockResolvedValueOnce([]);
     const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
     await waitFor(() => expect(container.textContent).toContain("No annotations."));
+  });
+
+  // SPEC: P3-ANN-009 — replies nest under their parent and a new reply persists.
+  it("threads a reply under its parent and posts a new one", async () => {
+    mockRead.mockResolvedValueOnce([
+      { id: "p1", page: 0, kind: "note", rect: [100, 700, 118, 718], contents: "question?", author: "Ada", modified: 100, inReplyTo: null },
+      { id: "r1", page: 0, kind: "note", rect: [100, 700, 118, 718], contents: "an answer", author: "Bo", modified: 200, inReplyTo: "p1" },
+    ]);
+    const { container } = render(<AnnotationPanel documentId="doc-1" epoch={0} onJump={vi.fn()} />);
+    await waitFor(() => expect(container.textContent).toContain("an answer"));
+
+    // The reply nests — the parent is the only top-level annotation row (the
+    // reply is a div under it, not its own selectable "… on page 1" row button).
+    expect(container.querySelectorAll('button[aria-label="Note on page 1"]')).toHaveLength(1);
+
+    // Open the composer, type, send → addReply(doc, parentId, default author, text).
+    fireEvent.click(screen.getByRole("button", { name: /Reply \(1\)/ }));
+    fireEvent.change(screen.getByLabelText("Reply text"), { target: { value: "thanks" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Reply$/ }));
+    expect(addReply).toHaveBeenCalledWith("doc-1", "p1", "VibePDF User", "thanks");
   });
 });
