@@ -2267,6 +2267,38 @@ formats, anisotropic scale, page /VP viewport, and UTF-16 unit labels deferred.
 
 ---
 
+### P3.C3b — image stamps (this commit)
+
+No new dependencies — the `png` crate (added for the render encoder) ships a
+decoder in the same crate; PNG decode needed no `cargo add`.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 310/310 (+4: stamps lib +2, stamps IPC +1, stamp-layer image branch +1)
+npm run test:rust      # EXIT 0. image_xobject.rs units: 5 (sniff magic, RGB→DeviceRGB
+#   XObject no SMask, RGBA→SMask split, reject non-PNG, deinterleave). stamp.rs
+#   image cases: +5 (embeds PNG + aspect 2:1 rect, alpha→/SMask, image+text →
+#   /Contents, rejects non-PNG, actor round-trip + undo) + the ignored artifact.
+
+# PDF write-path artifact (ignored, on demand) → Sample PDFs/ + /tmp:
+cargo test --manifest-path src-tauri/Cargo.toml --test stamp \
+  stamp_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-stamp.pdf (2 text stamps + an image stamp (RGBA,
+#     transparent) + an image+text stamp).
+cp "Sample PDFs/vibepdf-verify-stamp.pdf" /tmp/vibepdf-verify.pdf
+sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/s.png   # CoreGraphics opens it → valid
+```
+
+PNG only (JPEG + the bundled default image set deferred). New
+`pdf/image_xobject.rs` decodes a PNG → Image XObject, splitting alpha into a
+grayscale `/SMask`; `add_image_stamp` places it aspect-correct + clamped, with
+an optional overlaid label. `StampSpec` became a `text | image` union. Image
+data uncompressed for v1. Left `[~]` pending the human in-app (pick a transparent
+PNG → click → renders aspect-correct) + cross-reader pass.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

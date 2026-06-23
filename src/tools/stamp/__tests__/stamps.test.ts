@@ -2,7 +2,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BUILTIN_STAMPS, customStamp, STAMP_HEIGHT, STAMP_WIDTH, stampRectAt } from "@/tools/stamp/stamps";
+import {
+  BUILTIN_STAMPS,
+  customStamp,
+  imageStamp,
+  STAMP_HEIGHT,
+  STAMP_WIDTH,
+  stampRectAt,
+} from "@/tools/stamp/stamps";
 
 describe("BUILTIN_STAMPS", () => {
   it("every stamp has a name, label, and colour, with unique names", () => {
@@ -20,8 +27,25 @@ describe("BUILTIN_STAMPS", () => {
 describe("customStamp", () => {
   it("carries the text as its label with a default colour", () => {
     const s = customStamp("Paid");
+    expect(s.kind).toBe("text");
     expect(s.label).toBe("Paid");
     expect(s.color).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+});
+
+describe("imageStamp", () => {
+  it("carries the path and derives a name from the file", () => {
+    const s = imageStamp("/Users/me/Signatures/sig.png");
+    expect(s.kind).toBe("image");
+    expect(s.imagePath).toBe("/Users/me/Signatures/sig.png");
+    expect(s.name).toBe("sig.png");
+    expect(s.label).toBeUndefined();
+  });
+
+  it("keeps an optional overlay label", () => {
+    const s = imageStamp("C:\\logos\\logo.png", "DRAFT");
+    expect(s.label).toBe("DRAFT");
+    expect(s.name).toBe("logo.png");
   });
 });
 

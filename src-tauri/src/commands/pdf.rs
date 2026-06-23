@@ -787,6 +787,44 @@ pub async fn pdf_add_stamp(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P3-ANN-006 (P3.C3b) — add an image `/Stamp` from the PNG at `image_path`,
+/// placed aspect-correct around the click `(x, y)` at `height` points tall, with
+/// an optional `text` label. The file is read here (the actor stays byte-pure);
+/// the embed + write run on the actor. Undoable.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_image_stamp(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    x: f32,
+    y: f32,
+    height: f32,
+    image_path: String,
+    text: Option<String>,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let image = std::fs::read(&image_path)
+        .map_err(|e| CommandError::InvalidInput(format!("cannot read {image_path}: {e}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_image_stamp_request(page, x, y, height, image, text, opacity)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-007 — add a measurement annotation (`kind` =
 /// distance|perimeter|area) through `points` (PDF points, 0-based `page`). The
 /// `label` is the pre-computed value (computed against the user's calibration).

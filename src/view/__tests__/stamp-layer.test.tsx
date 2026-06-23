@@ -7,9 +7,10 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 
 vi.mock("@/ipc/stamps", () => ({
   addStamp: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  addImageStamp: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
-import { addStamp } from "@/ipc/stamps";
+import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
@@ -17,13 +18,14 @@ import { StampLayer } from "@/view/stamp-layer";
 
 const DOC = "doc-1";
 const mockAddStamp = vi.mocked(addStamp);
+const mockAddImageStamp = vi.mocked(addImageStamp);
 
 // Letter (612×792), 1× scale → screen (x,y) maps to PDF (x, 792−y).
 const layer = () => (
   <StampLayer documentId={DOC} page={0} displayedWidth={612} displayedHeight={792} scale={1} rotation={0} />
 );
 
-const APPROVED = { name: "Approved", label: "APPROVED", color: "#1e8449" };
+const APPROVED = { kind: "text", name: "Approved", label: "APPROVED", color: "#1e8449" } as const;
 
 afterEach(() => {
   cleanup();
@@ -63,6 +65,24 @@ describe("StampLayer", () => {
       "#1e8449",
       1,
     );
+  });
+
+  // SPEC: P3-ANN-006 (P3.C3b) — an armed image stamp routes to addImageStamp with
+  // the click point (the backend derives the aspect-correct rect).
+  it("drops an armed image stamp at the click point", () => {
+    useStampStore.setState({
+      armed: { kind: "image", name: "sig.png", imagePath: "/tmp/sig.png" },
+    });
+    const { container } = render(layer());
+    fireEvent.pointerDown(container.querySelector("div") as Element, {
+      clientX: 300,
+      clientY: 400,
+      pointerId: 1,
+      button: 0,
+    });
+    // screen (300,400) → PDF (300, 392); height 64, no label.
+    expect(mockAddImageStamp).toHaveBeenCalledWith(DOC, 0, 300, 392, 64, "/tmp/sig.png", null, 1);
+    expect(mockAddStamp).not.toHaveBeenCalled();
   });
 
   it("does nothing when no stamp is armed", () => {

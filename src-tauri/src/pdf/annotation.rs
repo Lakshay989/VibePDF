@@ -12,8 +12,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_ink, add_line, add_measure, add_polygon, add_shape, add_stamp,
-    add_reply, add_text_markup, add_text_note,
+    add_free_text, add_image_stamp, add_ink, add_line, add_measure, add_polygon, add_shape,
+    add_stamp, add_reply, add_text_markup, add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -415,6 +415,45 @@ impl<'a> Edit<PdfDocument<'a>> for StampEdit {
 
     fn label(&self) -> &'static str {
         "stamp"
+    }
+}
+
+/// SPEC: P3-ANN-006 (P3.C3b) — add an image `/Stamp` (a PNG embedded as an Image
+/// `XObject`, placed aspect-correct around the click) with a generated `/AP`.
+pub struct ImageStampEdit {
+    pub page: i32,
+    pub x: f32,
+    pub y: f32,
+    pub height: f32,
+    /// Raw PNG file bytes (read by the command; the actor stays byte-pure).
+    pub image: Vec<u8>,
+    pub text: Option<String>,
+    pub opacity: f32,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for ImageStampEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_image_stamp(
+                bytes,
+                page,
+                self.x,
+                self.y,
+                self.height,
+                &self.image,
+                self.text.as_deref(),
+                self.opacity,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "image-stamp"
     }
 }
 

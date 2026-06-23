@@ -425,6 +425,9 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - **C4b** `/Measure` (Calibrate → measure → ⌘S → reopen → tool stays calibrated
   without re-calibrating; then open the saved PDF in Acrobat and confirm its
   measuring tool reports the same value live — artifact `…verify-measure.pdf`).
+- **C3b** image stamps (Stamp → Image… → pick a transparent PNG → click → renders
+  aspect-correct with transparency, not stretched; ⌘Z; ⌘S, reopen; sidebar lists
+  "Stamp" + ✕ deletes; then cross-reader — artifact `…verify-stamp.pdf`).
 - The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
   verification debt.
 
@@ -519,10 +522,19 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - ✅ **DONE 2026-06-21 (C3a, P3-ANN-006) — stamp library + custom text stamps**
   (`/Stamp` + generated `/AP`, click-to-place via a self-contained `StampLayer`).
   Deferred:
-- **Image stamps (C3b)** — the other half of P3-ANN-006: custom stamps from an
-  **image** (and image+text). Needs image XObject embedding (read file → `/Image`
-  XObject → `Do` in the `/AP`), a bundled default stamp-image set in
-  `src/assets/stamps/`, and aspect-aware placement.
+- ✅ **DONE 2026-06-22 (C3b, P3-ANN-006) — image stamps** (PNG → Image XObject via
+  the `png` decoder, alpha → `/SMask`, aspect-correct placement, optional overlaid
+  label; `pdf/image_xobject.rs`). Deferred:
+- **JPEG + other formats** — PNG only (the stamp format; transparency). JPEG embeds
+  dep-free via `/DCTDecode` + an SOF header parse (DeviceRGB/Gray; CMYK rejected) —
+  a quick follow-up. GIF/BMP/TIFF/WebP not planned.
+- **The bundled default stamp-image set** (`src/assets/stamps/`) — needs asset/
+  resource plumbing to reach the backend; the C3a text library covers built-ins, so
+  this is polish.
+- **Flate-compressing the embedded image** — uncompressed for v1 (a 500×500 RGBA ≈
+  1 MB). `lopdf`'s `Stream::compress` (flate2-backed) is the follow-up.
+- **CMYK / 16-bit images** — rejected with a typed error (16-bit would need a strip
+  or a wider XObject).
 - **No resize / move / rotate of a placed stamp** — fixed default size, dropped
   centred on the click; shared with the markup/shape select-and-edit follow-up.
 - **No persistent custom-stamp manager** — a typed custom label isn't saved for

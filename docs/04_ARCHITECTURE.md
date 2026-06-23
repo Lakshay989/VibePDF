@@ -32,6 +32,7 @@ vibepdf/
 │   │   │   ├── annotation.rs     # Annotations
 │   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
 │   │   │   ├── flatten.rs        # Flatten annotations into page content (P3.E2)
+│   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -198,7 +199,22 @@ click, drops it via `cos::add_stamp`. The result is a `/Stamp` whose generated
 `/AP` draws a coloured border + the bold uppercase label, centred and auto-fit to
 the box (the label width is *estimated* from an average Helvetica-Bold glyph em —
 exact metrics aren't needed for one centred line). `/Name` is informational; the
-`/AP` is what renders. Image stamps (the other half of P3-ANN-006) are C3b.
+`/AP` is what renders.
+
+**C3b adds image stamps.** `StampSpec` is a `text | image` union; the palette's
+**Image…** picker arms an image stamp from a chosen PNG path, and the layer
+branches to `cos::add_image_stamp`. A new **`pdf/image_xobject.rs`** decodes the
+PNG with the `png` crate's *decoder* (already in the tree — the crate we added for
+the render *encoder* ships both; **no new dependency**) and builds a `/Subtype
+/Image` XObject; an alpha channel is split off into a grayscale **`/SMask`** so a
+transparent signature/logo composites correctly. `add_image_stamp` derives an
+**aspect-correct** rect from the click + a default height (clamped to the
+`MediaBox`, never stretched — the frontend can't know the pixels' ratio, the
+backend can) and builds an `/AP` that paints the image with `Do` plus an optional
+overlaid label (the "combination" stamp). It reuses the C3a `/Stamp` dict, so it
+reads back as kind `"stamp"` and inherits list/delete. Image data is uncompressed
+for v1; the path goes to the backend (read there, like merge/insert-from). **PNG
+only** — JPEG and the bundled default *image* set are deferred (BACKLOG).
 
 **Measurements (P3.C4a)** are distance / perimeter / area tools. The maths is
 pure + frontend (`src/tools/measure/measure.ts`): a *calibration* (units per

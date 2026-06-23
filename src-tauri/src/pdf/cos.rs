@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
+use crate::pdf::image_xobject::embed_png;
 
 /// Map an `lopdf` error onto our typed error. Takes the error by value so it
 /// can be used directly as a `.map_err(cos_err)` adapter.
@@ -1625,6 +1626,148 @@ pub fn add_stamp(
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// SPEC: P3-ANN-006 (P3.C3b) — add an **image** `/Stamp`: embed `image` (PNG) as
+/// an Image `XObject`, place it aspect-correct around the click `(x, y)` at
+/// `height` points tall (clamped to the page), and generate an `/AP` that paints
+/// it with `Do` plus an optional `text` label on top (the "combination" stamp).
+/// Reads back as kind `"stamp"`, so list/delete work for free.
+#[allow(clippy::too_many_arguments)]
+pub fn add_image_stamp(
+    bytes: &[u8],
+    page: usize,
+    x: f32,
+    y: f32,
+    height: f32,
+    image: &[u8],
+    text: Option<&str>,
+    opacity: f32,
+) -> Result<Vec<u8>, CommandError> {
+    let opacity = opacity.clamp(0.0, 1.0);
+    let label = text.map(str::trim).filter(|t| !t.is_empty());
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    // Embed the image; its dimensions drive an aspect-correct, page-clamped rect.
+    let img = embed_png(&mut doc, image)?;
+    if img.width == 0 || img.height == 0 {
+        return Err(CommandError::InvalidInput("stamp image has zero size".into()));
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let aspect = img.width as f32 / img.height as f32;
+    let h = height.max(8.0);
+    let w = (h * aspect).max(8.0);
+    let mb = effective_media_box(&doc, page_id).unwrap_or([0.0, 0.0, 612.0, 792.0]);
+    let rect = image_stamp_rect(x, y, w, h, mb);
+
+    let content = image_stamp_content(rect, label);
+
+    // `/AP` resources: the image under `/Im0`, an ExtGState for opacity, and the
+    // bold base-14 font only when there's a label to draw.
+    let mut gs = Dictionary::new();
+    gs.set("ca", Object::Real(opacity));
+    gs.set("CA", Object::Real(opacity));
+    let mut ext = Dictionary::new();
+    ext.set("GS", Object::Dictionary(gs));
+    let mut xobjects = Dictionary::new();
+    xobjects.set("Im0", Object::Reference(img.id));
+    let mut resources = Dictionary::new();
+    resources.set("ExtGState", Object::Dictionary(ext));
+    resources.set("XObject", Object::Dictionary(xobjects));
+    if label.is_some() {
+        let mut font = Dictionary::new();
+        font.set("Type", Object::Name(b"Font".to_vec()));
+        font.set("Subtype", Object::Name(b"Type1".to_vec()));
+        font.set("BaseFont", Object::Name(b"Helvetica-Bold".to_vec()));
+        let mut fonts = Dictionary::new();
+        fonts.set("F1", Object::Dictionary(font));
+        resources.set("Font", Object::Dictionary(fonts));
+    }
+
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_array(rect));
+    ap_dict.set("Resources", Object::Dictionary(resources));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Stamp".to_vec()));
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set("Name", Object::Name(b"Image".to_vec()));
+    annot.set("Rect", rect_array(rect));
+    if let Some(label) = label {
+        annot.set("Contents", Object::string_literal(label));
+    }
+    annot.set("CA", Object::Real(opacity));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("P", Object::Reference(page_id));
+    annot.set("AP", Object::Dictionary(ap));
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Centre a `w`×`h` box on `(x, y)` and clamp it into the media box `[x0,y0,x1,y1]`
+/// (shrinking to fit if the image is larger than the page). `[rx0,ry0,rx1,ry1]`.
+fn image_stamp_rect(x: f32, y: f32, w: f32, h: f32, mb: [f32; 4]) -> [f32; 4] {
+    let pw = (mb[2] - mb[0]).max(1.0);
+    let ph = (mb[3] - mb[1]).max(1.0);
+    let w = w.min(pw);
+    let h = h.min(ph);
+    let rx0 = (x - w / 2.0).clamp(mb[0], mb[2] - w);
+    let ry0 = (y - h / 2.0).clamp(mb[1], mb[3] - h);
+    [rx0, ry0, rx0 + w, ry0 + h]
+}
+
+/// The `/AP` content for an image stamp: paint `/Im0` into `rect` (the image's
+/// unit square mapped onto the rect by `cm`), then optionally a bold `label`
+/// centred on top. Absolute page coords (`BBox == rect`).
+fn image_stamp_content(rect: [f32; 4], label: Option<&str>) -> String {
+    use std::fmt::Write as _;
+    let [x0, y0, x1, y1] = rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    let mut out = String::new();
+    let _ = writeln!(out, "/GS gs");
+    // Map the image (drawn in the unit square) onto the rect, isolated in q/Q so
+    // the scaling matrix doesn't distort the label drawn afterwards.
+    let _ = writeln!(out, "q");
+    let _ = writeln!(out, "{w:.2} 0 0 {h:.2} {x0:.2} {y0:.2} cm");
+    let _ = writeln!(out, "/Im0 Do");
+    let _ = writeln!(out, "Q");
+    if let Some(label) = label {
+        let upper = label.to_uppercase();
+        let count = u16::try_from(upper.chars().count().max(1)).unwrap_or(u16::MAX);
+        let len = f32::from(count);
+        let by_width = (w * 0.9) / (HELV_BOLD_EM * len);
+        let size = by_width.min(h * 0.3).clamp(5.0, 48.0);
+        let text_w = HELV_BOLD_EM * size * len;
+        let tx = x0 + (w - text_w) / 2.0;
+        let baseline = (y0 + y1) / 2.0 - size * 0.34;
+        let _ = writeln!(out, "0 0 0 rg");
+        let _ = writeln!(out, "BT");
+        let _ = writeln!(out, "/F1 {size:.2} Tf");
+        let _ = writeln!(out, "{tx:.2} {baseline:.2} Td");
+        let _ = writeln!(out, "({}) Tj", pdf_escape(&upper));
+        let _ = writeln!(out, "ET");
+    }
+    out
 }
 
 /// A PDF `/Name` token for a stamp — ASCII alphanumerics only (drop spaces and

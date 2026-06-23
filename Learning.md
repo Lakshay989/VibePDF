@@ -5098,6 +5098,66 @@ the calibration survive a save/reopen.
 
 ---
 
+### P3.C3b — image stamps (embedding a raster into a PDF)
+
+#### Problem
+
+C3a stamped *text* (a drawn label). C3b stamps an *image* — a signature, a logo, a
+company seal — which means getting raw pixels **into** the PDF as something a
+renderer can paint, with transparency intact.
+
+#### Concepts learned
+
+- **An image is just another XObject.** Same `Do` operator as flatten's form
+  XObjects, but the XObject is `/Subtype /Image` instead of `/Form`: a stream of
+  raw pixel bytes plus a dictionary saying `/Width`, `/Height`, `/ColorSpace`,
+  `/BitsPerComponent`. The stamp `/AP` paints it with `q <w> 0 0 <h> <x> <y> cm
+  /Im0 Do Q` — the `cm` maps the image's **unit square** (the space `Do` draws an
+  image into) onto the placement rect.
+
+- **Transparency is a second image: the soft mask.** A PDF image's colour data has
+  *no* alpha. Transparency lives in a separate grayscale `/SMask` image (0 =
+  transparent, 255 = opaque). So an RGBA PNG is **split**: the RGB bytes become the
+  colour image, the A bytes become the `/SMask`. De-interleaving `RGBARGBA…` into
+  `RGBRGB…` + `AA…` is the whole trick.
+
+- **The dependency you have is bigger than the one you use.** The plan flagged a
+  PNG-decoder dependency — but the `png` crate we'd added *just for the render
+  encoder* ships a full `Decoder` in the same crate. The Cargo comment said
+  "encoder-only" to describe our *intent*, not a feature gate. Lesson: check what a
+  dependency actually exposes before adding another. `normalize_to_color8()`
+  (EXPAND | STRIP_16) collapses the PNG zoo — palettes, 1/2/4/16-bit — down to a
+  predictable 8-bit RGB(A)/Gray(A), so the embed code handles four cases, not
+  twenty.
+
+- **Aspect ratio belongs where the dimensions are known.** The frontend has a file
+  *path*, not pixels — so it can't know the image is 2:1. The backend decodes,
+  learns the dimensions, and derives the placement rect (height fixed, width =
+  height × aspect, clamped to the page). "Aspect-aware placement" = compute the
+  rect where you know the aspect, not where you started the gesture.
+
+- **A discriminated union keeps one tool bimodal.** `StampSpec` became
+  `{ kind: "text", … } | { kind: "image", … }`; the layer branches on `kind` to
+  call `addStamp` (rect) or `addImageStamp` (click point). One tool, one armed
+  slot, two commit paths — the type system forces the layer to handle both.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/image_xobject.rs` | Sniff + decode PNG (via the `png` decoder), build the Image `XObject`, split alpha → `/SMask`. |
+| `src-tauri/src/pdf/cos.rs` | `add_image_stamp`: embed, aspect-correct + page-clamped rect, `/AP` (`Do` + optional label), `/Stamp` dict. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ImageStampEdit` + `AddImageStamp` + `pdf_add_image_stamp` (reads the file path). |
+| `src/ipc/stamps.ts`, `src/tools/stamp/stamps.ts`, `StampPalette.tsx`, `src/view/stamp-layer.tsx` | `addImageStamp`; `StampSpec` union + `imageStamp`; the Image… picker; the layer's image branch. |
+| `image_xobject` units, `stamp.rs` image cases, FE `stamps`/`stamp-layer` | Decode + SMask split + aspect rect + round-trip + the UI branch. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §8.9.5 (Image XObjects), §11.6.5.2 (soft-mask images / `/SMask`), §8.10.1 (`Do`).
+- The `png` crate's `Decoder` + `Transformations::normalize_to_color8`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

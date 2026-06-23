@@ -8,13 +8,13 @@
 
 import { type PointerEvent as ReactPointerEvent } from "react";
 
-import { addStamp } from "@/ipc/stamps";
+import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, screenToPdf } from "@/tools/_framework";
-import { stampRectAt } from "@/tools/stamp/stamps";
+import { IMAGE_STAMP_HEIGHT, stampRectAt } from "@/tools/stamp/stamps";
 
 export interface StampLayerProps {
   documentId: string;
@@ -60,8 +60,30 @@ export function StampLayer({
     if (!active || !armed || e.button !== 0) return;
     const r = e.currentTarget.getBoundingClientRect();
     const pdf = screenToPdf({ x: e.clientX - r.left, y: e.clientY - r.top }, geo);
-    const rect = stampRectAt(pdf.x, pdf.y, geo.width, geo.height);
-    addStamp(documentId, page, rect, armed.label, armed.name, armed.color, options.opacity)
+    // Image stamps place aspect-correct around the click (the backend derives the
+    // rect from the image's ratio); text stamps drop a fixed-size box.
+    const commit =
+      armed.kind === "image"
+        ? addImageStamp(
+            documentId,
+            page,
+            pdf.x,
+            pdf.y,
+            IMAGE_STAMP_HEIGHT,
+            armed.imagePath,
+            armed.label ?? null,
+            options.opacity,
+          )
+        : addStamp(
+            documentId,
+            page,
+            stampRectAt(pdf.x, pdf.y, geo.width, geo.height),
+            armed.label,
+            armed.name,
+            armed.color,
+            options.opacity,
+          );
+    commit
       .then((h) => {
         bumpEpoch(documentId);
         setHistory(documentId, h);

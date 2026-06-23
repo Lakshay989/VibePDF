@@ -1,9 +1,12 @@
-// SPEC: P3-ANN-006 (P3.C3a) — the built-in stamp library + placement geometry.
-// Pure data/maths so it's testable without React. A stamp is a coloured label
-// rendered as a `/Stamp` annotation's `/AP` on the Rust side; here we only carry
-// the spec and compute where a click drops the box. Image stamps are C3b.
+// SPEC: P3-ANN-006 (P3.C3a/C3b) — the built-in stamp library + placement geometry.
+// Pure data/maths so it's testable without React. A stamp is rendered as a
+// `/Stamp` annotation's `/AP` on the Rust side; here we only carry the spec and
+// compute where a click drops the box. A stamp is either a coloured text label
+// (C3a) or an embedded image (C3b, optionally with a label).
 
-export interface StampSpec {
+/** A coloured text rubber-stamp (C3a). */
+export interface TextStampSpec {
+  kind: "text";
   /** A PDF `/Name` token (informational) + the palette id. */
   name: string;
   /** The visible label (also the annotation's `/Contents`). */
@@ -12,21 +15,38 @@ export interface StampSpec {
   color: string;
 }
 
+/** An image stamp from a picked PNG (C3b), optionally with an overlaid label. */
+export interface ImageStampSpec {
+  kind: "image";
+  /** Display id (the file's base name). */
+  name: string;
+  /** Absolute path to the PNG; the backend reads + embeds it. */
+  imagePath: string;
+  /** Optional label drawn over the image (the "combination" stamp). */
+  label?: string;
+}
+
+export type StampSpec = TextStampSpec | ImageStampSpec;
+
+/** Default placement height (PDF points) for an image stamp; width follows the
+ *  image's aspect ratio, computed on the Rust side. */
+export const IMAGE_STAMP_HEIGHT = 64;
+
 const RED = "#c0392b";
 const GREEN = "#1e8449";
 const BLUE = "#1f6feb";
 const GRAY = "#555555";
 
 /** The built-in rubber-stamp library. */
-export const BUILTIN_STAMPS: readonly StampSpec[] = [
-  { name: "Approved", label: "APPROVED", color: GREEN },
-  { name: "Reviewed", label: "REVIEWED", color: GREEN },
-  { name: "Received", label: "RECEIVED", color: BLUE },
-  { name: "Final", label: "FINAL", color: BLUE },
-  { name: "Confidential", label: "CONFIDENTIAL", color: RED },
-  { name: "NotApproved", label: "NOT APPROVED", color: RED },
-  { name: "Void", label: "VOID", color: RED },
-  { name: "Draft", label: "DRAFT", color: GRAY },
+export const BUILTIN_STAMPS: readonly TextStampSpec[] = [
+  { kind: "text", name: "Approved", label: "APPROVED", color: GREEN },
+  { kind: "text", name: "Reviewed", label: "REVIEWED", color: GREEN },
+  { kind: "text", name: "Received", label: "RECEIVED", color: BLUE },
+  { kind: "text", name: "Final", label: "FINAL", color: BLUE },
+  { kind: "text", name: "Confidential", label: "CONFIDENTIAL", color: RED },
+  { kind: "text", name: "NotApproved", label: "NOT APPROVED", color: RED },
+  { kind: "text", name: "Void", label: "VOID", color: RED },
+  { kind: "text", name: "Draft", label: "DRAFT", color: GRAY },
 ];
 
 /** Default stamp box size in PDF points. */
@@ -34,8 +54,15 @@ export const STAMP_WIDTH = 150;
 export const STAMP_HEIGHT = 46;
 
 /** A custom text stamp (default colour red). */
-export function customStamp(text: string, color: string = RED): StampSpec {
-  return { name: "Custom", label: text, color };
+export function customStamp(text: string, color: string = RED): TextStampSpec {
+  return { kind: "text", name: "Custom", label: text, color };
+}
+
+/** An image stamp from a picked PNG `path`, with an optional overlaid `label`.
+ *  `name` defaults to the file's base name. */
+export function imageStamp(path: string, label?: string): ImageStampSpec {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  return { kind: "image", name: base, imagePath: path, ...(label ? { label } : {}) };
 }
 
 /**

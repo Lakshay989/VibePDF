@@ -39,8 +39,8 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit, ImportXfdfEdit,
-    InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
+    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit, ImageStampEdit,
+    ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
     ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{
@@ -321,6 +321,18 @@ pub enum Message {
         text: String,
         name: String,
         color: String,
+        opacity: f32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P3-ANN-006 (P3.C3b) — add an image `/Stamp` (PNG bytes embedded as an
+    /// Image `XObject`). Undoable; marks dirty.
+    AddImageStamp {
+        page: i32,
+        x: f32,
+        y: f32,
+        height: f32,
+        image: Vec<u8>,
+        text: Option<String>,
         opacity: f32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
@@ -1235,6 +1247,42 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P3-ANN-006 (P3.C3b) — add an image stamp from PNG `image` bytes.
+    /// Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_image_stamp(
+        &self,
+        page: i32,
+        x: f32,
+        y: f32,
+        height: f32,
+        image: Vec<u8>,
+        text: Option<String>,
+        opacity: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_image_stamp_request(page, x, y, height, image, text, opacity)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_image_stamp_request(
+        &self,
+        page: i32,
+        x: f32,
+        y: f32,
+        height: f32,
+        image: Vec<u8>,
+        text: Option<String>,
+        opacity: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddImageStamp { page, x, y, height, image, text, opacity, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 — add a measurement. Await-holding for tests.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
@@ -2009,6 +2057,18 @@ fn run_worker(
             }
             Message::AddStamp { page, rect, text, name, color, opacity, reply } => {
                 let edit = StampEdit { page, rect, text, name, color, opacity };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddImageStamp { page, x, y, height, image, text, opacity, reply } => {
+                let edit = ImageStampEdit { page, x, y, height, image, text, opacity };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
