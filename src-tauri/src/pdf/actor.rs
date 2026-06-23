@@ -250,6 +250,7 @@ pub enum Message {
         color: String,
         bold: bool,
         italic: bool,
+        underline: bool,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-003 — add a free-text box at `rect` on `page` with a
@@ -263,6 +264,7 @@ pub enum Message {
         color: String,
         bold: bool,
         italic: bool,
+        underline: bool,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -966,9 +968,11 @@ impl DocumentActorHandle {
         color: String,
         bold: bool,
         italic: bool,
+        underline: bool,
     ) -> Result<HistoryState, CommandError> {
-        let rx =
-            self.update_free_text_request(nm, text, font_family, font_size, color, bold, italic)?;
+        let rx = self.update_free_text_request(
+            nm, text, font_family, font_size, color, bold, italic, underline,
+        )?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
@@ -983,6 +987,7 @@ impl DocumentActorHandle {
         color: String,
         bold: bool,
         italic: bool,
+        underline: bool,
     ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -994,6 +999,7 @@ impl DocumentActorHandle {
                 color,
                 bold,
                 italic,
+                underline,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -1012,9 +1018,11 @@ impl DocumentActorHandle {
         color: String,
         bold: bool,
         italic: bool,
+        underline: bool,
     ) -> Result<HistoryState, CommandError> {
-        let rx =
-            self.add_free_text_request(page, rect, text, font_family, font_size, color, bold, italic)?;
+        let rx = self.add_free_text_request(
+            page, rect, text, font_family, font_size, color, bold, italic, underline,
+        )?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
@@ -1030,6 +1038,7 @@ impl DocumentActorHandle {
         color: String,
         bold: bool,
         italic: bool,
+        underline: bool,
     ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -1042,6 +1051,7 @@ impl DocumentActorHandle {
                 color,
                 bold,
                 italic,
+                underline,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -1946,6 +1956,7 @@ fn run_worker(
                 color,
                 bold,
                 italic,
+                underline,
                 reply,
             } => {
                 let edit = UpdateFreeTextEdit {
@@ -1956,6 +1967,7 @@ fn run_worker(
                     color,
                     bold,
                     italic,
+                    underline,
                 };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
@@ -1976,6 +1988,7 @@ fn run_worker(
                 color,
                 bold,
                 italic,
+                underline,
                 reply,
             } => {
                 let edit = FreeTextEdit {
@@ -1987,6 +2000,7 @@ fn run_worker(
                     color,
                     bold,
                     italic,
+                    underline,
                 };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {

@@ -5158,6 +5158,69 @@ renderer can paint, with transparency intact.
 
 ---
 
+### P3.B3b — free-text underline, auto-wrap, and double-click re-edit
+
+#### Problem
+
+B3a drew uniform-style free text but only honoured *manual* line breaks and had
+no underline, and re-editing meant the sidebar pencil. B3b makes the box behave
+like a text box: long lines wrap, you can underline, and double-clicking a box
+reopens it.
+
+#### Concepts learned
+
+- **Underline is a drawn rule, not a font property.** Base-14 PDF fonts have no
+  "underline" — so after the text (`BT … Tj … ET`) we stroke a thin line under
+  each rendered line (`m … l S`, *outside* `BT/ET` since those are path ops). The
+  width of each rule is the same estimate used for wrapping. PDF has no standard
+  per-annotation "underline" flag either, so it's persisted in a **private
+  `/Underline` key** — readers ignore the key but still show the `/AP` rule; only
+  *our* re-edit reads the key back. (B3c will move this into the standard `/DS`.)
+
+- **Wrapping needs one source of truth.** The box auto-grows to fit its text — but
+  if "how tall" used a different line-count than "what's drawn," the box would clip
+  or gap. So `wrap_lines` is computed **once** and consumed by *both*
+  `grow_free_text_rect` (height) and the `/AP` content (the drawn lines). Width is
+  estimated as `chars × size × em`, with a per-family average em (Courier ≈0.6,
+  proportional ≈0.5) — deliberately a slight *under*-estimate so it wraps a hair
+  early rather than overflowing the `BBox`-clipped box. Real glyph metrics (AFM)
+  would be exact; the estimate is the honest, dependency-free 80%.
+
+- **Hit-testing canvas-drawn annotations.** A committed free-text box renders on
+  the PDF.js *canvas*, not as a DOM node — there's nothing to attach a
+  double-click to. So the overlay reads the page's free-text rects
+  (`read_annotations`, on the edit epoch) and renders a transparent
+  `pointer-events:auto` **hit-zone** per box. A child can opt back into pointer
+  events even though the parent layer is `pointer-events:none` when idle — so text
+  selection still works everywhere except over a box. A double-click on a zone
+  posts the *same* edit request the sidebar ✎ already uses — reusing D1e's whole
+  read-back → editor flow for free.
+
+- **Widening a 5-call signature is a paper-cut, not a wound, when caught early.**
+  Adding `underline` rippled through `add_free_text`/`update_free_text` and their
+  edit/actor/command/IPC layers plus ~25 test call-sites. A balanced-paren script
+  patched the calls — but **trailing commas in multi-line calls** turned
+  `false,\n)` into `false, , false)` (a syntax error the compiler caught
+  instantly). The lesson: mechanical edits want a compile gate immediately after,
+  not at the end.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_free_text`/`update_free_text` +`underline`; `wrap_lines` + `font_avg_em`; underline `/AP` rule; `/Underline` read-back; `FreeTextData` +`underline`. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `src/ipc/freetext.ts` | Thread `underline` through the edit/actor/command/IPC chain. |
+| `src/tools/_framework/types.ts`, `state/tool-store.ts`, `app/MarkupToolbar.tsx` | `options.underline` + the **U** toolbar toggle. |
+| `src/view/free-text-layer.tsx` | Underline preview + commit; per-box double-click hit-zones → edit request. |
+| `cos.rs` (+2), `freetext` IPC, `free-text-layer` tests | Underline draws + round-trips, long-line wrap + grow, double-click re-edit. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.7.4.3 (variable text / `/DA`) and §12.7.3.3 (rich text `/RC`, `/DS` — the deferred B3c).
+- Greedy word-wrap; font metrics (AFM widths) vs average-advance estimation.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

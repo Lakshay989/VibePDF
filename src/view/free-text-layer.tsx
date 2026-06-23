@@ -9,9 +9,10 @@
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
-import { addFreeText, type FreeTextRect, updateFreeText } from "@/ipc/freetext";
+import { readAnnotations } from "@/ipc/annotations";
+import { addFreeText, type FreeTextRect, readFreeText, updateFreeText } from "@/ipc/freetext";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
-import { useEditEpochStore } from "@/state/edit-epoch-store";
+import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
@@ -58,11 +59,16 @@ export function FreeTextLayer({
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const editRequest = useAnnotationEditStore((s) => s.editing);
   const clearEdit = useAnnotationEditStore((s) => s.clearEdit);
+  const requestEdit = useAnnotationEditStore((s) => s.requestEdit);
+  const epoch = useDocEpoch(documentId);
 
   const [start, setStart] = useState<ScreenPoint | null>(null);
   const [current, setCurrent] = useState<ScreenPoint | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [text, setText] = useState("");
+  // SPEC: P3-ANN-013 (P3.B3b) — this page's free-text boxes, for double-click
+  // re-edit hit-testing. Re-read on every edit epoch so it tracks add/update/undo.
+  const [boxes, setBoxes] = useState<{ nm: string; rect: FreeTextRect }[]>([]);
 
   const placing = activeTool === "free-text";
 
@@ -137,6 +143,7 @@ export function FreeTextLayer({
       color: data.color,
       bold: data.bold,
       italic: data.italic,
+      underline: data.underline,
     });
     setEditor({
       rect: {
@@ -150,6 +157,34 @@ export function FreeTextLayer({
     });
     clearEdit();
   }, [editRequest, page, scale, rotation, displayedWidth, displayedHeight, setOptions, clearEdit]);
+
+  // SPEC: P3-ANN-013 (P3.B3b) — track this page's free-text boxes for double-click.
+  useEffect(() => {
+    let cancelled = false;
+    readAnnotations(documentId)
+      .then((rows) => {
+        if (cancelled) return;
+        setBoxes(
+          rows
+            .filter((a) => a.kind === "freetext" && a.page === page)
+            .map((a) => ({ nm: a.id, rect: a.rect as FreeTextRect })),
+        );
+      })
+      .catch((err: unknown) => console.warn("read free-text boxes failed", documentId, err));
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, page, epoch]);
+
+  // SPEC: P3-ANN-013 (P3.B3b) — double-click a committed box → open it pre-filled
+  // (the same edit request the sidebar ✎ posts).
+  const reEdit = (nm: string) => {
+    readFreeText(documentId, nm)
+      .then((data) => {
+        if (data) requestEdit({ nm, page, data });
+      })
+      .catch((err: unknown) => console.warn("read free-text failed", documentId, err));
+  };
 
   const cancel = () => {
     setEditor(null);
@@ -178,6 +213,7 @@ export function FreeTextLayer({
           options.color,
           options.bold,
           options.italic,
+          options.underline,
         )
       : addFreeText(
           documentId,
@@ -189,6 +225,7 @@ export function FreeTextLayer({
           options.color,
           options.bold,
           options.italic,
+          options.underline,
         );
     promise.then(done).catch(fail);
   };
@@ -214,6 +251,32 @@ export function FreeTextLayer({
           style={{ left: preview.left, top: preview.top, width: preview.width, height: preview.height }}
         />
       ) : null}
+
+      {/* SPEC: P3-ANN-013 (P3.B3b) — double-click a committed box to re-edit. Only
+          when idle (no tool, no open editor); each zone opts back into pointer
+          events under the otherwise pass-through layer. */}
+      {!placing && !editor
+        ? boxes.map((b) => {
+            const tl = pdfToScreen({ page, x: b.rect[0], y: b.rect[3] }, geo);
+            const br = pdfToScreen({ page, x: b.rect[2], y: b.rect[1] }, geo);
+            return (
+              <div
+                key={b.nm}
+                className="absolute"
+                title="Double-click to edit"
+                onDoubleClick={() => reEdit(b.nm)}
+                style={{
+                  left: Math.min(tl.x, br.x),
+                  top: Math.min(tl.y, br.y),
+                  width: Math.abs(br.x - tl.x),
+                  height: Math.abs(br.y - tl.y),
+                  pointerEvents: "auto",
+                  cursor: "text",
+                }}
+              />
+            );
+          })
+        : null}
 
       {editor ? (
         <div
@@ -251,6 +314,7 @@ export function FreeTextLayer({
               fontSize: `${options.fontSize * scale}px`,
               fontWeight: options.bold ? 700 : 400,
               fontStyle: options.italic ? "italic" : "normal",
+              textDecoration: options.underline ? "underline" : "none",
               lineHeight: 1.2,
               background: "rgba(255,255,255,0.85)",
             }}

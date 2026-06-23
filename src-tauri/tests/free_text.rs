@@ -59,6 +59,7 @@ async fn free_text_persists_through_save() {
             "#1133ff".into(),
             true,
             false,
+            false,
         )
         .await
         .expect("add free text");
@@ -79,7 +80,7 @@ async fn free_text_undo_removes_it() {
     let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
 
     handle
-        .add_free_text(0, [50.0, 50.0, 250.0, 90.0], "x".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false)
+        .add_free_text(0, [50.0, 50.0, 250.0, 90.0], "x".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false, false)
         .await
         .expect("add");
     let after_undo = handle.undo().await.expect("undo");
@@ -97,7 +98,7 @@ async fn free_text_rejects_empty_rect() {
     let id = uuid::Uuid::new_v4();
     let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
     let err = handle
-        .add_free_text(0, [10.0, 10.0, 10.0, 40.0], "x".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false)
+        .add_free_text(0, [10.0, 10.0, 10.0, 40.0], "x".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false, false)
         .await;
     assert!(err.is_err(), "an empty rect is rejected");
     drop(handle);
@@ -109,27 +110,49 @@ async fn free_text_rejects_empty_rect() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn free_text_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-freetext.pdf");
+    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-freetext-b3b.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }
     let id = uuid::Uuid::new_v4();
     let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+    // Bold + manual line break (B3a baseline).
     handle
         .add_free_text(
             0,
-            [100.0, 600.0, 360.0, 700.0],
+            [80.0, 660.0, 360.0, 720.0],
             "VibePDF free text — P3.B3a.\nLine two, Times Bold 18.".into(),
             "Times".into(),
             18.0,
             "#cc1111".into(),
             true,
             false,
+            false,
         )
         .await
-        .expect("add free text");
+        .expect("bold box");
+    // Underlined (B3b).
+    handle
+        .add_free_text(0, [80.0, 600.0, 360.0, 640.0], "Underlined Helvetica 16.".into(), "Helvetica".into(), 16.0, "#1133cc".into(), false, false, true)
+        .await
+        .expect("underlined box");
+    // A long single line (no manual breaks) — must auto-wrap to the box width (B3b).
+    handle
+        .add_free_text(
+            0,
+            [80.0, 480.0, 300.0, 580.0],
+            "This is a deliberately long run of text with no manual line breaks, so the appearance must wrap it to the box width.".into(),
+            "Helvetica".into(),
+            12.0,
+            "#000000".into(),
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("wrapping box");
     handle.save(Some(out.clone())).await.expect("save");
-    eprintln!("wrote free-text verification artifact to {}", out.display());
+    eprintln!("wrote free-text B3b verification artifact to {}", out.display());
 
     drop(handle);
 }

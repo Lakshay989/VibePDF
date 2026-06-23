@@ -42,6 +42,7 @@ beforeEach(() => {
       fontSize: 14,
       bold: false,
       italic: false,
+      underline: false,
     },
   });
   useMeasureStore.setState({ kind: "distance", calibration: {}, calibrating: false, pendingRefPoints: null });

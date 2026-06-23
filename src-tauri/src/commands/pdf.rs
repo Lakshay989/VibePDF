@@ -566,6 +566,7 @@ pub async fn pdf_update_free_text(
     color: String,
     bold: bool,
     italic: bool,
+    underline: bool,
 ) -> Result<HistoryState, CommandError> {
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
@@ -577,7 +578,7 @@ pub async fn pdf_update_free_text(
         let handle = guard
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
-        handle.update_free_text_request(nm, text, font_family, font_size, color, bold, italic)?
+        handle.update_free_text_request(nm, text, font_family, font_size, color, bold, italic, underline)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
@@ -598,6 +599,7 @@ pub async fn pdf_add_free_text(
     color: String,
     bold: bool,
     italic: bool,
+    underline: bool,
 ) -> Result<HistoryState, CommandError> {
     if page < 0 {
         return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
@@ -612,7 +614,7 @@ pub async fn pdf_add_free_text(
         let handle = guard
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
-        handle.add_free_text_request(page, rect, text, font_family, font_size, color, bold, italic)?
+        handle.add_free_text_request(page, rect, text, font_family, font_size, color, bold, italic, underline)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

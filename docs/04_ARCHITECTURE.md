@@ -161,6 +161,18 @@ canvas takes over. So the overlay catalogue is now: notes (persistent overlay,
 no `/AP`), free-text (transient editor overlay, canvas-rendered `/AP`), markup
 (no overlay, canvas-rendered `/AP`).
 
+**B3b** rounds out the box: **underline** (a stroked rule drawn under each line in
+the `/AP`, *outside* `BT/ET`; persisted in a private `/Underline` key so re-edit
+recovers it — readers ignore the key but still show the rule), **auto word-wrap**
+(a single `wrap_lines` — width estimated as `chars × size × per-family-em` —
+feeds *both* the box's grow-to-fit height and the drawn `/AP` lines, so they can't
+disagree), and **double-click re-edit** (the otherwise-`pointer-events:none`
+overlay renders a transparent hit-zone per committed box, read from
+`read_annotations` on the edit epoch; a double-click posts the same
+`annotation-edit-store` request the sidebar ✎ uses, reusing the D1e read-back →
+editor flow). Rich text (`/RC` + `/DS` mixed-style runs — a runs editor + a
+multi-style `/AP`) is **deferred to B3c**.
+
 **Lines + arrows (P3.C1b₁)** are the first *points-based* shape: `cos::add_line`
 writes a `/Line` (`/L [x1 y1 x2 y2]`, `/C`, `/BS /W`, `/NM`, plus `/LE [/None
 /OpenArrow]` for an arrow) with a generated `/AP` that strokes the segment and an

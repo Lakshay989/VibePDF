@@ -40,6 +40,7 @@ beforeEach(() => {
       fontSize: 14,
       bold: false,
       italic: false,
+      underline: false,
     },
   });
   useEditEpochStore.setState({ byDoc: {}, edited: {} });

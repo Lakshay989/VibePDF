@@ -209,7 +209,8 @@ impl<'a> Edit<PdfDocument<'a>> for DeleteAnnotationEdit {
 }
 
 /// SPEC: P3-ANN-003 — add a free-text annotation (a `/FreeText` box with a
-/// generated `/AP`) at `rect` on `page`. Uniform style; underline/rich text B3b.
+/// generated `/AP`) at `rect` on `page`. Uniform style + underline + auto-wrap
+/// (P3.B3b); per-run rich text is B3c.
 pub struct FreeTextEdit {
     pub page: i32,
     pub rect: [f32; 4],
@@ -219,6 +220,7 @@ pub struct FreeTextEdit {
     pub color: String,
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
 }
 
 impl<'a> Edit<PdfDocument<'a>> for FreeTextEdit {
@@ -239,6 +241,7 @@ impl<'a> Edit<PdfDocument<'a>> for FreeTextEdit {
                 &self.color,
                 self.bold,
                 self.italic,
+                self.underline,
             )
         })
     }
@@ -508,6 +511,7 @@ pub struct UpdateFreeTextEdit {
     pub color: String,
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
 }
 
 impl<'a> Edit<PdfDocument<'a>> for UpdateFreeTextEdit {
@@ -525,6 +529,7 @@ impl<'a> Edit<PdfDocument<'a>> for UpdateFreeTextEdit {
                 &self.color,
                 self.bold,
                 self.italic,
+                self.underline,
             )
         })
     }

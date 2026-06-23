@@ -19,6 +19,7 @@ const DEFAULT_OPTIONS: ToolOptions = {
   fontSize: 14,
   bold: false,
   italic: false,
+  underline: false,
 };
 
 interface ToolState {

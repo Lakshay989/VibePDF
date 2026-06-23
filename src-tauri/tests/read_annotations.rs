@@ -20,7 +20,7 @@ async fn reads_all_through_actor() {
 
     handle.add_note("n".into(), 0, 100.0, 700.0, "hi".into(), "Ada".into()).await.expect("note");
     handle
-        .add_free_text(0, [50.0, 400.0, 250.0, 440.0], "boxed".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false)
+        .add_free_text(0, [50.0, 400.0, 250.0, 440.0], "boxed".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false, false)
         .await
         .expect("free text");
 
@@ -78,7 +78,7 @@ async fn writes_sidebar_demo_artifact() {
         .await
         .expect("note");
     handle
-        .add_free_text(0, [80.0, 540.0, 360.0, 600.0], "A free-text box.".into(), "Times".into(), 16.0, "#1133cc".into(), true, false)
+        .add_free_text(0, [80.0, 540.0, 360.0, 600.0], "A free-text box.".into(), "Times".into(), 16.0, "#1133cc".into(), true, false, false)
         .await
         .expect("free text");
 

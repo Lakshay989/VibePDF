@@ -340,7 +340,7 @@ fn first_annot_with_ap(bytes: &[u8]) -> (Dictionary, String, String) {
 #[test]
 fn cos_add_free_text_writes_annot_with_ap() {
     let bytes = fixture_bytes("hello.pdf");
-    let out = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 700.0], "Hello", "Helvetica", 14.0, "#ff0000", false, false)
+    let out = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 700.0], "Hello", "Helvetica", 14.0, "#ff0000", false, false, false)
         .expect("free text");
 
     assert_eq!(pdfium_page_count(&out), 1);
@@ -363,7 +363,7 @@ fn cos_free_text_font_variants() {
         ("Times", false, false, "Times-Roman"),
         ("Courier", false, true, "Courier-Oblique"),
     ] {
-        let out = add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", family, 12.0, "#000000", bold, italic)
+        let out = add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", family, 12.0, "#000000", bold, italic, false)
             .unwrap_or_else(|e| panic!("{family} b={bold} i={italic}: {e}"));
         let (_, _, base_font) = first_annot_with_ap(&out);
         assert_eq!(base_font, expected, "{family} bold={bold} italic={italic}");
@@ -373,7 +373,7 @@ fn cos_free_text_font_variants() {
 #[test]
 fn cos_free_text_escapes_and_splits_lines() {
     let bytes = fixture_bytes("hello.pdf");
-    let out = add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 80.0], "a(b)\\c\nsecond", "Helvetica", 12.0, "#000000", false, false)
+    let out = add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 80.0], "a(b)\\c\nsecond", "Helvetica", 12.0, "#000000", false, false, false)
         .expect("free text");
     let (_, content, _) = first_annot_with_ap(&out);
     // Parens + backslash escaped in the literal string.
@@ -389,7 +389,7 @@ fn cos_free_text_escapes_and_splits_lines() {
 fn cos_free_text_grows_box_to_fit_large_font() {
     let bytes = fixture_bytes("hello.pdf");
     // 48pt over two lines in a 20pt-tall box (y 680..700) would clip badly.
-    let out = add_free_text(&bytes, 0, [100.0, 680.0, 300.0, 700.0], "Big\nText", "Helvetica", 48.0, "#000000", false, false)
+    let out = add_free_text(&bytes, 0, [100.0, 680.0, 300.0, 700.0], "Big\nText", "Helvetica", 48.0, "#000000", false, false, false)
         .expect("free text");
     let doc = Document::load_mem(&out).expect("load");
     let page_id = *doc.get_pages().get(&1).unwrap();
@@ -414,7 +414,7 @@ fn cos_free_text_grows_box_to_fit_large_font() {
 #[test]
 fn cos_read_free_text_round_trips_style() {
     let bytes = fixture_bytes("hello.pdf");
-    let out = add_free_text(&bytes, 0, [100.0, 560.0, 300.0, 640.0], "Hi\nThere", "Times", 18.0, "#cc1133", true, false)
+    let out = add_free_text(&bytes, 0, [100.0, 560.0, 300.0, 640.0], "Hi\nThere", "Times", 18.0, "#cc1133", true, false, false)
         .expect("free text");
     let nm = read_annotations(&out).expect("read")[0].id.clone();
 
@@ -428,16 +428,59 @@ fn cos_read_free_text_round_trips_style() {
     assert!(read_free_text(&out, "nope").expect("read").is_none());
 }
 
+/// SPEC: P3-ANN-003 (P3.B3b) — underline draws a rule in the `/AP` (stroke ops)
+/// and round-trips through read_free_text via the private `/Underline` key.
+#[test]
+fn cos_free_text_underline_draws_and_round_trips() {
+    let bytes = fixture_bytes("hello.pdf");
+    let on = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 640.0], "Underlined", "Helvetica", 14.0, "#000000", false, false, true)
+        .expect("free text");
+    let (_, content, _) = first_annot_with_ap(&on);
+    // The underline is a stroked rule: a stroke colour (`RG`) + a line (`l S`),
+    // neither of which the plain (fill-only) text path emits.
+    assert!(content.contains("RG") && content.contains("l S"), "underline rule drawn: {content}");
+
+    let nm = read_annotations(&on).expect("read")[0].id.clone();
+    assert!(read_free_text(&on, &nm).expect("read").expect("some").underline, "underline round-trips");
+
+    // Without underline there is no stroke rule, and the read-back is false.
+    let off = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 640.0], "Plain", "Helvetica", 14.0, "#000000", false, false, false)
+        .expect("free text");
+    let (_, off_content, _) = first_annot_with_ap(&off);
+    assert!(!off_content.contains("RG"), "no underline → no stroke rule: {off_content}");
+    let off_nm = read_annotations(&off).expect("read")[0].id.clone();
+    assert!(!read_free_text(&off, &off_nm).expect("read").expect("some").underline);
+}
+
+/// SPEC: P3-ANN-003 (P3.B3b) — a long line auto-wraps to the box width: the `/AP`
+/// draws multiple lines and the box grows taller than a single line.
+#[test]
+fn cos_free_text_wraps_long_line() {
+    let bytes = fixture_bytes("hello.pdf");
+    // A narrow (~130pt) box; the long single line (no `\n`) must wrap.
+    let long = "alpha beta gamma delta epsilon zeta eta theta iota";
+    let out = add_free_text(&bytes, 0, [100.0, 600.0, 230.0, 700.0], long, "Helvetica", 12.0, "#000000", false, false, false)
+        .expect("free text");
+    let (annot, content, _) = first_annot_with_ap(&out);
+    // No manual newline, yet the appearance shows more than one drawn line.
+    assert!(content.matches("Tj").count() >= 2, "long line wrapped to multiple /AP lines: {content}");
+
+    // The box grew downward to fit the wrapped lines (more than one 12pt line).
+    let rect = annot.get(b"Rect").and_then(Object::as_array).unwrap();
+    let (y0, y1) = (num(&rect[1]), num(&rect[3]));
+    assert!(y1 - y0 > 12.0 * 1.2 + 6.0, "box grew for wrapped lines: height {}", y1 - y0);
+}
+
 /// SPEC: P3-ANN-013 — update_free_text rewrites text + style in place and keeps
 /// the same `/NM` (so the sidebar selection / identity survives).
 #[test]
 fn cos_update_free_text_changes_text_keeps_nm() {
     let bytes = fixture_bytes("hello.pdf");
-    let out = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 640.0], "before", "Helvetica", 14.0, "#000000", false, false)
+    let out = add_free_text(&bytes, 0, [100.0, 600.0, 300.0, 640.0], "before", "Helvetica", 14.0, "#000000", false, false, false)
         .expect("add");
     let nm = read_annotations(&out).expect("read")[0].id.clone();
 
-    let updated = update_free_text(&out, &nm, "after edited", "Times", 20.0, "#ff0000", false, true)
+    let updated = update_free_text(&out, &nm, "after edited", "Times", 20.0, "#ff0000", false, true, false)
         .expect("update");
     assert_eq!(pdfium_page_count(&updated), 1);
 
@@ -455,15 +498,15 @@ fn cos_update_free_text_changes_text_keeps_nm() {
 
 #[test]
 fn cos_update_free_text_rejects_unknown_nm() {
-    let bytes = add_free_text(&fixture_bytes("hello.pdf"), 0, [10.0, 10.0, 200.0, 60.0], "x", "Helvetica", 12.0, "#000000", false, false).unwrap();
-    assert!(update_free_text(&bytes, "no-such-nm", "y", "Helvetica", 12.0, "#000000", false, false).is_err());
+    let bytes = add_free_text(&fixture_bytes("hello.pdf"), 0, [10.0, 10.0, 200.0, 60.0], "x", "Helvetica", 12.0, "#000000", false, false, false).unwrap();
+    assert!(update_free_text(&bytes, "no-such-nm", "y", "Helvetica", 12.0, "#000000", false, false, false).is_err());
 }
 
 #[test]
 fn cos_free_text_rejects_empty_rect_and_bad_font() {
     let bytes = fixture_bytes("hello.pdf");
-    assert!(add_free_text(&bytes, 0, [10.0, 10.0, 10.0, 40.0], "x", "Helvetica", 12.0, "#000000", false, false).is_err());
-    assert!(add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", "Comic Sans", 12.0, "#000000", false, false).is_err());
+    assert!(add_free_text(&bytes, 0, [10.0, 10.0, 10.0, 40.0], "x", "Helvetica", 12.0, "#000000", false, false, false).is_err());
+    assert!(add_free_text(&bytes, 0, [10.0, 10.0, 200.0, 40.0], "x", "Comic Sans", 12.0, "#000000", false, false, false).is_err());
 }
 
 /// The single annotation dict on page 1 + its `/AP /N` stream content (no font
@@ -821,7 +864,7 @@ fn cos_reads_all_annotation_kinds() {
     let with_hl = add_text_markup(&fixture_bytes("hello.pdf"), 0, "highlight", &quads, "#ffd400", 1.0)
         .expect("markup");
     let with_note = add_text_note(&with_hl, "n1", 0, 100.0, 600.0, "my note", "Ada").expect("note");
-    let all = add_free_text(&with_note, 0, [50.0, 400.0, 250.0, 440.0], "boxed", "Helvetica", 12.0, "#000000", false, false)
+    let all = add_free_text(&with_note, 0, [50.0, 400.0, 250.0, 440.0], "boxed", "Helvetica", 12.0, "#000000", false, false, false)
         .expect("free text");
 
     let infos = read_annotations(&all).expect("read");
@@ -848,7 +891,7 @@ fn cos_reads_all_annotation_kinds() {
 fn cos_annotations_carry_nm_and_delete_by_it() {
     let quads = [[72.0_f32, 700.0, 200.0, 700.0, 72.0, 688.0, 200.0, 688.0]];
     let a = add_text_markup(&fixture_bytes("hello.pdf"), 0, "highlight", &quads, "#ffd400", 1.0).unwrap();
-    let b = add_free_text(&a, 0, [50.0, 400.0, 250.0, 440.0], "x", "Helvetica", 12.0, "#000000", false, false).unwrap();
+    let b = add_free_text(&a, 0, [50.0, 400.0, 250.0, 440.0], "x", "Helvetica", 12.0, "#000000", false, false, false).unwrap();
     let all = add_shape(&b, 0, "rectangle", [60.0, 200.0, 260.0, 300.0], "#000000", None, 1.0, 2.0).unwrap();
 
     let infos = read_annotations(&all).expect("read");

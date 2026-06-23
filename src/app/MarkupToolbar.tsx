@@ -50,6 +50,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const fontSize = useToolStore((s) => s.options.fontSize);
   const bold = useToolStore((s) => s.options.bold);
   const italic = useToolStore((s) => s.options.italic);
+  const underline = useToolStore((s) => s.options.underline);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const fillColor = useToolStore((s) => s.options.fillColor);
@@ -210,6 +211,18 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
             }
           >
             I
+          </button>
+          <button
+            type="button"
+            onClick={() => setOptions({ underline: !underline })}
+            aria-label="Underline"
+            aria-pressed={underline}
+            className={
+              "rounded px-1.5 py-0.5 text-xs underline hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+              (underline ? "bg-blue-200 dark:bg-blue-300/30" : "")
+            }
+          >
+            U
           </button>
         </div>
       ) : null}

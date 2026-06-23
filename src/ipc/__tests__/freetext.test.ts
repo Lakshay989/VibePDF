@@ -25,6 +25,7 @@ describe("readFreeText / updateFreeText (P3-ANN-013)", () => {
       color: "#ff0000",
       bold: true,
       italic: false,
+      underline: true,
     };
     mockInvoke.mockResolvedValueOnce(data);
     const out = await readFreeText("doc-1", "nm-1");
@@ -33,7 +34,7 @@ describe("readFreeText / updateFreeText (P3-ANN-013)", () => {
   });
 
   it("updateFreeText marshals id, nm, text, and style", async () => {
-    await updateFreeText("doc-1", "nm-1", "Hello", "Helvetica", 24, "#003399", false, true);
+    await updateFreeText("doc-1", "nm-1", "Hello", "Helvetica", 24, "#003399", false, true, true);
     expect(mockInvoke).toHaveBeenCalledWith("pdf_update_free_text", {
       id: "doc-1",
       nm: "nm-1",
@@ -43,13 +44,14 @@ describe("readFreeText / updateFreeText (P3-ANN-013)", () => {
       color: "#003399",
       bold: false,
       italic: true,
+      underline: true,
     });
   });
 });
 
 describe("addFreeText", () => {
   it("marshals id, page, rect, text, and style", async () => {
-    await addFreeText("doc-1", 0, [100, 600, 320, 700], "Hi", "Times", 18, "#ff0000", true, false);
+    await addFreeText("doc-1", 0, [100, 600, 320, 700], "Hi", "Times", 18, "#ff0000", true, false, true);
     expect(mockInvoke).toHaveBeenCalledWith("pdf_add_free_text", {
       id: "doc-1",
       page: 0,
@@ -60,12 +62,13 @@ describe("addFreeText", () => {
       color: "#ff0000",
       bold: true,
       italic: false,
+      underline: true,
     });
   });
 
   it("returns the HistoryState from the backend", async () => {
     mockInvoke.mockResolvedValueOnce({ canUndo: true, canRedo: true });
-    const h = await addFreeText("doc-1", 0, [0, 0, 1, 1], "x", "Helvetica", 12, "#000000", false, false);
+    const h = await addFreeText("doc-1", 0, [0, 0, 1, 1], "x", "Helvetica", 12, "#000000", false, false, false);
     expect(h).toEqual({ canUndo: true, canRedo: true });
   });
 });

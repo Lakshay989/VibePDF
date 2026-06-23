@@ -16,6 +16,7 @@ const ctx: ToolContext = {
     fontSize: 14,
     bold: false,
     italic: false,
+    underline: false,
   },
 };
 const pt = (x: number, y: number): PagePoint => ({ page: 0, x, y });

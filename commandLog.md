@@ -2299,6 +2299,35 @@ PNG → click → renders aspect-correct) + cross-reader pass.
 
 ---
 
+### P3.B3b — free-text underline + auto-wrap + double-click re-edit (this commit)
+
+No new dependencies. Last of the "Phase 3.5" deferred sub-features.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 311/311 (+1: free-text-layer double-click re-edit; freetext IPC +underline)
+npm run test:rust      # EXIT 0. cos.rs free-text +2 (underline draws a stroke rule + round-trips
+#   via /Underline; a long no-\n line wraps to multiple /AP lines + grows the box).
+#   ~25 existing add/update_free_text call-sites updated for the +underline signature.
+
+# PDF write-path artifact (ignored, on demand) → Sample PDFs/ + /tmp:
+cargo test --manifest-path src-tauri/Cargo.toml --test free_text \
+  free_text_writes_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-freetext-b3b.pdf (bold+breaks, underlined, and a
+#     long auto-wrapping box).
+cp "Sample PDFs/vibepdf-verify-freetext-b3b.pdf" /tmp/vibepdf-verify.pdf
+sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/ft.png   # CoreGraphics opens it → valid
+```
+
+Underline (a stroked /AP rule + a private /Underline key for re-edit), auto
+word-wrap (shared `wrap_lines` drives both the box height and the drawn lines),
+and double-click-to-re-edit (per-box hit-zones → the sidebar's edit flow). Rich
+text (/RC + /DS mixed runs) is deferred to B3c, so this lands `[~]`. Left pending
+the human in-app + cross-reader pass.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

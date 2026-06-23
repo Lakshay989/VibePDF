@@ -295,13 +295,21 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From P3.B3a (free-text boxes)
 
-- **No rich text / underline (`/RC` + `/DS`)** — B3a is one uniform style per box.
-  Mixed runs/colours, underline, and the XHTML-subset rich-content appearance are
-  **B3b** (the deferred half of P3-ANN-003).
-- **No auto-wrap** — the `/AP` honors explicit `\n` only; the editor's soft-wrap
-  won't match if the user relies on it. Measure-and-wrap in the `/AP` is B3b.
-- **No re-edit of a committed box** — once added, you can ⌘Z but not double-click
-  to edit (needs a read-back like B2b). Lands with B3b / the D1 sidebar.
+- ✅ **DONE 2026-06-22 (B3b, P3-ANN-003) — underline + auto-wrap + double-click
+  re-edit** (underline `/AP` rule + private `/Underline` key; shared `wrap_lines`
+  drives box height + drawn lines; per-box hit-zones → the sidebar's edit flow).
+  Still deferred:
+- **B3c — rich text (`/RC` + `/DS` mixed runs)** — per-run colour/bold/italic. The
+  big remaining piece of P3-ANN-003: a runs-based editor (the current one is a
+  plain textarea), `/RC` XHTML (de)serialize, and a multi-style `/AP` renderer.
+  This is why P3-ANN-003 stays `[~]`.
+- **Wrap uses estimated metrics** — `wrap_lines` measures `chars × size × avg-em`,
+  not real AFM glyph widths, so wrap points differ slightly from other readers and
+  the editor's CSS soft-wrap. Real metrics (or measuring base-14 widths) is exact.
+  Mid-word breaks aren't done — a single over-long word overflows (clipped).
+- **Underline persistence is a private `/Underline` key** — non-standard (readers
+  ignore it but still show the `/AP` rule); B3c should standardize via `/DS`
+  `text-decoration:underline`.
 - **Base-14 / ASCII-WinAnsi only** — no font embedding, no non-Latin scripts; the
   three families (Helvetica/Times/Courier) render the Latin range. Embedding +
   subsetting is a separate, larger effort.
@@ -428,6 +436,9 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 - **C3b** image stamps (Stamp → Image… → pick a transparent PNG → click → renders
   aspect-correct with transparency, not stretched; ⌘Z; ⌘S, reopen; sidebar lists
   "Stamp" + ✕ deletes; then cross-reader — artifact `…verify-stamp.pdf`).
+- **B3b** free-text underline/wrap/re-edit (type a long paragraph → wraps; **U** →
+  underlined; ⌘S, reopen → both persist; **double-click** a box → re-edits in place;
+  then cross-reader — artifact `…verify-freetext-b3b.pdf`).
 - The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
   verification debt.
 

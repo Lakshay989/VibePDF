@@ -33,6 +33,7 @@ vi.mock("@/ipc/freetext", () => ({
     color: "#000000",
     bold: false,
     italic: false,
+    underline: false,
   }),
 }));
 

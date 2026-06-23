@@ -15,6 +15,7 @@ export interface FreeTextData {
   color: string;
   bold: boolean;
   italic: boolean;
+  underline: boolean;
 }
 
 /**
@@ -42,6 +43,7 @@ export async function updateFreeText(
   color: string,
   bold: boolean,
   italic: boolean,
+  underline: boolean,
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_update_free_text", {
     id,
@@ -52,6 +54,7 @@ export async function updateFreeText(
     color,
     bold,
     italic,
+    underline,
   });
 }
 
@@ -71,6 +74,7 @@ export async function addFreeText(
   color: string,
   bold: boolean,
   italic: boolean,
+  underline: boolean,
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_add_free_text", {
     id,
@@ -82,5 +86,6 @@ export async function addFreeText(
     color,
     bold,
     italic,
+    underline,
   });
 }

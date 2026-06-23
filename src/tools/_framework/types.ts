@@ -56,9 +56,10 @@ export interface ToolOptions {
   fontFamily: FontFamily;
   /** Free-text font size in points. */
   fontSize: number;
-  /** Free-text bold / italic (base-14 variant). */
+  /** Free-text bold / italic (base-14 variant) + underline (P3.B3b). */
   bold: boolean;
   italic: boolean;
+  underline: boolean;
 }
 
 /** Fields every annotation carries. */

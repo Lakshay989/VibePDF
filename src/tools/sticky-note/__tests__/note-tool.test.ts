@@ -22,6 +22,7 @@ const ctx = {
     fontSize: 14,
     bold: false,
     italic: false,
+    underline: false,
   },
 };
 

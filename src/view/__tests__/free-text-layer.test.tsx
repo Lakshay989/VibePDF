@@ -4,14 +4,26 @@
 // path (covered by the Rust free_text / cos tests).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 vi.mock("@/ipc/freetext", () => ({
   addFreeText: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   updateFreeText: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  readFreeText: vi.fn().mockResolvedValue({
+    rect: [100, 642, 300, 692],
+    text: "Hi",
+    fontFamily: "Times",
+    fontSize: 18,
+    color: "#cc1133",
+    bold: true,
+    italic: false,
+    underline: true,
+  }),
 }));
+vi.mock("@/ipc/annotations", () => ({ readAnnotations: vi.fn().mockResolvedValue([]) }));
 
-import { addFreeText, updateFreeText } from "@/ipc/freetext";
+import { readAnnotations } from "@/ipc/annotations";
+import { addFreeText, readFreeText, updateFreeText } from "@/ipc/freetext";
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useToolStore } from "@/state/tool-store";
@@ -53,6 +65,7 @@ beforeEach(() => {
       fontSize: 18,
       bold: true,
       italic: false,
+      underline: false,
     },
   });
   useEditEpochStore.setState({ byDoc: {}, edited: {} });
@@ -81,6 +94,7 @@ describe("FreeTextLayer", () => {
       18,
       "#112233",
       true,
+      false,
       false,
     );
     // Editor closes and the tool drops to idle after committing.
@@ -126,6 +140,7 @@ describe("FreeTextLayer", () => {
         color: "#cc1133",
         bold: true,
         italic: false,
+        underline: false,
       },
     });
     const { container } = render(layer());
@@ -142,7 +157,7 @@ describe("FreeTextLayer", () => {
     fireEvent.change(textarea, { target: { value: "Hello" } });
     fireEvent.click(container.querySelector('button[aria-label="Add free text"]') as Element);
 
-    expect(updateFreeText).toHaveBeenCalledWith("doc-1", "ft-1", "Hello", "Times", 18, "#cc1133", true, false);
+    expect(updateFreeText).toHaveBeenCalledWith("doc-1", "ft-1", "Hello", "Times", 18, "#cc1133", true, false, false);
     expect(addFreeText).not.toHaveBeenCalled();
   });
 
@@ -152,5 +167,31 @@ describe("FreeTextLayer", () => {
     const root = container.firstElementChild as Element;
     drag(root, [100, 100], [300, 150]);
     expect(container.querySelector("textarea")).toBeNull();
+  });
+
+  // SPEC: P3-ANN-013 (P3.B3b) — double-click a committed box → re-edit.
+  it("double-clicking a committed free-text box opens it for re-edit", async () => {
+    useToolStore.setState({ activeTool: null }); // idle: hit-zones are active
+    vi.mocked(readAnnotations).mockResolvedValueOnce([
+      { id: "ft-9", page: 0, kind: "freetext", rect: [100, 642, 300, 692], contents: "Hi", author: "", modified: null, inReplyTo: null },
+    ]);
+    const { container } = render(layer());
+
+    const zone = await waitFor(() => {
+      const z = container.querySelector('[title="Double-click to edit"]');
+      expect(z).not.toBeNull();
+      return z as Element;
+    });
+    fireEvent.doubleClick(zone);
+
+    expect(readFreeText).toHaveBeenCalledWith(DOC, "ft-9");
+    // The editor opens pre-filled with the box's text (the layer consumes the
+    // edit request immediately, so observe the editor, not the transient store).
+    const textarea = await waitFor(() => {
+      const t = container.querySelector('textarea[aria-label="Free-text annotation"]') as HTMLTextAreaElement;
+      expect(t).not.toBeNull();
+      return t;
+    });
+    expect(textarea.value).toBe("Hi");
   });
 });

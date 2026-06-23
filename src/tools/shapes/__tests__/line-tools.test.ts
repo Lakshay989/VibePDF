@@ -17,6 +17,7 @@ const ctx: ToolContext = {
     fontSize: 14,
     bold: false,
     italic: false,
+    underline: false,
   },
 };
 

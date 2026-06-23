@@ -439,7 +439,7 @@ fn add_top_level(bytes: &[u8], el: &ParsedAnnot) -> Result<Vec<u8>, CommandError
         }
         "freetext" => {
             let (size, fcolor) = parse_default_appearance(el.default_appearance.as_deref(), &color);
-            add_free_text(bytes, page, el.rect, &el.contents, "Helvetica", size, &fcolor, false, false)
+            add_free_text(bytes, page, el.rect, &el.contents, "Helvetica", size, &fcolor, false, false, false)
         }
         "text" => {
             let name = el.name.clone().unwrap_or_else(new_uuid);

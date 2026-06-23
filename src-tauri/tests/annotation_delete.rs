@@ -22,7 +22,7 @@ async fn deletes_each_kind_through_actor() {
     handle.add_text_markup(0, "highlight".into(), quads, "#ffd400".into(), 1.0).await.expect("markup");
     handle.add_note("n".into(), 0, 100.0, 600.0, "hi".into(), "Ada".into()).await.expect("note");
     handle
-        .add_free_text(0, [50.0, 400.0, 250.0, 440.0], "boxed".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false)
+        .add_free_text(0, [50.0, 400.0, 250.0, 440.0], "boxed".into(), "Helvetica".into(), 12.0, "#000000".into(), false, false, false)
         .await
         .expect("free text");
     handle

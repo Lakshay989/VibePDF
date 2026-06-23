@@ -1205,8 +1205,9 @@ fn markup_appearance_content(subtype: &str, quads: &[[f32; 8]], (r, g, b): (f32,
 
 /// SPEC: P3-ANN-003 — add a free-text annotation: a `/FreeText` box at `rect`
 /// holding `text` in a base-14 font, plus a generated `/AP` appearance so it
-/// renders in every reader (`PDFium` can't author this). One uniform style
-/// (family / size / colour / bold / italic); underline + rich text are B3b.
+/// renders in every reader (`PDFium` can't author this). Uniform style (family /
+/// size / colour / bold / italic / `underline`) with auto word-wrap to the box
+/// width (P3.B3b); per-run rich text is B3c.
 #[allow(clippy::too_many_arguments)]
 pub fn add_free_text(
     bytes: &[u8],
@@ -1218,6 +1219,7 @@ pub fn add_free_text(
     color: &str,
     bold: bool,
     italic: bool,
+    underline: bool,
 ) -> Result<Vec<u8>, CommandError> {
     let (r, g, b) = parse_hex_color(color)?;
     let base = base_font(font_family, bold, italic)?;
@@ -1226,7 +1228,7 @@ pub fn add_free_text(
     if !(x1 > x0 && y1 > y0) {
         return Err(CommandError::InvalidInput("free-text rect is empty".into()));
     }
-    let rect = grow_free_text_rect(rect, text, size);
+    let rect = grow_free_text_rect(rect, text, size, font_avg_em(base));
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
@@ -1238,7 +1240,7 @@ pub fn add_free_text(
         .get(&page_no)
         .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
 
-    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b));
+    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b), underline);
 
     let mut annot = Dictionary::new();
     annot.set("Type", Object::Name(b"Annot".to_vec()));
@@ -1247,6 +1249,7 @@ pub fn add_free_text(
     annot.set("Rect", rect_array(rect));
     annot.set("Contents", Object::string_literal(text));
     annot.set("DA", Object::string_literal(da));
+    annot.set("Underline", Object::Boolean(underline)); // private: persists underline for re-edit
     annot.set("F", Object::Integer(4)); // Print
     annot.set("P", Object::Reference(page_id));
     annot.set("AP", Object::Dictionary(ap));
@@ -1272,6 +1275,7 @@ pub fn update_free_text(
     color: &str,
     bold: bool,
     italic: bool,
+    underline: bool,
 ) -> Result<Vec<u8>, CommandError> {
     let (r, g, b) = parse_hex_color(color)?;
     let base = base_font(font_family, bold, italic)?;
@@ -1285,13 +1289,14 @@ pub fn update_free_text(
         return Err(CommandError::InvalidInput("annotation is not free-text".into()));
     }
     // Keep the top edge + width; grow only downward to fit the new text.
-    let rect = grow_free_text_rect(rect_bounds(dict), text, size);
+    let rect = grow_free_text_rect(rect_bounds(dict), text, size, font_avg_em(base));
 
-    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b));
+    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b), underline);
     let dict = doc.get_dictionary_mut(id).map_err(cos_err)?;
     dict.set("Contents", Object::string_literal(text));
     dict.set("Rect", rect_array(rect));
     dict.set("DA", Object::string_literal(da));
+    dict.set("Underline", Object::Boolean(underline));
     dict.set("AP", Object::Dictionary(ap));
 
     doc.prune_objects(); // drop the now-orphaned old /AP stream
@@ -1311,6 +1316,9 @@ pub struct FreeTextData {
     pub color: String,
     pub bold: bool,
     pub italic: bool,
+    /// SPEC: P3-ANN-003 (P3.B3b) — underline. Persisted in a private `/Underline`
+    /// key (the `/AP` draws the rule regardless); read back here for re-edit.
+    pub underline: bool,
 }
 
 /// SPEC: P3-ANN-013 — read a free-text annotation's text + style by `/NM`, so the
@@ -1332,6 +1340,7 @@ pub fn read_free_text(bytes: &[u8], nm: &str) -> Result<Option<FreeTextData>, Co
         .map_or_else(String::new, |s| String::from_utf8_lossy(s).into_owned());
     let (font_size, color) = parse_da(&da);
     let (font_family, bold, italic) = font_from_base(read_ap_base_font(&doc, dict).as_deref());
+    let underline = matches!(dict.get(b"Underline"), Ok(Object::Boolean(true)));
     Ok(Some(FreeTextData {
         rect: rect_bounds(dict),
         text: str_field(dict, b"Contents"),
@@ -1340,6 +1349,7 @@ pub fn read_free_text(bytes: &[u8], nm: &str) -> Result<Option<FreeTextData>, Co
         color,
         bold,
         italic,
+        underline,
     }))
 }
 
@@ -1348,18 +1358,68 @@ fn rect_array(rect: [f32; 4]) -> Object {
     Object::Array(rect.iter().map(|&v| Object::Real(v)).collect())
 }
 
-/// Grow `rect` downward (top edge + width fixed) so `text` at `size` fits the
-/// `/AP` box (which clips to `BBox == Rect`). Never shrinks below the input.
-fn grow_free_text_rect(rect: [f32; 4], text: &str, size: f32) -> [f32; 4] {
+/// Grow `rect` downward (top edge + width fixed) so the **wrapped** `text` at
+/// `size` fits the `/AP` box (which clips to `BBox == Rect`). Never shrinks below
+/// the input. Uses the same [`wrap_lines`] as the appearance, so the box height
+/// always matches the rendered line count.
+fn grow_free_text_rect(rect: [f32; 4], text: &str, size: f32, em: f32) -> [f32; 4] {
     let [x0, y0_in, x1, y1] = rect;
     let leading = size * 1.2;
-    let line_count = u16::try_from(text.split('\n').count().max(1)).unwrap_or(u16::MAX);
+    let lines = wrap_lines(text, size, em, free_text_inner_width([x0, y0_in, x1, y1]));
+    let line_count = u16::try_from(lines.len().max(1)).unwrap_or(u16::MAX);
     let needed = f32::from(line_count) * leading + size * 0.35;
     [x0, (y1 - needed).min(y0_in), x1, y1]
 }
 
+/// The text column width inside a free-text box (its width less the 2pt inset on
+/// each side). At least 1pt so wrapping always makes progress.
+fn free_text_inner_width(rect: [f32; 4]) -> f32 {
+    (rect[2] - rect[0] - 4.0).max(1.0)
+}
+
+/// Average glyph advance (em) for a base-14 font — a rough proxy for line-width
+/// estimation. Courier is monospaced (≈0.6); the proportional families average
+/// near 0.5, a touch wider when bold. Under-estimating is the safe direction (it
+/// wraps a hair early rather than overflowing the clipped box).
+fn font_avg_em(base: &str) -> f32 {
+    if base.starts_with("Courier") {
+        0.6
+    } else if base.contains("Bold") {
+        0.54
+    } else {
+        0.5
+    }
+}
+
+/// Word-wrap each `\n`-delimited line of `text` to `max_width` points, estimating
+/// width as `chars × size × em`. Breaks at spaces; a single word longer than the
+/// column is left to overflow (no mid-word break) — the `/AP` clips it. Empty
+/// input lines are preserved (blank lines).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn wrap_lines(text: &str, size: f32, em: f32, max_width: f32) -> Vec<String> {
+    let char_w = (size * em).max(0.01);
+    let max_chars = ((max_width / char_w).floor() as usize).max(1);
+    let mut out = Vec::new();
+    for raw in text.split('\n') {
+        let mut cur = String::new();
+        for word in raw.split(' ') {
+            let candidate =
+                if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+            if cur.is_empty() || candidate.chars().count() <= max_chars {
+                cur = candidate;
+            } else {
+                out.push(std::mem::take(&mut cur));
+                cur = word.to_string();
+            }
+        }
+        out.push(cur);
+    }
+    out
+}
+
 /// Build the free-text `/AP` form (added to `doc`) + its `/DA` string for the
 /// given geometry/style. Shared by [`add_free_text`] and [`update_free_text`].
+#[allow(clippy::too_many_arguments)]
 fn free_text_appearance(
     doc: &mut Document,
     rect: [f32; 4],
@@ -1367,8 +1427,9 @@ fn free_text_appearance(
     base: &str,
     size: f32,
     (r, g, b): (f32, f32, f32),
+    underline: bool,
 ) -> (Dictionary, String) {
-    let content = free_text_appearance_content(rect, text, size, (r, g, b));
+    let content = free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline);
 
     // The appearance's own font resource — `/AP` is self-contained, so display
     // doesn't depend on an AcroForm `/DR`.
@@ -1471,18 +1532,21 @@ fn font_from_base(base: Option<&str>) -> (String, bool, bool) {
 
 /// The `/AP` content stream for a free-text box: each line of `text` drawn
 /// top-anchored inside `rect`, inset 2pt, with 1.2×size leading. Honors explicit
-/// newlines only — auto-wrap is B3b.
+/// the box width (P3.B3b); `underline` draws a rule under each line.
 fn free_text_appearance_content(
     rect: [f32; 4],
     text: &str,
     size: f32,
     (r, g, b): (f32, f32, f32),
+    em: f32,
+    underline: bool,
 ) -> String {
     use std::fmt::Write as _;
     let [x0, _y0, _x1, y1] = rect;
     let leading = size * 1.2;
     let tx = x0 + 2.0; // small left inset
     let y_top = y1 - size; // first baseline a little below the top edge
+    let lines = wrap_lines(text, size, em, free_text_inner_width(rect));
 
     let mut out = String::new();
     let _ = writeln!(out, "q");
@@ -1491,13 +1555,31 @@ fn free_text_appearance_content(
     let _ = writeln!(out, "{leading:.2} TL");
     let _ = writeln!(out, "{r:.4} {g:.4} {b:.4} rg");
     let _ = writeln!(out, "{tx:.2} {y_top:.2} Td");
-    for (i, line) in text.split('\n').enumerate() {
+    for (i, line) in lines.iter().enumerate() {
         if i > 0 {
             let _ = writeln!(out, "T*");
         }
         let _ = writeln!(out, "({}) Tj", pdf_escape(line));
     }
     let _ = writeln!(out, "ET");
+
+    // Underline: a thin rule under each line's text (path ops, so outside BT/ET).
+    if underline {
+        let thickness = (size * 0.06).max(0.4);
+        let _ = writeln!(out, "{r:.4} {g:.4} {b:.4} RG");
+        let _ = writeln!(out, "{thickness:.2} w");
+        for (i, line) in lines.iter().enumerate() {
+            let chars = u16::try_from(line.chars().count()).unwrap_or(u16::MAX);
+            let width = f32::from(chars) * size * em;
+            if width <= 0.0 {
+                continue;
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let baseline = y_top - i as f32 * leading;
+            let uy = baseline - size * 0.12;
+            let _ = writeln!(out, "{tx:.2} {uy:.2} m {:.2} {uy:.2} l S", tx + width);
+        }
+    }
     let _ = writeln!(out, "Q");
     out
 }

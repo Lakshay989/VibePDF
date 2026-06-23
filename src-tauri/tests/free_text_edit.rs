@@ -19,7 +19,7 @@ async fn edit_round_trips_through_actor() {
     let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
 
     handle
-        .add_free_text(0, [100.0, 600.0, 320.0, 640.0], "Helo".into(), "Times".into(), 18.0, "#cc1133".into(), true, false)
+        .add_free_text(0, [100.0, 600.0, 320.0, 640.0], "Helo".into(), "Times".into(), 18.0, "#cc1133".into(), true, false, false)
         .await
         .expect("add");
     let nm = handle.read_annotations().await.expect("read")[0].id.clone();
@@ -32,7 +32,7 @@ async fn edit_round_trips_through_actor() {
 
     // Fix the typo + restyle.
     handle
-        .update_free_text(nm.clone(), "Hello".into(), "Helvetica".into(), 24.0, "#003399".into(), false, true)
+        .update_free_text(nm.clone(), "Hello".into(), "Helvetica".into(), 24.0, "#003399".into(), false, true, false)
         .await
         .expect("update");
 
