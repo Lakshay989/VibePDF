@@ -414,33 +414,22 @@ the current roadmap phase. When one is picked up, move it into the relevant
 - **Round/flat caps** — the ribbon ends are flat (square across the normal); no
   rounded pen cap. Cosmetic.
 
-## Verification debt (in-app + cross-reader, deferred by the user)
+## Verification debt — IN-APP DONE 2026-06-25; cross-reader optional
 
-The automated suites (`check` / `test` / `test:rust`) are green; these shipped
-`[~]` features still want a human in-app + cross-reader pass. **2026-06-21 the user
-said "push testing to backlog verify"** — keep shipping, surface these at
-phase-close. Walk `MANUAL_TESTING.md` + the `Sample PDFs/vibepdf-verify-*.pdf`
-artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
-- **C1b₁** line/arrow, **C1b₂** polygon (placement eyeballed 2026-06-21;
-  cross-reader pending), **C2** ink, **C3a** stamps, **C4a** measurements.
-- **D1** sidebar UI, **D1d** select+delete, **D1e** free-text edit-in-place.
-- **D2** reply threads, **E1** XFDF round-trip (draw → ⬆ Export → delete all →
-  ⬇ Import → restored + reply still threaded; then open the `.xfdf` in Acrobat
-  against the same base PDF — artifacts at `Sample PDFs/vibepdf-verify-xfdf.{pdf,xfdf}`).
-- **E2** flatten (draw markup → ▦ Flatten → confirm → markup stays visible but
-  leaves the sidebar + isn't selectable → ⌘Z restores → ⌘S, reopen → baked, not
-  selectable; then cross-reader — artifact `Sample PDFs/vibepdf-verify-flatten.pdf`).
-- **C4b** `/Measure` (Calibrate → measure → ⌘S → reopen → tool stays calibrated
-  without re-calibrating; then open the saved PDF in Acrobat and confirm its
-  measuring tool reports the same value live — artifact `…verify-measure.pdf`).
-- **C3b** image stamps (Stamp → Image… → pick a transparent PNG → click → renders
-  aspect-correct with transparency, not stretched; ⌘Z; ⌘S, reopen; sidebar lists
-  "Stamp" + ✕ deletes; then cross-reader — artifact `…verify-stamp.pdf`).
-- **B3b** free-text underline/wrap/re-edit (type a long paragraph → wraps; **U** →
-  underlined; ⌘S, reopen → both persist; **double-click** a box → re-edits in place;
-  then cross-reader — artifact `…verify-freetext-b3b.pdf`).
-- The **per-edit refresh flash** is a separate *open bug* (reverted; below), not
-  verification debt.
+**2026-06-25 the user walked every Phase-3 `[~]` feature in `npm run dev` and
+confirmed them** (four issues found + fixed mid-sweep: scroll-jump, free-text
+wrap/hard-break, filter-reset-on-delete, reply-button visibility). All Phase-3
+steps are now `[x]` in `steps/P3.md` except **B3c** (rich text, `[ ]`, deferred
+by design). The remaining **cross-reader pass** (opening the
+`Sample PDFs/vibepdf-verify-*.pdf` artifacts in Acrobat/Preview) is **optional /
+not blocking** — the artifacts are already CoreGraphics-validated (`sips`). Worth
+a deeper look someday, especially:
+- **C4b** — Acrobat's measuring tool re-measuring the saved line *live* (validates
+  the `/Measure` `/X`/`/D`/`/A` chain against a real reader; risk #2 from the plan).
+- **E1** — Acrobat *reading* our exported `.xfdf` against the same base PDF (we
+  verified the in-app cross-document round-trip, not Acrobat ingestion).
+- The **per-edit page-blank flash** is a separate *open bug* (below), not
+  verification debt; the scroll-jump half of it was fixed 2026-06-25.
 
 ## From P3.D2 (reply threads)
 
