@@ -1377,17 +1377,17 @@ fn free_text_inner_width(rect: [f32; 4]) -> f32 {
     (rect[2] - rect[0] - 4.0).max(1.0)
 }
 
-/// Average glyph advance (em) for a base-14 font — a rough proxy for line-width
-/// estimation. Courier is monospaced (≈0.6); the proportional families average
-/// near 0.5, a touch wider when bold. Under-estimating is the safe direction (it
-/// wraps a hair early rather than overflowing the clipped box).
+/// Glyph-advance (em) estimate for a base-14 font, used to decide where a line
+/// wraps. **Over-**estimating is the safe direction: the `/AP` clips to the box,
+/// so a line that's estimated too *narrow* would render past the right edge and
+/// look un-wrapped (just cut off). So we bias wide — wrapping a little early
+/// (leaving a right margin) beats overflowing. Courier is monospaced (≈0.6); the
+/// proportional families peak well above their ~0.5 average, so 0.6 / 0.62.
 fn font_avg_em(base: &str) -> f32 {
-    if base.starts_with("Courier") {
-        0.6
-    } else if base.contains("Bold") {
-        0.54
+    if base.contains("Bold") {
+        0.62
     } else {
-        0.5
+        0.6
     }
 }
 

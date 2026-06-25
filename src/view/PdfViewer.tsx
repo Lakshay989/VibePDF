@@ -186,6 +186,10 @@ export function PdfViewer({ documentId, path }: Props) {
   // cost — incremental preview is tracked in BACKLOG.
   const lastDocIdRef = useRef<string | null>(null);
   const initialPageRef = useRef(1);
+  // Exact scroll offset to restore across an edit reload (same doc, same scale,
+  // same page heights → the px offset lands in the same place). Avoids the
+  // jump-to-page-top the page-granular restore caused on every annotation edit.
+  const initialScrollTopRef = useRef(0);
   const resetRotations = useRotationPreviewStore((s) => s.resetDoc);
 
   useEffect(() => {
@@ -196,6 +200,7 @@ export function PdfViewer({ documentId, path }: Props) {
     initialPageRef.current = sameDoc
       ? (virtRef.current?.getCurrentPage() ?? 1)
       : 1;
+    initialScrollTopRef.current = sameDoc ? (virtRef.current?.getScrollTop() ?? 0) : 0;
     lastDocIdRef.current = documentId;
     setDoc(null);
     // The (re)loaded bytes carry the real /Rotate, so any cosmetic rotation
@@ -446,7 +451,11 @@ export function PdfViewer({ documentId, path }: Props) {
             onJump={(page) => virtRef.current?.scrollToPage(page)}
           />
         ) : null}
-        {showAnnotations && doc ? (
+        {/* Not gated on `doc`: the panel reads annotations via the actor
+            (documentId), so keeping it mounted across an edit reload (when `doc`
+            briefly goes null) preserves its filter / search / composer state. The
+            documentId key still remounts it on a real document switch. */}
+        {showAnnotations ? (
           <AnnotationPanel
             key={`annotations:${documentId}`}
             documentId={documentId}
@@ -467,6 +476,7 @@ export function PdfViewer({ documentId, path }: Props) {
               documentId={documentId}
               epoch={epoch}
               initialPage={initialPageRef.current}
+              initialScrollTop={initialScrollTopRef.current}
               zoom={zoom}
               fitMode={fitMode}
               darkMode={darkMode}

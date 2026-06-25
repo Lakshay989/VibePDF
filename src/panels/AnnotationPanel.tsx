@@ -518,9 +518,11 @@ export function AnnotationPanel({ documentId, epoch, onJump }: Props) {
                               setReplyingTo(info.id);
                               setReplyText("");
                             }}
-                            className="ml-3 rounded px-2 py-0.5 text-[11px] text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-900 dark:hover:text-neutral-200"
+                            aria-label={`Reply to ${kindLabel(info.kind)} on page ${info.page + 1}`}
+                            title="Add a reply (threads under this annotation)"
+                            className="ml-3 rounded border border-neutral-300 px-2 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 dark:border-neutral-600 dark:text-blue-300 dark:hover:bg-blue-950/40"
                           >
-                            💬 Reply{replies.length > 0 ? ` (${replies.length})` : ""}
+                            💬 {replies.length > 0 ? `${replies.length} repl${replies.length === 1 ? "y" : "ies"}` : "Reply"}
                           </button>
                         )}
                       </li>

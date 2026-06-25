@@ -171,7 +171,7 @@ describe("AnnotationPanel", () => {
     expect(container.querySelectorAll('button[aria-label="Note on page 1"]')).toHaveLength(1);
 
     // Open the composer, type, send → addReply(doc, parentId, default author, text).
-    fireEvent.click(screen.getByRole("button", { name: /Reply \(1\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Reply to Note on page 1" }));
     fireEvent.change(screen.getByLabelText("Reply text"), { target: { value: "thanks" } });
     fireEvent.click(screen.getByRole("button", { name: /^Reply$/ }));
     expect(addReply).toHaveBeenCalledWith("doc-1", "p1", "VibePDF User", "thanks");

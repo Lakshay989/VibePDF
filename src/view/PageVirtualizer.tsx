@@ -62,6 +62,10 @@ interface Props {
   epoch: number;
   /** Page to scroll to once measured (restores position after an edit reload). */
   initialPage: number;
+  /** Exact scroll offset (px) to restore after an edit reload — preferred over
+   *  `initialPage` so an annotation edit keeps the precise position, not just the
+   *  page top. `0`/undefined falls back to the page-based restore. */
+  initialScrollTop?: number;
   zoom: number;
   fitMode: FitMode | null;
   darkMode: boolean;
@@ -74,6 +78,8 @@ export interface PageVirtualizerHandle {
   scrollByPages: (delta: number) => void;
   scrollByLine: (deltaPx: number) => void;
   getCurrentPage: () => number;
+  /** Current scroll offset (px), captured before an edit reload to restore it. */
+  getScrollTop: () => number;
 }
 
 function computeFitScale(
@@ -100,7 +106,7 @@ function computeFitScale(
 
 export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
   function PageVirtualizer(
-    { doc, documentId, epoch, initialPage, zoom, fitMode, darkMode, onZoom },
+    { doc, documentId, epoch, initialPage, initialScrollTop, zoom, fitMode, darkMode, onZoom },
     ref,
   ) {
     const [pages, setPages] = useState<NaturalPage[] | null>(null);
@@ -151,16 +157,26 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
       };
     }, [doc]);
 
-    // Restore the page once the slots exist (after `pages` commits). Used to
-    // keep the user's position across an edit reload, which remounts us.
+    // Restore position once the slots exist (after `pages` commits) — an edit
+    // reload remounts us, so we'd otherwise land at the top. Prefer the *exact*
+    // scroll offset (page heights + scale are unchanged across an annotation
+    // edit, so the px offset maps to the same place); fall back to the page top.
+    const initialScrollTopRef = useRef(initialScrollTop ?? 0);
+    initialScrollTopRef.current = initialScrollTop ?? 0;
     useEffect(() => {
       if (!pages) return;
+      const exact = initialScrollTopRef.current;
       const target = Math.min(Math.max(1, initialPageRef.current), pages.length);
-      if (target <= 1) return;
+      if (exact <= 0 && target <= 1) return;
       requestAnimationFrame(() => {
-        const el = slotsRef.current.get(target);
         const scroller = scrollRef.current;
-        if (el && scroller) {
+        if (!scroller) return;
+        if (exact > 0) {
+          scroller.scrollTo({ top: exact, behavior: "auto" });
+          return;
+        }
+        const el = slotsRef.current.get(target);
+        if (el) {
           scroller.scrollTo({ top: el.offsetTop - 8, behavior: "auto" });
           currentPageRef.current = target;
         }
@@ -298,6 +314,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
           scrollRef.current?.scrollBy({ top: deltaPx, behavior: "auto" });
         },
         getCurrentPage: () => currentPageRef.current,
+        getScrollTop: () => scrollRef.current?.scrollTop ?? 0,
       }),
       [pages],
     );

@@ -561,16 +561,41 @@ artifacts and flip the passing `[~]`→`[x]` in `steps/P3.md`.
 
 ## From the P3.C2 verification sweep
 
-- **The per-edit "refresh flash" (deferred — needs eyes on the pixels).** Every
-  annotation add/remove/edit bumps the edit-epoch, and `PdfViewer`'s doc-load
-  effect `setDoc(null)`s on that change — unmounting the whole page view, showing
-  "Opening…", then rebuilding it. So each edit blanks the page (and jumps scroll).
-  The fix is to keep the current doc mounted and **swap a freshly-loaded one in
-  when ready** (doc-level double-buffer), paired with a canvas-level double-buffer
-  in `PageSlot`. A first attempt skewed the page-geometry/scale timing — shapes
-  rendered off-spot, ovals→circles — so it was **reverted** to the known-good
-  path. Redo it with the dev app open so the geometry can be eyeballed while
-  iterating; add a `PageVirtualizer`/`PdfViewer` render test if one is feasible.
+- **The per-edit "refresh flash" — scroll-jump FIXED 2026-06-25; the page-blank
+  flash remains.** Every annotation add/remove/edit bumps the edit-epoch, and
+  `PdfViewer`'s doc-load effect `setDoc(null)`s on that change — unmounting the
+  page view, showing "Opening…", then rebuilding it. **Fixed the scroll-jump**:
+  `PdfViewer` now captures the exact `scrollTop` (via a new
+  `PageVirtualizerHandle.getScrollTop`) before the reload and passes it as
+  `initialScrollTop`, which the virtualizer restores after re-measure (page
+  heights + scale are unchanged across an annotation edit, so the px offset maps
+  back exactly) — replacing the old jump-to-page-*top* restore. The remaining
+  **blank/flash** (the page briefly disappears during the reload) still wants the
+  doc-level double-buffer (keep the old doc mounted, swap a freshly-loaded one in
+  when ready); a first attempt at that skewed page-geometry timing (shapes
+  off-spot, ovals→circles) and was reverted — redo it with the dev app open.
+
+## From the 2026-06-25 verification sweep (Phase-3 in-app pass)
+
+User walked the `[~]` features in `npm run dev`. Most passed (C1a/b, C2, C3a/b,
+C4a/b, B3b). Four issues found + fixed this session:
+- ✅ **Draw scrolled to the page top** — the exact-scroll restore above.
+- ✅ **Free-text never wrapped** — `font_avg_em` under-estimated width, so wrapped
+  lines ran past the `/AP`'s clipped right edge (looked un-wrapped). Bumped the
+  ems (0.6 / 0.62 bold) to bias wide so lines wrap inside the box. *Estimate, not
+  AFM metrics — exact widths still a follow-up.*
+- ✅ **Filter reset to the full list on delete** — the `AnnotationPanel` was gated
+  on `&& doc`, so each edit reload (`setDoc(null)`→value) unmounted + remounted it,
+  wiping its `filter`/search/composer state. Removed the `doc` gate (the panel
+  reads via the actor, not PDF.js); the `documentId` key still remounts on a real
+  switch.
+- ✅ **Reply affordance unclear (D2)** — the `💬 Reply` button was faint gray text;
+  made it a visible bordered blue button with a count ("💬 2 replies").
+- ⏳ **Add a note/comment from the sidebar** — the user expected an Acrobat-style
+  "add comment" in the panel; today notes are placed via the page Note tool and
+  the sidebar only *replies* to existing annotations. A "new note" affordance in
+  the sidebar needs a placement decision (where on the page?) — deferred as a
+  small feature.
 
 ## Real bugs (fix soon — these aren't polish)
 
