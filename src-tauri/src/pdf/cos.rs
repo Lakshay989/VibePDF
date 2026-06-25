@@ -1392,9 +1392,10 @@ fn font_avg_em(base: &str) -> f32 {
 }
 
 /// Word-wrap each `\n`-delimited line of `text` to `max_width` points, estimating
-/// width as `chars × size × em`. Breaks at spaces; a single word longer than the
-/// column is left to overflow (no mid-word break) — the `/AP` clips it. Empty
-/// input lines are preserved (blank lines).
+/// width as `chars × size × em`. Breaks at spaces; a word too wide to fit on a
+/// line *by itself* (common for a large font in a small box) is **hard-broken**
+/// mid-word so it can't overflow the clipped `/AP`. Empty input lines are
+/// preserved (blank lines).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn wrap_lines(text: &str, size: f32, em: f32, max_width: f32) -> Vec<String> {
     let char_w = (size * em).max(0.01);
@@ -1403,13 +1404,29 @@ fn wrap_lines(text: &str, size: f32, em: f32, max_width: f32) -> Vec<String> {
     for raw in text.split('\n') {
         let mut cur = String::new();
         for word in raw.split(' ') {
-            let candidate =
-                if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
-            if cur.is_empty() || candidate.chars().count() <= max_chars {
-                cur = candidate;
-            } else {
-                out.push(std::mem::take(&mut cur));
-                cur = word.to_string();
+            let mut word = word.to_string();
+            loop {
+                let sep = usize::from(!cur.is_empty());
+                if cur.chars().count() + sep + word.chars().count() <= max_chars {
+                    if !cur.is_empty() {
+                        cur.push(' ');
+                    }
+                    cur.push_str(&word);
+                    break;
+                }
+                if cur.is_empty() {
+                    // A word wider than a whole line: emit `max_chars` of it and
+                    // carry the rest (guarantees progress — never loops forever).
+                    let head: String = word.chars().take(max_chars).collect();
+                    word = word.chars().skip(max_chars).collect();
+                    out.push(head);
+                    if word.is_empty() {
+                        break;
+                    }
+                } else {
+                    // Flush the line and retry the word on a fresh one.
+                    out.push(std::mem::take(&mut cur));
+                }
             }
         }
         out.push(cur);

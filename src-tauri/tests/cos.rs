@@ -471,6 +471,18 @@ fn cos_free_text_wraps_long_line() {
     assert!(y1 - y0 > 12.0 * 1.2 + 6.0, "box grew for wrapped lines: height {}", y1 - y0);
 }
 
+/// SPEC: P3-ANN-003 (P3.B3b) — a large font in a small box hard-breaks a single
+/// long word mid-word so it can't overflow the clipped box.
+#[test]
+fn cos_free_text_hard_breaks_long_word_in_small_box() {
+    let bytes = fixture_bytes("hello.pdf");
+    // 36pt text in an 80pt-wide box: one long unbroken word must split.
+    let out = add_free_text(&bytes, 0, [100.0, 600.0, 180.0, 680.0], "Supercalifragilistic", "Helvetica", 36.0, "#000000", false, false, false)
+        .expect("free text");
+    let (_, content, _) = first_annot_with_ap(&out);
+    assert!(content.matches("Tj").count() >= 2, "long word hard-broken across lines: {content}");
+}
+
 /// SPEC: P3-ANN-013 — update_free_text rewrites text + style in place and keeps
 /// the same `/NM` (so the sidebar selection / identity survives).
 #[test]
