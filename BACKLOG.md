@@ -606,6 +606,29 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **CMYK/pattern fills → approximated** — `fill_color` normalizes to `#rrggbb`; a
   pattern/shading text fill (rare) falls back to black.
 
+## From P4.A2 (font fallback resolver)
+
+- ✅ **DONE 2026-06-26 (A2) — font resolver + once-per-doc banner** (`pdf/font_resolver.rs`,
+  `FontFallbackBanner.tsx`). Resolver + warning are gated; the re-flow *action* and the
+  in-app banner eyeball are deferred. Carry-forwards:
+- **Re-flow action is a no-op until B1** — the banner's "Re-flow affected text" button
+  is rendered **disabled** (the spec's *offer*, not the *action*). Wire it to the real
+  reflow (A3) when B1 lands, and flip P4.A2 `[~]` → `[x]` after an in-app eyeball.
+- **System-font check is a file-stem heuristic** — `load_system_fonts` matches on the
+  normalized font-file *stem*, not the parsed `name`-table family. So a face whose file
+  is named oddly may be **falsely warned** (deliberate bias: warn-when-unsure). A precise
+  check needs a font-parsing crate (`ttf-parser`/`fontdb`) we declined — revisit only if
+  false warnings become noisy.
+- **No user-chosen substitute** — the fallback face is auto-picked (serif→Times,
+  mono→Courier, else Helvetica). A per-font "use this instead" picker is a later polish.
+- **Per-document warning, not per-run** — one banner names every missing font on open.
+  B1 may additionally want an *inline* per-run confirm at edit time ("this run → Helvetica").
+- **Arial≡Helvetica metrics** — both map to the base-14 Helvetica widths; we don't ship
+  a true Arial. Fine for layout (same metrics), a caveat for pixel-exact diffs.
+- **Open-time scan cost** — `collect_document_fonts` walks every page's objects under the
+  PDFium lock once on open. Cheap for normal docs; if a huge doc ever stalls, make the
+  report fetch lazier (it's already off the critical render path, fetched async).
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

@@ -47,7 +47,8 @@ use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
     FreeTextData, MeasureCalibration, NoteData,
 };
-use crate::pdf::text_extract::{extract_text_runs, TextRun};
+use crate::pdf::font_resolver::{build_font_report, FontReport};
+use crate::pdf::text_extract::{collect_document_fonts, extract_text_runs, TextRun};
 use crate::pdf::xfdf::annotations_to_xfdf;
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
@@ -98,6 +99,11 @@ pub enum Message {
     ReadTextRuns {
         page: usize,
         reply: oneshot::Sender<Result<Vec<TextRun>, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-002 (P4.A2) — resolve the document's fonts against the
+    /// system to decide which edits would be lossy (read-only; same lock path).
+    ReadFontReport {
+        reply: oneshot::Sender<Result<FontReport, CommandError>>,
     },
     /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
     /// the document's own path; `Some(p)` is a save-as to `p`.
@@ -1372,6 +1378,24 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P4-EDIT-002 (P4.A2) — resolve the document's fonts. Await-holding
+    /// convenience for tests; IPC uses `read_font_report_request`.
+    pub async fn read_font_report(&self) -> Result<FontReport, CommandError> {
+        let rx = self.read_font_report_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_font_report_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<FontReport, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadFontReport { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
     /// Await-holding convenience for tests; IPC uses the `_request` form.
     pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
@@ -1669,6 +1693,13 @@ fn run_worker(
                 // SPEC: P4-EDIT-001 (P4.A1) — read-only; extract_text_runs holds
                 // the PDFium lock itself (same as render_page).
                 let _ = reply.send(extract_text_runs(&doc, page));
+            }
+            Message::ReadFontReport { reply } => {
+                // SPEC: P4-EDIT-002 (P4.A2) — read-only. collect_document_fonts
+                // holds the PDFium lock; build_font_report is pure (+ a one-time
+                // OS font-dir scan).
+                let result = collect_document_fonts(&doc).map(build_font_report);
+                let _ = reply.send(result);
             }
             Message::Save {
                 path: dest_arg,

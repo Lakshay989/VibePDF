@@ -16,6 +16,8 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { SearchBar } from "@/app/SearchBar";
+import { FontFallbackBanner } from "@/app/FontFallbackBanner";
+import { useFontReport } from "@/app/use-font-report";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
 import { mergeDocuments } from "@/ipc/merge";
@@ -68,6 +70,10 @@ export function PdfViewer({ documentId, path }: Props) {
   // SPEC: edit-preview pipeline — bumped on every edit/undo/redo; drives
   // the reload-from-actor-bytes effect below.
   const epoch = useDocEpoch(documentId);
+
+  // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
+  // embedded or installed, so the user knows editing it will substitute.
+  const fontReport = useFontReport(documentId);
 
   // SPEC: P2-PAGE-006 — extract pages: pick a range, then a native save
   // dialog, then write the new PDF. Read-only on the open document.
@@ -406,6 +412,11 @@ export function PdfViewer({ documentId, path }: Props) {
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
+      <FontFallbackBanner
+        report={fontReport.report}
+        dismissed={fontReport.dismissed}
+        onDismiss={fontReport.dismiss}
+      />
       <ExtractDialog
         open={extractOpen}
         pageCount={doc?.numPages ?? 0}

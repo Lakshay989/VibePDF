@@ -33,7 +33,8 @@ vibepdf/
 │   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
 │   │   │   ├── flatten.rs        # Flatten annotations into page content (P3.E2)
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
-│   │   │   ├── text_extract.rs   # Text-run extraction (live PDFium read, P4.A1)
+│   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
+│   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -334,6 +335,21 @@ will hit-test a click to a run for **click-to-edit** (P4.B1). This is the read h
 of the text engine — A2 (font fallback) + A3 (redact-and-reflow, the lossy *write*
 half) build on it. So the COS layer now has **three** read shapes: lopdf byte-reads
 (annotations), a render-to-pixels read, and this live-PDFium structured-text read.
+
+**Font fallback (P4.A2)** is the honesty gate for that write half. `text_extract.rs`
+gains `collect_document_fonts` (a lighter sibling of the run walk — distinct
+`(name, embedded)` only, same live-`PDFium`-under-lock path), and **`pdf/font_resolver.rs`**
+turns those into a `FontReport` over the read-only `pdf_read_font_report` query.
+The resolver itself is **pure** — `resolve_font` classifies each font as embedded /
+base-14 / system-installed / fallback against an injected `SystemFontIndex`, so it's
+fully unit-testable. The *only* side effect is `load_system_fonts`: a one-time,
+`OnceLock`-cached std::fs scan of the OS font dirs (offline, no network, **no new
+dependency**). "Installed on the system" is a normalized file-stem heuristic — precise
+family parsing would need a font crate we don't take — so the bias is deliberately to
+**warn when unsure** rather than silently substitute (the roadmap's hard rule). The
+frontend raises a once-per-document `FontFallbackBanner` (`use-font-report.ts` keyed
+on document id, not edit epoch); its "re-flow" affordance is present-but-disabled
+until B1 makes re-flow real.
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

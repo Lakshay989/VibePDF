@@ -5283,6 +5283,75 @@ in-place editor) stands on.
 
 ---
 
+### P4.A2 — font fallback resolver (the honesty gate)
+
+#### Problem
+
+Editing text means re-emitting glyphs — but you can only do that *correctly* if you
+have the font. A PDF often references a font without **embedding** it (to save
+bytes), trusting the reader to already have it. If we edit such a run and that font
+isn't on this machine, the new glyphs come out in *some other* font — silently. The
+roadmap's hard rule: never silently substitute and pretend it matched. A2 builds the
+detector + the warning so editing can be honest before A3 makes editing possible.
+
+#### Concepts learned
+
+- **"Embedded" and "installed" are different guarantees.** Embedded = the glyph
+  outlines travel *inside* the file → lossless anywhere. Installed = the face happens
+  to be on *this* machine → fine here, maybe not on the next. And a third tier sits
+  above both: the **base-14** fonts (Helvetica/Times/Courier + Symbol/ZapfDingbats,
+  plus the Arial/Times-New-Roman/Courier-New aliases) every PDF viewer is *required*
+  to ship — always safe, never a warning. The resolver buckets each font into
+  embedded / standard / system-available / fallback.
+
+- **Pure core, impure shell.** All the *decisions* (`resolve_font`,
+  `build_font_report`, the substitute mapping, name normalization) are pure functions
+  over an injected `SystemFontIndex` — so every branch is a fast unit test with no
+  disk, no PDFium. The one impurity, `load_system_fonts` (a std::fs scan of the OS
+  font dirs), is isolated behind a `OnceLock` cache and injected at the boundary.
+  This "functional core, imperative shell" split is why the resolver has 8 unit tests
+  and the integration test only has to prove the wiring.
+
+- **A heuristic with an honest bias.** Deciding "is this installed?" *precisely* means
+  parsing every system font's `name` table for its family — which needs a font crate
+  we deliberately don't add (vendor-lock-in > implementation work). Instead we match
+  on a **normalized file stem**: lowercase, alphanumerics only, trailing style words
+  (`bold`, `mt`, `psmt`, …) peeled off so `Arial-BoldMT` and `Arial Bold.ttf` both
+  collapse to `arial`. It's fuzzy, so the bias is chosen: **when unsure, warn** — a
+  false warning costs a dismissible banner; a false *all-clear* costs a silent wrong
+  glyph. (Gotcha found in testing: `roman`/`book` are family words as often as
+  weights — stripping them turned `timesnewroman` into `timesnew`, so they're
+  excluded from the suffix list and `Times-Roman` is matched explicitly instead.)
+
+- **Document-level read, once.** Font usage doesn't change when you add an annotation,
+  so the banner hook keys on the **document id, not the edit epoch** — fetch the report
+  once per open. The actor query (`ReadFontReport`) reuses A1's live-PDFium-under-lock
+  path via a lightweight `collect_document_fonts` (distinct `(name, embedded)` only —
+  no text/bbox), so it's cheap and never serializes bytes.
+
+- **Ship the *offer*, defer the *action*.** The spec says "offer to re-flow." Re-flow
+  is a *write* (A3/B1) that doesn't exist yet — so the banner shows the affordance
+  **disabled** with a tooltip. The honest move: surface the capability's existence
+  without faking a dead button that does nothing. The step stays `[~]` until B1 wires
+  the action and a human eyeballs the banner.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/font_resolver.rs` | Pure resolver: `FontStatus`/`FontResolution`/`FontReport`, base-14 set, substitute mapping, `normalize_font_key`, `load_system_fonts` (OnceLock dir-scan). |
+| `src-tauri/src/pdf/text_extract.rs` | `collect_document_fonts` — distinct `(name, embedded)` across the doc, same live-PDFium read path as A1. |
+| `src-tauri/src/pdf/{actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ReadFontReport` read-only query + `pdf_read_font_report` (mirrors the A1 arm). |
+| `src/ipc/fonts.ts`, `src/app/use-font-report.ts`, `src/app/FontFallbackBanner.tsx`, `PdfViewer.tsx` | IPC wrapper + once-per-doc hook + the dismissible banner (disabled re-flow affordance), mounted under the toolbars. |
+| `tests/font_fallback.rs`, `font_resolver.rs` units, `fonts.test.ts`, `font-fallback-banner.test.tsx` | Hand-built non-embedded Calibri → fallback; `hello.pdf` base-14 → none; cross-doc invariants; 8 resolver units; IPC marshalling; banner render/dismiss. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.6.2 (the standard-14 fonts) and §9.8 (font descriptors / `FontFile` embedding).
+- "Functional core, imperative shell" (Gary Bernhardt) — the pure-resolver / fs-scan-at-the-edge split.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

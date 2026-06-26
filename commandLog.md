@@ -2353,6 +2353,35 @@ it yet. Left `[~]` (read-only infra, flips to `[x]` when B1 wires it).
 
 ---
 
+### P4.A2 — font fallback resolver (this commit)
+
+No new dependencies (pure std::fs scan of OS font dirs; reuses `pdfium-render` +
+`lopdf` — the latter only in the test, to build the non-embedded fixture).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 318/318 (+6: fonts IPC marshalling ×1, FontFallbackBanner ×5)
+npm run test:rust      # EXIT 0. font_fallback.rs integration: 3 (hand-built non-embedded
+#   Calibri → needsFallback + substitute Helvetica; hello.pdf base-14 → no fallback;
+#   cross-doc substitute-iff-fallback invariant) + font_resolver.rs units: 8 (embedded/
+#   standard/system-available/fallback buckets, substitute family+style, normalize
+#   collapses variants, report dedup + roll-up).
+
+# No write path → NO /tmp/vibepdf-verify.pdf artifact (A2 is read-only).
+```
+
+`pdf/font_resolver.rs` is a **pure** resolver (`resolve_font` + `build_font_report`
+over an injected `SystemFontIndex`); the only side effect is `load_system_fonts`, a
+one-time `OnceLock`-cached dir scan — no network, no new dep. `text_extract.rs` gains
+`collect_document_fonts` (distinct (name, embedded), live-PDFium read). Read-only
+`ReadFontReport` actor query + `pdf_read_font_report`; `src/ipc/fonts.ts` +
+`use-font-report.ts` (once-per-doc, keyed on document id) + `FontFallbackBanner.tsx`
+(disabled re-flow affordance until B1). Left `[~]` (re-flow action + banner eyeball
+land with B1).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
