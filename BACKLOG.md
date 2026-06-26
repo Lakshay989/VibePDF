@@ -586,6 +586,26 @@ C4a/b, B3b). Four issues found + fixed this session:
   the sidebar needs a placement decision (where on the page?) — deferred as a
   small feature.
 
+## From P4.A1 (text-run extraction)
+
+- ✅ **DONE 2026-06-25 (A1) — read-only text-run extraction** (live PDFium,
+  `pdf/text_extract.rs`). Carry-forwards for the rest of the text engine:
+- **Run granularity is author-dependent** — one PDFium text object may be a glyph,
+  a word, or a whole line (whatever a `Tj`/`TJ` emitted). B1's editor may want to
+  **merge** adjacent same-style runs on a line into one editable field; not A1's job.
+- **`fontName` is not the `/Font` resource key** — PDFium gives a (subset-stripped)
+  font *name*, but a byte-level edit (A3 reflow) needs the page's `/Font` resource
+  + encoding to re-emit glyphs. Mapping name→resource (or going through PDFium's
+  own text-set API) is an A3/B1 problem.
+- **Loose AABB for rotated/skewed text** — `bbox` is axis-aligned (over-covers);
+  the `transform` matrix is shipped so B1 can compute the true oriented box. Fine
+  for coarse hit-testing now.
+- **Per-page, whole-page payload** — a text-heavy page returns every run in one
+  `Vec`. Fine for click-to-edit (one visible page on demand); cap/stream if a
+  pathological page ever bites.
+- **CMYK/pattern fills → approximated** — `fill_color` normalizes to `#rrggbb`; a
+  pattern/shading text fill (rare) falls back to black.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

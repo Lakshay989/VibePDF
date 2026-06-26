@@ -33,6 +33,7 @@ vibepdf/
 │   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
 │   │   │   ├── flatten.rs        # Flatten annotations into page content (P3.E2)
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
+│   │   │   ├── text_extract.rs   # Text-run extraction (live PDFium read, P4.A1)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -320,6 +321,19 @@ via `cos_edit`, so the inverse is a pre-flatten snapshot: **undoable in-session,
 gone once saved + reopened** — exactly the spec's wording. `/AP`-less notes/replies
 have no appearance to bake and are **kept live**. Command `pdf_flatten_annotations`;
 the `AnnotationPanel` ▦ action is gated behind an inline confirm.
+
+**Phase 4 — content editing — adds a third read pattern.** P3's reads went through
+the cos byte path (`save_to_bytes` → lopdf); but *text* lives in encoded content
+streams that lopdf can't cheaply turn into positioned, styled runs — that's
+PDFium's job. So **`pdf/text_extract.rs` (P4.A1)** reads the **live `PdfDocument`**
+directly under the shared `PDFium` lock, exactly like `render.rs` renders it (no
+serialize round-trip, no `unsafe` — the pdfium-render *high-level* API). It walks a
+page's text page-objects (each ≈ one show operator) and emits a `TextRun {text,
+bbox, font, size, colour, transform}` over `pdf_extract_text_runs`; the frontend
+will hit-test a click to a run for **click-to-edit** (P4.B1). This is the read half
+of the text engine — A2 (font fallback) + A3 (redact-and-reflow, the lossy *write*
+half) build on it. So the COS layer now has **three** read shapes: lopdf byte-reads
+(annotations), a render-to-pixels read, and this live-PDFium structured-text read.
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

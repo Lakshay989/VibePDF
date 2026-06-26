@@ -2328,6 +2328,31 @@ the human in-app + cross-reader pass.
 
 ---
 
+### P4.A1 — text-run extraction (this commit) · Phase 4 begins
+
+No new dependencies (uses the existing `pdfium-render` high-level API).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 312/312 (+1: text-runs IPC marshalling)
+npm run test:rust      # EXIT 0. text_extract.rs integration: 3 (extracts runs from
+#   hello.pdf with sane page-space bbox + populated font/size/colour; out-of-range
+#   page errors; stable across links.pdf/forms.pdf) + text_extract.rs units: 3
+#   (subset-tag strip ×2, rgb hex).
+
+# No write path → NO /tmp/vibepdf-verify.pdf artifact (A1 is read-only).
+```
+
+First Phase-4 step. `pdf/text_extract.rs` reads the **live PdfDocument** under the
+PDFium lock (like render_page — not the cos byte path) and emits a TextRun per
+text page-object {text, bbox, fontName, embedded, fontSize, color, transform}.
+Read-only `ReadTextRuns` actor query + `pdf_extract_text_runs`; `src/ipc/
+text-runs.ts` wrapper. The IPC is exposed for B1 (click-to-edit) — no UI consumes
+it yet. Left `[~]` (read-only infra, flips to `[x]` when B1 wires it).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

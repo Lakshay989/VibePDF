@@ -5221,6 +5221,68 @@ reopens it.
 
 ---
 
+### P4.A1 — text-run extraction (Phase 4 begins)
+
+#### Problem
+
+Phase 4 is *editing existing content* — and you can't edit what you can't locate.
+Before "click a typo to fix it," the app must answer: *what text is under this
+click, where exactly is it, and how is it styled?* A1 is that read-only lookup —
+the foundation the whole text engine (font fallback, redact-and-reflow, the
+in-place editor) stands on.
+
+#### Concepts learned
+
+- **A PDF doesn't store "text" — it stores show operators.** There's no
+  paragraph model; a page is a stream of `Tf`/`Td`/`Tj`/`TJ` operators that *paint*
+  glyphs. PDFium decodes that stream into **text page-objects** — each ≈ one show
+  operator — and exposes per-object text, bounds, font, size, colour, and the text
+  matrix. So "a text run" = one PDFium text object: the natural, honest edit unit
+  (it might be a word, a line, or a glyph, depending on how the authoring tool
+  emitted it — we surface PDFium's granularity rather than guessing).
+
+- **A third read pattern.** P3's reads serialized to bytes and parsed with lopdf —
+  great for the object model (annotations, the page tree), useless for text, which
+  lives *inside* encoded content streams. Decoding that is PDFium's job, so A1
+  reads the **live `PdfDocument`** under the shared PDFium lock (the `render.rs`
+  pattern), not a byte round-trip. The COS layer now has three read shapes:
+  lopdf-byte (structure), render-to-pixels (display), and live-PDFium-structured
+  (text). Knowing *which* tool decodes *which* layer is half of working with PDFs.
+
+- **High-level binding > raw FFI.** pdfium-render wraps the C API in safe Rust:
+  `page.objects().iter()` → match `PdfPageObject::Text(t)` → `t.text()`,
+  `t.bounds()`, `t.font().name()/is_embedded()`, `t.scaled_font_size()`,
+  `t.fill_color()`, `t.matrix()`. No `unsafe`, no manual `FPDFText_*` handle
+  juggling. Two small frictions: the object iterator yields **owned** wrappers that
+  are `Drop`, so you must match by **reference** (`&object`) — moving out of a
+  `Drop` type is a compile error; and `pages().get()` wants an `i32` index.
+
+- **Surface honest, useful metadata.** The record carries `embedded` (does the
+  file ship the font?) — not needed to *render*, but it's exactly what **A2**'s
+  font-fallback decision and the "this edit may not match" warning will hinge on.
+  And subset tags (`ABCDEF+Helvetica`, six uppercase letters + `+`) are stripped
+  for display — noise from embedded subsetting, not a real family name.
+
+- **Read-only first.** A1 writes nothing — no artifact, no undo, no actor edit;
+  just a query. Starting the *hardest* phase with its read half keeps the first
+  step low-risk and gives B1 a stable contract to build the lossy write path on.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/text_extract.rs` | `extract_text_runs(doc, page)` over the live PDFium doc; the `TextRun` struct; subset-tag strip. |
+| `src-tauri/src/pdf/{actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ReadTextRuns` read-only query + `pdf_extract_text_runs` (mirrors the render arm — no `save_to_bytes`). |
+| `src/ipc/text-runs.ts` | `extractTextRuns` + the `TextRun` type (no UI consumer yet — B1 wires it). |
+| `tests/text_extract.rs`, `text_extract.rs` units, `text-runs.test.ts` | Runs from `hello.pdf` (sane bbox/font/size/colour), bad-index error, cross-doc stability; subset-strip + hex; IPC marshalling. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.4 (text objects + the text-showing operators) and §9.4.4 (text space / the text matrix).
+- pdfium-render's `PdfPageObject` / `PdfPageTextObject` high-level API; PDFium's `FPDFText_*` / `FPDFTextObj_*` C API underneath.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

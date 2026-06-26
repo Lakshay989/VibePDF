@@ -47,6 +47,7 @@ use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
     FreeTextData, MeasureCalibration, NoteData,
 };
+use crate::pdf::text_extract::{extract_text_runs, TextRun};
 use crate::pdf::xfdf::annotations_to_xfdf;
 use crate::pdf::reorder::ReorderEdit;
 use crate::pdf::resize::ResizeEdit;
@@ -91,6 +92,12 @@ pub enum Message {
         dpi: f32,
         format: ImageFormat,
         reply: oneshot::Sender<Result<RenderedPage, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-001 (P4.A1) — extract every text run on a page (read-only,
+    /// on the live `PdfDocument` under the `PDFium` lock). Feeds click-to-edit.
+    ReadTextRuns {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<TextRun>, CommandError>>,
     },
     /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
     /// the document's own path; `Some(p)` is a save-as to `p`.
@@ -1346,6 +1353,25 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P4-EDIT-001 (P4.A1) — extract a page's text runs. Await-holding
+    /// convenience for tests; IPC uses `read_text_runs_request`.
+    pub async fn read_text_runs(&self, page: usize) -> Result<Vec<TextRun>, CommandError> {
+        let rx = self.read_text_runs_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_text_runs_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<TextRun>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadTextRuns { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
     /// Await-holding convenience for tests; IPC uses the `_request` form.
     pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
@@ -1638,6 +1664,11 @@ fn run_worker(
                 reply,
             } => {
                 let _ = reply.send(render::render_page(&doc, page, dpi, format));
+            }
+            Message::ReadTextRuns { page, reply } => {
+                // SPEC: P4-EDIT-001 (P4.A1) — read-only; extract_text_runs holds
+                // the PDFium lock itself (same as render_page).
+                let _ = reply.send(extract_text_runs(&doc, page));
             }
             Message::Save {
                 path: dest_arg,

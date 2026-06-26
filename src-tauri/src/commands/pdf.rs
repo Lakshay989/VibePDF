@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData};
+use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
@@ -885,6 +886,34 @@ pub async fn pdf_read_measure_calibration(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.read_measure_calibration_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-001 (P4.A1) — extract every text run on `page` (0-based) for
+/// click-to-edit hit-testing. Read-only; runs on the live document via the actor.
+#[tauri::command]
+pub async fn pdf_extract_text_runs(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+) -> Result<Vec<TextRun>, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_text_runs_request(page)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
