@@ -629,6 +629,35 @@ C4a/b, B3b). Four issues found + fixed this session:
   PDFium lock once on open. Cheap for normal docs; if a huge doc ever stalls, make the
   report fetch lazier (it's already off the critical render path, fetched async).
 
+## From P4.A3 (text editing) — shipped EDIT-only; redact half BLOCKED
+
+- ✅ **DONE 2026-06-26 (A3) — in-place text edit** (`pdf/reflow.rs::replace_text_run`).
+  Edits a run's text via PDFium `set_text` on a throwaway doc, `Manual`-staged + one
+  `regenerate_content`, swap-the-live-doc with a `RestoreDocEdit` inverse. Read-for-B1
+  infra; no actor/IPC/UI yet.
+- 🚧 **BLOCKER — `FPDFPage_RemoveObject` SIGSEGVs in our bundled PDFium.** Diagnosed to
+  the FFI call itself (stderr markers: enters, never returns; reproduced with 1 and 2
+  page loads). This blocks **everything that removes a content object**:
+    - **P4-EDIT-004 (delete text)** — deferred (was planned for A3).
+    - **P6-SEC-010 (true redaction)** — its "remove from the content stream" clause needs
+      the same call.
+    - **Fallback-font recreate** — editing a non-embedded run currently keeps the font
+      reference (edit still works; A2 already warned); *baking in* the base-14 substitute
+      needs remove+create.
+  **Path forward:** implement removal at the **lopdf content-stream level** (parse the
+  page stream, splice out the run's `BT…Tj…ET` / show-operator) — the layer every other
+  write already uses — or re-evaluate a newer PDFium binary (touches the bundled
+  `libpdfium.dylib`; needs a human OK per CLAUDE.md). Until then, B3 (delete) and P6
+  redaction can't land.
+- **No neighbour reflow / in-bbox wrapping** — A3 edits one run's text in place; it does
+  not re-wrap long replacements or shift neighbouring runs. That needs B1's whole-line
+  layout model.
+- **Subset embedded fonts may tofu** — `set_text` with characters outside an embedded
+  *subset* font's glyph set renders missing glyphs. This is the lossiness A2 warns about;
+  detecting per-glyph coverage is deferred.
+- **Rotated/skewed runs** — `set_text` preserves the matrix (good), so rotation is fine
+  for *edit*; only the (deferred) recreate path would need to re-apply a matrix.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

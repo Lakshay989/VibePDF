@@ -2382,6 +2382,40 @@ land with B1).
 
 ---
 
+### P4.A3 — in-place text editing (this commit) · shipped EDIT-only
+
+No new dependencies (uses the existing `pdfium-render` mutation API; `lopdf` in the
+test to build the non-embedded fixture).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 318/318 (frontend untouched by A3)
+npm run test:rust      # EXIT 0. reflow.rs: 5 (replace preserves position + changes text
+#   via A1 re-extraction; round-trips through PDFium; edits a non-embedded font; bad
+#   page/run index errors; ReplaceTextRunEdit inverse restores) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test reflow writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (hello.pdf edited "Hello, VibePDF." → "Hello, World!")
+
+# Diagnosis that drove the EDIT-only scope cut (not committed; for the record):
+#   Bracketed FPDFPage_RemoveObject with stderr markers → "before remove" prints,
+#   process SIGSEGVs, "after remove" never reached. Reproduced with 1 and 2 page
+#   loads → it's the bundled PDFium, not our code. set_text path is unaffected.
+```
+
+`pdf/reflow.rs::replace_text_run` rewrites a run's text **in place** via PDFium
+`FPDFText_SetText` on a *throwaway* doc (never the live doc — content mutation
+SIGSEGVs at teardown), staged under `Manual` regeneration + one `regenerate_content()`
+(without it `set_text` is silently dropped on save), then serialized.
+`ReplaceTextRunEdit` swaps the live doc with a `RestoreDocEdit` snapshot inverse. No
+actor/IPC/UI (B1 wires it). **Redact half (delete / true redaction / fallback recreate)
+deferred** — `FPDFPage_RemoveObject` SIGSEGVs in our PDFium (2026-06-26 decision: ship
+edit-only, removal → future lopdf content-stream surgery). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

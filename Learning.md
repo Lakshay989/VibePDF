@@ -5352,6 +5352,70 @@ detector + the warning so editing can be honest before A3 makes editing possible
 
 ---
 
+### P4.A3 — in-place text editing (and a library wall)
+
+#### Problem
+
+The headline of Phase 4: change the words in an existing PDF without wrecking it.
+A1 located the runs, A2 made font substitution honest — A3 is the first **write**
+that actually rewrites text in the page's content stream.
+
+#### Concepts learned
+
+- **A PDF has no "text field" to edit — you rewrite a show operator.** A run is a
+  `PDFium` text page-object; editing it means calling `FPDFText_SetText` to swap the
+  Unicode the object paints. `PDFium` re-encodes glyphs against the object's font and
+  rewrites the content stream for you. That's why the tech stack picks "redact+reflow
+  via `PDFium` primitives" over hand-splicing the stream in lopdf — glyph encoding is
+  exactly the part you don't want to reimplement.
+
+- **`PDFium` is now a writer — but only between byte snapshots.** Every earlier write
+  used lopdf; A3 is the first to mutate via `PDFium`. The catch (learned the hard way
+  earlier with `resize_pages`): mutating the actor's **live** document and then dropping
+  it SIGSEGVs at teardown. The fix is the same shape as every COS edit — mutate a
+  *throwaway* doc loaded from the current bytes, serialize, and swap the live doc to the
+  result, with the pre-edit bytes as the undo snapshot (`RestoreDocEdit`). The bytes stay
+  the document of record; `PDFium` is just a transform in the middle.
+
+- **Staged regeneration is load-bearing.** `set_text` mutates the object's FFI handle
+  but does **not** mark the page dirty, so `save_to_bytes` happily writes the *old*
+  content stream — the edit silently vanishes. The cure: set the page's content
+  regeneration strategy to `Manual`, stage the change, then call `regenerate_content()`
+  exactly once before saving. (The default `AutomaticOnEveryChange` regenerates
+  mid-mutation, which is its own source of crashes.) A whole class of "the FFI call
+  succeeded but nothing changed" bugs hides in *when* a library flushes your changes.
+
+- **Sometimes the library is the wall — diagnose, then descope honestly.** Delete, true
+  redaction, and recreating a run in a substitute font all need `FPDFPage_RemoveObject`.
+  In our bundled `PDFium` that FFI call **SIGSEGVs** — confirmed by bracketing it with
+  stderr markers (`before remove` prints; `after remove` never does), and reproduced
+  with one *and* two page loads, so it's the library, not our borrow dance. The
+  disciplined move isn't to thrash a workaround into the design under the radar — it's
+  to stop, show the evidence, and let the human choose scope. We shipped the **edit**
+  half (which works and is tested) and deferred the **redact** half to a future lopdf
+  content-stream approach. Editing a non-embedded-font run still succeeds; A2's warning
+  already covers the substitution.
+
+- **`run_index` is a contract between read and write.** A3 counts text objects in the
+  *same* order as A1's `extract_text_runs`, so the index a future click-to-edit (B1)
+  hands back maps straight to the object A3 mutates. Read and write agreeing on identity
+  is what makes "click this, change that" possible.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/reflow.rs` | `replace_text_run` (throwaway-doc `set_text` + `Manual` regenerate + swap) and `ReplaceTextRunEdit` (undoable, `RestoreDocEdit` inverse). |
+| `src-tauri/src/pdf/mod.rs` | `pub mod reflow;`. |
+| `src-tauri/tests/reflow.rs` | Replace preserves position + changes text (via A1 re-extraction); round-trips through `PDFium`; edits a non-embedded font; bad index errors; inverse restores; `#[ignore]` artifact writer. |
+
+#### Further reading
+
+- pdfium-render `PdfPageTextObject::set_text`, `PdfPage::set_content_regeneration_strategy` / `regenerate_content`; PDFium's `FPDFText_SetText` / `FPDFPage_GenerateContent` underneath.
+- PDF 32000-1:2008 §9.4 (text-showing operators) — what `set_text` ultimately rewrites.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

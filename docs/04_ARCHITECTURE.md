@@ -35,6 +35,7 @@ vibepdf/
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
+│   │   │   ├── reflow.rs         # In-place text-run edit via PDFium set_text (P4.A3)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -350,6 +351,23 @@ family parsing would need a font crate we don't take — so the bias is delibera
 frontend raises a once-per-document `FontFallbackBanner` (`use-font-report.ts` keyed
 on document id, not edit epoch); its "re-flow" affordance is present-but-disabled
 until B1 makes re-flow real.
+
+**Text editing (P4.A3) makes PDFium a *writer* — between byte snapshots.** Until now
+every write went through lopdf (the COS path); A3 is the first to use PDFium's own
+object-mutation API, because re-emitting glyphs is PDFium's job, not lopdf's.
+`pdf/reflow.rs::replace_text_run` edits a run's text in place with `FPDFText_SetText`,
+preserving font/size/colour/matrix. Two hard-won rules shape it: (1) **never mutate
+the live document** — PDFium content mutation can SIGSEGV at teardown (the same reason
+`resize_pages` lives in lopdf), so we mutate a *throwaway* doc loaded from the input
+bytes, serialize, and have `ReplaceTextRunEdit` swap the live doc to the result (inverse
+= a `RestoreDocEdit` byte snapshot, identical to the COS edits' undo); and (2) **stage
+under `Manual` content regeneration and `regenerate_content()` exactly once** — a bare
+`set_text` mutates the object handle but doesn't flag the page, so the change is lost on
+save otherwise. **A3 is edit-only:** the *redact* half (delete, true redaction, recreate
+in a substitute font) needs `FPDFPage_RemoveObject`, which **SIGSEGVs in our bundled
+PDFium** — so removal-based operations are deferred to a lopdf content-stream approach
+(see `BACKLOG.md`). So PDFium now appears in the write path too, but only ever between
+byte snapshots — the document of record is still the bytes.
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

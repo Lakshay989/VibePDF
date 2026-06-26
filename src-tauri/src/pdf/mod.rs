@@ -12,6 +12,7 @@ pub mod image_xobject;
 pub mod insert_from;
 pub mod merge;
 pub mod insert_blank;
+pub mod reflow;
 pub mod render;
 pub mod reorder;
 pub mod resize;
