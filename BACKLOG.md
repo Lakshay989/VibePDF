@@ -664,9 +664,22 @@ C4a/b, B3b). Four issues found + fixed this session:
   shared a cursor); true reflow needs the line model (shared with the A3/B1 carry-forward).
 - **Two PDFium loads per delete** (before + after verify) — fine for interactive delete;
   revisit only if batch/region redaction makes it hot.
-- **No neighbour reflow / in-bbox wrapping** — A3 edits one run's text in place; it does
-  not re-wrap long replacements or shift neighbouring runs. That needs B1's whole-line
-  layout model.
+
+## From P4.B2 (add text box — page content)
+
+- ✅ **DONE 2026-06-26 (B2)** — `add_text_box` appends a `Tj` fragment to the page content
+  stream (not an annotation); the **Add Text** tool. Pending the in-app eyeball. The added
+  text is real content → editable/deletable via B1/B3 for free.
+- **Base-14 fonts only** — Helvetica/Times/Courier (the families that render without
+  embedding). A custom/embedded-font picker is a separate feature (font embedding).
+- **No on-page auto-grow** — text wraps within the drawn box (free-text's `wrap_lines`); the
+  box doesn't expand on the page if the text overflows (unlike the free-text *annotation*,
+  which grows its `/Rect`). Overflow clips at the box edge.
+- **Rewritten content is an extra uncompressed stream** — appended as a plain `/Contents`
+  entry (no `/FlateDecode`). Valid, slightly larger; re-compress later if size matters.
+- **No edit-as-a-unit** — once committed it's ordinary content text; there's no "edit this box"
+  affordance, you edit/delete the run(s) via B1/B3. Intentional, but a power user might expect
+  to reselect the whole box.
 - **Subset embedded fonts may tofu** — `set_text` with characters outside an embedded
   *subset* font's glyph set renders missing glyphs. This is the lossiness A2 warns about;
   detecting per-glyph coverage is deferred.

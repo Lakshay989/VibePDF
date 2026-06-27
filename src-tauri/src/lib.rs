@@ -108,6 +108,7 @@ pub fn run() {
             commands::pdf::pdf_import_annotations,
             commands::pdf::pdf_flatten_annotations,
             commands::pdf::pdf_add_free_text,
+            commands::pdf::pdf_add_text_box,
             commands::pdf::pdf_read_free_text,
             commands::pdf::pdf_update_free_text,
             commands::pdf::pdf_add_shape,

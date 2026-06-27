@@ -5534,6 +5534,62 @@ it. It's the first time the project deletes content at the COS byte level.
 
 ---
 
+### P4.B2 — adding text as page content (reuse, and a font-resource gotcha)
+
+#### Problem
+
+P3 already lets you "add text" — but as a `/FreeText` *annotation*, which some workflows
+strip and which isn't "real" page text. P4-EDIT-003 wants text that's **part of the page**:
+content-stream text you can later select, search, edit (B1), and delete (B3). B2 builds that.
+
+#### Concepts learned
+
+- **The same drawing, a different destination.** Free-text already emits a
+  `q BT /F1 … Tj … ET … Q` fragment — it just paints it into an annotation's `/AP` XObject.
+  B2 paints the *identical* fragment straight into the **page content stream**. The drawing
+  code (wrap, colour, underline rule) was reused verbatim by parameterizing one thing: the
+  font resource name. Recognizing that "annotation appearance" and "page content" are the
+  same PDF graphics, just attached to different objects, is what made B2 small.
+
+- **A shared namespace bites: font resource names.** A page's `/Resources /Font` maps short
+  names (`/F1`, `/F2`) to font objects, and a `Tf` operator references one. If I'd blindly
+  registered my font as `/F1`, a page that already defined `/F1` for a *different* face would
+  suddenly render its existing text in my font — silent corruption. Fix: scan the existing
+  keys and pick an unused name (`Fvibe`, `Fvibe1`, …). The test that would've caught the bug
+  builds a page with its own `/F1` and asserts both texts survive. Whenever you add an entry
+  to a namespace you didn't create, check what's already there.
+
+- **Never mutate a shared object.** A page's `/Resources` can be a *direct* dict, a
+  *reference* to a shared dict, or *inherited* from `/Pages`. Adding a font to a referenced or
+  inherited dict would change it for *other* pages too. So `register_page_font` **clones**
+  whatever it finds into a page-owned direct dict before editing. Aliasing in a document model
+  is as dangerous as aliasing in memory — copy-on-write before you touch shared state.
+
+- **Doing it "right" pays compound interest.** Because the text is real content (not an
+  annotation), it needs *no* new edit or delete path — B1's Edit Text and B3's Delete already
+  work on it. One honest implementation choice (content stream, per the spec) deleted a whole
+  category of follow-up work. The cheapest feature is the one the architecture already covers.
+
+- **`cos_edit` is the write chassis.** B2's `TextBoxEdit` is six lines: hand a bytes → bytes
+  transform to the shared `cos_edit` helper and undo/redo, dirty-tracking, and the actor swap
+  all come for free. By now every COS write is "write the transform, plug into the chassis."
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_text_box` + `register_page_font` (collision-free, copy-on-write Resources); `free_text_appearance_content` gained a `font_res` param. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `TextBoxEdit` + `AddTextBox` message + `pdf_add_text_box` (mirrors the free-text write path). |
+| `src/ipc/text-box.ts`, `src/view/text-box-layer.tsx`, `MarkupToolbar.tsx`, `tools/_framework/types.ts` | `addTextBox` + the drag-to-create overlay + the **Add Text** tool (reusing the free-text style controls). |
+| `tests/text_add.rs`, `text-box.test.ts`, `text-box-layer.test.tsx` | Content-run-not-annotation; `F1`-collision fixture; empty rejects; actor add+undo; marshalling; drag→add. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §7.8.3 (Resource dictionaries) and §9.6.2 (the standard-14 fonts).
+- This repo's `cos.rs::free_text_appearance_content` (the shared drawing) and `cos_edit` (the write chassis).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

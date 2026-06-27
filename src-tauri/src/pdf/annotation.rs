@@ -13,7 +13,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::{
     add_free_text, add_image_stamp, add_ink, add_line, add_measure, add_polygon, add_shape,
-    add_stamp, add_reply, add_text_markup, add_text_note,
+    add_stamp, add_reply, add_text_box, add_text_markup, add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -248,6 +248,49 @@ impl<'a> Edit<PdfDocument<'a>> for FreeTextEdit {
 
     fn label(&self) -> &'static str {
         "free-text"
+    }
+}
+
+/// SPEC: P4-EDIT-003 (P4.B2) — add a text box as **page content** (not an
+/// annotation). Same fields as free-text, but the bytes land in the page content
+/// stream; the inverse is a pre-write snapshot (`RestoreDocEdit`).
+pub struct TextBoxEdit {
+    pub page: i32,
+    pub rect: [f32; 4],
+    pub text: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for TextBoxEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            add_text_box(
+                bytes,
+                page,
+                self.rect,
+                &self.text,
+                &self.font_family,
+                self.font_size,
+                &self.color,
+                self.bold,
+                self.italic,
+                self.underline,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "add-text-box"
     }
 }
 

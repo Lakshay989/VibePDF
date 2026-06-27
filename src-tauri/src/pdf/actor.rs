@@ -41,7 +41,7 @@ use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit, ImageStampEdit,
     ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
-    ShapeEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
+    ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
@@ -286,6 +286,20 @@ pub enum Message {
     /// SPEC: P3-ANN-003 — add a free-text box at `rect` on `page` with a
     /// generated `/AP`. Undoable; marks dirty; replies with history availability.
     AddFreeText {
+        page: i32,
+        rect: [f32; 4],
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-003 (P4.B2) — add a text box as **page content** (not an
+    /// annotation) at `rect` on `page`. Undoable; marks dirty.
+    AddTextBox {
         page: i32,
         rect: [f32; 4],
         text: String,
@@ -1073,6 +1087,58 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::AddFreeText {
+                page,
+                rect,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                underline,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-003 (P4.B2) — add a content-stream text box. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_text_box(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_text_box_request(
+            page, rect, text, font_family, font_size, color, bold, italic, underline,
+        )?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_text_box_request(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddTextBox {
                 page,
                 rect,
                 text,
@@ -2171,6 +2237,41 @@ fn run_worker(
                 reply,
             } => {
                 let edit = FreeTextEdit {
+                    page,
+                    rect,
+                    text,
+                    font_family,
+                    font_size,
+                    color,
+                    bold,
+                    italic,
+                    underline,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddTextBox {
+                page,
+                rect,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                underline,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-003 (P4.B2) — text into the page content stream; the
+                // inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = TextBoxEdit {
                     page,
                     rect,
                     text,

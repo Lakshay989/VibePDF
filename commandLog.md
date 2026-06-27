@@ -2468,6 +2468,34 @@ will reuse this primitive. Left `[~]` pending the in-app eyeball.
 
 ---
 
+### P4.B2 — add text box as page content (this commit)
+
+No new dependencies (reuses the lopdf content API + free-text's drawing).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 330/330 (+4: addTextBox marshalling, TextBoxLayer ×3)
+npm run test:rust      # EXIT 0. text_add.rs: 5 (added text extracts as a CONTENT run not an
+#   annotation [read_annotations unchanged]; F1-collision fixture keeps its text; empty
+#   rect/text errors; actor add+undo) + 1 ignored artifact. free_text.rs still 8 (the
+#   free_text_appearance_content font-name parameterization didn't regress).
+
+# Write path → verification artifact:
+cargo test --test text_add writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (hello.pdf + an added content text box)
+```
+
+`cos::add_text_box` registers a base-14 font under a collision-free `Fvibe…` name (cloning a
+shared/inherited `/Resources` so it never mutates another page's), then appends the same
+`q BT … Tj … ET … Q` fragment free-text draws — but into the **page content stream**, not an
+annotation (the spec's key clause). `TextBoxEdit` (cos_edit + RestoreDocEdit) + `AddTextBox`
+actor msg + `pdf_add_text_box` + `addTextBox` IPC + a drag-to-create `TextBoxLayer` + the
+**Add Text** tool (reusing the free-text style controls). The result is real content, so it's
+editable/deletable via B1/B3 with no extra path. Left `[~]` pending the in-app eyeball.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -1261,6 +1261,119 @@ pub fn add_free_text(
     Ok(buf)
 }
 
+/// SPEC: P4-EDIT-003 (P4.B2) — add a text box as **page content** (not an
+/// annotation): register a base-14 font on the page and append a `q BT … Tj … ET … Q`
+/// fragment to the page's content stream. The result is ordinary content-stream
+/// text — selectable, and editable/deletable by P4.B1/B3. Wraps within `rect`.
+#[allow(clippy::too_many_arguments)]
+pub fn add_text_box(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    color: &str,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+) -> Result<Vec<u8>, CommandError> {
+    let (r, g, b) = parse_hex_color(color)?;
+    let base = base_font(font_family, bold, italic)?;
+    let size = font_size.max(1.0);
+    let [x0, y0, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0) {
+        return Err(CommandError::InvalidInput("text-box rect is empty".into()));
+    }
+    if text.trim().is_empty() {
+        return Err(CommandError::InvalidInput("text-box text is empty".into()));
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    // Register the font on the page (cloning a shared/inherited Resources so we
+    // never mutate another page's), under a name that can't collide with existing.
+    let font_res = register_page_font(&mut doc, page_id, base)?;
+
+    // Draw the same wrapped/underlined fragment free-text uses for its `/AP`, but
+    // straight into page space — it's `q … Q` balanced, so it can't leak state.
+    let content =
+        free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline, &font_res);
+    let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+
+    // Append after existing content so the text draws on top.
+    let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
+        Ok(Object::Reference(id)) => vec![Object::Reference(*id)],
+        Ok(Object::Array(a)) => a.clone(),
+        _ => Vec::new(),
+    };
+    contents.push(Object::Reference(content_id));
+    doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Contents", Object::Array(contents));
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Give `page_id` its own `/Resources /Font` carrying a fresh base-14 font, and
+/// return the (collision-free) resource name to reference in a `Tf` operator.
+/// Clones a referenced or inherited `/Resources` so we never edit a shared object.
+fn register_page_font(
+    doc: &mut Document,
+    page_id: ObjectId,
+    base: &str,
+) -> Result<String, CommandError> {
+    // The page's effective Resources, as an owned dict.
+    let mut resources: Dictionary = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Resources") {
+        Ok(Object::Dictionary(d)) => d.clone(),
+        Ok(Object::Reference(id)) => doc.get_dictionary(*id).map_err(cos_err)?.clone(),
+        _ => {
+            // Inherited from /Pages (or absent) — clone what's inherited.
+            let (_own, ids) = doc.get_page_resources(page_id).map_err(cos_err)?;
+            ids.first()
+                .and_then(|id| doc.get_object(*id).ok())
+                .and_then(|o| o.as_dict().ok())
+                .cloned()
+                .unwrap_or_default()
+        }
+    };
+
+    let mut fonts: Dictionary = match resources.get(b"Font") {
+        Ok(Object::Dictionary(d)) => d.clone(),
+        Ok(Object::Reference(id)) => doc.get_dictionary(*id).map_err(cos_err)?.clone(),
+        _ => Dictionary::new(),
+    };
+
+    // A name no existing font uses (`Fvibe`, `Fvibe1`, …).
+    let mut n = 0u32;
+    let name = loop {
+        let candidate = if n == 0 { "Fvibe".to_owned() } else { format!("Fvibe{n}") };
+        if !fonts.has(candidate.as_bytes()) {
+            break candidate;
+        }
+        n += 1;
+    };
+
+    let mut font = Dictionary::new();
+    font.set("Type", Object::Name(b"Font".to_vec()));
+    font.set("Subtype", Object::Name(b"Type1".to_vec()));
+    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    fonts.set(name.clone(), Object::Dictionary(font));
+    resources.set("Font", Object::Dictionary(fonts));
+    doc.get_dictionary_mut(page_id)
+        .map_err(cos_err)?
+        .set("Resources", Object::Dictionary(resources));
+    Ok(name)
+}
+
 /// SPEC: P3-ANN-013 — update an existing free-text annotation (found by `/NM`):
 /// new `text` + style, rewriting `/Contents` + `/Rect` (grown to fit) + `/DA` +
 /// `/AP` while preserving the `/NM` and every other field. The old `/AP` stream
@@ -1446,7 +1559,8 @@ fn free_text_appearance(
     (r, g, b): (f32, f32, f32),
     underline: bool,
 ) -> (Dictionary, String) {
-    let content = free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline);
+    let content =
+        free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline, "F1");
 
     // The appearance's own font resource — `/AP` is self-contained, so display
     // doesn't depend on an AcroForm `/DR`.
@@ -1557,6 +1671,7 @@ fn free_text_appearance_content(
     (r, g, b): (f32, f32, f32),
     em: f32,
     underline: bool,
+    font_res: &str,
 ) -> String {
     use std::fmt::Write as _;
     let [x0, _y0, _x1, y1] = rect;
@@ -1568,7 +1683,7 @@ fn free_text_appearance_content(
     let mut out = String::new();
     let _ = writeln!(out, "q");
     let _ = writeln!(out, "BT");
-    let _ = writeln!(out, "/F1 {size:.2} Tf");
+    let _ = writeln!(out, "/{font_res} {size:.2} Tf");
     let _ = writeln!(out, "{leading:.2} TL");
     let _ = writeln!(out, "{r:.4} {g:.4} {b:.4} rg");
     let _ = writeln!(out, "{tx:.2} {y_top:.2} Td");

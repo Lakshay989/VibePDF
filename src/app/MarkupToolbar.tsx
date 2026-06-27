@@ -66,6 +66,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const stampActive = activeTool === "stamp";
   const measureActive = activeTool === "measure";
   const editTextActive = activeTool === "edit-text";
+  const addTextActive = activeTool === "add-text";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -166,7 +167,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       >
         Text
       </button>
-      {textActive ? (
+      {textActive || addTextActive ? (
         <div className="flex items-center gap-1">
           <select
             aria-label="Font family"
@@ -345,6 +346,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Edit Text
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(addTextActive ? null : "add-text")}
+        title="Add text to the page (drag a box; the text becomes part of the page, not an annotation)"
+        aria-label="Add text tool"
+        aria-pressed={addTextActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (addTextActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Add Text
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

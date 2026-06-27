@@ -622,6 +622,42 @@ pub async fn pdf_add_free_text(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-003 (P4.B2) — add a text box as **page content** (not an
+/// annotation) at `rect` on `page` (0-based). Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_text_box(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    rect: [f32; 4],
+    text: String,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_text_box_request(page, rect, text, font_family, font_size, color, bold, italic, underline)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-004 — add a shape annotation (`/Square` or `/Circle`) at `rect`
 /// on `page` (0-based). Undoable; runs on the actor.
 #[tauri::command]

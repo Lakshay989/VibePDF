@@ -375,6 +375,15 @@ removal use — is still deferred; see `BACKLOG.md`.) So PDFium appears in the w
 edits and lopdf for deletes, but both only ever between byte snapshots — the document of
 record is still the bytes.
 
+**Adding text (P4.B2)** is also lopdf, and reuses the free-text drawing. `cos::add_text_box`
+registers a base-14 font on the page under a collision-free `Fvibe…` name (cloning a shared
+or inherited `/Resources` so it never mutates another page's), then appends the *same*
+`q BT … Tj … ET … Q` fragment free-text emits for its `/AP` — but into the **page content
+stream** rather than an annotation appearance (the spec's "content stream, not an
+annotation"). The payoff of real content: the added text is immediately **editable by B1 and
+deletable by B3** — no bespoke edit path. `TextBoxEdit` wraps it in the usual `cos_edit`
+(snapshot + swap + `RestoreDocEdit` inverse), so undo/redo come for free.
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend
