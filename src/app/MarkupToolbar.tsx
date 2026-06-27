@@ -65,6 +65,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const inkActive = activeTool === "ink";
   const stampActive = activeTool === "stamp";
   const measureActive = activeTool === "measure";
+  const editTextActive = activeTool === "edit-text";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -332,6 +333,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         Measure
       </button>
       {measureActive ? <MeasureControls documentId={documentId} /> : null}
+      <button
+        type="button"
+        onClick={() => setActiveTool(editTextActive ? null : "edit-text")}
+        title="Edit text (click a text run to rewrite it in place)"
+        aria-label="Edit text tool"
+        aria-pressed={editTextActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (editTextActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Edit Text
+      </button>
       {fillable ? (
         <div className="flex items-center gap-1">
           <span className="text-xs text-neutral-400">Fill</span>

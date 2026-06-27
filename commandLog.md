@@ -2416,6 +2416,31 @@ edit-only, removal → future lopdf content-stream surgery). Left `[~]`.
 
 ---
 
+### P4.B1 — click-to-edit text (this commit)
+
+No new dependencies (pure wiring over A1/A2/A3).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 324/324 (+6: text-edit IPC ×1, cssFamilyForFont ×1, TextEditLayer ×4)
+npm run test:rust      # EXIT 0. text_edit.rs: 3 (actor replace changes text + records undo;
+#   undo restores original; out-of-range run errors) + 1 ignored artifact.
+
+# Write path → verification artifact (full B1 path: actor edit → save):
+cargo test --test text_edit writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (hello.pdf edited "Hello, VibePDF." → "Hello, World!")
+```
+
+`ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse, dirty,
+return `HistoryState`); `pdf_replace_text_run` command + `src/ipc/text-edit.ts`. Frontend
+`TextEditLayer` (overlay in `PageVirtualizer`) fetches runs via A1, lays hit-zones, opens
+an inline editor on click, commits via `replaceTextRun` → `bumpEpoch`. **Edit Text** tool
+toggle in `MarkupToolbar`; `edit-text` added to `ToolId`. Non-embedded run shows an inline
+A2 cue. Left `[~]` pending the in-app eyeball (which also flips A1/A2/A3 → `[x]`).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

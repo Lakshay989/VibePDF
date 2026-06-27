@@ -48,6 +48,7 @@ use crate::pdf::cos::{
     FreeTextData, MeasureCalibration, NoteData,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
+use crate::pdf::reflow::ReplaceTextRunEdit;
 use crate::pdf::text_extract::{collect_document_fonts, extract_text_runs, TextRun};
 use crate::pdf::xfdf::annotations_to_xfdf;
 use crate::pdf::reorder::ReorderEdit;
@@ -104,6 +105,15 @@ pub enum Message {
     /// system to decide which edits would be lossy (read-only; same lock path).
     ReadFontReport {
         reply: oneshot::Sender<Result<FontReport, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-001 (P4.B1) — replace run `run_index` on `page` with
+    /// `new_text`, preserving its font/size/colour/matrix (in-place `set_text`).
+    /// Undoable; marks dirty; replies with history availability.
+    ReplaceTextRun {
+        page: usize,
+        run_index: usize,
+        new_text: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
     /// the document's own path; `Some(p)` is a save-as to `p`.
@@ -1396,6 +1406,37 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P4-EDIT-001 (P4.B1) — replace a text run. Await-holding convenience
+    /// for tests; IPC uses `replace_text_run_request`.
+    pub async fn replace_text_run(
+        &self,
+        page: usize,
+        run_index: usize,
+        new_text: String,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.replace_text_run_request(page, run_index, new_text)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn replace_text_run_request(
+        &self,
+        page: usize,
+        run_index: usize,
+        new_text: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReplaceTextRun {
+                page,
+                run_index,
+                new_text,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
     /// Await-holding convenience for tests; IPC uses the `_request` form.
     pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
@@ -1699,6 +1740,29 @@ fn run_worker(
                 // holds the PDFium lock; build_font_report is pure (+ a one-time
                 // OS font-dir scan).
                 let result = collect_document_fonts(&doc).map(build_font_report);
+                let _ = reply.send(result);
+            }
+            Message::ReplaceTextRun {
+                page,
+                run_index,
+                new_text,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-001 (P4.B1) — edit a run's text in place; the
+                // inverse is a pre-edit byte snapshot (RestoreDocEdit).
+                let edit = ReplaceTextRunEdit {
+                    page,
+                    run_index,
+                    new_text,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::Save {

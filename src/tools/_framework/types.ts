@@ -37,7 +37,8 @@ export type ToolId =
   | "polygon"
   | "ink"
   | "stamp"
-  | "measure";
+  | "measure"
+  | "edit-text";
 
 /** A base-14 font family the free-text tool can request. */
 export type FontFamily = "Helvetica" | "Times" | "Courier";

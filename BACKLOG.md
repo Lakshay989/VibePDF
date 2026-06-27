@@ -658,6 +658,26 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Rotated/skewed runs** — `set_text` preserves the matrix (good), so rotation is fine
   for *edit*; only the (deferred) recreate path would need to re-apply a matrix.
 
+## From P4.B1 (click-to-edit text)
+
+- ✅ **DONE 2026-06-26 (B1) — Edit Text tool** (`TextEditLayer` + `ReplaceTextRun`).
+  The consumer that surfaces A1+A2+A3. Pending the in-app eyeball that flips A1/A2/A3 → `[x]`.
+- **Run granularity is whatever PDFium emits** — a "run" may be a word, a line, or a glyph
+  (A1 caveat). B1 edits exactly that unit; merging adjacent same-style runs into one
+  editable field is a later nicety, not wired.
+- **No re-wrap / neighbour shift on long edits** — a much longer replacement is placed at
+  the same origin and may visually overrun; neighbours don't move. Needs the line model
+  (shared with the A3 reflow carry-forward).
+- **No style-change picker** — B1 preserves the run's existing font/size/colour; changing
+  *style* while editing (bold a word, recolour) is future work.
+- **Editor preview font is approximate** — `cssFamilyForFont` buckets serif/mono/sans for
+  the on-screen editor only; the saved file keeps the real font (`set_text`). Cosmetic.
+- **Rotated-text editor geometry is best-effort** — the editor box is axis-aligned over a
+  rotated run's loose AABB; the *edit* still applies correctly (matrix preserved).
+- **Per-page run fetch on tool activate** — `extractTextRuns` runs for the visible page
+  when Edit Text is on (and on each epoch). Fine for normal pages; a pathological page
+  could be cached if it ever bites.
+
 ## Real bugs (fix soon — these aren't polish)
 
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was

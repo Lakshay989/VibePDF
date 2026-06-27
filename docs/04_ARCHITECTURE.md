@@ -35,7 +35,7 @@ vibepdf/
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
-│   │   │   ├── reflow.rs         # In-place text-run edit via PDFium set_text (P4.A3)
+│   │   │   ├── reflow.rs         # In-place text-run edit via PDFium set_text (P4.A3); ReplaceTextRun actor msg (P4.B1)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -368,6 +368,16 @@ in a substitute font) needs `FPDFPage_RemoveObject`, which **SIGSEGVs in our bun
 PDFium** — so removal-based operations are deferred to a lopdf content-stream approach
 (see `BACKLOG.md`). So PDFium now appears in the write path too, but only ever between
 byte snapshots — the document of record is still the bytes.
+
+**Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
+The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
+mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend
+`TextEditLayer` (a per-page overlay beside `FreeTextLayer`) fetches the page's runs via
+A1's `extractTextRuns`, lays a hit-zone over each, and on click opens an inline editor at
+the run's bbox; commit calls `replaceTextRun` then bumps the edit epoch so the canvas
+re-renders. No new write *mechanism* — B1 is pure wiring over A1 (read), A2 (the fallback
+banner + an inline per-edit cue), and A3 (the `set_text` write). The `run_index` the layer
+hands back is the same ordinal A1 emits, so read and write agree on run identity.
 
 **Deleting annotations (P3-ANN-012)** turned on one thing: a stable identity.
 Every annotation our writers create now carries a `/NM` (a uuid; `cos` stamps it

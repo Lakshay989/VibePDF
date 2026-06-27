@@ -5416,6 +5416,66 @@ that actually rewrites text in the page's content stream.
 
 ---
 
+### P4.B1 — click-to-edit (the payoff of Track A)
+
+#### Problem
+
+A1 (find runs), A2 (font honesty), A3 (the edit write) were each shipped as `[~]`
+infrastructure with no user-facing surface. B1 is the step that makes them a feature:
+click a word in the page, edit it, see it change. It's almost entirely *wiring* — and
+that's the lesson, because the foundation was built so the wiring is small.
+
+#### Concepts learned
+
+- **A feature can be (mostly) plumbing when the foundation is right.** B1 adds **no new
+  write mechanism** — the actor message just calls A3's `ReplaceTextRunEdit`; the layer
+  just calls A1's `extractTextRuns` and A3's `replaceTextRun`. The hard parts (locating
+  runs, the lossy write, font honesty) were paid for upstream, so the "headline" step is
+  a thin actor message + a command + an overlay. When a feature feels small, that's
+  usually evidence the earlier decomposition was good.
+
+- **`run_index` is the identity contract between read and write.** The frontend hit-tests
+  a click against the bbox A1 returned, and hands the run's *array index* to the write.
+  That only works because A1's `extract_text_runs` and A3's `nth_text_object_index` walk
+  text objects in the **same order**. Read and write must agree on "which run is run 3,"
+  or you edit the wrong word. Identity, not coordinates, is what ties a click to an edit.
+
+- **The overlay pattern, reused.** B1's `TextEditLayer` is the same shape as every other
+  annotation layer: an absolutely-positioned div per page, `pointerEvents: none` on the
+  container so scrolling passes through, and per-run hit-zones that opt back into
+  `pointerEvents: auto` (the WKWebView-friendly approach — no HTML5 DnD). Commit →
+  `bumpEpoch` → the canvas reloads from the actor's new bytes and renders the edit. Once
+  you have one good layer, the next is a fill-in-the-blanks.
+
+- **Honesty surfaces where the user acts.** A2's banner warns once per document; B1 adds
+  a *per-edit* cue (`run.embedded === false` → "may render in a substitute") right in the
+  editor. Showing the caveat at the moment of the edit — not just at open — is the
+  difference between a warning the user reads and one they actually apply.
+
+- **Cosmetic vs. authoritative styling.** The editor's on-screen font is a *guess*
+  (`cssFamilyForFont` buckets the name into serif/mono/sans). It deliberately doesn't try
+  to be exact, because it doesn't matter: `set_text` preserves the *real* font in the
+  file. Knowing which parts of a UI are authoritative (the saved bytes) and which are
+  just preview (the editor chrome) keeps you from over-engineering the preview.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | `ReplaceTextRun` message + `pdf_replace_text_run` (applies A3's `ReplaceTextRunEdit`; mirrors the `UpdateFreeText` arm). |
+| `src/ipc/text-edit.ts` | `replaceTextRun` wrapper → `HistoryState`. |
+| `src/tools/text-edit/text-edit.ts` | `cssFamilyForFont` — cosmetic editor-preview font mapping. |
+| `src/view/text-edit-layer.tsx` | The overlay: run hit-zones + inline editor + commit; mounts in `PageVirtualizer`. |
+| `src/app/MarkupToolbar.tsx`, `tools/_framework/types.ts` | The **Edit Text** toggle + the `edit-text` `ToolId`. |
+| `tests/text_edit.rs`, `text-edit.test.ts`, `text-edit-layer.test.tsx`, `tools/text-edit` unit | Actor edit + undo + bad-index + artifact; IPC marshalling; layer interaction; font buckets. |
+
+#### Further reading
+
+- React Testing Library `findBy*` (async) + Vitest `vi.hoisted` — mocking a module whose factory needs a fixture defined in the test file.
+- The annotation-layer pattern in this repo (`free-text-layer.tsx`) — the template B1 follows.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

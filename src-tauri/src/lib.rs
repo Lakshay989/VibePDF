@@ -120,6 +120,7 @@ pub fn run() {
             commands::pdf::pdf_read_measure_calibration,
             commands::pdf::pdf_extract_text_runs,
             commands::pdf::pdf_read_font_report,
+            commands::pdf::pdf_replace_text_run,
             commands::pdf::pdf_add_reply,
             commands::pdf::pdf_delete_pages,
             commands::pdf::pdf_insert_blank_page,
