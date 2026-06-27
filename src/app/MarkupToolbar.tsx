@@ -7,10 +7,12 @@
 // suppress it to keep the selection alive.
 
 import { useEffect } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import { addTextMarkup, clearTextMarkup } from "@/ipc/annotations";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useImageAddStore } from "@/state/image-add-store";
 import { useMeasureStore } from "@/state/measure-store";
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
@@ -67,6 +69,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const measureActive = activeTool === "measure";
   const editTextActive = activeTool === "edit-text";
   const addTextActive = activeTool === "add-text";
+  const addImageActive = activeTool === "add-image";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -75,6 +78,28 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   useEffect(() => {
     if (activeTool !== "stamp") armStamp(null);
   }, [activeTool, armStamp]);
+
+  // Disarm the picked image whenever the Add Image tool is left.
+  const armImage = useImageAddStore((s) => s.arm);
+  useEffect(() => {
+    if (activeTool !== "add-image") armImage(null);
+  }, [activeTool, armImage]);
+
+  // Add Image: pick a PNG/JPEG, then arm it for drag-placement.
+  const pickImage = () => {
+    void openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg"] }],
+    })
+      .then((picked) => {
+        if (typeof picked === "string") {
+          armImage(picked);
+          setActiveTool("add-image");
+        }
+      })
+      .catch((err: unknown) => console.warn("image pick failed", err));
+  };
 
   // Cancel any in-progress calibration when the measure tool is left.
   const cancelCalibrating = useMeasureStore((s) => s.cancelCalibrating);
@@ -359,6 +384,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Add Text
+      </button>
+      <button
+        type="button"
+        onClick={pickImage}
+        title="Add an image (PNG/JPEG) to the page (pick a file, then drag a box)"
+        aria-label="Add image tool"
+        aria-pressed={addImageActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (addImageActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Add Image
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

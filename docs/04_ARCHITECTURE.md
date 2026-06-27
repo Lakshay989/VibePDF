@@ -384,6 +384,17 @@ annotation"). The payoff of real content: the added text is immediately **editab
 deletable by B3** — no bespoke edit path. `TextBoxEdit` wraps it in the usual `cos_edit`
 (snapshot + swap + `RestoreDocEdit` inverse), so undo/redo come for free.
 
+**Adding an image (P4.C1)** is the same recipe with an Image `XObject` instead of a font, and
+opens **Track C**. `cos::add_image` embeds via `image_xobject::embed_image` (PNG → raw samples +
+`/SMask` reusing P3.C3b's `embed_png`; JPEG → embedded verbatim as a `/DCTDecode` stream, dims
+read from the `SOF` header — no pixel decode), registers it under a collision-free `/XObject`
+name, and appends `q <cm> /Img Do Q` to the page content. The Resource-registration and
+content-append helpers (`register_page_resource`, `append_page_content`) were **generalized out
+of B2** and are now shared by add-text and add-image. Only PNG/JPEG are accepted — the other
+formats the spec lists need a raster decoder we don't bundle (clean error; BACKLOG). Like the
+added text, the image is real content, so **C2** (edit/move/resize/rotate/replace/delete) will
+operate on it uniformly.
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend

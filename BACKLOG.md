@@ -686,6 +686,24 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Rotated/skewed runs** — `set_text` preserves the matrix (good), so rotation is fine
   for *edit*; only the (deferred) recreate path would need to re-apply a matrix.
 
+## From P4.C1 (add image — page content)
+
+- ✅ **DONE 2026-06-27 (C1)** — `add_image` embeds a PNG/JPEG as a content-stream Image XObject
+  (`q <cm> /Img Do Q`); the **Add Image** tool. Pending the in-app eyeball. Real content → C2
+  edits it.
+- **PNG + JPEG only** — GIF/BMP/TIFF/WebP (the other formats P4-EDIT-005 lists) need a raster
+  decoder we don't bundle; they error cleanly. Add via a decoder crate if real demand appears.
+- **No rotation** — deferred to **C2** (move/resize/**rotate**); C1 is place + aspect-fit. The
+  `cm` matrix already supports rotation, so C2 just supplies the angle.
+- **CMYK / Adobe-marker JPEGs** — `embed_jpeg` maps 4 components → `DeviceCMYK` but doesn't
+  honour an APP14 transform / inverted-`/Decode`; an Adobe CMYK JPEG may render inverted. Rare;
+  revisit if it bites (add `/Decode [1 0 1 0 1 0 1 0]` when the APP14 transform says so).
+- **No down-sampling / recompression** — the image embeds at its source resolution (PNG raw
+  uncompressed; JPEG verbatim). A huge photo bloats the PDF. A "fit to N dpi" pass is a later
+  optimization (shared with the stamp's same caveat).
+- **Aspect-fit, not free-resize** — the image fits (centred) inside the drawn box; you can't
+  stretch or set an exact size at add time. Post-placement resize is **C2**.
+
 ## From P4.B1 (click-to-edit text)
 
 - ✅ **DONE 2026-06-26 (B1) — Edit Text tool** (`TextEditLayer` + `ReplaceTextRun`).

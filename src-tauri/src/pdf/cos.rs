@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
-use crate::pdf::image_xobject::embed_png;
+use crate::pdf::image_xobject::{embed_image, embed_png};
 
 /// Map an `lopdf` error onto our typed error. Takes the error by value so it
 /// can be used directly as a `.map_err(cos_err)` adapter.
@@ -1307,9 +1307,67 @@ pub fn add_text_box(
     // straight into page space — it's `q … Q` balanced, so it can't leak state.
     let content =
         free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline, &font_res);
-    let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
-
     // Append after existing content so the text draws on top.
+    append_page_content(&mut doc, page_id, content)?;
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (not an
+/// annotation): embed it as an Image `XObject`, register it on the page, and
+/// append a `q <cm> /Img Do Q` fragment to the content stream. Aspect-fit + centred
+/// within `rect`. PNG and JPEG only (other formats error in `embed_image`).
+pub fn add_image(bytes: &[u8], page: usize, rect: [f32; 4], image: &[u8]) -> Result<Vec<u8>, CommandError> {
+    let [x0, y0, x1, y1] = rect;
+    if !(x1 > x0 && y1 > y0) {
+        return Err(CommandError::InvalidInput("image rect is empty".into()));
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let img = embed_image(&mut doc, image)?;
+    if img.width == 0 || img.height == 0 {
+        return Err(CommandError::InvalidInput("image has zero size".into()));
+    }
+    let [px0, py0, px1, py1] = aspect_fit_rect(rect, img.width, img.height);
+    let (w, h) = (px1 - px0, py1 - py0);
+
+    let name = register_page_resource(&mut doc, page_id, b"XObject", "Imgvibe", Object::Reference(img.id))?;
+
+    // The image draws in the unit square; `cm` maps it onto the placed rect.
+    let content = format!("q\n{w:.2} 0 0 {h:.2} {px0:.2} {py0:.2} cm\n/{name} Do\nQ\n");
+    append_page_content(&mut doc, page_id, content)?;
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// Aspect-fit an image of `iw`×`ih` pixels inside `rect`, centred (never stretched).
+fn aspect_fit_rect(rect: [f32; 4], iw: u32, ih: u32) -> [f32; 4] {
+    let [x0, y0, x1, y1] = rect;
+    let (bw, bh) = (x1 - x0, y1 - y0);
+    #[allow(clippy::cast_precision_loss)]
+    let aspect = iw as f32 / ih as f32;
+    let (w, h) = if aspect > bw / bh { (bw, bw / aspect) } else { (bh * aspect, bh) };
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
+}
+
+/// Append `content` (a balanced `q … Q` fragment) as a new content stream after the
+/// page's existing content, so it draws on top. Shared by add-text and add-image.
+fn append_page_content(doc: &mut Document, page_id: ObjectId, content: String) -> Result<(), CommandError> {
+    let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
     let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
         Ok(Object::Reference(id)) => vec![Object::Reference(*id)],
         Ok(Object::Array(a)) => a.clone(),
@@ -1317,19 +1375,33 @@ pub fn add_text_box(
     };
     contents.push(Object::Reference(content_id));
     doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Contents", Object::Array(contents));
-
-    let mut buf = Vec::new();
-    doc.save_to(&mut buf)?;
-    Ok(buf)
+    Ok(())
 }
 
 /// Give `page_id` its own `/Resources /Font` carrying a fresh base-14 font, and
 /// return the (collision-free) resource name to reference in a `Tf` operator.
-/// Clones a referenced or inherited `/Resources` so we never edit a shared object.
 fn register_page_font(
     doc: &mut Document,
     page_id: ObjectId,
     base: &str,
+) -> Result<String, CommandError> {
+    let mut font = Dictionary::new();
+    font.set("Type", Object::Name(b"Font".to_vec()));
+    font.set("Subtype", Object::Name(b"Type1".to_vec()));
+    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    register_page_resource(doc, page_id, b"Font", "Fvibe", Object::Dictionary(font))
+}
+
+/// Give `page_id` its own `/Resources /<category>` carrying `value` under a fresh
+/// collision-free name (`prefix`, `prefix1`, …), returning that name. Clones a
+/// referenced or inherited `/Resources` (and the category sub-dict) so we never
+/// edit a shared object. Shared by add-text (`/Font`) and add-image (`/XObject`).
+fn register_page_resource(
+    doc: &mut Document,
+    page_id: ObjectId,
+    category: &[u8],
+    prefix: &str,
+    value: Object,
 ) -> Result<String, CommandError> {
     // The page's effective Resources, as an owned dict.
     let mut resources: Dictionary = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Resources") {
@@ -1346,28 +1418,23 @@ fn register_page_font(
         }
     };
 
-    let mut fonts: Dictionary = match resources.get(b"Font") {
+    let mut sub: Dictionary = match resources.get(category) {
         Ok(Object::Dictionary(d)) => d.clone(),
         Ok(Object::Reference(id)) => doc.get_dictionary(*id).map_err(cos_err)?.clone(),
         _ => Dictionary::new(),
     };
 
-    // A name no existing font uses (`Fvibe`, `Fvibe1`, …).
     let mut n = 0u32;
     let name = loop {
-        let candidate = if n == 0 { "Fvibe".to_owned() } else { format!("Fvibe{n}") };
-        if !fonts.has(candidate.as_bytes()) {
+        let candidate = if n == 0 { prefix.to_owned() } else { format!("{prefix}{n}") };
+        if !sub.has(candidate.as_bytes()) {
             break candidate;
         }
         n += 1;
     };
 
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
-    fonts.set(name.clone(), Object::Dictionary(font));
-    resources.set("Font", Object::Dictionary(fonts));
+    sub.set(name.clone(), value);
+    resources.set(category, Object::Dictionary(sub));
     doc.get_dictionary_mut(page_id)
         .map_err(cos_err)?
         .set("Resources", Object::Dictionary(resources));

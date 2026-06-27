@@ -39,9 +39,9 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit, ImageStampEdit,
-    ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit, StampEdit,
-    ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
+    AddImageEdit, AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit,
+    ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit,
+    StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
@@ -309,6 +309,14 @@ pub enum Message {
         bold: bool,
         italic: bool,
         underline: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (an Image
+    /// `XObject`), aspect-fit into `rect` on `page`. Undoable; marks dirty.
+    AddImage {
+        page: i32,
+        rect: [f32; 4],
+        image: Vec<u8>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1148,6 +1156,36 @@ impl DocumentActorHandle {
                 bold,
                 italic,
                 underline,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-005 (P4.C1) — add an image as page content. Await-holding for tests.
+    pub async fn add_image(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        image: Vec<u8>,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_image_request(page, rect, image)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_image_request(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        image: Vec<u8>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddImage {
+                page,
+                rect,
+                image,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2282,6 +2320,25 @@ fn run_worker(
                     italic,
                     underline,
                 };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddImage {
+                page,
+                rect,
+                image,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-005 (P4.C1) — image into the page content stream; the
+                // inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = AddImageEdit { page, rect, image };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

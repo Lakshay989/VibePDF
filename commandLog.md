@@ -2496,6 +2496,39 @@ editable/deletable via B1/B3 with no extra path. Left `[~]` pending the in-app e
 
 ---
 
+### P4.C1 — add image as page content (this commit) · Track C begins
+
+No new dependencies (reuses `png` + lopdf; JPEG embedded verbatim, no decoder).
+
+```bash
+# One-time fixture generation (committed):
+#   python3 → tiny PNG → sips -s format jpeg → tests/fixtures/basic/sample.jpg
+
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 333/333 (+3: addImage marshalling, ImageAddLayer ×2)
+npm run test:rust      # EXIT 0. image_add.rs: 5 (PNG → content XObject painted by Do, NOT an
+#   annotation, round-trips; real sample.jpg → /DCTDecode + PDFium round-trip; two adds → two
+#   distinct XObject names; GIF/garbage/empty-rect error; actor add+undo) + 1 ignored artifact.
+#   image_xobject.rs units: +3 (JPEG magic, SOF→DCTDecode dims, embed_image dispatch).
+#   text_add/free_text/stamp unaffected by the register_page_resource/append_page_content refactor.
+
+# Write path → verification artifact:
+cargo test --test image_add writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (hello.pdf + an embedded PNG)
+```
+
+`image_xobject::embed_jpeg` embeds a JPEG verbatim as a `/DCTDecode` stream (dims from the SOF
+header — no decode); `embed_image` dispatches PNG/JPEG by magic. `cos::add_image` embeds →
+registers the XObject under a collision-free `Imgvibe…` name → appends `q <cm> /Img Do Q` to the
+page content (aspect-fit). The Resource-registration + content-append helpers were generalized
+out of B2 (`register_page_resource`, `append_page_content`). `AddImageEdit` + `AddImage` actor
+msg + `pdf_add_image` (reads the file) + `addImage` IPC + pick-then-arm (`image-add-store`) +
+drag-to-place `ImageAddLayer` + **Add Image** toolbar button (file dialog). Real content → C2
+will edit it. PNG+JPEG only; rotation → C2. Left `[~]` pending the in-app eyeball.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

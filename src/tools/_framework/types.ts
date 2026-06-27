@@ -39,7 +39,8 @@ export type ToolId =
   | "stamp"
   | "measure"
   | "edit-text"
-  | "add-text";
+  | "add-text"
+  | "add-image";
 
 /** A base-14 font family the free-text tool can request. */
 export type FontFamily = "Helvetica" | "Times" | "Courier";

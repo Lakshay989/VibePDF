@@ -1,15 +1,16 @@
-//! Embed a raster image as a PDF Image `XObject` (P3.C3b — image stamps).
+//! Embed a raster image as a PDF Image `XObject` (P3.C3b stamps; P4.C1 add-image).
 //!
-//! SPEC: P3-ANN-006 — custom stamps from an image. We decode a `PNG` with the
-//! `png` crate (already a dependency — used as the render encoder; its decoder
-//! ships in the same crate) and build a `/Subtype /Image` `XObject` the stamp
-//! `/AP` can paint with `Do`. An alpha channel becomes a grayscale `/SMask` so a
-//! transparent signature/logo stamps cleanly. `JPEG` + other formats are
-//! deferred (BACKLOG); only `PNG` is accepted here.
+//! SPEC: P3-ANN-006 / P4-EDIT-005. Two encodings:
+//! - **`PNG`** ([`embed_png`]) is decoded with the `png` crate (already a
+//!   dependency) into raw samples → a `DeviceGray`/`DeviceRGB` Image `XObject`,
+//!   with any alpha split out as a grayscale `/SMask`. Stored **uncompressed**
+//!   (no `/Filter`) for simplicity.
+//! - **`JPEG`** ([`embed_jpeg`]) is embedded **verbatim** as a `/DCTDecode`
+//!   stream — `PDF` speaks JPEG natively, so there's no decode step; we only parse
+//!   the `SOF` header for dimensions + component count (→ colour space).
 //!
-//! Pixel data is stored **uncompressed** (no `/Filter`) for v1 — simplest and
-//! dependency-free; stamps are small. Flate-compressing the stream is a noted
-//! follow-up.
+//! [`embed_image`] dispatches on the magic bytes. `GIF`/`BMP`/`TIFF`/`WebP` need a
+//! raster decoder we don't bundle — they error cleanly (BACKLOG).
 
 use std::io::Cursor;
 
@@ -81,6 +82,103 @@ pub fn embed_png(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, Comm
     let img_dict = image_dict(width, height, color_space, smask_id);
     let id = doc.add_object(Stream::new(img_dict, color).with_compression(false));
     Ok(EmbeddedImage { id, width, height })
+}
+
+/// True if `bytes` looks like a JPEG (`FF D8 FF …`).
+#[must_use]
+pub fn is_jpeg(bytes: &[u8]) -> bool {
+    bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
+}
+
+/// SPEC: P4-EDIT-005 — embed a `JPEG` verbatim as a `/DCTDecode` Image `XObject`.
+/// No pixel decode: we parse the `SOF` header for dimensions + component count
+/// (the colour space) and store the original JPEG bytes as the stream content.
+pub fn embed_jpeg(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, CommandError> {
+    if !is_jpeg(bytes) {
+        return Err(CommandError::InvalidInput("image is not a JPEG".into()));
+    }
+    let JpegInfo { width, height, components } = parse_jpeg_sof(bytes)?;
+    let color_space: &[u8] = match components {
+        1 => b"DeviceGray",
+        3 => b"DeviceRGB",
+        4 => b"DeviceCMYK",
+        n => return Err(CommandError::InvalidInput(format!("unsupported JPEG component count: {n}"))),
+    };
+    let mut dict = image_dict(width, height, color_space, None);
+    // The stream *is* the DCTDecode-encoded data — keep lopdf from re-compressing it.
+    dict.set("Filter", Object::Name(b"DCTDecode".to_vec()));
+    let id = doc.add_object(Stream::new(dict, bytes.to_vec()).with_compression(false));
+    Ok(EmbeddedImage { id, width, height })
+}
+
+/// SPEC: P4-EDIT-005 — embed `bytes` as an Image `XObject`, dispatching on the
+/// magic bytes. PNG → `FlateDecode`-style raw samples, JPEG → `DCTDecode`; anything
+/// else errors (the unsupported formats are a documented limitation).
+pub fn embed_image(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, CommandError> {
+    if is_png(bytes) {
+        embed_png(doc, bytes)
+    } else if is_jpeg(bytes) {
+        embed_jpeg(doc, bytes)
+    } else {
+        Err(CommandError::InvalidInput(
+            "unsupported image format (only PNG and JPEG are supported)".into(),
+        ))
+    }
+}
+
+struct JpegInfo {
+    width: u32,
+    height: u32,
+    components: u8,
+}
+
+/// Walk a JPEG's marker segments to its Start-Of-Frame (`SOF0`–`SOF15`, excluding
+/// the non-frame `C4`/`C8`/`CC`) and read `[precision, height, width, components]`.
+/// Pure byte scan — defensive against truncation; errors if no `SOF` is found.
+fn parse_jpeg_sof(bytes: &[u8]) -> Result<JpegInfo, CommandError> {
+    let bad = || CommandError::InvalidInput("JPEG header is malformed or has no SOF marker".into());
+    let mut i = 2; // skip the SOI (FF D8)
+    while i + 1 < bytes.len() {
+        if bytes[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let marker = bytes[i + 1];
+        // Fill byte (FF FF) → advance one and retry.
+        if marker == 0xFF {
+            i += 1;
+            continue;
+        }
+        // Standalone markers carry no length payload.
+        if marker == 0xD8 || marker == 0xD9 || marker == 0x01 || (0xD0..=0xD7).contains(&marker) {
+            i += 2;
+            continue;
+        }
+        // Every other marker is followed by a 2-byte segment length.
+        if i + 4 > bytes.len() {
+            return Err(bad());
+        }
+        let len = usize::from(u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]));
+        if len < 2 {
+            return Err(bad());
+        }
+        let is_sof = (0xC0..=0xCF).contains(&marker) && marker != 0xC4 && marker != 0xC8 && marker != 0xCC;
+        if is_sof {
+            // Segment data: precision(1) height(2) width(2) components(1).
+            if i + 9 >= bytes.len() {
+                return Err(bad());
+            }
+            let height = u32::from(u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]));
+            let width = u32::from(u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]));
+            let components = bytes[i + 9];
+            if width == 0 || height == 0 {
+                return Err(bad());
+            }
+            return Ok(JpegInfo { width, height, components });
+        }
+        i += 2 + len;
+    }
+    Err(bad())
 }
 
 /// The `XObject` dictionary for an 8-bit image with an optional `/SMask` ref.
@@ -179,6 +277,53 @@ mod tests {
         let mut doc = Document::with_version("1.5");
         assert!(embed_png(&mut doc, b"\xff\xd8\xff\xe0 jpeg-ish").is_err());
         assert!(embed_png(&mut doc, b"").is_err());
+    }
+
+    /// A minimal JPEG byte stream: SOI + an APP0 segment + an `SOF0` frame header
+    /// for a `width`×`height`, `components`-channel image + EOI. Enough for the
+    /// header parser + `embed_jpeg` (which never decodes the entropy data).
+    fn make_jpeg_header(width: u16, height: u16, components: u8) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xD8]; // SOI
+        // APP0 (JFIF) — a length-bearing segment to skip past.
+        out.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]);
+        // SOF0: marker, length, precision, height, width, components, (per-comp data omitted len-wise)
+        out.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x0B, 0x08]);
+        out.extend_from_slice(&height.to_be_bytes());
+        out.extend_from_slice(&width.to_be_bytes());
+        out.push(components);
+        out.extend_from_slice(&[0x01, 0x11, 0x00]); // one component descriptor
+        out.extend_from_slice(&[0xFF, 0xD9]); // EOI
+        out
+    }
+
+    #[test]
+    fn sniffs_jpeg_magic() {
+        use super::is_jpeg;
+        assert!(is_jpeg(&make_jpeg_header(2, 2, 3)));
+        assert!(!is_jpeg(&make_png(2, 2, png::ColorType::Rgb)));
+        assert!(!is_jpeg(b"\xff\xd8 short"));
+    }
+
+    #[test]
+    fn jpeg_becomes_dctdecode_xobject_with_parsed_dims() {
+        use super::embed_jpeg;
+        let mut doc = Document::with_version("1.5");
+        let img = embed_jpeg(&mut doc, &make_jpeg_header(640, 480, 3)).expect("embed jpeg");
+        assert_eq!((img.width, img.height), (640, 480));
+        let stream = doc.get_object(img.id).and_then(Object::as_stream).unwrap();
+        assert_eq!(stream.dict.get(b"Filter").unwrap().as_name().unwrap(), b"DCTDecode");
+        assert_eq!(stream.dict.get(b"ColorSpace").unwrap().as_name().unwrap(), b"DeviceRGB");
+        assert_eq!(stream.dict.get(b"Width").unwrap().as_i64().unwrap(), 640);
+    }
+
+    #[test]
+    fn embed_image_dispatches_and_rejects_unknown() {
+        use super::embed_image;
+        let mut doc = Document::with_version("1.5");
+        assert!(embed_image(&mut doc, &make_png(2, 2, png::ColorType::Rgb)).is_ok());
+        assert!(embed_image(&mut doc, &make_jpeg_header(2, 2, 1)).is_ok());
+        // GIF magic — an unsupported format must error, not panic.
+        assert!(embed_image(&mut doc, b"GIF89a\x01\x00").is_err());
     }
 
     #[test]

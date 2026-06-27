@@ -5590,6 +5590,67 @@ content-stream text you can later select, search, edit (B1), and delete (B3). B2
 
 ---
 
+### P4.C1 — adding an image (the third time's a refactor)
+
+#### Problem
+
+"Add image" sounds like a from-scratch feature, but it's the *third* "put content on the page"
+operation (after add-text and the image *stamp*). C1 embeds a PNG/JPEG into the **page content
+stream** — and the interesting part is how little new code it needed, plus one genuinely new
+trick: embedding JPEG without decoding it.
+
+#### Concepts learned
+
+- **PDF speaks JPEG natively — don't decode it.** A PNG must be decoded to raw samples (PDF has
+  no PNG filter), but JPEG *is* a PDF filter: `/DCTDecode`. So `embed_jpeg` stores the original
+  JPEG bytes **verbatim** as the stream content and just sets `/Filter /DCTDecode` — no pixel
+  work at all. The only thing it parses is the **SOF marker** (Start Of Frame) for width/height
+  and component count (→ `DeviceGray`/`RGB`/`CMYK`). Walking JPEG marker segments (`FF xx` +
+  2-byte length, skipping the standalone `RST`/`SOI`/`EOI` markers and `FF` fill bytes) to find
+  `SOF0`–`SOF15` is the kind of binary-format scan worth knowing: most container formats are a
+  tag-length-value walk.
+
+- **The third occurrence is the refactor signal.** add-text (B2) and add-image (C1) both need:
+  register a resource on the page under a name that won't collide, cloning a shared/inherited
+  `/Resources` first; and append a `q … Q` content fragment. After the second copy, I pulled
+  these into `register_page_resource(category, prefix, value)` and `append_page_content` — so
+  B2's font registration and C1's XObject registration are now *one* function parameterized by
+  `b"Font"` vs `b"XObject"`. The "rule of three" in practice: the first use is a one-off, the
+  second is a coincidence, the third earns the abstraction (and the existing tests prove the
+  refactor preserved behavior).
+
+- **Aspect-fit is a placement decision, not a resize.** The image draws in the unit square and a
+  `cm` matrix maps it onto the page. To avoid distortion, `aspect_fit_rect` shrinks the user's
+  drawn box to the image's aspect ratio and centres it — so the `cm` is always a uniform scale.
+  Stretching would've been one line *less* code and looked wrong on every non-square image.
+
+- **A real fixture beats a synthetic one for the format you don't control.** The PNG tests build
+  images in-memory (we own a PNG encoder). For JPEG we don't — so the unit tests use a
+  hand-crafted *header* (enough to exercise the SOF parser), but the integration test embeds a
+  **real `sample.jpg`** (generated once via `sips`) so PDFium actually has to *decode and render*
+  it. Synthetic inputs test your parser; real inputs test your assumptions.
+
+- **Doing it as content keeps paying.** Like B2, the image is real page content, so C2
+  (move/resize/rotate/replace/delete) will manipulate it with the same primitives — no separate
+  "image object" model. The `cos_edit` chassis again made the undoable write six lines.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/image_xobject.rs` | `embed_jpeg` (DCTDecode + SOF parse) + `embed_image` dispatch; reuses `embed_png`. |
+| `src-tauri/src/pdf/cos.rs` | `add_image` + `aspect_fit_rect`; `register_page_resource` / `append_page_content` generalized out of B2. |
+| `src-tauri/src/pdf/{annotation,actor}.rs`, `commands/pdf.rs`, `lib.rs` | `AddImageEdit` + `AddImage` message + `pdf_add_image` (reads the file, like the stamp command). |
+| `src/ipc/image.ts`, `src/state/image-add-store.ts`, `src/view/image-add-layer.tsx`, `MarkupToolbar.tsx` | `addImage` + the pick-then-arm flow + the drag-to-place overlay + the **Add Image** button. |
+| `tests/image_add.rs`, `image_xobject.rs` units, `image.test.ts`, `image-add-layer.test.tsx`, `fixtures/basic/sample.jpg` | Content-XObject-not-annotation; real-JPEG DCTDecode round-trip; collision-free names; unsupported-format errors; drag→add. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §7.4.8 (`DCTDecode`) and §8.9 (image XObjects); ITU-T T.81 (JPEG) §B.2 (frame headers / SOF markers).
+- The "rule of three" (Martin Fowler, *Refactoring*) — when duplication earns an abstraction.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -12,8 +12,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_image_stamp, add_ink, add_line, add_measure, add_polygon, add_shape,
-    add_stamp, add_reply, add_text_box, add_text_markup, add_text_note,
+    add_free_text, add_image, add_image_stamp, add_ink, add_line, add_measure, add_polygon,
+    add_shape, add_stamp, add_reply, add_text_box, add_text_markup, add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -291,6 +291,30 @@ impl<'a> Edit<PdfDocument<'a>> for TextBoxEdit {
 
     fn label(&self) -> &'static str {
         "add-text-box"
+    }
+}
+
+/// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (an Image
+/// `XObject` painted by `Do`), aspect-fit into `rect`. The inverse is a pre-write
+/// snapshot (`RestoreDocEdit`).
+pub struct AddImageEdit {
+    pub page: i32,
+    pub rect: [f32; 4],
+    pub image: Vec<u8>,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for AddImageEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| add_image(bytes, page, self.rect, &self.image))
+    }
+
+    fn label(&self) -> &'static str {
+        "add-image"
     }
 }
 
