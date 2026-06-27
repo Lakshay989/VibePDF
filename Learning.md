@@ -5476,6 +5476,64 @@ that's the lesson, because the foundation was built so the wiring is small.
 
 ---
 
+### P4.B3 — deleting text via content-stream surgery (routing around a library crash)
+
+#### Problem
+
+A3 hit a wall: PDFium's `FPDFPage_RemoveObject` SIGSEGVs in our bundled build, so
+delete, redaction, and substitute-baking were all blocked. B3 is the workaround — remove
+a run by editing the raw page **content stream** in lopdf instead of asking PDFium to do
+it. It's the first time the project deletes content at the COS byte level.
+
+#### Concepts learned
+
+- **A PDF page is a program; deleting text = removing an instruction.** The page content
+  stream is a sequence of operators — `BT`/`Tf`/`Td`/`Tj`/`ET`. The glyphs of a run are
+  painted by one *text-showing operator* (`Tj` for a string, `TJ` for a kerned array).
+  Delete = decode the stream into operations, drop that one operator, re-encode. The
+  positioning (`Td`) and font (`Tf`) ops can stay as harmless no-ops; only the show
+  operator paints, so removing it is a clean delete. lopdf hands you exactly this:
+  `get_and_decode_page_content` → `Vec<Operation>`, and `change_page_content` to write back
+  (it transparently handles `/Contents` being a single ref, a 1-array, or an N-array).
+
+- **Two engines, two orderings — and a verification bridge.** A1's `run_index` counts
+  *PDFium text objects*; the splice counts *show operators in the content stream*. These
+  agree on normal pages (PDFium processes content in stream order), but I can't *assume*
+  it — a mismatch would silently delete the wrong sentence. The fix is a **verify-by-
+  re-extraction** bridge: extract runs before, splice, extract runs after, and require
+  `after == before` with exactly the target index removed — else error, input untouched.
+  When two subsystems must agree on an ordering, don't trust the alignment: **assert it,
+  and fail safe.** (Bonus: that exact check *is* P6-SEC-010's "verify the text is gone.")
+
+- **Fail-safe beats best-effort for destructive ops.** Editing the wrong run is annoying;
+  *deleting* the wrong run is data loss. So the edges all error rather than guess: text
+  inside an `XObject` (no show operator in the page stream → out of range), and `'`/`"`
+  operators (which advance the line as they show, so removing them would shift following
+  text). A hand-built 2-run fixture pins the ordinal guarantee (delete run 0 → run 1
+  survives, and vice-versa) — the test that would have caught the scariest bug.
+
+- **Route around the library, keep the contract.** B3 swaps the *mechanism* (lopdf, not
+  PDFium) but keeps the exact same shape as every other write: a bytes → bytes transform
+  wrapped in a `DeleteTextRunEdit` that snapshots, swaps the live doc, and stores a
+  `RestoreDocEdit` inverse. The actor, undo, and command layers didn't notice the engine
+  change. Good seams let you replace what's behind them without disturbing the callers.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/reflow.rs` | `delete_text_run` (lopdf `splice_out_show_operator` + PDFium `extract_runs` verify) + `DeleteTextRunEdit`. |
+| `src-tauri/src/pdf/{actor}.rs`, `commands/pdf.rs`, `lib.rs` | `DeleteTextRun` message + `pdf_delete_text_run` (mirrors the `ReplaceTextRun` arm). |
+| `src/ipc/text-edit.ts`, `src/view/text-edit-layer.tsx` | `deleteTextRun` wrapper + the **Delete** button in the run editor (completes B3). |
+| `tests/text_delete.rs` | Removes from `hello.pdf` (verified by re-extraction); 2-run fixture ordinal correctness; XObject fail-safe; out-of-range; artifact. Plus `text_edit.rs` delete+undo and the frontend tests. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.4.3 (text-showing operators `Tj`/`TJ`/`'`/`"`) and §7.8.2 (content streams).
+- lopdf `Document::get_and_decode_page_content` / `change_page_content`; `content::{Content, Operation}`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

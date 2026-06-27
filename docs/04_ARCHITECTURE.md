@@ -35,7 +35,7 @@ vibepdf/
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
-│   │   │   ├── reflow.rs         # In-place text-run edit via PDFium set_text (P4.A3); ReplaceTextRun actor msg (P4.B1)
+│   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -363,11 +363,17 @@ bytes, serialize, and have `ReplaceTextRunEdit` swap the live doc to the result 
 = a `RestoreDocEdit` byte snapshot, identical to the COS edits' undo); and (2) **stage
 under `Manual` content regeneration and `regenerate_content()` exactly once** — a bare
 `set_text` mutates the object handle but doesn't flag the page, so the change is lost on
-save otherwise. **A3 is edit-only:** the *redact* half (delete, true redaction, recreate
-in a substitute font) needs `FPDFPage_RemoveObject`, which **SIGSEGVs in our bundled
-PDFium** — so removal-based operations are deferred to a lopdf content-stream approach
-(see `BACKLOG.md`). So PDFium now appears in the write path too, but only ever between
-byte snapshots — the document of record is still the bytes.
+save otherwise. **The *redact* half (delete) came via lopdf, not PDFium:** `FPDFPage_RemoveObject`
+**SIGSEGVs in our bundled PDFium**, so `delete_text_run` (P4.B3) removes a run at the COS
+level — decode the page content with `get_and_decode_page_content`, splice out the run's
+`Tj`/`TJ` operator, `change_page_content` to write it back. The trap is that A1's `run_index`
+counts PDFium *text objects* while lopdf counts *show operators*; they align on normal pages,
+but to never mis-delete we **verify by re-extraction** (post-delete runs == pre-delete minus
+the target, else error) — which doubles as P6-SEC-010(c)'s "confirm the text is gone." `'`/`"`
+and `XObject`-embedded text are rejected. (Recreating a run in a substitute font — the other
+removal use — is still deferred; see `BACKLOG.md`.) So PDFium appears in the write path for
+edits and lopdf for deletes, but both only ever between byte snapshots — the document of
+record is still the bytes.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

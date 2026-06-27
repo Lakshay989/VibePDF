@@ -979,6 +979,39 @@ pub async fn pdf_replace_text_run(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-004 (P4.B3) — remove text run `run_index` on `page` (0-based, A1
+/// ordering) from the page content stream. Undoable; returns history availability.
+#[tauri::command]
+pub async fn pdf_delete_text_run(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    run_index: i32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    if run_index < 0 {
+        return Err(CommandError::InvalidInput(format!("negative run index: {run_index}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let run_index = usize::try_from(run_index).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.delete_text_run_request(page, run_index)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

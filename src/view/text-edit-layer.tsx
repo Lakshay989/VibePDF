@@ -13,7 +13,7 @@ import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
 import { extractTextRuns, type TextRun } from "@/ipc/text-runs";
-import { replaceTextRun } from "@/ipc/text-edit";
+import { deleteTextRun, replaceTextRun } from "@/ipc/text-edit";
 import { type PageGeometry, pdfToScreen } from "@/tools/_framework";
 import { cssFamilyForFont } from "@/tools/text-edit/text-edit";
 
@@ -136,6 +136,19 @@ export function TextEditLayer({
       .catch((err: unknown) => console.warn("replace text run failed", documentId, err));
   };
 
+  // SPEC: P4-EDIT-004 (P4.B3) — remove the run from the content stream entirely.
+  const remove = () => {
+    const ed = editor;
+    cancel();
+    if (!ed) return;
+    deleteTextRun(documentId, page, ed.runIndex)
+      .then((h) => {
+        bumpEpoch(documentId);
+        setHistory(documentId, h);
+      })
+      .catch((err: unknown) => console.warn("delete text run failed", documentId, err));
+  };
+
   if (!active) return null;
 
   return (
@@ -208,6 +221,14 @@ export function TextEditLayer({
             </div>
           ) : null}
           <div className="mt-0.5 flex justify-end gap-1">
+            <button
+              type="button"
+              onClick={remove}
+              aria-label="Delete text run"
+              className="mr-auto rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 hover:bg-red-200"
+            >
+              Delete
+            </button>
             <button
               type="button"
               onClick={cancel}

@@ -71,6 +71,20 @@ async fn out_of_range_run_index_errors() {
     drop(handle);
 }
 
+#[tokio::test]
+async fn delete_then_undo_restores() {
+    let handle = spawn("hello.pdf");
+    assert!(page0_text(&handle).await.contains("VibePDF"), "fixture sanity");
+
+    let state = handle.delete_text_run(0, 0).await.expect("delete");
+    assert!(state.can_undo, "a delete must be undoable");
+    assert!(!page0_text(&handle).await.contains("VibePDF"), "run removed");
+
+    handle.undo().await.expect("undo");
+    assert!(page0_text(&handle).await.contains("VibePDF"), "undo restores the run");
+    drop(handle);
+}
+
 /// Drives the full B1 path — actor edit then save — and writes the result to /tmp
 /// for the manual three-reader check. Ignored by default (produces an artifact).
 #[tokio::test]

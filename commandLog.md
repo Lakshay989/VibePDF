@@ -2441,6 +2441,33 @@ A2 cue. Left `[~]` pending the in-app eyeball (which also flips A1/A2/A3 → `[x
 
 ---
 
+### P4.B3 — delete text via lopdf content-stream surgery (this commit)
+
+No new dependencies (uses existing `lopdf` content API; `pdfium-render` for the verify).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 326/326 (+2: deleteTextRun marshalling, Delete-button interaction)
+npm run test:rust      # EXIT 0. text_delete.rs: 5 (removes from hello.pdf, verified by
+#   re-extraction; 2-run fixture proves ordinal correctness ×2; XObject text fails safely;
+#   out-of-range errors) + 1 ignored artifact. text_edit.rs: +1 (delete_then_undo_restores).
+
+# Write path → verification artifact:
+cargo test --test text_delete writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (hello.pdf with its only run deleted)
+```
+
+Sidesteps the A3 `FPDFPage_RemoveObject` SIGSEGV: `pdf/reflow.rs::delete_text_run` removes a
+run at the **lopdf COS level** — `get_and_decode_page_content` → drop the run's `Tj`/`TJ`
+operator → `change_page_content`. **Verified by re-extraction** (post == pre minus the target,
+else error — also P6-SEC-010(c)); `'`/`"` + XObject text rejected. `DeleteTextRun` actor msg +
+`pdf_delete_text_run` + `deleteTextRun` IPC + **Delete** button in the Edit Text editor (B3 UI).
+Undoable. **Unblocks** the standing `FPDFPage_RemoveObject` blocker for delete; P6 redaction
+will reuse this primitive. Left `[~]` pending the in-app eyeball.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

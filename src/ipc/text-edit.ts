@@ -16,3 +16,16 @@ export async function replaceTextRun(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_replace_text_run", { id, page, runIndex, newText });
 }
+
+/**
+ * SPEC: P4-EDIT-004 (P4.B3) — remove text run `runIndex` on `page` from the page
+ * content stream entirely (lopdf splice, verified by re-extraction). Through the
+ * document actor; returns the new undo/redo availability.
+ */
+export async function deleteTextRun(
+  id: DocumentId,
+  page: number,
+  runIndex: number,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_delete_text_run", { id, page, runIndex });
+}

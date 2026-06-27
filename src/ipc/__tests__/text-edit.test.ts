@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
-import { replaceTextRun } from "@/ipc/text-edit";
+import { deleteTextRun, replaceTextRun } from "@/ipc/text-edit";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -24,6 +24,20 @@ describe("replaceTextRun", () => {
       page: 2,
       runIndex: 5,
       newText: "new text",
+    });
+    expect(out).toEqual({ canUndo: true, canRedo: false });
+  });
+});
+
+describe("deleteTextRun", () => {
+  it("marshals the document id, page, and run index", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+
+    const out = await deleteTextRun("doc-1", 3, 7);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_delete_text_run", {
+      id: "doc-1",
+      page: 3,
+      runIndex: 7,
     });
     expect(out).toEqual({ canUndo: true, canRedo: false });
   });

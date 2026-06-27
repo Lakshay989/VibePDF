@@ -635,20 +635,35 @@ C4a/b, B3b). Four issues found + fixed this session:
   Edits a run's text via PDFium `set_text` on a throwaway doc, `Manual`-staged + one
   `regenerate_content`, swap-the-live-doc with a `RestoreDocEdit` inverse. Read-for-B1
   infra; no actor/IPC/UI yet.
-- 🚧 **BLOCKER — `FPDFPage_RemoveObject` SIGSEGVs in our bundled PDFium.** Diagnosed to
-  the FFI call itself (stderr markers: enters, never returns; reproduced with 1 and 2
-  page loads). This blocks **everything that removes a content object**:
-    - **P4-EDIT-004 (delete text)** — deferred (was planned for A3).
-    - **P6-SEC-010 (true redaction)** — its "remove from the content stream" clause needs
-      the same call.
-    - **Fallback-font recreate** — editing a non-embedded run currently keeps the font
-      reference (edit still works; A2 already warned); *baking in* the base-14 substitute
-      needs remove+create.
-  **Path forward:** implement removal at the **lopdf content-stream level** (parse the
-  page stream, splice out the run's `BT…Tj…ET` / show-operator) — the layer every other
-  write already uses — or re-evaluate a newer PDFium binary (touches the bundled
-  `libpdfium.dylib`; needs a human OK per CLAUDE.md). Until then, B3 (delete) and P6
-  redaction can't land.
+- ⚠️ **`FPDFPage_RemoveObject` SIGSEGVs in our bundled PDFium** (diagnosed to the FFI call:
+  stderr markers enter, never return; reproduced with 1 and 2 page loads). We **route around
+  it** rather than fix it:
+    - **P4-EDIT-004 (delete text)** — ✅ **DONE 2026-06-26 (B3)** via lopdf content-stream
+      splice (`reflow.rs::delete_text_run`), not PDFium. No longer blocked.
+    - **P6-SEC-010 (true redaction)** — unblocked: will **reuse `delete_text_run`** for the
+      text-removal clause (region selection + image removal still to build).
+    - **Fallback-font recreate** — still deferred (needs *remove + create* of an object,
+      which the lopdf splice doesn't do — editing a non-embedded run keeps the font ref;
+      A2 warns). Revisit if/when a newer PDFium binary is evaluated (touches the bundled
+      `libpdfium.dylib`; needs a human OK per CLAUDE.md).
+
+## From P4.B3 (delete text — lopdf content-stream surgery)
+
+- ✅ **DONE 2026-06-26 (B3)** — `delete_text_run` splices a run's `Tj`/`TJ` out of the page
+  content stream and **verifies by re-extraction**; wired as the Edit Text **Delete** button.
+  Pending the in-app eyeball.
+- **`'` / `"` operators rejected** — these advance the line as they show, so removing them
+  would shift following text. Rare; errors cleanly. Support them (convert to a move-only op)
+  if a real document ever needs it.
+- **XObject-embedded text rejected** — glyphs inside a Form XObject have no show operator in
+  the *page* stream, so the ordinal won't resolve → clean error. Deleting them would mean
+  editing the XObject stream (and it may be shared) — out of scope.
+- **Rewritten stream is uncompressed** — `change_page_content` writes one plain stream (no
+  `/FlateDecode`). Valid, slightly larger; re-compress later if size matters.
+- **No neighbour reflow** — the deleted run leaves its gap (or the line closes up if runs
+  shared a cursor); true reflow needs the line model (shared with the A3/B1 carry-forward).
+- **Two PDFium loads per delete** (before + after verify) — fine for interactive delete;
+  revisit only if batch/region redaction makes it hot.
 - **No neighbour reflow / in-bbox wrapping** — A3 edits one run's text in place; it does
   not re-wrap long replacements or shift neighbouring runs. That needs B1's whole-line
   layout model.

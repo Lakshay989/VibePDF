@@ -25,15 +25,17 @@ vi.mock("@/ipc/text-runs", () => ({
 }));
 vi.mock("@/ipc/text-edit", () => ({
   replaceTextRun: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  deleteTextRun: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
 import { extractTextRuns } from "@/ipc/text-runs";
-import { replaceTextRun } from "@/ipc/text-edit";
+import { deleteTextRun, replaceTextRun } from "@/ipc/text-edit";
 import { useToolStore } from "@/state/tool-store";
 import { TextEditLayer } from "@/view/text-edit-layer";
 
 const DOC = "doc-1";
 const mockReplace = vi.mocked(replaceTextRun);
+const mockDelete = vi.mocked(deleteTextRun);
 
 const layer = () => (
   <TextEditLayer documentId={DOC} page={0} displayedWidth={612} displayedHeight={792} scale={1} rotation={0} />
@@ -69,6 +71,14 @@ describe("TextEditLayer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save text edit" }));
 
     expect(mockReplace).toHaveBeenCalledWith(DOC, 0, 0, "Hello, Acrobat.");
+  });
+
+  it("deletes a run via deleteTextRun with the run index", async () => {
+    render(layer());
+    fireEvent.click(await screen.findByTitle("Click to edit this text"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete text run" }));
+    expect(mockDelete).toHaveBeenCalledWith(DOC, 0, 0);
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it("does not call replaceTextRun for an unchanged edit", async () => {

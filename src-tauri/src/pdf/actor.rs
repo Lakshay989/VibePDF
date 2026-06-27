@@ -48,7 +48,7 @@ use crate::pdf::cos::{
     FreeTextData, MeasureCalibration, NoteData,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
-use crate::pdf::reflow::ReplaceTextRunEdit;
+use crate::pdf::reflow::{DeleteTextRunEdit, ReplaceTextRunEdit};
 use crate::pdf::text_extract::{collect_document_fonts, extract_text_runs, TextRun};
 use crate::pdf::xfdf::annotations_to_xfdf;
 use crate::pdf::reorder::ReorderEdit;
@@ -113,6 +113,13 @@ pub enum Message {
         page: usize,
         run_index: usize,
         new_text: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-004 (P4.B3) — remove run `run_index` on `page` from the page
+    /// content stream (lopdf splice + verify). Undoable; marks dirty.
+    DeleteTextRun {
+        page: usize,
+        run_index: usize,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
@@ -1437,6 +1444,34 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P4-EDIT-004 (P4.B3) — delete a text run. Await-holding for tests; IPC
+    /// uses `delete_text_run_request`.
+    pub async fn delete_text_run(
+        &self,
+        page: usize,
+        run_index: usize,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.delete_text_run_request(page, run_index)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn delete_text_run_request(
+        &self,
+        page: usize,
+        run_index: usize,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::DeleteTextRun {
+                page,
+                run_index,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
     /// Await-holding convenience for tests; IPC uses the `_request` form.
     pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
@@ -1755,6 +1790,24 @@ fn run_worker(
                     run_index,
                     new_text,
                 };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::DeleteTextRun {
+                page,
+                run_index,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-004 (P4.B3) — remove a run via lopdf; the inverse is
+                // a pre-delete byte snapshot (RestoreDocEdit).
+                let edit = DeleteTextRunEdit { page, run_index };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
