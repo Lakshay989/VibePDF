@@ -711,6 +711,26 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Selection doesn't persist across the edit** — after move/resize the epoch reload re-extracts;
   the box re-derives from the new geometry. Fine, but rapid successive edits each round-trip.
 
+## From P4.C3 (hyperlinks)
+
+- ✅ **DONE 2026-06-28 (C3, P4-EDIT-007)** — `cos::add_link` writes a `/Link` annotation over a
+  dragged region: URL / `mailto:` email (`/A /URI`), internal page (`/Dest [pageRef /Fit]`, the
+  form the P2 reorder/delete fixups resolve), named destination (`/Dest (name)`). Invisible
+  hot-zone; `(value)` escaped by `string_literal`. The **Add Link** tool. Pending the in-app
+  eyeball (`[~]`).
+- **Add only — no link-edit UI.** You can't move an existing link's rect or retarget it from the
+  UI; delete works generically (annotation delete / dangling-dest prune). A dedicated link-edit
+  overlay (select an existing `/Link`, drag its box, change the target) is deferred.
+- **Region rect, not a text-snapped quad.** The link box is whatever you drag; it doesn't snap to
+  the glyph quads of a text selection. "Hyperlink the selected *text*" (precise quads) is later
+  polish — the spec allows either text or region.
+- **No auto-linking.** We don't scan page text for bare URLs and convert them to links in bulk.
+  Separate feature if demand appears.
+- **References, doesn't create, named destinations.** `named` points at an existing entry in
+  `/Names/Dests`; C3 doesn't author the destination itself.
+- **URL kind requires a scheme** (`https://…`). A bare `example.com` is rejected in the popover so
+  the stored URI is unambiguous to readers; no auto-`https://` prepend.
+
 ## From P4.C1 (add image — page content)
 
 - ✅ **DONE 2026-06-27 (C1)** — `add_image` embeds a PNG/JPEG as a content-stream Image XObject

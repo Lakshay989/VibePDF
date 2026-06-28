@@ -39,9 +39,9 @@ use crate::pdf::document::{
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
-    AddImageEdit, AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit, FreeTextEdit,
-    ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit, ReplyEdit,
-    StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
+    AddImageEdit, AddLinkEdit, AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit,
+    FreeTextEdit, ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit,
+    ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
@@ -347,6 +347,16 @@ pub enum Message {
         page: i32,
         rect: [f32; 4],
         image: Vec<u8>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-007 — add a `/Link` annotation over `rect`. `kind` is
+    /// `url` | `email` | `page` | `named`; `value` is the matching target.
+    /// Undoable; marks dirty.
+    AddLink {
+        page: i32,
+        rect: [f32; 4],
+        kind: String,
+        value: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1216,6 +1226,39 @@ impl DocumentActorHandle {
                 page,
                 rect,
                 image,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation. Await-holding for tests.
+    pub async fn add_link(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        kind: String,
+        value: String,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_link_request(page, rect, kind, value)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_link_request(
+        &self,
+        page: i32,
+        rect: [f32; 4],
+        kind: String,
+        value: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddLink {
+                page,
+                rect,
+                kind,
+                value,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2527,6 +2570,26 @@ fn run_worker(
                 // SPEC: P4-EDIT-005 (P4.C1) — image into the page content stream; the
                 // inverse is a pre-write byte snapshot (RestoreDocEdit).
                 let edit = AddImageEdit { page, rect, image };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddLink {
+                page,
+                rect,
+                kind,
+                value,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-007 (P4.C3) — /Link annotation; the inverse is a
+                // pre-write byte snapshot (RestoreDocEdit).
+                let edit = AddLinkEdit { page, rect, kind, value };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

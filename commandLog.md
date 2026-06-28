@@ -2584,6 +2584,34 @@ preserved (new image fills the old box). Left `[~]` (C2's eyeball now also cover
 
 ---
 
+### P4.C3 — Hyperlinks (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 353/353 (+7: target.ts validation + 1-based→0-based wire conversion)
+npm run test:rust      # EXIT 0. link.rs: 8 (url roundtrip; mailto prefix; internal-page /Dest;
+#   named dest kept; URL-with-parens escaped; out-of-range page errs; unknown kind errs;
+#   actor add+undo) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test link link_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-link.pdf (copied to /tmp/vibepdf-verify.pdf);
+#   3 links on links.pdf page 1: a URL, a page-jump (→ p2), and a mailto.
+```
+
+Completes P4-EDIT-007 (Track C). `cos::add_link` builds a `/Link` annotation dict — url/email →
+`/A /URI`, internal page → `/Dest [pageRef /Fit]` (the form the P2 reorder/delete fixups already
+resolve), named → `/Dest (name)`; invisible hot-zone (`/Border [0 0 0]`, no `/AP`); `(value)`
+escaped by `string_literal`. `AddLinkEdit` (via `cos_edit`) + `AddLink` actor msg + `pdf_add_link`
++ `addLink` IPC + `tools/link/target.ts` (pure validate + wire conversion) + `LinkLayer` (drag rect
+→ target popover) + an **Add Link** toolbar button. Primitive lives in `cos.rs` (convention), not a
+new `link.rs`. Left `[~]` (awaiting the cross-reader eyeball).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

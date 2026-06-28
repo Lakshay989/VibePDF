@@ -12,8 +12,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    add_free_text, add_image, add_image_stamp, add_ink, add_line, add_measure, add_polygon,
-    add_shape, add_stamp, add_reply, add_text_box, add_text_markup, add_text_note,
+    add_free_text, add_image, add_image_stamp, add_ink, add_line, add_link, add_measure,
+    add_polygon, add_shape, add_stamp, add_reply, add_text_box, add_text_markup, add_text_note,
     clear_text_markup, delete_annotation, update_free_text, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -315,6 +315,32 @@ impl<'a> Edit<PdfDocument<'a>> for AddImageEdit {
 
     fn label(&self) -> &'static str {
         "add-image"
+    }
+}
+
+/// SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation over `rect` on `page`.
+/// `kind` is `url` | `email` | `page` | `named`; `value` is the URL / address /
+/// 0-based target-page index / destination name. The inverse is a pre-write
+/// snapshot (`RestoreDocEdit`).
+pub struct AddLinkEdit {
+    pub page: i32,
+    pub rect: [f32; 4],
+    pub kind: String,
+    pub value: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for AddLinkEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| add_link(bytes, page, self.rect, &self.kind, &self.value))
+    }
+
+    fn label(&self) -> &'static str {
+        "add-link"
     }
 }
 

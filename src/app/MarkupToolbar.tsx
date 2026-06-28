@@ -71,6 +71,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const addTextActive = activeTool === "add-text";
   const addImageActive = activeTool === "add-image";
   const editImageActive = activeTool === "edit-image";
+  const addLinkActive = activeTool === "add-link";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -411,6 +412,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Edit Image
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(addLinkActive ? null : "add-link")}
+        title="Add a hyperlink (drag a box, then choose a URL / email / page / named destination)"
+        aria-label="Add link tool"
+        aria-pressed={addLinkActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (addLinkActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Add Link
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

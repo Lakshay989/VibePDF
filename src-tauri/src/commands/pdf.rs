@@ -690,6 +690,38 @@ pub async fn pdf_add_image(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation over `rect` on `page`
+/// (0-based). `kind` is `url` | `email` | `page` | `named`; `value` is the
+/// matching target (URL / address / 0-based target-page index / dest name).
+/// Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_add_link(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    rect: [f32; 4],
+    kind: String,
+    value: String,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_link_request(page, rect, kind, value)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-004 — add a shape annotation (`/Square` or `/Circle`) at `rect`
 /// on `page` (0-based). Undoable; runs on the actor.
 #[tauri::command]

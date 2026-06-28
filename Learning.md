@@ -5757,6 +5757,64 @@ and content-stream surgery. There's a cleaner level to act at.
 
 ---
 
+## P4.C3 — Hyperlinks (Link annotation)
+
+#### Problem
+
+Make a region of a page clickable: open a URL, jump to another page, follow a named
+destination, or start an email. This is the last Track-C feature.
+
+#### Concepts learned
+
+- **A hyperlink is an annotation, not content.** Unlike add-text/add-image (which write into
+  the page *content stream*), a link is a `/Link` **annotation** dictionary in the page's
+  `/Annots`. So C3 reused the annotation chassis (`cos::add_*` + `append_annotation`, run
+  through `annotation::cos_edit`), the exact shape the sticky note already used — almost no new
+  machinery. The lesson: classify the feature (content vs. annotation) *first*; it picks your
+  whole code path.
+- **Four target shapes, one dict.** External URL and email both use an action —
+  `/A << /S /URI /URI (…) >>` — differing only by a `mailto:` prefix. An internal page jump is
+  a *destination*: `/Dest [pageRef /Fit]`. A named destination is `/Dest (name)` (a string the
+  reader looks up in the catalog's `/Names/Dests`). `/Fit` means "show the whole page" — no
+  scroll coordinates to compute.
+- **Pick the representation that existing code already understands.** The internal-page link
+  uses the **array-with-page-ref** form (`[pageRef /Fit]`) precisely because the page
+  reorder/delete cleanup written back in P2 (`dest_target_page`, `prune_dangling_destinations`)
+  already resolves *that* shape. Choosing it means a link created here is automatically
+  fixed-up or pruned when its target page moves or is deleted — zero new code. Had we invented a
+  different encoding, we'd have had to teach the cleanup about it.
+- **Let the library escape your strings.** A URL can contain `()` and `\`, the exact characters
+  that delimit/escape a PDF literal string. Hand-concatenating would corrupt the file;
+  `Object::string_literal` escapes for us. The test `url_with_parens_is_escaped` is the guard.
+- **Find your own object back in a shared fixture.** `links.pdf` already ships with its own
+  `/Link` annotations, so "the first link with a page Dest" matched a *pre-existing* one, not
+  ours — the page-target test failed with a confusing off-by-one. Fix: tag what you add with
+  something unique (here, a known `/Rect`) and look it back up by that. General rule for
+  integration tests against real fixtures: never assume your write is the only one present.
+- **1-based for humans, 0-based on the wire.** The popover asks "Page 1–N" (what a person sees);
+  `toWireValue` subtracts one before the IPC call, because the Rust command (like every page API
+  here) is 0-based. Keeping that conversion in one pure, tested function stops the off-by-one
+  from leaking into the UI.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `add_link` (builds the `/Link` dict for url/email/page/named) + `page_id_at`. |
+| `src-tauri/src/pdf/annotation.rs` | `AddLinkEdit` (snapshot → `add_link` → reload; inverse `RestoreDocEdit`). |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | `AddLink` message + `pdf_add_link` command + register. |
+| `src/tools/link/target.ts` | Pure `LinkTarget` union, `validateTarget`, `toWireValue` (1-based → 0-based). |
+| `src/ipc/links.ts`, `src/view/link-layer.tsx` | `addLink` wrapper + the drag-a-rect + target-popover overlay. |
+| `src/app/MarkupToolbar.tsx`, `src/view/PageVirtualizer.tsx`, `src/tools/_framework/types.ts` | "Add Link" button, layer mount, `add-link` tool id. |
+| `tests/link.rs`, `src/tools/link/__tests__/target.test.ts` | 8 Rust (roundtrip / mailto / page Dest / named / escaping / range / unknown-kind / actor-undo) + 7 frontend (validation + wire conversion). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.6.5 (Link annotations) and §12.6.4.7 (URI actions) — the dict shapes.
+- PDF 32000-1:2008 §12.3.2 (Destinations) — `/Dest` arrays, `/Fit`, and named destinations.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

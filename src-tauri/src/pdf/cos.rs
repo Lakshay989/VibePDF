@@ -3337,6 +3337,98 @@ pub fn add_text_note(
     Ok(buf)
 }
 
+/// SPEC: P4-EDIT-007 — add a `/Link` annotation over `rect` (PDF pts, normalized
+/// here) on `page` (0-based). `kind` selects the target shape:
+///
+/// - `"url"`   → `/A << /S /URI /URI (value) >>` (external URL, verbatim)
+/// - `"email"` → same, with a `mailto:` scheme prepended to `value`
+/// - `"page"`  → `/Dest [pageRef /Fit]` for the 0-based page index in `value`;
+///   the array-with-page-ref form so `dest_target_page` resolves it and reorder /
+///   delete fixups (`prune_dangling_destinations`) apply
+/// - `"named"` → `/Dest (value)`, a named destination looked up in `/Names/Dests`
+///
+/// Invisible hot-zone: `/Border [0 0 0]`, no `/AP` (readers draw nothing). The
+/// `(value)` string is escaped by `Object::string_literal`, so parens/backslashes
+/// in a URL can't corrupt the file.
+pub fn add_link(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    kind: &str,
+    value: &str,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_id = page_id_at(&doc, page)?;
+
+    // Normalize so x1<x2, y1<y2 regardless of drag direction.
+    let [ax, ay, bx, by] = rect;
+    let mut annot = Dictionary::new();
+    annot.set("Type", Object::Name(b"Annot".to_vec()));
+    annot.set("Subtype", Object::Name(b"Link".to_vec()));
+    annot.set(
+        "Rect",
+        Object::Array(vec![
+            Object::Real(ax.min(bx)),
+            Object::Real(ay.min(by)),
+            Object::Real(ax.max(bx)),
+            Object::Real(ay.max(by)),
+        ]),
+    );
+    annot.set("Border", Object::Array(vec![Object::Integer(0); 3]));
+    annot.set("F", Object::Integer(4)); // Print
+    annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
+    annot.set("P", Object::Reference(page_id));
+
+    match kind {
+        "url" | "email" => {
+            let uri = if kind == "email" { format!("mailto:{value}") } else { value.to_owned() };
+            let mut action = Dictionary::new();
+            action.set("Type", Object::Name(b"Action".to_vec()));
+            action.set("S", Object::Name(b"URI".to_vec()));
+            action.set("URI", Object::string_literal(uri));
+            annot.set("A", Object::Dictionary(action));
+        }
+        "page" => {
+            let target: usize = value
+                .trim()
+                .parse()
+                .map_err(|_| CommandError::InvalidInput(format!("bad target page: {value}")))?;
+            let target_id = page_id_at(&doc, target)?;
+            annot.set(
+                "Dest",
+                Object::Array(vec![Object::Reference(target_id), Object::Name(b"Fit".to_vec())]),
+            );
+        }
+        "named" => {
+            if value.is_empty() {
+                return Err(CommandError::InvalidInput("empty named destination".into()));
+            }
+            annot.set("Dest", Object::string_literal(value));
+        }
+        other => {
+            return Err(CommandError::InvalidInput(format!("unknown link kind: {other}")));
+        }
+    }
+
+    let annot_id = doc.add_object(Object::Dictionary(annot));
+    append_annotation(&mut doc, page_id, annot_id)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The object id of the 0-based `page`, or an out-of-range `InvalidInput`.
+fn page_id_at(doc: &Document, page: usize) -> Result<ObjectId, CommandError> {
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    doc.get_pages()
+        .get(&page_no)
+        .copied()
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))
+}
+
 /// SPEC: P3-ANN-002 — update the note with `/NM == note_id`: new `/Contents` and
 /// a fresh `/M` (modification date).
 pub fn update_text_note(bytes: &[u8], note_id: &str, content: &str) -> Result<Vec<u8>, CommandError> {

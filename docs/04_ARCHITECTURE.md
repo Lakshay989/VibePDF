@@ -26,7 +26,7 @@ vibepdf/
 │   │   ├── commands/             # Tauri commands (the IPC surface)
 │   │   ├── pdf/                  # Core PDF engine (PDFium wrapper)
 │   │   │   ├── document.rs       # Open, save, metadata
-│   │   │   ├── cos.rs            # lopdf object-model layer (structural edits)
+│   │   │   ├── cos.rs            # lopdf object-model layer (structural edits) + annotation add_* incl. add_link (P4.C3)
 │   │   │   ├── page.rs           # Page operations
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations
@@ -411,6 +411,20 @@ whitespace) — corrupting multi-image delete. Fixed by prepending `\n`. **Repla
 `replace_image`) embeds the new image and overwrites the `XObject` the selected image references
 *in place* — the resource name, `cm`, and `Do` are untouched, so only the pixels change and no
 `/Resources` edit (and no copy-on-write) is needed.
+
+**Hyperlinks (P4.C3)** close Track C and reuse the *annotation* chassis rather than the
+content-stream one: `cos::add_link` builds a `/Link` annotation dict (the same `add_*` +
+`append_annotation` shape as the sticky note), and `annotation::AddLinkEdit` runs it through
+`cos_edit` (snapshot → transform → reload; inverse `RestoreDocEdit`). The target is one of
+four shapes: a URL or `mailto:` email → `/A << /S /URI >>`; an internal page → `/Dest [pageRef
+/Fit]` (the **array-with-page-ref** form, so the existing `dest_target_page` /
+`prune_dangling_destinations` reorder-and-delete fixups apply unchanged); a named destination →
+`/Dest (name)`. Links are invisible hot-zones — `/Border [0 0 0]`, no `/AP`. The `(value)`
+string is escaped by lopdf's `Object::string_literal`, so parens/backslashes in a URL can't
+break the file. The frontend `LinkLayer` drags a rect, then a popover collects the target;
+`tools/link/target.ts` (pure) validates it and converts the user's 1-based page number to the
+0-based index the command takes. The primitive deliberately lives in `cos.rs` (every other
+annotation `add_*` does), **not** a separate `link.rs`.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
