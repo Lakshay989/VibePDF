@@ -2529,6 +2529,35 @@ will edit it. PNG+JPEG only; rotation → C2. Left `[~]` pending the in-app eyeb
 
 ---
 
+### P4.C2 — edit existing image: move/resize/rotate/delete (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 344/344 (+11: matrix ×4, image-edit IPC ×3, ImageEditLayer ×4)
+npm run test:rust      # EXIT 0. image_edit.rs: 7 (RISK-#1 transform no-SIGSEGV; locate; delete +
+#   2-image ORDINAL correctness; rotate-90 aspect swap; out-of-range; actor transform+delete+undo)
+#   + 1 ignored artifact. text_add/image_add/text_delete/free_text unaffected by the
+#   append_page_content `\n` fix.
+
+# Write path → verification artifact:
+cargo test --test image_edit writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (an image moved + resized)
+```
+
+RISK #1 RESOLVED: PDFium `reset_matrix` is a mutate-in-place FFI (like set_text) — works, no
+crash. `image_extract::extract_images` (A1-style read) + `image_edit::transform_image`
+(reset_matrix, throwaway doc + Manual regen) covers move/resize/rotate via one matrix the
+frontend computes; `delete_image` splices the image's `Do` at the lopdf level (B3-style, verified
+by re-extraction). `ReadImages`/`TransformImage`/`DeleteImage` actor + 3 commands + `image-edit.ts`
++ `matrix.ts` (pure math) + selection-box `ImageEditLayer` + **Edit Image** tool. **Bug found +
+fixed:** `append_page_content` lacked a leading separator → `…ET`+`q` = `ETq` on lopdf re-decode
+(PDFium masked it), corrupting multi-image delete; prepend `\n`. Replace → C2b. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

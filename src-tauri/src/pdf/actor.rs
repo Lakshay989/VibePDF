@@ -48,6 +48,8 @@ use crate::pdf::cos::{
     FreeTextData, MeasureCalibration, NoteData,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
+use crate::pdf::image_edit::{DeleteImageEdit, TransformImageEdit};
+use crate::pdf::image_extract::{extract_images, ImageInfo};
 use crate::pdf::reflow::{DeleteTextRunEdit, ReplaceTextRunEdit};
 use crate::pdf::text_extract::{collect_document_fonts, extract_text_runs, TextRun};
 use crate::pdf::xfdf::annotations_to_xfdf;
@@ -120,6 +122,26 @@ pub enum Message {
     DeleteTextRun {
         page: usize,
         run_index: usize,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-006 (P4.C2) — locate the images on `page` (read-only).
+    ReadImages {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<ImageInfo>, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-006 (P4.C2) — override image `index`'s placement matrix on
+    /// `page` (move/resize/rotate). Undoable; marks dirty.
+    TransformImage {
+        page: usize,
+        index: usize,
+        matrix: [f32; 6],
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-006 (P4.C2) — delete image `index` on `page` (lopdf splice +
+    /// verify). Undoable; marks dirty.
+    DeleteImage {
+        page: usize,
+        index: usize,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
@@ -1576,6 +1598,77 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P4-EDIT-006 (P4.C2) — locate images on a page. Await-holding for tests.
+    pub async fn read_images(&self, page: usize) -> Result<Vec<ImageInfo>, CommandError> {
+        let rx = self.read_images_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_images_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<ImageInfo>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadImages { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-006 (P4.C2) — move/resize/rotate an image. Await-holding for tests.
+    pub async fn transform_image(
+        &self,
+        page: usize,
+        index: usize,
+        matrix: [f32; 6],
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.transform_image_request(page, index, matrix)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn transform_image_request(
+        &self,
+        page: usize,
+        index: usize,
+        matrix: [f32; 6],
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::TransformImage {
+                page,
+                index,
+                matrix,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-006 (P4.C2) — delete an image. Await-holding for tests.
+    pub async fn delete_image(
+        &self,
+        page: usize,
+        index: usize,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.delete_image_request(page, index)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn delete_image_request(
+        &self,
+        page: usize,
+        index: usize,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::DeleteImage { page, index, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
     /// Await-holding convenience for tests; IPC uses the `_request` form.
     pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
@@ -1912,6 +2005,44 @@ fn run_worker(
                 // SPEC: P4-EDIT-004 (P4.B3) — remove a run via lopdf; the inverse is
                 // a pre-delete byte snapshot (RestoreDocEdit).
                 let edit = DeleteTextRunEdit { page, run_index };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReadImages { page, reply } => {
+                // SPEC: P4-EDIT-006 (P4.C2) — read-only; extract_images holds the
+                // PDFium lock itself (like render_page).
+                let _ = reply.send(extract_images(&doc, page));
+            }
+            Message::TransformImage {
+                page,
+                index,
+                matrix,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-006 (P4.C2) — move/resize/rotate; inverse is a
+                // pre-edit byte snapshot (RestoreDocEdit).
+                let edit = TransformImageEdit { page, index, matrix };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::DeleteImage { page, index, reply } => {
+                // SPEC: P4-EDIT-006 (P4.C2) — delete via lopdf splice; inverse is a
+                // pre-delete byte snapshot (RestoreDocEdit).
+                let edit = DeleteImageEdit { page, index };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

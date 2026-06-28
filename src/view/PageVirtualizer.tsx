@@ -14,6 +14,7 @@ import { FreeTextLayer } from "@/view/free-text-layer";
 import { TextEditLayer } from "@/view/text-edit-layer";
 import { TextBoxLayer } from "@/view/text-box-layer";
 import { ImageAddLayer } from "@/view/image-add-layer";
+import { ImageEditLayer } from "@/view/image-edit-layer";
 import { InkLayer } from "@/view/ink-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PolygonLayer } from "@/view/polygon-layer";
@@ -538,6 +539,14 @@ function PageSlot({
         rotation={rotation}
       />
       <ImageAddLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <ImageEditLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

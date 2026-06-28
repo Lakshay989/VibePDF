@@ -686,6 +686,27 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Rotated/skewed runs** — `set_text` preserves the matrix (good), so rotation is fine
   for *edit*; only the (deferred) recreate path would need to re-apply a matrix.
 
+## From P4.C2 (edit existing image)
+
+- ✅ **DONE 2026-06-27 (C2)** — move/resize/rotate (PDFium `reset_matrix`) + delete (lopdf
+  splice). RISK #1 resolved: `reset_matrix` mutate-in-place works (no SIGSEGV). Pending the
+  in-app eyeball.
+- ✅ **FIXED — `ETq` content-stream merge.** `append_page_content` (C1/B2) lacked a leading
+  separator; lopdf concatenates `/Contents` array streams without inserting the spec-required
+  whitespace, so `…ET`+`q` fused into a bogus token and broke multi-image delete. Prepended `\n`.
+  (PDFium masks this on read, which is why it surfaced only via the lopdf delete path.)
+- 🔜 **Replace deferred to C2b** — pick a file → embed a new XObject → repoint the `Do`'s
+  resource name (or swap the XObject object). The "original data preserved unless replaced"
+  clause becomes load-bearing here.
+- **Resizing a rotated image resets rotation** — `rectToMatrix` produces an axis-aligned matrix,
+  so a resize after a rotate squares it up. Acceptable; a rotation-aware resize is later polish.
+- **90° rotation only** — no free-angle drag handle (the matrix supports any angle; the handle +
+  snapping UX is deferred).
+- **Best on identifiable images** — delete relies on finding the image's `Do`; an image inside a
+  Form XObject (or shared across pages) won't match → the verify errors rather than corrupt.
+- **Selection doesn't persist across the edit** — after move/resize the epoch reload re-extracts;
+  the box re-derives from the new geometry. Fine, but rapid successive edits each round-trip.
+
 ## From P4.C1 (add image — page content)
 
 - ✅ **DONE 2026-06-27 (C1)** — `add_image` embeds a PNG/JPEG as a content-stream Image XObject

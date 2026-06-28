@@ -36,6 +36,8 @@ vibepdf/
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
+│   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
+│   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete (lopdf splice) (P4.C2)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -394,6 +396,19 @@ of B2** and are now shared by add-text and add-image. Only PNG/JPEG are accepted
 formats the spec lists need a raster decoder we don't bundle (clean error; BACKLOG). Like the
 added text, the image is real content, so **C2** (edit/move/resize/rotate/replace/delete) will
 operate on it uniformly.
+
+**Editing an image (P4.C2)** finally exercises a PDFium *content mutation* A3 left uncertain.
+`image_extract.rs` locates images (A1-style live-PDFium read → `ImageInfo {index, bbox,
+matrix}`). Move/resize/rotate are all *one* new placement matrix the frontend computes, applied
+by `image_edit::transform_image` via PDFium **`reset_matrix`** — and the key finding is that
+`reset_matrix` is a *mutate-in-place* FFI like `FPDFText_SetText` (it **works**), unlike
+`FPDFPage_RemoveObject` (which crashes). So transform follows the throwaway-doc + `Manual`-regen
+pattern; **delete** still goes through a lopdf `Do`-splice (`delete_image`, B3-style, verified by
+re-extraction). C2 also flushed out a latent bug in C1/B2's `append_page_content`: appended
+content streams lacked a leading separator, so a page ending `…ET` fused with the appended `q`
+into `ETq` when lopdf re-decoded the array (PDFium had hidden it by inserting the spec-required
+whitespace) — corrupting multi-image delete. Fixed by prepending `\n`. **Replace** (swap the
+`Do`'s XObject) is deferred to C2b.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

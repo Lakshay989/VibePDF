@@ -8,6 +8,8 @@ pub mod document;
 pub mod extract;
 pub mod flatten;
 pub mod font_resolver;
+pub mod image_edit;
+pub mod image_extract;
 pub mod image_xobject;
 pub mod insert_from;
 pub mod merge;

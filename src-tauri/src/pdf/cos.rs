@@ -1366,7 +1366,14 @@ fn aspect_fit_rect(rect: [f32; 4], iw: u32, ih: u32) -> [f32; 4] {
 
 /// Append `content` (a balanced `q … Q` fragment) as a new content stream after the
 /// page's existing content, so it draws on top. Shared by add-text and add-image.
-fn append_page_content(doc: &mut Document, page_id: ObjectId, content: String) -> Result<(), CommandError> {
+///
+/// The leading newline is load-bearing: PDF content streams in a `/Contents` array
+/// are concatenated, and a stream that ends without whitespace (e.g. `…ET`) would
+/// otherwise fuse with our leading `q` into a bogus `ETq` token when the array is
+/// later decoded as one stream (the delete path). `PDFium` inserts the separator
+/// per spec; lopdf does not, so we add our own.
+fn append_page_content(doc: &mut Document, page_id: ObjectId, mut content: String) -> Result<(), CommandError> {
+    content.insert(0, '\n');
     let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
     let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
         Ok(Object::Reference(id)) => vec![Object::Reference(*id)],

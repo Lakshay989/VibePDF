@@ -70,6 +70,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const editTextActive = activeTool === "edit-text";
   const addTextActive = activeTool === "add-text";
   const addImageActive = activeTool === "add-image";
+  const editImageActive = activeTool === "edit-image";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -397,6 +398,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Add Image
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(editImageActive ? null : "edit-image")}
+        title="Edit image (click an image to move / resize / rotate / delete it)"
+        aria-label="Edit image tool"
+        aria-pressed={editImageActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (editImageActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Edit Image
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

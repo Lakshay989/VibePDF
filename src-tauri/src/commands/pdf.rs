@@ -7,6 +7,7 @@ use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData};
 use crate::pdf::font_resolver::FontReport;
+use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
@@ -1074,6 +1075,92 @@ pub async fn pdf_delete_text_run(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.delete_text_run_request(page, run_index)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-006 (P4.C2) — locate the images on `page` (0-based) for
+/// click-to-select. Read-only; runs on the live document via the actor.
+#[tauri::command]
+pub async fn pdf_extract_images(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+) -> Result<Vec<ImageInfo>, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_images_request(page)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-006 (P4.C2) — override image `index`'s placement matrix on `page`
+/// (move/resize/rotate). Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_transform_image(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    index: i32,
+    matrix: [f32; 6],
+) -> Result<HistoryState, CommandError> {
+    if page < 0 || index < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page/index: {page}/{index}")));
+    }
+    let (page, index) = (usize::try_from(page).unwrap_or(0), usize::try_from(index).unwrap_or(0));
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.transform_image_request(page, index, matrix)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-006 (P4.C2) — delete image `index` on `page`. Undoable; on the actor.
+#[tauri::command]
+pub async fn pdf_delete_image(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    index: i32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 || index < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page/index: {page}/{index}")));
+    }
+    let (page, index) = (usize::try_from(page).unwrap_or(0), usize::try_from(index).unwrap_or(0));
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.delete_image_request(page, index)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

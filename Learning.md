@@ -5651,6 +5651,69 @@ trick: embedding JPEG without decoding it.
 
 ---
 
+### P4.C2 — editing an image (validate first, and a bug PDFium was hiding)
+
+#### Problem
+
+C2 is the biggest single feature so far — *five* operations on an interactive selection box —
+and it carried a real unknown: A3 proved PDFium's `remove_object` SIGSEGVs, but C2's
+move/resize/rotate want to *mutate* an object's matrix. Would that crash too? The whole plan
+hinged on the answer.
+
+#### Concepts learned
+
+- **De-risk the unknown in increment 1, not at the end.** Before writing the actor, the IPC, or
+  a single line of UI, I wrote *one* test: add an image, `reset_matrix` it, re-extract, assert no
+  crash. It passed — `reset_matrix` is a *mutate-in-place* FFI (`FPDFPageObj_TransformF`) in the
+  same family as `FPDFText_SetText` (which works), not `FPDFPage_RemoveObject` (which crashes).
+  Had it crashed, I'd have stopped and reported with one cheap test burned, not a half-built
+  feature. When a plan rests on an unknown, spend the first increment proving it.
+
+- **Five gestures, one primitive.** Move, resize, and rotate look like three features but are all
+  just *a new placement matrix*. The frontend computes it (drag → translate, corner → new rect,
+  button → `rotate90` composed about the centre) and the backend has a single `transform_image`.
+  Pushing the variation into pure, testable matrix math (`matrix.ts`) kept the backend tiny and
+  the hard part unit-tested.
+
+- **A bug one layer was hiding from another.** The ordinal test failed with a bbox of *exactly*
+  `image0_cm × image1_cm` — image 0's transform leaking into image 1. Dumping the re-encoded
+  content stream showed the smoking gun: **`ETq`**. PDF concatenates the streams in a `/Contents`
+  array, and the spec says insert whitespace between them — **PDFium does, lopdf doesn't**. So a
+  page ending `…ET` fused with our appended `q` into one bogus token; PDFium had silently fixed
+  it on read, so C1's "add" looked fine, but lopdf's decode→re-encode (the delete path) inherited
+  the corruption. Two libraries disagreeing about an implicit rule is a classic source of "works
+  here, breaks there." The one-character fix (prepend `\n` to appended content) closed it.
+
+- **Verify destructive edits by their *effect*, not just a count.** My first delete-verify only
+  checked "one fewer image" — which *passed* on the corrupted output (still one image, just
+  mislocated). Strengthening it to "the survivors' bboxes match the originals minus the target"
+  would have caught the corruption as an error. Count is necessary but not sufficient; verify the
+  thing you actually care about (geometry unchanged), and the safety net catches more.
+
+- **Read like A1, write like A3, delete like B3.** C2 is mostly *recomposition* of patterns:
+  the read mirrors text-run extraction, the transform mirrors `replace_text_run`'s throwaway-doc
+  write, the delete mirrors `delete_text_run`'s lopdf splice. The selection-box UI is the only
+  genuinely new surface. By Track C, "a new editing op" is mostly choosing which existing chassis
+  to bolt it onto.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/image_extract.rs` | `extract_images` (live-PDFium read) + `extract_images_from_bytes` (the verify helper). |
+| `src-tauri/src/pdf/image_edit.rs` | `transform_image` (PDFium `reset_matrix`) + `delete_image` (lopdf `Do`-splice, verified) + the two `Edit` impls. |
+| `src-tauri/src/pdf/cos.rs` | `append_page_content` gained a leading `\n` (the `ETq` fix). |
+| `src-tauri/src/pdf/{actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ReadImages`/`TransformImage`/`DeleteImage` + three commands. |
+| `src/tools/image-edit/matrix.ts`, `src/ipc/image-edit.ts`, `src/view/image-edit-layer.tsx`, `MarkupToolbar.tsx` | Matrix math + IPC + the selection-box overlay + the **Edit Image** tool. |
+| `tests/image_edit.rs`, `matrix.test.ts`, `image-edit.test.ts`, `image-edit-layer.test.tsx` | Risk-#1 no-crash; locate; move/resize/rotate; delete + ordinal; actor undo; matrix units; select/delete/rotate UI. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §7.8.2 (content streams; the inter-stream whitespace rule) and §8.3.4 (the `cm` transform matrix).
+- pdfium-render `reset_matrix` / `transform` (`FPDFPageObj_TransformF`) vs `remove_object`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
