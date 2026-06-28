@@ -113,6 +113,7 @@ pub fn run() {
             commands::pdf::pdf_extract_images,
             commands::pdf::pdf_transform_image,
             commands::pdf::pdf_delete_image,
+            commands::pdf::pdf_replace_image,
             commands::pdf::pdf_read_free_text,
             commands::pdf::pdf_update_free_text,
             commands::pdf::pdf_add_shape,

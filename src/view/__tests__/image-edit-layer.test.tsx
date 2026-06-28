@@ -19,9 +19,13 @@ vi.mock("@/ipc/image-edit", () => ({
   extractImages: vi.fn().mockResolvedValue([IMAGE]),
   transformImage: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   deleteImage: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  replaceImage: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn().mockResolvedValue("/tmp/new.png") }));
 
-import { deleteImage, extractImages, transformImage } from "@/ipc/image-edit";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+
+import { deleteImage, extractImages, replaceImage, transformImage } from "@/ipc/image-edit";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useToolStore } from "@/state/tool-store";
 import { ImageEditLayer } from "@/view/image-edit-layer";
@@ -29,6 +33,7 @@ import { ImageEditLayer } from "@/view/image-edit-layer";
 const DOC = "doc-1";
 const mockDelete = vi.mocked(deleteImage);
 const mockTransform = vi.mocked(transformImage);
+const mockReplace = vi.mocked(replaceImage);
 
 const layer = () => (
   <ImageEditLayer documentId={DOC} page={0} displayedWidth={612} displayedHeight={792} scale={1} rotation={0} />
@@ -66,6 +71,15 @@ describe("ImageEditLayer", () => {
     expect(mockTransform).toHaveBeenCalledTimes(1);
     const [doc, page, index] = mockTransform.mock.calls[0];
     expect([doc, page, index]).toEqual([DOC, 0, 0]);
+  });
+
+  it("replaces the selected image via a file pick → replaceImage", async () => {
+    render(layer());
+    fireEvent.click(await screen.findByTitle("Click to edit this image"));
+    fireEvent.click(screen.getByRole("button", { name: "Replace image" }));
+    // The dialog resolves async, then replaceImage is called with the picked path.
+    await vi.waitFor(() => expect(openDialog).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockReplace).toHaveBeenCalledWith(DOC, 0, 0, "/tmp/new.png"));
   });
 
   it("renders nothing when the edit-image tool is inactive", () => {

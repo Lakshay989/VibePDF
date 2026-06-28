@@ -37,7 +37,7 @@ vibepdf/
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
-│   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete (lopdf splice) (P4.C2)
+│   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete + replace (lopdf) (P4.C2/C2b)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -407,8 +407,10 @@ pattern; **delete** still goes through a lopdf `Do`-splice (`delete_image`, B3-s
 re-extraction). C2 also flushed out a latent bug in C1/B2's `append_page_content`: appended
 content streams lacked a leading separator, so a page ending `…ET` fused with the appended `q`
 into `ETq` when lopdf re-decoded the array (PDFium had hidden it by inserting the spec-required
-whitespace) — corrupting multi-image delete. Fixed by prepending `\n`. **Replace** (swap the
-`Do`'s XObject) is deferred to C2b.
+whitespace) — corrupting multi-image delete. Fixed by prepending `\n`. **Replace** (P4.C2b,
+`replace_image`) embeds the new image and overwrites the `XObject` the selected image references
+*in place* — the resource name, `cm`, and `Do` are untouched, so only the pixels change and no
+`/Resources` edit (and no copy-on-write) is needed.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

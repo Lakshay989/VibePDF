@@ -48,7 +48,7 @@ use crate::pdf::cos::{
     FreeTextData, MeasureCalibration, NoteData,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
-use crate::pdf::image_edit::{DeleteImageEdit, TransformImageEdit};
+use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
 use crate::pdf::image_extract::{extract_images, ImageInfo};
 use crate::pdf::reflow::{DeleteTextRunEdit, ReplaceTextRunEdit};
 use crate::pdf::text_extract::{collect_document_fonts, extract_text_runs, TextRun};
@@ -142,6 +142,14 @@ pub enum Message {
     DeleteImage {
         page: usize,
         index: usize,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-006 (P4.C2b) — replace image `index`'s pixels on `page` with a
+    /// new PNG/JPEG, preserving placement. Undoable; marks dirty.
+    ReplaceImage {
+        page: usize,
+        index: usize,
+        image: Vec<u8>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P2-SAVE-001 — explicit save. `path = None` writes back to
@@ -1669,6 +1677,36 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P4-EDIT-006 (P4.C2b) — replace an image's pixels. Await-holding for tests.
+    pub async fn replace_image(
+        &self,
+        page: usize,
+        index: usize,
+        image: Vec<u8>,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.replace_image_request(page, index, image)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn replace_image_request(
+        &self,
+        page: usize,
+        index: usize,
+        image: Vec<u8>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReplaceImage {
+                page,
+                index,
+                image,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P3-ANN-007 (P3.C4b) — read the document's measurement calibration.
     /// Await-holding convenience for tests; IPC uses the `_request` form.
     pub async fn read_measure_calibration(&self) -> Result<Option<MeasureCalibration>, CommandError> {
@@ -2043,6 +2081,25 @@ fn run_worker(
                 // SPEC: P4-EDIT-006 (P4.C2) — delete via lopdf splice; inverse is a
                 // pre-delete byte snapshot (RestoreDocEdit).
                 let edit = DeleteImageEdit { page, index };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReplaceImage {
+                page,
+                index,
+                image,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-006 (P4.C2b) — swap the image's pixels; inverse is a
+                // pre-edit byte snapshot (RestoreDocEdit).
+                let edit = ReplaceImageEdit { page, index, image };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

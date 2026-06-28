@@ -695,9 +695,13 @@ C4a/b, B3b). Four issues found + fixed this session:
   separator; lopdf concatenates `/Contents` array streams without inserting the spec-required
   whitespace, so `…ET`+`q` fused into a bogus token and broke multi-image delete. Prepended `\n`.
   (PDFium masks this on read, which is why it surfaced only via the lopdf delete path.)
-- 🔜 **Replace deferred to C2b** — pick a file → embed a new XObject → repoint the `Do`'s
-  resource name (or swap the XObject object). The "original data preserved unless replaced"
-  clause becomes load-bearing here.
+- ✅ **DONE 2026-06-28 (C2b) — replace** (`replace_image`): embed the new PNG/JPEG, overwrite the
+  referenced `XObject` in place (name/`cm`/`Do` untouched). The "original data preserved unless
+  replaced" clause is now satisfied (every other op leaves pixels alone; replace is the explicit
+  swap). **Aspect re-fit not done** — the new image fills the old box; if its aspect differs it
+  stretches (resize via the handles). A re-fit-on-replace pass is the noted follow-up. **Single
+  instance of a shared XObject** still can't be replaced independently (would need a fresh name +
+  content rewrite) — rare for VibePDF-added images.
 - **Resizing a rotated image resets rotation** — `rectToMatrix` produces an axis-aligned matrix,
   so a resize after a rotate squares it up. Acceptable; a rotation-aware resize is later polish.
 - **90° rotation only** — no free-angle drag handle (the matrix supports any angle; the handle +

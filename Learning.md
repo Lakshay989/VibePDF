@@ -5714,6 +5714,49 @@ hinged on the answer.
 
 ---
 
+### P4.C2b — replace an image (mutate the object, not the references)
+
+#### Problem
+
+C2 did move/resize/rotate/delete; "replace" was the last verb of P4-EDIT-006. The naïve idea —
+repoint the resource name or rewrite the `Do` — drags in the copy-on-write `/Resources` problem
+and content-stream surgery. There's a cleaner level to act at.
+
+#### Concepts learned
+
+- **Edit the indirection's *target*, not the indirection.** A page draws an image as
+  `…/Img Do`, where `/Img → Reference(old_id)` in `/Resources /XObject`, and `old_id` is the
+  pixel stream. To replace the pixels, I embed the new image (a new object) and **overwrite
+  `old_id`'s contents in place** (`doc.objects.insert(old_id, new_obj)`). The name still points at
+  `old_id`; the `cm`, the `Do`, the Resources dict — *nothing* about the references changes, so
+  there's no copy-on-write and no content rewrite. When you want to change a thing many places
+  point to, change the thing, not every pointer.
+
+- **Reuse compounds.** `replace_image` is `embed_image` (C1) + the image-`Do` ordinal walk (C2's
+  delete) + the `image_edit_apply` undo chassis + a one-line object swap. The genuinely new code
+  is tiny because each prior step left a reusable seam. By the fifth image operation, "add a verb"
+  is mostly wiring.
+
+- **Verify what the op promises.** Replace promises "swap pixels, keep placement." The primitive
+  verifies the *placement* (count + every bbox unchanged → no corruption); the *test* asserts the
+  XObject's `/Width`/`/Height` changed (the pixels really swapped) and that an RGBA replacement
+  carries an `/SMask` (alpha survives). Between them, both halves of the promise are checked.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/image_edit.rs` | `replace_image` (embed + in-place XObject swap + verify) + `nth_image_xobject_id` + `ReplaceImageEdit`. |
+| `src-tauri/src/pdf/{actor}.rs`, `commands/pdf.rs`, `lib.rs` | `ReplaceImage` message + `pdf_replace_image` (reads the file). |
+| `src/ipc/image-edit.ts`, `src/view/image-edit-layer.tsx` | `replaceImage` + the **Replace** button (file dialog) in the selection toolbar. |
+| `tests/image_replace.rs`, `image-edit.test.ts`, `image-edit-layer.test.tsx` | Swap preserves placement + changes dims; keeps alpha; ordinal correctness; actor replace+undo; marshalling; Replace-button → file pick. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §7.3.10 (indirect objects) — why overwriting the object behind a reference is the surgical edit.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

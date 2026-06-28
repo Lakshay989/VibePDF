@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
-import { deleteImage, extractImages, transformImage } from "@/ipc/image-edit";
+import { deleteImage, extractImages, replaceImage, transformImage } from "@/ipc/image-edit";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -37,5 +37,16 @@ describe("image-edit IPC", () => {
     mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
     await deleteImage("doc-1", 0, 1);
     expect(mockInvoke).toHaveBeenCalledWith("pdf_delete_image", { id: "doc-1", page: 0, index: 1 });
+  });
+
+  it("replaceImage marshals (id, page, index, imagePath)", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await replaceImage("doc-1", 0, 1, "/tmp/new.png");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_replace_image", {
+      id: "doc-1",
+      page: 0,
+      index: 1,
+      imagePath: "/tmp/new.png",
+    });
   });
 });

@@ -42,3 +42,16 @@ export async function deleteImage(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_delete_image", { id, page, index });
 }
+
+/**
+ * SPEC: P4-EDIT-006 (P4.C2b) — replace image `index`'s pixels with the PNG/JPEG at
+ * `imagePath`, preserving placement. The Rust command reads the file.
+ */
+export async function replaceImage(
+  id: DocumentId,
+  page: number,
+  index: number,
+  imagePath: string,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_replace_image", { id, page, index, imagePath });
+}

@@ -7,8 +7,9 @@
 // DnD (WKWebView; docs/04).
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
-import { deleteImage, extractImages, type ImageInfo, transformImage } from "@/ipc/image-edit";
+import { deleteImage, extractImages, type ImageInfo, replaceImage, transformImage } from "@/ipc/image-edit";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
@@ -106,14 +107,32 @@ export function ImageEditLayer({
 
   const selectedImage = images.find((i) => i.index === selected) ?? null;
 
+  const applyHistory = (h: Awaited<ReturnType<typeof transformImage>>) => {
+    bumpEpoch(documentId);
+    setHistory(documentId, h);
+  };
+
   const commit = (matrix: Parameters<typeof transformImage>[3]) => {
     if (selected === null) return;
     transformImage(documentId, page, selected, matrix)
-      .then((h) => {
-        bumpEpoch(documentId);
-        setHistory(documentId, h);
-      })
+      .then(applyHistory)
       .catch((err: unknown) => console.warn("transform image failed", documentId, err));
+  };
+
+  // SPEC: P4-EDIT-006 (P4.C2b) — pick a new PNG/JPEG and swap the image's pixels
+  // (placement preserved).
+  const replace = () => {
+    if (selected === null) return;
+    const idx = selected;
+    void openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg"] }],
+    })
+      .then((picked) =>
+        typeof picked === "string" ? replaceImage(documentId, page, idx, picked).then(applyHistory) : undefined,
+      )
+      .catch((err: unknown) => console.warn("replace image failed", documentId, err));
   };
 
   const startDrag = (kind: "move" | "resize", corner: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -240,6 +259,14 @@ export function ImageEditLayer({
               className="rounded bg-neutral-200 px-2 py-0.5 text-xs hover:bg-neutral-300"
             >
               ⟳ 90°
+            </button>
+            <button
+              type="button"
+              onClick={replace}
+              aria-label="Replace image"
+              className="rounded bg-neutral-200 px-2 py-0.5 text-xs hover:bg-neutral-300"
+            >
+              Replace
             </button>
             <button
               type="button"

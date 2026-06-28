@@ -1166,6 +1166,38 @@ pub async fn pdf_delete_image(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-006 (P4.C2b) — replace image `index`'s pixels on `page` with the
+/// PNG/JPEG at `image_path`, preserving placement. Reads the file; on the actor.
+#[tauri::command]
+pub async fn pdf_replace_image(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    index: i32,
+    image_path: String,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 || index < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page/index: {page}/{index}")));
+    }
+    let (page, index) = (usize::try_from(page).unwrap_or(0), usize::try_from(index).unwrap_or(0));
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let image = std::fs::read(&image_path)
+        .map_err(|e| CommandError::InvalidInput(format!("cannot read {image_path}: {e}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.replace_image_request(page, index, image)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P2-PAGE-003 — delete `pages` (0-based indices). `PDFium` renumbers
 /// the page tree; the removed pages are preserved for undo. Marks the
 /// document dirty; returns the new history availability.

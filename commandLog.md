@@ -2558,6 +2558,32 @@ fixed:** `append_page_content` lacked a leading separator → `…ET`+`q` = `ETq
 
 ---
 
+### P4.C2b — replace an image's pixels (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 346/346 (+2: replaceImage marshalling, Replace-button → file pick)
+npm run test:rust      # EXIT 0. image_replace.rs: 5 (swap preserves placement + changes XObject
+#   dims; keeps alpha [RGBA → /SMask]; preserves other images [ordinal]; out-of-range; actor
+#   replace+undo) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test image_replace writes_verification_artifact -- --exact --ignored
+#   → /tmp/vibepdf-verify.pdf (an image replaced with a different one)
+```
+
+Completes P4-EDIT-006. `image_edit::replace_image` embeds the new image (`embed_image`) and
+**overwrites the XObject in place** at the id the selected image's `Do` references — name/`cm`/`Do`
+untouched, so no `/Resources` edit / copy-on-write. Verified by re-extraction (count + every bbox
+unchanged). `ReplaceImageEdit` + `ReplaceImage` actor msg + `pdf_replace_image` (reads the file) +
+`replaceImage` IPC + a **Replace** button (file dialog) in the selection toolbar. Placement
+preserved (new image fills the old box). Left `[~]` (C2's eyeball now also covers replace).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

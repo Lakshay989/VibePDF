@@ -20,6 +20,7 @@ use pdfium_render::prelude::*;
 use crate::error::CommandError;
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_extract::extract_images_from_bytes;
+use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -210,6 +211,94 @@ fn deref_dict<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a lopdf::Dicti
     }
 }
 
+/// SPEC: P4-EDIT-006 — replace image `index`'s pixel data with `new_image` (PNG or
+/// JPEG), **preserving its placement**. Embeds the new image and overwrites the
+/// `XObject` the selected image references *in place* (its resource name, `cm`, and
+/// `Do` are all untouched — only the pixels change, so no `/Resources` edit and no
+/// copy-on-write are needed). Verified by re-extraction: same image count + every
+/// bbox unchanged, else error.
+pub fn replace_image(
+    bytes: &[u8],
+    page: usize,
+    index: usize,
+    new_image: &[u8],
+) -> Result<Vec<u8>, CommandError> {
+    let before = extract_images_from_bytes(bytes, page)?;
+    if index >= before.len() {
+        return Err(CommandError::InvalidInput(format!(
+            "image index {index} out of range ({} images on page)",
+            before.len()
+        )));
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(lopdf_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let old_id = nth_image_xobject_id(&doc, page_id, index).ok_or_else(|| {
+        CommandError::InvalidInput("could not locate the image's XObject to replace".to_owned())
+    })?;
+
+    // Embed the new image, then overwrite the old XObject in place — the resource
+    // name still points at `old_id`, which now holds the new pixels (and `/SMask`).
+    let new = embed_image(&mut doc, new_image)?;
+    let new_object = doc.get_object(new.id).map_err(lopdf_err)?.clone();
+    doc.objects.insert(old_id, new_object);
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out)
+        .map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+
+    // The replace must not move or drop any image — only the targeted pixels change.
+    let after = extract_images_from_bytes(&out, page)?;
+    let placement_preserved = after.len() == before.len()
+        && after
+            .iter()
+            .zip(&before)
+            .all(|(a, b)| a.bbox.iter().zip(&b.bbox).all(|(x, y)| (x - y).abs() < 1.0));
+    if !placement_preserved {
+        return Err(CommandError::PdfError(
+            "image replace disturbed the page's image geometry".to_owned(),
+        ));
+    }
+    Ok(out)
+}
+
+/// Resolve the `/XObject` object id that the `index`-th image `Do` on the page
+/// references. Walks the content `Do` operators (image-aware) to the Nth image,
+/// then looks its resource name up in `/Resources /XObject`.
+fn nth_image_xobject_id(doc: &Document, page_id: lopdf::ObjectId, index: usize) -> Option<lopdf::ObjectId> {
+    let image_names = image_xobject_names(doc, page_id);
+    let operations = doc.get_and_decode_page_content(page_id).ok()?.operations;
+
+    let mut seen = 0usize;
+    let mut name = None;
+    for op in &operations {
+        if op.operator == "Do" {
+            if let Some(Object::Name(n)) = op.operands.first() {
+                if image_names.contains(n) {
+                    if seen == index {
+                        name = Some(n.clone());
+                        break;
+                    }
+                    seen += 1;
+                }
+            }
+        }
+    }
+    let name = name?;
+
+    let resources = deref_dict(doc, doc.get_dictionary(page_id).ok()?.get(b"Resources").ok()?)?;
+    let xobjects = deref_dict(doc, resources.get(b"XObject").ok()?)?;
+    xobjects.get(name.as_slice()).ok()?.as_reference().ok()
+}
+
 /// SPEC: P4-EDIT-006 — move/resize/rotate an image as one undoable edit. Snapshots
 /// the live document, runs the bytes → bytes transform, swaps the document; the
 /// inverse restores the pre-edit bytes. Mirrors [`crate::pdf::reflow`].
@@ -248,6 +337,26 @@ impl<'a> Edit<PdfDocument<'a>> for DeleteImageEdit {
 
     fn label(&self) -> &'static str {
         "delete-image"
+    }
+}
+
+/// SPEC: P4-EDIT-006 — replace an image's pixels as one undoable edit.
+pub struct ReplaceImageEdit {
+    pub page: usize,
+    pub index: usize,
+    pub image: Vec<u8>,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for ReplaceImageEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        image_edit_apply(doc, |bytes| replace_image(bytes, self.page, self.index, &self.image))
+    }
+
+    fn label(&self) -> &'static str {
+        "replace-image"
     }
 }
 
