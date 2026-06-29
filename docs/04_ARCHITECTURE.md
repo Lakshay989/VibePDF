@@ -38,6 +38,7 @@ vibepdf/
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
 │   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete + replace (lopdf) (P4.C2/C2b)
+│   │   │   ├── watermark.rs      # Text/image watermark over selected pages, on-top/behind (P4.D2)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -431,6 +432,21 @@ attaches a generated `/AP` Form XObject (BBox == Rect, identity matrix, a 1pt st
 scaffold as the markup `/AP`) plus `/C` + `/BS` for readers that ignore `/AP`. Drawing a real
 appearance — not just `/Border` — is what makes the box/underline render in every reader (a
 borderless link only shows the reader's own hover affordance).
+
+**Watermark (P4.D2)** opens **Track D — page decoration**, and is the first feature with its own
+`pdf/watermark.rs` module rather than living in `cos.rs`: Track D's later features (background,
+header/footer, page numbers, Bates) all share the same "draw content onto selected pages with
+placement / opacity" machinery, so it earns a home. It reuses cos's content-writer helpers — now
+`pub(crate)`: `register_page_resource` (copy-on-write `/Resources`), `append_page_content` and a new
+`prepend_page_content`, `base_font`, `font_avg_em`, `parse_hex_color`. A watermark is **page
+content**, not an annotation: per selected page it registers an opacity `/ExtGState` and a font (or
+the shared image `XObject`, embedded **once**), then writes a `q … Q` fragment that rotates about the
+page centre (a `cm` matrix) and draws the centred text/image. *On top* appends the stream; *behind*
+prepends it (so existing content paints over the mark). `WatermarkEdit` is self-contained like
+`image_edit` (snapshot → reload, inverse `RestoreDocEdit`), not routed through `annotation.rs`'s
+`cos_edit`. The frontend is a **document-wide dialog** (`WatermarkDialog`, like Split/Merge), not a
+canvas layer; `tools/watermark/parsePageRange` turns "all" / "1-3,5" into 0-based indices. 50 pages
+in ~0.1 s — it's pure lopdf object-adds + one save, no rasterization.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

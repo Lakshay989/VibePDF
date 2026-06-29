@@ -32,6 +32,9 @@ export interface ZoomToolbarProps {
   /** SPEC: P2-PAGE-005 — open the insert-from-PDF dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onInsertFromPdf?: (() => void) | undefined;
+  /** SPEC: P4-EDIT-009 — open the watermark dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onWatermark?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -39,6 +42,7 @@ export function ZoomToolbar({
   onSplit,
   onMerge,
   onInsertFromPdf,
+  onWatermark,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -194,6 +198,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Insert PDF…
+        </button>
+      ) : null}
+
+      {onWatermark ? (
+        <button
+          type="button"
+          onClick={onWatermark}
+          title="Add a text or image watermark"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Watermark…
         </button>
       ) : null}
 

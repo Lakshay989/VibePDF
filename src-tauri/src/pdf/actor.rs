@@ -43,6 +43,7 @@ use crate::pdf::annotation::{
     FreeTextEdit, ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit,
     ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
+use crate::pdf::watermark::{WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
     FreeTextData, MeasureCalibration, NoteData,
@@ -360,6 +361,16 @@ pub enum Message {
         value: String,
         style: String,
         color: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-009 — stamp a text/image watermark on `pages` (0-based) at
+    /// `opacity` + `rotation`, on top or `behind` content. Undoable; marks dirty.
+    AddWatermark {
+        pages: Vec<i32>,
+        kind: WatermarkKind,
+        opacity: f32,
+        rotation: f32,
+        behind: bool,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1270,6 +1281,42 @@ impl DocumentActorHandle {
                 value,
                 style,
                 color,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-009 (P4.D2) — stamp a watermark. Await-holding for tests.
+    pub async fn add_watermark(
+        &self,
+        pages: Vec<i32>,
+        kind: WatermarkKind,
+        opacity: f32,
+        rotation: f32,
+        behind: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_watermark_request(pages, kind, opacity, rotation, behind)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_watermark_request(
+        &self,
+        pages: Vec<i32>,
+        kind: WatermarkKind,
+        opacity: f32,
+        rotation: f32,
+        behind: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddWatermark {
+                pages,
+                kind,
+                opacity,
+                rotation,
+                behind,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2603,6 +2650,27 @@ fn run_worker(
                 // SPEC: P4-EDIT-007 (P4.C3) / P4-EDIT-007b — /Link annotation + its
                 // appearance; the inverse is a pre-write byte snapshot (RestoreDocEdit).
                 let edit = AddLinkEdit { page, rect, kind, value, style, color };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddWatermark {
+                pages,
+                kind,
+                opacity,
+                rotation,
+                behind,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-009 (P4.D2) — watermark as page content; the inverse
+                // is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = WatermarkEdit { pages, kind, opacity, rotation, behind };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

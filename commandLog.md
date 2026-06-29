@@ -2640,6 +2640,36 @@ a **visible box** per the human. Left `[~]`.
 
 ---
 
+### P4.D2 — Watermark (this commit)
+
+No new dependencies. New 50-page fixture generated once:
+
+```bash
+python3 tests/fixtures/basic/generate-many.py   # → many-pages.pdf (50 pages, 13522 B)
+
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 359/359 (+4: parsePageRange all/range/dedupe/errors + defaults)
+npm run test:rust      # EXIT 0. watermark.rs: 10 (selected-pages-only; behind prepends / on-top
+#   appends; opacity /ExtGState; rotation cm 0.70711; image embeds once; empty-pages / empty-text /
+#   out-of-range errors; 50-page <2s [measured 0.12s]; actor add+undo) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test watermark watermark_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-watermark.pdf (→ /tmp/vibepdf-verify.pdf): "DRAFT" behind every
+#   page of the 50-page fixture. Apple PDFKit confirms pages 1/26/50 render DRAFT + original text.
+```
+
+Opens Track D. `watermark.rs` (new module) `add_watermark` stamps text/image page content per
+selected page: an opacity `/ExtGState` + base-14 font (or a once-embedded image `XObject`) and a
+`q…Q` fragment rotated about the page centre (`cm`). On-top = `append_page_content`, behind =
+`prepend_page_content` (new, mirror of append). Self-contained `WatermarkEdit` (snapshot→reload,
+`RestoreDocEdit`). Five cos helpers promoted to `pub(crate)`. `AddWatermark` message +
+`pdf_add_text_watermark` / `pdf_add_image_watermark` (reads file) + `WatermarkDialog` (document-wide,
+mounted in PdfViewer, opened from ZoomToolbar) + `parsePageRange`. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

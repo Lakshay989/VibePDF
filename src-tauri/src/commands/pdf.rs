@@ -14,6 +14,7 @@ use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
 use crate::pdf::split::{SplitMode, SplitOutcome};
 use crate::pdf::undo::HistoryState;
+use crate::pdf::watermark::WatermarkKind;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -721,6 +722,77 @@ pub async fn pdf_add_link(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.add_link_request(page, rect, kind, value, style, color)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-009 (P4.D2) — stamp a **text** watermark on `pages` (0-based) at
+/// `opacity` (0..1) + `rotation` degrees, on top or `behind` content. Undoable.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_text_watermark(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    text: String,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    opacity: f32,
+    rotation: f32,
+    behind: bool,
+) -> Result<HistoryState, CommandError> {
+    let kind = WatermarkKind::Text {
+        text,
+        font_family,
+        size: font_size,
+        color,
+        bold: false,
+        italic: false,
+    };
+    run_watermark(&state, &id, pages, kind, opacity, rotation, behind).await
+}
+
+/// SPEC: P4-EDIT-009 (P4.D2) — stamp an **image** watermark (PNG/JPEG at
+/// `image_path`) on `pages`. Reads the file, then runs on the actor. Undoable.
+#[tauri::command]
+pub async fn pdf_add_image_watermark(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    image_path: String,
+    opacity: f32,
+    rotation: f32,
+    behind: bool,
+) -> Result<HistoryState, CommandError> {
+    let image = std::fs::read(&image_path)
+        .map_err(|e| CommandError::InvalidInput(format!("cannot read {image_path}: {e}")))?;
+    let kind = WatermarkKind::Image(image);
+    run_watermark(&state, &id, pages, kind, opacity, rotation, behind).await
+}
+
+/// Shared tail for both watermark commands: resolve the actor + dispatch.
+async fn run_watermark(
+    state: &State<'_, AppState>,
+    id: &str,
+    pages: Vec<i32>,
+    kind: WatermarkKind,
+    opacity: f32,
+    rotation: f32,
+    behind: bool,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_watermark_request(pages, kind, opacity, rotation, behind)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

@@ -711,6 +711,24 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Selection doesn't persist across the edit** — after move/resize the epoch reload re-extracts;
   the box re-derives from the new geometry. Fine, but rapid successive edits each round-trip.
 
+## From P4.D2 (watermark)
+
+- ✅ **DONE 2026-06-29 (D2, P4-EDIT-009)** — text/image watermark over a page range, on top of or
+  behind content, with opacity (`/ExtGState`) + rotation (`cm` about the page centre). New
+  `watermark.rs` module + `WatermarkDialog`. 50 pages in ~0.12 s (budget 2 s). Pending the in-app
+  eyeball (`[~]`).
+- **Single centred mark, not tiled.** No repeating/grid watermark across the page — one centred
+  instance. A tiled mode (cover the page) is a follow-up.
+- **No live preview.** The watermark is apply-then-render (epoch bump), like the other
+  document-wide ops; you don't see it until it's applied (then undo if wrong).
+- **Can't edit/remove an applied watermark as an object.** It's page content, so removal is
+  in-session undo; a saved file's watermark isn't separately selectable. A "remove watermark" pass
+  (find + strip our `q…Q` fragment by marker) is possible later.
+- **Base-14 text + PNG/JPEG image only** (matches `embed_image`); no embedded fonts, no
+  GIF/BMP/TIFF.
+- **Image fit is ~70% of page, centred.** No control over watermark image scale/position yet.
+- **`many-pages.pdf`** (50pp) added as a shared Track-D fixture — reuse for D3/D4/D5.
+
 ## From P4.C3 (hyperlinks)
 
 - ✅ **DONE 2026-06-28 (C3, P4-EDIT-007)** — `cos::add_link` writes a `/Link` annotation over a

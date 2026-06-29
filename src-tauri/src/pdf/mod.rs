@@ -23,4 +23,5 @@ pub mod rotate;
 pub mod split;
 pub mod text_extract;
 pub mod undo;
+pub mod watermark;
 pub mod xfdf;

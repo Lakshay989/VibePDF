@@ -15,6 +15,7 @@ import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
+import { WatermarkDialog } from "@/app/WatermarkDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
 import { useFontReport } from "@/app/use-font-report";
@@ -144,6 +145,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const [insertFromOpen, setInsertFromOpen] = useState(false);
+  const [watermarkOpen, setWatermarkOpen] = useState(false);
   const handleInsertFromPdf = useCallback(
     async ({
       sourcePath,
@@ -409,6 +411,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onSplit={doc ? () => setSplitOpen(true) : undefined}
         onMerge={doc ? () => setMergeOpen(true) : undefined}
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
+        onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
@@ -440,6 +443,12 @@ export function PdfViewer({ documentId, path }: Props) {
         destPageCount={doc?.numPages ?? 0}
         onInsert={(args) => void handleInsertFromPdf(args)}
         onClose={() => setInsertFromOpen(false)}
+      />
+      <WatermarkDialog
+        open={watermarkOpen}
+        documentId={documentId}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setWatermarkOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (

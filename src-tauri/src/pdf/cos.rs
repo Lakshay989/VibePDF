@@ -1372,7 +1372,11 @@ fn aspect_fit_rect(rect: [f32; 4], iw: u32, ih: u32) -> [f32; 4] {
 /// otherwise fuse with our leading `q` into a bogus `ETq` token when the array is
 /// later decoded as one stream (the delete path). `PDFium` inserts the separator
 /// per spec; lopdf does not, so we add our own.
-fn append_page_content(doc: &mut Document, page_id: ObjectId, mut content: String) -> Result<(), CommandError> {
+pub(crate) fn append_page_content(
+    doc: &mut Document,
+    page_id: ObjectId,
+    mut content: String,
+) -> Result<(), CommandError> {
     content.insert(0, '\n');
     let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
     let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
@@ -1381,6 +1385,27 @@ fn append_page_content(doc: &mut Document, page_id: ObjectId, mut content: Strin
         _ => Vec::new(),
     };
     contents.push(Object::Reference(content_id));
+    doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Contents", Object::Array(contents));
+    Ok(())
+}
+
+/// Insert `content` (a balanced `q … Q` fragment) as a new content stream **before**
+/// the page's existing content, so it draws *behind* it. Same separator discipline as
+/// [`append_page_content`]: a trailing newline keeps our `…Q` from fusing with the
+/// page's first token when the `/Contents` array is decoded as one stream.
+pub(crate) fn prepend_page_content(
+    doc: &mut Document,
+    page_id: ObjectId,
+    mut content: String,
+) -> Result<(), CommandError> {
+    content.push('\n');
+    let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+    let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
+        Ok(Object::Reference(id)) => vec![Object::Reference(*id)],
+        Ok(Object::Array(a)) => a.clone(),
+        _ => Vec::new(),
+    };
+    contents.insert(0, Object::Reference(content_id));
     doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Contents", Object::Array(contents));
     Ok(())
 }
@@ -1403,7 +1428,7 @@ fn register_page_font(
 /// collision-free name (`prefix`, `prefix1`, …), returning that name. Clones a
 /// referenced or inherited `/Resources` (and the category sub-dict) so we never
 /// edit a shared object. Shared by add-text (`/Font`) and add-image (`/XObject`).
-fn register_page_resource(
+pub(crate) fn register_page_resource(
     doc: &mut Document,
     page_id: ObjectId,
     category: &[u8],
@@ -1570,7 +1595,7 @@ fn free_text_inner_width(rect: [f32; 4]) -> f32 {
 /// look un-wrapped (just cut off). So we bias wide — wrapping a little early
 /// (leaving a right margin) beats overflowing. Courier is monospaced (≈0.6); the
 /// proportional families peak well above their ~0.5 average, so 0.6 / 0.62.
-fn font_avg_em(base: &str) -> f32 {
+pub(crate) fn font_avg_em(base: &str) -> f32 {
     if base.contains("Bold") {
         0.62
     } else {
@@ -1791,7 +1816,7 @@ fn free_text_appearance_content(
 }
 
 /// Map a UI font family + bold/italic to its base-14 PostScript name.
-fn base_font(family: &str, bold: bool, italic: bool) -> Result<&'static str, CommandError> {
+pub(crate) fn base_font(family: &str, bold: bool, italic: bool) -> Result<&'static str, CommandError> {
     let name = match (family, bold, italic) {
         ("Helvetica", false, false) => "Helvetica",
         ("Helvetica", true, false) => "Helvetica-Bold",
@@ -2972,7 +2997,7 @@ fn shape_appearance_content(
 
 /// Parse `#rrggbb` into RGB components in 0..=1.
 #[allow(clippy::cast_precision_loss)] // 0..=255 → f32 is exact.
-fn parse_hex_color(hex: &str) -> Result<(f32, f32, f32), CommandError> {
+pub(crate) fn parse_hex_color(hex: &str) -> Result<(f32, f32, f32), CommandError> {
     let h = hex.trim_start_matches('#');
     if h.len() != 6 || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err(CommandError::InvalidInput(format!("bad colour: {hex}")));

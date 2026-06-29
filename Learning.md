@@ -5870,6 +5870,63 @@ fixture's own bordered link. Add an opt-in appearance: a box, an underline, or i
 
 ---
 
+## P4.D2 — Watermark (text / image)
+
+#### Problem
+
+Stamp "DRAFT" (or a logo) across selected pages, faint and rotated, above or behind the
+content — and do a 50-page document in under 2 seconds.
+
+#### Concepts learned
+
+- **A watermark is page content, not an annotation.** It goes straight into the page's content
+  stream — the same path as add-text/add-image — so it reuses `register_page_resource` +
+  `append_page_content`. Classifying it (content vs. annotation) up front picked the whole
+  approach, exactly like the link did (annotation) and add-text did (content).
+- **`q … Q` saves and restores graphics state.** Every fragment we add is wrapped in `q` (save)
+  … `Q` (restore) so the colour, opacity, and transform we set can't leak into — or out of — the
+  page's own drawing. This is *the* discipline for splicing content into someone else's stream.
+- **Opacity isn't a paint operator — it's graphics state.** You can't "set alpha" inline; you set
+  it via an **`/ExtGState`** resource (`/ca` fill alpha, `/CA` stroke alpha) referenced with `gs`.
+  So a translucent watermark needs a registered ExtGState, not just a colour.
+- **Rotate by transforming the coordinate system, then draw at the origin.** Instead of computing
+  rotated glyph positions, set the CTM to `cosθ sinθ -sinθ cosθ cx cy cm` (rotate about origin,
+  then move the origin to the page centre) and draw the mark centred on `(0,0)` — offset by half
+  its width/height. The matrix does the trig; the content stays simple. An image needs a second
+  `cm` (it draws in the unit square, so scale it to `sw×sh` and recentre).
+- **On top vs. behind is just stream order.** PDF paints content streams in array order, so
+  *appending* the watermark draws it last (on top) and *prepending* draws it first (behind, the
+  page's own content paints over it). That's the whole difference — hence the new
+  `prepend_page_content`, a mirror of `append_page_content` with the separator newline at the
+  **end** (our `…Q` mustn't fuse with the next stream's first token — the same `ETq`-class trap
+  C2 hit, just on the other side).
+- **Embed shared resources once.** An image watermark on 50 pages embeds the image as a single
+  XObject and has every page's `/Resources` *reference* it — not 50 copies. Cheap, and it's why
+  the 50-page run is ~0.1 s: it's pure object-adds + one save, no rasterization.
+- **A feature earns its own module when a whole track will share it.** Unlike the link (one dict,
+  kept in `cos.rs`), watermark got `watermark.rs` because Track D's background / header-footer /
+  page-numbers / Bates all want the same place-content-on-pages machinery. That meant promoting a
+  few `cos.rs` helpers to `pub(crate)` — a deliberate, minimal widening.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/watermark.rs` | `WatermarkKind` + `add_watermark` (per-page ExtGState/font/image + rotated `q…Q`) + self-contained `WatermarkEdit`. |
+| `src-tauri/src/pdf/cos.rs` | `prepend_page_content` (new) + five helpers promoted to `pub(crate)`. |
+| `src-tauri/src/pdf/actor.rs`, `commands/pdf.rs`, `lib.rs` | `AddWatermark` message + `pdf_add_text_watermark` / `pdf_add_image_watermark` (reads the file). |
+| `src/tools/watermark/watermark.ts` | `WatermarkSpec` + `parsePageRange` ("all" / "1-3,5" → 0-based) + defaults. |
+| `src/ipc/watermark.ts`, `src/app/WatermarkDialog.tsx` | IPC wrappers + the document-wide dialog (mounted in `PdfViewer`, opened from `ZoomToolbar`). |
+| `tests/fixtures/basic/many-pages.pdf` (+ `generate-many.py`) | 50-page fixture for the `<2s` acceptance (reused by D3–D5). |
+| `tests/watermark.rs`, `watermark.test.ts` | 10 Rust (selected-pages, behind/on-top order, opacity GState, rotation `cm`, image-embeds-once, errors, 50-page `<2s`, undo) + 4 frontend. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §8.4.5 (Graphics state parameter dictionaries) — `/ExtGState`, `/ca`, `/CA`.
+- PDF 32000-1:2008 §8.3.4 (Transformation matrices) — the `cm` rotate-about-a-point pattern.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
