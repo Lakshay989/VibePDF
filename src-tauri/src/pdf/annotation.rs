@@ -320,13 +320,16 @@ impl<'a> Edit<PdfDocument<'a>> for AddImageEdit {
 
 /// SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation over `rect` on `page`.
 /// `kind` is `url` | `email` | `page` | `named`; `value` is the URL / address /
-/// 0-based target-page index / destination name. The inverse is a pre-write
-/// snapshot (`RestoreDocEdit`).
+/// 0-based target-page index / destination name. SPEC: P4-EDIT-007b — `style` is
+/// `invisible` | `box` | `underline` in `color` (`#rrggbb`). The inverse is a
+/// pre-write snapshot (`RestoreDocEdit`).
 pub struct AddLinkEdit {
     pub page: i32,
     pub rect: [f32; 4],
     pub kind: String,
     pub value: String,
+    pub style: String,
+    pub color: String,
 }
 
 impl<'a> Edit<PdfDocument<'a>> for AddLinkEdit {
@@ -336,7 +339,9 @@ impl<'a> Edit<PdfDocument<'a>> for AddLinkEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let page = usize::try_from(self.page)
             .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
-        cos_edit(doc, |bytes| add_link(bytes, page, self.rect, &self.kind, &self.value))
+        cos_edit(doc, |bytes| {
+            add_link(bytes, page, self.rect, &self.kind, &self.value, &self.style, &self.color)
+        })
     }
 
     fn label(&self) -> &'static str {

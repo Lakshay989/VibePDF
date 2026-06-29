@@ -424,7 +424,13 @@ string is escaped by lopdf's `Object::string_literal`, so parens/backslashes in 
 break the file. The frontend `LinkLayer` drags a rect, then a popover collects the target;
 `tools/link/target.ts` (pure) validates it and converts the user's 1-based page number to the
 0-based index the command takes. The primitive deliberately lives in `cos.rs` (every other
-annotation `add_*` does), **not** a separate `link.rs`.
+annotation `add_*` does), **not** a separate `link.rs`. **Appearance (P4-EDIT-007b)** threads a
+`style` (`box` default / `underline` / `invisible`) + `color` through the same chain:
+`apply_link_appearance` either leaves a borderless hot-zone (invisible — byte-identical to C3) or
+attaches a generated `/AP` Form XObject (BBox == Rect, identity matrix, a 1pt stroke — the same
+scaffold as the markup `/AP`) plus `/C` + `/BS` for readers that ignore `/AP`. Drawing a real
+appearance — not just `/Border` — is what makes the box/underline render in every reader (a
+borderless link only shows the reader's own hover affordance).
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

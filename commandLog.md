@@ -2612,6 +2612,34 @@ new `link.rs`. Left `[~]` (awaiting the cross-reader eyeball).
 
 ---
 
+### P4.C3b — Link appearance (this commit)
+
+No new dependencies. **New spec line P4-EDIT-007b** added to `docs/02_PRODUCT_SPEC.md`
+(human-approved wording).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 355/355 (+2: default style=box/#0000ff, style list = box/underline/invisible)
+npm run test:rust      # EXIT 0. link.rs: 14 (+6: invisible no-/AP; box /AP+/C+/BS S; underline /BS U;
+#   styled still navigates; unknown style errs; bad colour errs) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test link link_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-link.pdf (→ /tmp/vibepdf-verify.pdf): a blue box URL link, a
+#   red underline page link (0-based "1" → page 2), and an invisible mailto. Confirmed via Apple
+#   PDFKit: box→URL, underline→page 2, invisible→mailto.
+```
+
+Extends P4-EDIT-007 with appearance. `add_link` gains `style` (`box` default / `underline` /
+`invisible`) + `color`; `apply_link_appearance` attaches a generated `/AP` Form XObject (1pt stroke,
+BBox==Rect identity matrix, inset by half line width) + `/C` + `/BS` for visible styles, or leaves
+`/Border [0 0 0]` (byte-identical to C3) for invisible. Threaded through `AddLinkEdit` / `AddLink` /
+`pdf_add_link` / `addLink` IPC; popover gains a Style select + `<input type=color>`. Default moved to
+a **visible box** per the human. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

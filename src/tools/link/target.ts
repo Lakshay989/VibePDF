@@ -4,6 +4,24 @@
 /** The four hyperlink target kinds the spec requires. */
 export type LinkKind = "url" | "email" | "page" | "named";
 
+/**
+ * SPEC: P4-EDIT-007b — a link's on-page appearance. `box` and `underline` are
+ * stored as a generated `/AP` in {@link DEFAULT_LINK_COLOR}; `invisible` is a
+ * borderless hot-zone.
+ */
+export type LinkStyle = "box" | "underline" | "invisible";
+
+/** Human labels for the appearance selector. `box` is the default. */
+export const LINK_STYLE_LABELS: Record<LinkStyle, string> = {
+  box: "Box",
+  underline: "Underline",
+  invisible: "Invisible",
+};
+
+/** Default appearance + colour for a new link: a blue box. */
+export const DEFAULT_LINK_STYLE: LinkStyle = "box";
+export const DEFAULT_LINK_COLOR = "#0000ff";
+
 export interface LinkTarget {
   kind: LinkKind;
   /**

@@ -15,8 +15,12 @@ import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, type ScreenPoint, screenToPdf } from "@/tools/_framework";
 import { normalizeScreenRect, withDefaultSize } from "@/tools/free-text/free-text";
 import {
+  DEFAULT_LINK_COLOR,
+  DEFAULT_LINK_STYLE,
   LINK_KIND_LABELS,
+  LINK_STYLE_LABELS,
   type LinkKind,
+  type LinkStyle,
   type LinkTarget,
   toWireValue,
   validateTarget,
@@ -61,6 +65,8 @@ export function LinkLayer({
   const [current, setCurrent] = useState<ScreenPoint | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [target, setTarget] = useState<LinkTarget>({ kind: "url", value: "" });
+  const [style, setStyle] = useState<LinkStyle>(DEFAULT_LINK_STYLE);
+  const [color, setColor] = useState<string>(DEFAULT_LINK_COLOR);
 
   const placing = activeTool === "add-link";
 
@@ -120,10 +126,13 @@ export function LinkLayer({
     if (!pending) return;
     if (!validateTarget(target, pageCount).ok) return;
     const { rect } = pending;
-    const { kind, value } = { kind: target.kind, value: toWireValue(target) };
+    const kind = target.kind;
+    const value = toWireValue(target);
+    const chosenStyle = style;
+    const chosenColor = color;
     cancel();
     setActiveTool(null);
-    addLink(documentId, page, rect, kind, value)
+    addLink(documentId, page, rect, kind, value, chosenStyle, chosenColor)
       .then((h) => {
         bumpEpoch(documentId);
         setHistory(documentId, h);
@@ -209,6 +218,29 @@ export function LinkLayer({
             {!validation.ok && target.value.trim() !== "" ? (
               <p className="text-xs text-red-600">{validation.reason}</p>
             ) : null}
+            <div className="flex items-center gap-2">
+              <select
+                className="flex-1 rounded border border-neutral-300 px-2 py-1"
+                aria-label="Link appearance"
+                value={style}
+                onChange={(e) => setStyle(e.target.value as LinkStyle)}
+              >
+                {(Object.keys(LINK_STYLE_LABELS) as LinkStyle[]).map((s) => (
+                  <option key={s} value={s}>
+                    {LINK_STYLE_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+              {style !== "invisible" ? (
+                <input
+                  type="color"
+                  aria-label="Link color"
+                  className="h-7 w-9 rounded border border-neutral-300"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                />
+              ) : null}
+            </div>
             <div className="flex justify-end gap-2">
               <button
                 type="button"

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { type LinkTarget, toWireValue, validateTarget } from "@/tools/link/target";
+import {
+  DEFAULT_LINK_COLOR,
+  DEFAULT_LINK_STYLE,
+  LINK_STYLE_LABELS,
+  type LinkStyle,
+  type LinkTarget,
+  toWireValue,
+  validateTarget,
+} from "@/tools/link/target";
 
 const PAGE_COUNT = 10;
 const v = (target: LinkTarget) => validateTarget(target, PAGE_COUNT);
@@ -48,5 +56,16 @@ describe("toWireValue", () => {
     expect(toWireValue({ kind: "url", value: " https://x.com " })).toBe("https://x.com");
     expect(toWireValue({ kind: "email", value: "ada@example.com" })).toBe("ada@example.com");
     expect(toWireValue({ kind: "named", value: "dest" })).toBe("dest");
+  });
+});
+
+describe("appearance defaults", () => {
+  it("defaults to a visible box in blue", () => {
+    expect(DEFAULT_LINK_STYLE).toBe<LinkStyle>("box");
+    expect(DEFAULT_LINK_COLOR).toBe("#0000ff");
+  });
+
+  it("offers exactly invisible / box / underline", () => {
+    expect(Object.keys(LINK_STYLE_LABELS).sort()).toEqual(["box", "invisible", "underline"]);
   });
 });

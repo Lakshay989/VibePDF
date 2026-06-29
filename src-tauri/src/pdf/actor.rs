@@ -351,12 +351,15 @@ pub enum Message {
     },
     /// SPEC: P4-EDIT-007 — add a `/Link` annotation over `rect`. `kind` is
     /// `url` | `email` | `page` | `named`; `value` is the matching target.
-    /// Undoable; marks dirty.
+    /// SPEC: P4-EDIT-007b — `style` is `invisible` | `box` | `underline` in
+    /// `color` (`#rrggbb`). Undoable; marks dirty.
     AddLink {
         page: i32,
         rect: [f32; 4],
         kind: String,
         value: String,
+        style: String,
+        color: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1233,24 +1236,30 @@ impl DocumentActorHandle {
     }
 
     /// SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
     pub async fn add_link(
         &self,
         page: i32,
         rect: [f32; 4],
         kind: String,
         value: String,
+        style: String,
+        color: String,
     ) -> Result<HistoryState, CommandError> {
-        let rx = self.add_link_request(page, rect, kind, value)?;
+        let rx = self.add_link_request(page, rect, kind, value, style, color)?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_link_request(
         &self,
         page: i32,
         rect: [f32; 4],
         kind: String,
         value: String,
+        style: String,
+        color: String,
     ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -1259,6 +1268,8 @@ impl DocumentActorHandle {
                 rect,
                 kind,
                 value,
+                style,
+                color,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2585,11 +2596,13 @@ fn run_worker(
                 rect,
                 kind,
                 value,
+                style,
+                color,
                 reply,
             } => {
-                // SPEC: P4-EDIT-007 (P4.C3) — /Link annotation; the inverse is a
-                // pre-write byte snapshot (RestoreDocEdit).
-                let edit = AddLinkEdit { page, rect, kind, value };
+                // SPEC: P4-EDIT-007 (P4.C3) / P4-EDIT-007b — /Link annotation + its
+                // appearance; the inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = AddLinkEdit { page, rect, kind, value, style, color };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

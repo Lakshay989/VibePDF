@@ -693,8 +693,10 @@ pub async fn pdf_add_image(
 /// SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation over `rect` on `page`
 /// (0-based). `kind` is `url` | `email` | `page` | `named`; `value` is the
 /// matching target (URL / address / 0-based target-page index / dest name).
-/// Undoable; runs on the actor.
+/// SPEC: P4-EDIT-007b — `style` is `invisible` | `box` | `underline` in `color`
+/// (`#rrggbb`). Undoable; runs on the actor.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn pdf_add_link(
     state: State<'_, AppState>,
     id: String,
@@ -702,6 +704,8 @@ pub async fn pdf_add_link(
     rect: [f32; 4],
     kind: String,
     value: String,
+    style: String,
+    color: String,
 ) -> Result<HistoryState, CommandError> {
     if page < 0 {
         return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
@@ -716,7 +720,7 @@ pub async fn pdf_add_link(
         let handle = guard
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
-        handle.add_link_request(page, rect, kind, value)?
+        handle.add_link_request(page, rect, kind, value, style, color)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

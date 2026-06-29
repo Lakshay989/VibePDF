@@ -5815,6 +5815,61 @@ destination, or start an email. This is the last Track-C feature.
 
 ---
 
+## P4.C3b — Link appearance (invisible / box / underline)
+
+#### Problem
+
+C3 made links work, but they were invisible — you couldn't *see* the clickable region. Verifying
+C3 in a reader drove this home: the only rectangle visible was the reader's hover affordance and a
+fixture's own bordered link. Add an opt-in appearance: a box, an underline, or invisible, in a color.
+
+#### Concepts learned
+
+- **`/Border` is a hint; `/AP` is the truth.** The cheap way to "show" a link border is
+  `/Border [0 0 1]` (width 1) or a `/BS` border-style dict. But readers honor those inconsistently —
+  Preview historically draws link borders only on hover. The reliable way to make *anything* render
+  identically everywhere is a generated **appearance stream** (`/AP`): a Form XObject whose content
+  you draw yourself. We attach an `/AP` that strokes the rectangle (box) or a bottom rule (underline),
+  and *also* set `/C` + `/BS` as a fallback hint. This is the project's recurring "draw your own `/AP`"
+  pattern (markup, free-text, stamps all do it) — the lesson is: if it must look the same in Acrobat,
+  Preview, and Okular, don't rely on the reader's default rendering of a structural key.
+- **Appearance streams draw in their own coordinate space.** A Form XObject has a `BBox` and a
+  matrix; with `BBox == Rect` and the identity matrix, form space == page space, so the content
+  draws in absolute page coordinates — no translation math. (Same trick the markup `/AP` uses.)
+- **Stroke inside the box, or it clips.** A 1pt stroke centered on the BBox edge is half outside the
+  BBox and gets clipped to a 0.5pt hairline. Inset the path by half the line width (`x0+0.5 …
+  w-1`) so the whole stroke lands inside.
+- **Keep the no-op path byte-identical.** "Invisible" had to stay exactly what C3 emitted
+  (`/Border [0 0 0]`, no `/AP`), so C3's existing tests keep passing untouched. The new code is a
+  branch that *adds* keys for the visible styles; the invisible branch is the old code verbatim. A
+  test (`invisible_style_has_no_ap`) pins that contract.
+- **A visible default is a product decision, not a code one.** The spec line was drafted with
+  invisible as the default; the user asked for a visible default, so the default moved to *box* —
+  a one-line change in `target.ts` (`DEFAULT_LINK_STYLE`) and the spec parenthetical. Worth noting
+  how cheap "change the default" is when the default lives in one named constant, not scattered.
+- **Verifying the fix also caught a latent label bug.** Regenerating the artifact with the page
+  link as 0-based `"1"` made it correctly target page 2 (PDFKit confirmed) — fixing the
+  page-3-vs-2 confusion the C3 verification surfaced (the C3 artifact harness had passed a raw
+  0-based `"2"`).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `docs/02_PRODUCT_SPEC.md` | New spec line **P4-EDIT-007b** (link appearance). |
+| `src-tauri/src/pdf/cos.rs` | `add_link` gains `style`+`color`; `apply_link_appearance` + `link_appearance_content` build the `/AP`. |
+| `src-tauri/src/pdf/annotation.rs`, `actor.rs`, `commands/pdf.rs` | thread `style`+`color` through `AddLinkEdit` / `AddLink` / `pdf_add_link`. |
+| `src/tools/link/target.ts` | `LinkStyle` union, `LINK_STYLE_LABELS`, `DEFAULT_LINK_STYLE` (box) + `DEFAULT_LINK_COLOR`. |
+| `src/ipc/links.ts`, `src/view/link-layer.tsx` | `addLink` gains the params; popover gains a Style select + a color input. |
+| `tests/link.rs`, `target.test.ts` | 6 new Rust (invisible no-AP / box AP+C+BS / underline U / still-navigates / unknown style / bad color) + 2 frontend (defaults + style list). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §12.5.5 (Appearance streams) — the `/AP` `/N` Form XObject.
+- PDF 32000-1:2008 §8.4.3 (Graphics state) + §8.5 (path painting) — `w`, `RG`, `re`, `m`/`l`/`S`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

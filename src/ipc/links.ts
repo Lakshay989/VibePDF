@@ -9,7 +9,8 @@ export type LinkRect = [number, number, number, number];
  * SPEC: P4-EDIT-007 (P4.C3) — add a `/Link` annotation over `rect` on `page`
  * (0-based). `kind` is `url` | `email` | `page` | `named`; `value` is the
  * matching target (URL / address / 0-based target-page index / destination
- * name). Returns the new undo/redo availability.
+ * name). SPEC: P4-EDIT-007b — `style` is `invisible` | `box` | `underline` in
+ * `color` (`#rrggbb`). Returns the new undo/redo availability.
  */
 export async function addLink(
   id: DocumentId,
@@ -17,6 +18,8 @@ export async function addLink(
   rect: LinkRect,
   kind: string,
   value: string,
+  style: string,
+  color: string,
 ): Promise<HistoryState> {
-  return invoke<HistoryState>("pdf_add_link", { id, page, rect, kind, value });
+  return invoke<HistoryState>("pdf_add_link", { id, page, rect, kind, value, style, color });
 }

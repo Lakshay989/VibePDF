@@ -3347,37 +3347,37 @@ pub fn add_text_note(
 ///   delete fixups (`prune_dangling_destinations`) apply
 /// - `"named"` → `/Dest (value)`, a named destination looked up in `/Names/Dests`
 ///
-/// Invisible hot-zone: `/Border [0 0 0]`, no `/AP` (readers draw nothing). The
-/// `(value)` string is escaped by `Object::string_literal`, so parens/backslashes
-/// in a URL can't corrupt the file.
+/// SPEC: P4-EDIT-007b — `style` selects the on-page appearance: `"invisible"`
+/// (`/Border [0 0 0]`, no `/AP` — readers draw nothing), `"box"` (a stroked
+/// rectangle), or `"underline"` (a rule along the bottom edge), in `color`
+/// (`#rrggbb`). A visible style carries a generated `/AP` so it renders the same
+/// in every reader, plus `/C` + `/BS` as a hint for readers that ignore `/AP`.
+///
+/// The `(value)` string is escaped by `Object::string_literal`, so
+/// parens/backslashes in a URL can't corrupt the file.
 pub fn add_link(
     bytes: &[u8],
     page: usize,
     rect: [f32; 4],
     kind: &str,
     value: &str,
+    style: &str,
+    color: &str,
 ) -> Result<Vec<u8>, CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_id = page_id_at(&doc, page)?;
 
     // Normalize so x1<x2, y1<y2 regardless of drag direction.
     let [ax, ay, bx, by] = rect;
+    let norm = [ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)];
     let mut annot = Dictionary::new();
     annot.set("Type", Object::Name(b"Annot".to_vec()));
     annot.set("Subtype", Object::Name(b"Link".to_vec()));
-    annot.set(
-        "Rect",
-        Object::Array(vec![
-            Object::Real(ax.min(bx)),
-            Object::Real(ay.min(by)),
-            Object::Real(ax.max(bx)),
-            Object::Real(ay.max(by)),
-        ]),
-    );
-    annot.set("Border", Object::Array(vec![Object::Integer(0); 3]));
+    annot.set("Rect", rect_array(norm));
     annot.set("F", Object::Integer(4)); // Print
     annot.set("NM", Object::string_literal(uuid::Uuid::new_v4().to_string()));
     annot.set("P", Object::Reference(page_id));
+    apply_link_appearance(&mut doc, &mut annot, norm, style, color)?;
 
     match kind {
         "url" | "email" => {
@@ -3415,6 +3415,71 @@ pub fn add_link(
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// SPEC: P4-EDIT-007b — set a link annotation's appearance keys for `style`.
+/// `"invisible"` leaves a borderless hot-zone (`/Border [0 0 0]`, no `/AP`);
+/// `"box"` / `"underline"` attach a generated `/AP` (added to `doc`) drawn in
+/// `color`, plus `/C` + `/BS` so readers that ignore `/AP` still get a hint.
+fn apply_link_appearance(
+    doc: &mut Document,
+    annot: &mut Dictionary,
+    rect: [f32; 4],
+    style: &str,
+    color: &str,
+) -> Result<(), CommandError> {
+    if style == "invisible" {
+        annot.set("Border", Object::Array(vec![Object::Integer(0); 3]));
+        return Ok(());
+    }
+    let bs_style: &[u8] = match style {
+        "box" => b"S",
+        "underline" => b"U",
+        other => return Err(CommandError::InvalidInput(format!("unknown link style: {other}"))),
+    };
+    let (r, g, b) = parse_hex_color(color)?;
+
+    // Appearance form: BBox == Rect with the identity matrix, so the content is
+    // drawn in absolute page coords (same scaffold as the markup `/AP`).
+    let mut ap_dict = Dictionary::new();
+    ap_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    ap_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    ap_dict.set("FormType", Object::Integer(1));
+    ap_dict.set("BBox", rect_array(rect));
+    ap_dict.set("Resources", Object::Dictionary(Dictionary::new()));
+    let content = link_appearance_content(style, rect, (r, g, b));
+    let ap_id = doc.add_object(Stream::new(ap_dict, content.into_bytes()));
+
+    let mut ap = Dictionary::new();
+    ap.set("N", Object::Reference(ap_id));
+    annot.set("AP", Object::Dictionary(ap));
+    annot.set("C", Object::Array(vec![Object::Real(r), Object::Real(g), Object::Real(b)]));
+    let mut bs = Dictionary::new();
+    bs.set("Type", Object::Name(b"Border".to_vec()));
+    bs.set("W", Object::Integer(1));
+    bs.set("S", Object::Name(bs_style.to_vec()));
+    annot.set("BS", Object::Dictionary(bs));
+    Ok(())
+}
+
+/// The `/AP` content stream for a visible link: a 1pt stroke in `(r,g,b)`. `box`
+/// strokes the rect inset by half the line width (so the stroke stays inside the
+/// `BBox`); `underline` strokes a rule along the bottom edge. Absolute page coords.
+fn link_appearance_content(style: &str, rect: [f32; 4], (r, g, b): (f32, f32, f32)) -> String {
+    use std::fmt::Write as _;
+    let [x0, y0, x1, y1] = rect;
+    let mut c = String::new();
+    let _ = writeln!(c, "{r:.4} {g:.4} {b:.4} RG");
+    let _ = writeln!(c, "1 w");
+    if style == "underline" {
+        let _ = writeln!(c, "{:.2} {:.2} m", x0, y0 + 0.5);
+        let _ = writeln!(c, "{:.2} {:.2} l", x1, y0 + 0.5);
+        let _ = writeln!(c, "S");
+    } else {
+        let _ = writeln!(c, "{:.2} {:.2} {:.2} {:.2} re", x0 + 0.5, y0 + 0.5, x1 - x0 - 1.0, y1 - y0 - 1.0);
+        let _ = writeln!(c, "S");
+    }
+    c
 }
 
 /// The object id of the 0-based `page`, or an out-of-range `InvalidInput`.

@@ -715,9 +715,17 @@ C4a/b, B3b). Four issues found + fixed this session:
 
 - ✅ **DONE 2026-06-28 (C3, P4-EDIT-007)** — `cos::add_link` writes a `/Link` annotation over a
   dragged region: URL / `mailto:` email (`/A /URI`), internal page (`/Dest [pageRef /Fit]`, the
-  form the P2 reorder/delete fixups resolve), named destination (`/Dest (name)`). Invisible
-  hot-zone; `(value)` escaped by `string_literal`. The **Add Link** tool. Pending the in-app
-  eyeball (`[~]`).
+  form the P2 reorder/delete fixups resolve), named destination (`/Dest (name)`). `(value)` escaped
+  by `string_literal`. The **Add Link** tool. Pending the in-app eyeball (`[~]`).
+- ✅ **DONE 2026-06-28 (C3b, P4-EDIT-007b)** — link appearance: **box** (default) / **underline** /
+  **invisible**, in a chosen colour. Visible styles carry a generated `/AP` (Form XObject, 1pt
+  stroke) so they render in every reader, not just on hover; invisible stays `/Border [0 0 0]`,
+  no `/AP`. Popover gained a Style select + colour picker. Verified box/underline/invisible via
+  Apple PDFKit.
+- **Single colour, fully opaque, static appearance.** No opacity, no dashed/variable-width borders,
+  no rollover/down (`/AP` `/R`,`/D`) states. Add if demand appears.
+- **Can't re-style an existing link** — appearance is set at creation; changing it needs the
+  deferred link-edit UI.
 - **Add only — no link-edit UI.** You can't move an existing link's rect or retarget it from the
   UI; delete works generically (annotation delete / dangling-dest prune). A dedicated link-edit
   overlay (select an existing `/Link`, drag its box, change the target) is deferred.

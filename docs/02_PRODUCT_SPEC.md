@@ -156,6 +156,9 @@ WHEN the user clicks an existing image, THE system SHALL allow move, resize, rot
 ### P4-EDIT-007 — Hyperlinks
 WHEN the user adds a hyperlink to selected text or a region, THE system SHALL store it as a PDF Link annotation. Hyperlinks SHALL support: external URL, internal page navigation, named destination, and email (mailto:).
 
+### P4-EDIT-007b — Link appearance
+WHEN the user adds a hyperlink, THE system SHALL let them choose its on-page appearance: a visible rectangle border (default), an underline, or invisible, with a configurable color. A visible style SHALL be stored as a generated appearance stream (`/AP`) so it renders identically across readers.
+
 ### P4-EDIT-008 — Background
 WHEN the user adds a background (color, image, or PDF page), THE system SHALL render it behind all existing content on selected pages.
 
