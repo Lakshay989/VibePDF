@@ -1,6 +1,7 @@
 pub mod actor;
 pub mod annotation;
 pub mod autosave;
+pub mod background;
 pub mod cos;
 pub mod crop;
 pub mod delete_page;

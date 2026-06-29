@@ -16,6 +16,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { WatermarkDialog } from "@/app/WatermarkDialog";
+import { BackgroundDialog } from "@/app/BackgroundDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
 import { useFontReport } from "@/app/use-font-report";
@@ -146,6 +147,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const setHistory = useHistoryStore((s) => s.setHistory);
   const [insertFromOpen, setInsertFromOpen] = useState(false);
   const [watermarkOpen, setWatermarkOpen] = useState(false);
+  const [backgroundOpen, setBackgroundOpen] = useState(false);
   const handleInsertFromPdf = useCallback(
     async ({
       sourcePath,
@@ -412,6 +414,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onMerge={doc ? () => setMergeOpen(true) : undefined}
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
         onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
+        onBackground={doc ? () => setBackgroundOpen(true) : undefined}
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
@@ -449,6 +452,12 @@ export function PdfViewer({ documentId, path }: Props) {
         documentId={documentId}
         pageCount={doc?.numPages ?? 0}
         onClose={() => setWatermarkOpen(false)}
+      />
+      <BackgroundDialog
+        open={backgroundOpen}
+        documentId={documentId}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setBackgroundOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (

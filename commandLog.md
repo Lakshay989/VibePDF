@@ -2670,6 +2670,34 @@ mounted in PdfViewer, opened from ZoomToolbar) + `parsePageRange`. Left `[~]`.
 
 ---
 
+### P4.D1a — Background (colour / image) (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 359/359 (parsePageRange cases relocated to tools/__tests__/page-range.test.ts)
+npm run test:rust      # EXIT 0. background.rs: 8 (color fills behind content; selected-pages-only;
+#   image embeds once + clips [W n]; opacity /ExtGState GSbg; empty-pages / bad-colour /
+#   out-of-range errors; actor add+undo) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test background bg_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-background.pdf (→ /tmp/vibepdf-verify.pdf): #e6f0ff behind
+#   hello.pdf. Apple PDFKit render: corner pixel = (230,240,255) = #e6f0ff (paints behind the text).
+```
+
+First reuse of Track D's shared machinery. New `background.rs` `add_background` prepends a full-page
+`q…Q`: colour fills the MediaBox rect (`re f`), image is embedded once + drawn **cover-fit with a
+clip** (`re W n` + cover `cm` `Do`). Always behind (`prepend_page_content`). Self-contained
+`BackgroundEdit`. **Consolidations:** `page_media_box` → `cos.rs` `pub(crate)` (was in watermark.rs);
+`parsePageRange` → `src/tools/page-range.ts` (watermark re-exports). `AddBackground` message +
+`pdf_add_color_background` / `pdf_add_image_background` (reads file) + `BackgroundDialog`. **PDF-page
+source deferred to D1b** (cross-doc page → Form XObject). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

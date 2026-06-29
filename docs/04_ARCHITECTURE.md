@@ -39,6 +39,7 @@ vibepdf/
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
 │   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete + replace (lopdf) (P4.C2/C2b)
 │   │   │   ├── watermark.rs      # Text/image watermark over selected pages, on-top/behind (P4.D2)
+│   │   │   ├── background.rs     # Colour/image background behind page content (P4.D1a)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -447,6 +448,16 @@ prepends it (so existing content paints over the mark). `WatermarkEdit` is self-
 `cos_edit`. The frontend is a **document-wide dialog** (`WatermarkDialog`, like Split/Merge), not a
 canvas layer; `tools/watermark/parsePageRange` turns "all" / "1-3,5" into 0-based indices. 50 pages
 in ~0.1 s — it's pure lopdf object-adds + one save, no rasterization.
+
+**Background (P4.D1a)** is the watermark's simpler sibling and the first reuse of Track D's shared
+machinery: always full-page, always **behind** (one `prepend_page_content`). Colour paints a filled
+`MediaBox` rect; an image is embedded once and drawn **cover-fit with a clip** (`re W n` then a
+cover-scaled `cm` — fills the page, crops overflow, no distortion). To share with watermark, this
+ship promoted `page_media_box` from `watermark.rs` into `cos.rs` (`pub(crate)`), and moved the
+frontend `parsePageRange` into a shared `tools/page-range.ts` (both decoration dialogs use it). The
+PDF-**page** source the spec also allows (a page from another PDF as a background) is deferred to
+**D1b** — it needs cross-document page → Form `XObject` import (the `renumber_objects_with` technique
+`cos::merge_documents` already uses), enough new surface to warrant its own ship.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

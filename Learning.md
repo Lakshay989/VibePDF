@@ -5927,6 +5927,57 @@ content — and do a 50-page document in under 2 seconds.
 
 ---
 
+## P4.D1a — Background (colour / image)
+
+#### Problem
+
+Fill a colour or an image behind the content of selected pages. The watermark, but always
+full-page and always behind — and the first feature to *reuse* Track D's shared machinery rather
+than add its own.
+
+#### Concepts learned
+
+- **"Behind" is the easy direction.** A background is just a watermark that's always full-page and
+  always prepended. Once D2 had `prepend_page_content`, the colour case was three lines: fill the
+  `MediaBox` rect (`x0 y0 w h re f`) inside a `q…Q`, prepend it. Recognising a new feature as an
+  existing one with two knobs locked is most of the design.
+- **Cover-fit needs a clip.** A background image should *fill* the page (no letterbox gaps), which
+  means scaling so the image covers the rect (`cover = max(w/iw, h/ih)`) — and that overflows the
+  page on one axis. To stop the overflow painting outside the page you set a **clip path** first:
+  `x0 y0 w h re W n` (append the rect to the path, `W` = intersect-clip, `n` = no-op-paint that
+  consumes the path), *then* draw. `W n` is the canonical "clip to this rectangle" idiom.
+- **Validate before you mutate.** `add_background` parses the colour and embeds the image *before*
+  the per-page loop, so a bad `#hex` or a corrupt image fails with the document untouched — never a
+  half-applied background on pages 1–3 and an error on page 4. Resolve-then-act.
+- **Promote a helper the moment a second caller appears.** `page_media_box` was private to
+  `watermark.rs`; background needed the identical logic, so it moved to `cos.rs` as `pub(crate)`
+  (one copy, both callers) rather than being duplicated. Same on the frontend: `parsePageRange`
+  moved from `tools/watermark/` to a shared `tools/page-range.ts`, re-exported from watermark for
+  back-compat so no import broke. Two users → shared module; the relocation is mechanical and the
+  moved test proves identical behaviour.
+- **Slice by cost, not by spec bullet.** P4-EDIT-008 lists three sources (colour, image, PDF page).
+  Colour + image are trivial reuse; the PDF-page source is a whole new capability (cross-document
+  page → Form XObject import). Shipping D1a now and D1b later keeps each verifiable — the same call
+  as C1/C2/C2b. The spec line stays one; the *work* splits.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/background.rs` | `BackgroundKind` + `add_background` (full-page colour fill / cover-clip image, prepended) + self-contained `BackgroundEdit`. |
+| `src-tauri/src/pdf/cos.rs` | `page_media_box` promoted to `pub(crate)` (moved out of `watermark.rs`). |
+| `src-tauri/src/pdf/{actor,commands/pdf,lib}.rs` | `AddBackground` message + `pdf_add_color_background` / `pdf_add_image_background` (reads file). |
+| `src/tools/page-range.ts` | `parsePageRange` moved here (shared); `tools/watermark/watermark.ts` re-exports it. |
+| `src/ipc/background.ts`, `src/app/BackgroundDialog.tsx` | IPC wrappers + the document-wide dialog (mounted in `PdfViewer`, opened from `ZoomToolbar`). |
+| `tests/background.rs`, `tools/__tests__/page-range.test.ts` | 8 Rust (fills-behind, selected-pages, image embeds-once + clips, opacity GState, errors, undo) + 3 frontend (moved range cases). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §8.5.4 (Clipping path operators) — `W` / `W*` and the `n` end-path.
+- PDF 32000-1:2008 §8.6.3 (Device colour spaces) — `rg` device-RGB fill.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

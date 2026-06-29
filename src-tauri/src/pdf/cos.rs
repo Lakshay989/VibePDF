@@ -1410,6 +1410,24 @@ pub(crate) fn prepend_page_content(
     Ok(())
 }
 
+/// A page's `/MediaBox` `[x0, y0, x1, y1]`, walking up the `/Parent` chain (it
+/// can be inherited), defaulting to US-Letter when absent. Shared by the page-
+/// decoration writers (watermark, background).
+pub(crate) fn page_media_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
+    let mut cur = Some(page_id);
+    while let Some(id) = cur {
+        let Ok(dict) = doc.get_dictionary(id) else { break };
+        if let Ok(mb) = dict.get(b"MediaBox").and_then(Object::as_array) {
+            if mb.len() == 4 {
+                let v: Vec<f32> = mb.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
+                return [v[0], v[1], v[2], v[3]];
+            }
+        }
+        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
+    }
+    [0.0, 0.0, 612.0, 792.0]
+}
+
 /// Give `page_id` its own `/Resources /Font` carrying a fresh base-14 font, and
 /// return the (collision-free) resource name to reference in a `Tf` operator.
 fn register_page_font(

@@ -711,6 +711,25 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Selection doesn't persist across the edit** — after move/resize the epoch reload re-extracts;
   the box re-derives from the new geometry. Fine, but rapid successive edits each round-trip.
 
+## From P4.D1 (background)
+
+- ✅ **DONE 2026-06-29 (D1a, P4-EDIT-008)** — colour fill + image background behind page content on a
+  range, with opacity. New `background.rs` (always prepends; image cover-fit + clipped to the
+  MediaBox) + `BackgroundDialog`. Verified via Apple PDFKit render (corner pixel = the fill colour).
+  Pending the in-app eyeball (`[~]`).
+- **⏭️ TODO — D1b: PDF-page background.** The spec's third source (a page from another PDF). Needs
+  cross-document page → Form `XObject` import: load the source, copy the chosen page's content +
+  `/Resources` + transitive object closure into the dest with `renumber_objects_with` (the
+  `cos::merge_documents` technique), build a `/Form` XObject (`BBox` = source `MediaBox`), then
+  prepend `Do`. Watch for resource-name collisions, page rotation, and **object bloat** (copy the
+  page's subtree, not the whole source doc). Its own ship.
+- **Image is cover-fit only** (fills + crops); no contain/stretch/tile toggle, no position control.
+- **Solid colour only** — no gradients/patterns.
+- **Can't edit/remove an applied background** — page content; removal is in-session undo. A
+  "remove background" pass (strip our `q…Q` by marker) is possible later.
+- **Consolidation:** `parsePageRange` now lives in `src/tools/page-range.ts` and `page_media_box` in
+  `cos.rs` (`pub(crate)`) — shared by watermark + background (and Track D's remaining features).
+
 ## From P4.D2 (watermark)
 
 - ✅ **DONE 2026-06-29 (D2, P4-EDIT-009)** — text/image watermark over a page range, on top of or

@@ -43,6 +43,7 @@ use crate::pdf::annotation::{
     FreeTextEdit, ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit,
     ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
+use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::watermark::{WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
@@ -371,6 +372,14 @@ pub enum Message {
         opacity: f32,
         rotation: f32,
         behind: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-008 — fill `pages` (0-based) behind their content with a
+    /// colour or image at `opacity`. Undoable; marks dirty.
+    AddBackground {
+        pages: Vec<i32>,
+        kind: BackgroundKind,
+        opacity: f32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1317,6 +1326,36 @@ impl DocumentActorHandle {
                 opacity,
                 rotation,
                 behind,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-008 (P4.D1) — fill pages behind content. Await-holding for tests.
+    pub async fn add_background(
+        &self,
+        pages: Vec<i32>,
+        kind: BackgroundKind,
+        opacity: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_background_request(pages, kind, opacity)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_background_request(
+        &self,
+        pages: Vec<i32>,
+        kind: BackgroundKind,
+        opacity: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddBackground {
+                pages,
+                kind,
+                opacity,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2671,6 +2710,25 @@ fn run_worker(
                 // SPEC: P4-EDIT-009 (P4.D2) — watermark as page content; the inverse
                 // is a pre-write byte snapshot (RestoreDocEdit).
                 let edit = WatermarkEdit { pages, kind, opacity, rotation, behind };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddBackground {
+                pages,
+                kind,
+                opacity,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-008 (P4.D1) — background as prepended page content; the
+                // inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = BackgroundEdit { pages, kind, opacity };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

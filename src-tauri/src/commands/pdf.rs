@@ -13,6 +13,7 @@ use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
 use crate::pdf::render::{ImageFormat, RenderedPage};
 use crate::pdf::split::{SplitMode, SplitOutcome};
+use crate::pdf::background::BackgroundKind;
 use crate::pdf::undo::HistoryState;
 use crate::pdf::watermark::WatermarkKind;
 use crate::AppState;
@@ -793,6 +794,58 @@ async fn run_watermark(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.add_watermark_request(pages, kind, opacity, rotation, behind)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-008 (P4.D1) — fill `pages` (0-based) behind their content with a
+/// solid `color` (`#rrggbb`) at `opacity` (0..1). Undoable.
+#[tauri::command]
+pub async fn pdf_add_color_background(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    color: String,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    run_background(&state, &id, pages, BackgroundKind::Color(color), opacity).await
+}
+
+/// SPEC: P4-EDIT-008 (P4.D1) — fill `pages` behind their content with an image
+/// (PNG/JPEG at `image_path`), cover-fit. Reads the file, then runs on the actor.
+#[tauri::command]
+pub async fn pdf_add_image_background(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    image_path: String,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    let image = std::fs::read(&image_path)
+        .map_err(|e| CommandError::InvalidInput(format!("cannot read {image_path}: {e}")))?;
+    run_background(&state, &id, pages, BackgroundKind::Image(image), opacity).await
+}
+
+/// Shared tail for both background commands: resolve the actor + dispatch.
+async fn run_background(
+    state: &State<'_, AppState>,
+    id: &str,
+    pages: Vec<i32>,
+    kind: BackgroundKind,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_background_request(pages, kind, opacity)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

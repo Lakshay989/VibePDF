@@ -17,8 +17,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, font_avg_em, parse_hex_color, prepend_page_content,
-    register_page_resource,
+    append_page_content, base_font, font_avg_em, page_media_box, parse_hex_color,
+    prepend_page_content, register_page_resource,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_xobject::embed_image;
@@ -139,23 +139,6 @@ pub fn add_watermark(
 #[allow(clippy::needless_pass_by_value)]
 fn cos_err(e: lopdf::Error) -> CommandError {
     CommandError::PdfError(format!("lopdf: {e}"))
-}
-
-/// A page's `/MediaBox`, walking up the `/Parent` chain (it can be inherited),
-/// defaulting to US-Letter when absent.
-fn page_media_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
-    let mut cur = Some(page_id);
-    while let Some(id) = cur {
-        let Ok(dict) = doc.get_dictionary(id) else { break };
-        if let Ok(mb) = dict.get(b"MediaBox").and_then(Object::as_array) {
-            if mb.len() == 4 {
-                let v: Vec<f32> = mb.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
-                return [v[0], v[1], v[2], v[3]];
-            }
-        }
-        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
-    }
-    [0.0, 0.0, 612.0, 792.0]
 }
 
 /// Aspect-fit `iw`×`ih` into a `bw`×`bh` box (never stretched), returning the

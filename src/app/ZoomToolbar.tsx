@@ -35,6 +35,9 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-009 — open the watermark dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onWatermark?: (() => void) | undefined;
+  /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onBackground?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -43,6 +46,7 @@ export function ZoomToolbar({
   onMerge,
   onInsertFromPdf,
   onWatermark,
+  onBackground,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -209,6 +213,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Watermark…
+        </button>
+      ) : null}
+
+      {onBackground ? (
+        <button
+          type="button"
+          onClick={onBackground}
+          title="Add a colour or image background behind content"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Background…
         </button>
       ) : null}
 
