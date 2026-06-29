@@ -39,7 +39,7 @@ vibepdf/
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
 │   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete + replace (lopdf) (P4.C2/C2b)
 │   │   │   ├── watermark.rs      # Text/image watermark over selected pages, on-top/behind (P4.D2)
-│   │   │   ├── background.rs     # Colour/image background behind page content (P4.D1a)
+│   │   │   ├── background.rs     # Colour/image/PDF-page background behind page content (P4.D1)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -454,10 +454,17 @@ machinery: always full-page, always **behind** (one `prepend_page_content`). Col
 `MediaBox` rect; an image is embedded once and drawn **cover-fit with a clip** (`re W n` then a
 cover-scaled `cm` — fills the page, crops overflow, no distortion). To share with watermark, this
 ship promoted `page_media_box` from `watermark.rs` into `cos.rs` (`pub(crate)`), and moved the
-frontend `parsePageRange` into a shared `tools/page-range.ts` (both decoration dialogs use it). The
-PDF-**page** source the spec also allows (a page from another PDF as a background) is deferred to
-**D1b** — it needs cross-document page → Form `XObject` import (the `renumber_objects_with` technique
-`cos::merge_documents` already uses), enough new surface to warrant its own ship.
+frontend `parsePageRange` into a shared `tools/page-range.ts` (both decoration dialogs use it).
+
+**A page from another PDF as a background (P4.D1b)** is the one genuinely new capability: a page
+can't be referenced directly, so `import_page_as_form` converts it into a **Form XObject**. It loads
+the source, `renumber_objects_with(dest.max_id + 1)` (the `cos::merge_documents` move) so the
+source's ids can't collide, takes the chosen page's `MediaBox` + effective `/Resources` (walking the
+`/Parent` chain) + decoded content, then copies **only the transitive object closure of those
+resources** into the dest (a BFS over references — *not* the whole source doc, so the file doesn't
+bloat) and wraps the content in a `/Form` XObject (`BBox` = source `MediaBox`). Each target page
+references that one Form, drawn **contain-fit** + centred so the whole source page stays visible.
+Limitation: the source page's `/Rotate` is ignored (Form XObjects don't carry page rotation).
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

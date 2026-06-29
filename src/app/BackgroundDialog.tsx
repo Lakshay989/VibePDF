@@ -7,7 +7,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 
-import { addColorBackground, addImageBackground } from "@/ipc/background";
+import { addColorBackground, addImageBackground, addPdfBackground } from "@/ipc/background";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { parsePageRange } from "@/tools/page-range";
@@ -25,9 +25,11 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
   const setHistory = useHistoryStore((s) => s.setHistory);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
 
-  const [kind, setKind] = useState<"color" | "image">("color");
+  const [kind, setKind] = useState<"color" | "image" | "pdf">("color");
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [imagePath, setImagePath] = useState<string | null>(null);
+  const [sourcePath, setSourcePath] = useState<string | null>(null);
+  const [sourcePage, setSourcePage] = useState("1");
   const [opacity, setOpacity] = useState("1");
   const [range, setRange] = useState("all");
   const [busy, setBusy] = useState(false);
@@ -38,6 +40,8 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
       setKind("color");
       setColor(DEFAULT_COLOR);
       setImagePath(null);
+      setSourcePath(null);
+      setSourcePage("1");
       setOpacity("1");
       setRange("all");
       setError(null);
@@ -51,6 +55,15 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
       filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg"] }],
     }).then((picked) => {
       if (typeof picked === "string") setImagePath(picked);
+    });
+  };
+
+  const pickSource = () => {
+    void openFileDialog({
+      multiple: false,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    }).then((picked) => {
+      if (typeof picked === "string") setSourcePath(picked);
     });
   };
 
@@ -80,13 +93,27 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
     setError(null);
     if (kind === "color") {
       addColorBackground(documentId, parsed.pages, color, op).then(done).catch(fail);
-    } else {
+    } else if (kind === "image") {
       if (!imagePath) {
         setError("Choose an image.");
         setBusy(false);
         return;
       }
       addImageBackground(documentId, parsed.pages, imagePath, op).then(done).catch(fail);
+    } else {
+      if (!sourcePath) {
+        setError("Choose a source PDF.");
+        setBusy(false);
+        return;
+      }
+      const srcPage = Number(sourcePage);
+      if (!Number.isInteger(srcPage) || srcPage < 1) {
+        setError("Source page must be 1 or greater.");
+        setBusy(false);
+        return;
+      }
+      // The user types a 1-based page; the command takes a 0-based index.
+      addPdfBackground(documentId, parsed.pages, sourcePath, srcPage - 1, op).then(done).catch(fail);
     }
   };
 
@@ -120,6 +147,10 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
                 <input type="radio" checked={kind === "image"} onChange={() => setKind("image")} />
                 Image
               </label>
+              <label className="flex items-center gap-1.5">
+                <input type="radio" checked={kind === "pdf"} onChange={() => setKind("pdf")} />
+                PDF page
+              </label>
             </div>
 
             {kind === "color" ? (
@@ -133,7 +164,7 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
                   className="h-8 w-12 rounded border border-neutral-300 dark:border-neutral-700"
                 />
               </label>
-            ) : (
+            ) : kind === "image" ? (
               <div className="flex items-center gap-2 text-sm">
                 <button
                   type="button"
@@ -145,6 +176,30 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
                 <span className="truncate text-neutral-600 dark:text-neutral-400">
                   {imagePath ? imagePath.split("/").pop() : "PNG or JPEG, cover-fit"}
                 </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm">
+                <button
+                  type="button"
+                  onClick={pickSource}
+                  className="rounded border border-neutral-300 px-3 py-1.5 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                >
+                  Choose PDF…
+                </button>
+                <span className="flex-1 truncate text-neutral-600 dark:text-neutral-400">
+                  {sourcePath ? sourcePath.split("/").pop() : "source PDF"}
+                </span>
+                <label className="flex items-center gap-1">
+                  <span className="text-neutral-600 dark:text-neutral-400">Page</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sourcePage}
+                    onChange={(e) => setSourcePage(e.target.value)}
+                    aria-label="Source page"
+                    className={`w-16 ${inputCls}`}
+                  />
+                </label>
               </div>
             )}
 

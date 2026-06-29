@@ -827,6 +827,25 @@ pub async fn pdf_add_image_background(
     run_background(&state, &id, pages, BackgroundKind::Image(image), opacity).await
 }
 
+/// SPEC: P4-EDIT-008 (P4.D1b) — fill `pages` behind their content with the
+/// 0-based `source_page` of the PDF at `source_path`, imported as a Form
+/// `XObject` (contain-fit). Reads the source file, then runs on the actor.
+#[tauri::command]
+pub async fn pdf_add_pdf_background(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    source_path: String,
+    source_page: i32,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    let source = std::fs::read(&source_path)
+        .map_err(|e| CommandError::InvalidInput(format!("cannot read {source_path}: {e}")))?;
+    let page = usize::try_from(source_page)
+        .map_err(|_| CommandError::InvalidInput(format!("negative source page: {source_page}")))?;
+    run_background(&state, &id, pages, BackgroundKind::PdfPage { source, page }, opacity).await
+}
+
 /// Shared tail for both background commands: resolve the actor + dispatch.
 async fn run_background(
     state: &State<'_, AppState>,

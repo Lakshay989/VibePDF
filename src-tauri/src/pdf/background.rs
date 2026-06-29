@@ -12,7 +12,9 @@
 //! The third spec source — a page from another PDF — is deferred to D1b (it needs
 //! cross-document page → Form `XObject` import).
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use std::collections::HashSet;
+
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
@@ -22,12 +24,16 @@ use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
-/// What to paint behind the page: a solid colour or a raster image.
+/// What to paint behind the page: a solid colour, a raster image, or a page from
+/// another PDF.
 pub enum BackgroundKind {
     /// `#rrggbb`.
     Color(String),
     /// Raw PNG/JPEG bytes (read by the command; the actor stays byte-pure).
     Image(Vec<u8>),
+    /// A page from another PDF (raw source bytes + 0-based page index). Imported
+    /// as a Form `XObject` and drawn contain-fit.
+    PdfPage { source: Vec<u8>, page: usize },
 }
 
 /// SPEC: P4-EDIT-008 — fill each 0-based page in `pages` behind its content with
@@ -60,14 +66,19 @@ pub fn add_background(
     }
 
     // Validate a colour up front (so a bad hex fails before any mutation); embed
-    // an image once and reference it from every page.
+    // an image / import a source page once and reference it from every page.
     let rgb = match kind {
         BackgroundKind::Color(hex) => Some(parse_hex_color(hex)?),
-        BackgroundKind::Image(_) => None,
+        _ => None,
     };
     let image = match kind {
         BackgroundKind::Image(data) => Some(embed_image(&mut doc, data)?),
-        BackgroundKind::Color(_) => None,
+        _ => None,
+    };
+    // (form_id, source MediaBox) — the imported page, shared across target pages.
+    let pdf_form = match kind {
+        BackgroundKind::PdfPage { source, page } => Some(import_page_as_form(&mut doc, source, *page)?),
+        _ => None,
     };
 
     for page_id in targets {
@@ -99,6 +110,18 @@ pub fn add_background(
                 )?;
                 image_content(&gs_name, &name, [x0, y0, w, h], img.width, img.height)
             }
+            BackgroundKind::PdfPage { .. } => {
+                let (form_id, src_bbox) =
+                    pdf_form.ok_or_else(|| CommandError::Internal("source page not imported".into()))?;
+                let name = register_page_resource(
+                    &mut doc,
+                    page_id,
+                    b"XObject",
+                    "Bgpdf",
+                    Object::Reference(form_id),
+                )?;
+                pdf_content(&gs_name, &name, src_bbox, [x0, y0, w, h])
+            }
         };
 
         // A background always draws behind the page's own content.
@@ -113,6 +136,110 @@ pub fn add_background(
 #[allow(clippy::needless_pass_by_value)]
 fn cos_err(e: lopdf::Error) -> CommandError {
     CommandError::PdfError(format!("lopdf: {e}"))
+}
+
+/// SPEC: P4-EDIT-008 (P4.D1b) — import the 0-based `page` of `source_bytes` into
+/// `dest` as a Form `XObject`, returning its id + source `MediaBox`. The page's
+/// content becomes the form's stream; its **effective `/Resources`** (resolved up
+/// the `/Parent` chain) become the form's, and the transitive object closure of
+/// those resources is copied in — only that subtree, not the whole source doc.
+/// Source ids are renumbered above `dest`'s first, so nothing collides.
+///
+/// Limitation: the source page's `/Rotate` is ignored (Form `XObject`s don't
+/// carry page rotation) — a rotated source imports unrotated.
+fn import_page_as_form(
+    dest: &mut Document,
+    source_bytes: &[u8],
+    page: usize,
+) -> Result<(ObjectId, [f32; 4]), CommandError> {
+    let mut src = Document::load_mem(source_bytes).map_err(cos_err)?;
+    // Shift every source id above the dest's so a copy can't collide.
+    src.renumber_objects_with(dest.max_id + 1);
+
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad source page: {page}")))?;
+    let page_id = *src
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("source page out of range: {page}")))?;
+
+    let bbox = page_media_box(&src, page_id);
+    let content = src.get_page_content(page_id).map_err(cos_err)?;
+    let resources = effective_resources(&src, page_id);
+
+    // Copy only the objects the page's resources transitively reference.
+    let mut closure = HashSet::new();
+    collect_refs(&src, &Object::Dictionary(resources.clone()), &mut closure);
+    for id in &closure {
+        if let Some(obj) = src.objects.get(id) {
+            dest.objects.insert(*id, obj.clone());
+        }
+    }
+    // Adopt the source's id ceiling so the new Form gets a fresh, non-colliding id.
+    dest.max_id = dest.max_id.max(src.max_id);
+
+    let mut form = Dictionary::new();
+    form.set("Type", Object::Name(b"XObject".to_vec()));
+    form.set("Subtype", Object::Name(b"Form".to_vec()));
+    form.set("FormType", Object::Integer(1));
+    form.set(
+        "BBox",
+        Object::Array(bbox.iter().map(|&v| Object::Real(v)).collect()),
+    );
+    form.set("Resources", Object::Dictionary(resources));
+    let form_id = dest.add_object(Stream::new(form, content));
+    Ok((form_id, bbox))
+}
+
+/// A page's effective `/Resources` as an owned dict, resolving a reference and
+/// walking the `/Parent` chain (resources can be inherited). Empty when absent.
+fn effective_resources(doc: &Document, page_id: ObjectId) -> Dictionary {
+    let mut cur = Some(page_id);
+    while let Some(id) = cur {
+        let Ok(dict) = doc.get_dictionary(id) else { break };
+        match dict.get(b"Resources") {
+            Ok(Object::Dictionary(d)) => return d.clone(),
+            Ok(Object::Reference(rid)) => {
+                if let Ok(d) = doc.get_dictionary(*rid) {
+                    return d.clone();
+                }
+            }
+            _ => {}
+        }
+        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
+    }
+    Dictionary::new()
+}
+
+/// Collect every object id transitively referenced from `obj`.
+fn collect_refs(doc: &Document, obj: &Object, acc: &mut HashSet<ObjectId>) {
+    match obj {
+        Object::Reference(id) if acc.insert(*id) => {
+            if let Ok(o) = doc.get_object(*id) {
+                collect_refs(doc, o, acc);
+            }
+        }
+        Object::Array(a) => a.iter().for_each(|o| collect_refs(doc, o, acc)),
+        Object::Dictionary(d) => d.iter().for_each(|(_, o)| collect_refs(doc, o, acc)),
+        Object::Stream(s) => s.dict.iter().for_each(|(_, o)| collect_refs(doc, o, acc)),
+        _ => {}
+    }
+}
+
+/// `q … Q`: paint the imported page Form (drawn in its `src_bbox` space)
+/// contain-fit and centred inside the target page rect `[tx0, ty0, tw, th]`
+/// (the whole source page stays visible — never cropped).
+#[allow(clippy::many_single_char_names)]
+fn pdf_content(gs: &str, name: &str, [sx0, sy0, sx1, sy1]: [f32; 4], [tx0, ty0, tw, th]: [f32; 4]) -> String {
+    let (sw, sh) = (sx1 - sx0, sy1 - sy0);
+    let scale = if sw > 0.0 && sh > 0.0 { (tw / sw).min(th / sh) } else { 1.0 };
+    let (pw, ph) = (sw * scale, sh * scale);
+    // Map a BBox point (x, y) → scale·(x − sx0) + ox, scale·(y − sy0) + oy.
+    let e = tx0 + (tw - pw) / 2.0 - scale * sx0;
+    let f = ty0 + (th - ph) / 2.0 - scale * sy0;
+    format!("q\n/{gs} gs\n{scale:.5} 0 0 {scale:.5} {e:.2} {f:.2} cm\n/{name} Do\nQ\n")
 }
 
 /// `q … Q`: fill the page rect `[x0, y0, w, h]` with `(r, g, b)`.

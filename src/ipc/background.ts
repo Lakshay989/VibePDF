@@ -29,3 +29,24 @@ export async function addImageBackground(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_add_image_background", { id, pages, imagePath, opacity });
 }
+
+/**
+ * SPEC: P4-EDIT-008 (P4.D1b) — fill `pages` behind their content with the
+ * 0-based `sourcePage` of the PDF at `sourcePath`, imported as a Form XObject
+ * (contain-fit). The Rust command reads the source file.
+ */
+export async function addPdfBackground(
+  id: DocumentId,
+  pages: number[],
+  sourcePath: string,
+  sourcePage: number,
+  opacity: number,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_add_pdf_background", {
+    id,
+    pages,
+    sourcePath,
+    sourcePage,
+    opacity,
+  });
+}

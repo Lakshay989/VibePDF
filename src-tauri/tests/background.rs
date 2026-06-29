@@ -123,6 +123,95 @@ async fn actor_background_then_undo() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// --- P4.D1b: a page from another PDF as the background --------------------------
+
+/// Every Form `XObject` stream in `bytes`.
+fn form_xobjects(bytes: &[u8]) -> Vec<lopdf::Stream> {
+    let doc = Document::load_mem(bytes).expect("load");
+    doc.objects
+        .values()
+        .filter_map(|o| o.as_stream().ok())
+        .filter(|s| s.dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(&b"Form"[..]))
+        .cloned()
+        .collect()
+}
+
+fn pdf_page(source: &str, page: usize) -> BackgroundKind {
+    BackgroundKind::PdfPage { source: bytes(source), page }
+}
+
+fn object_count(bytes: &[u8]) -> usize {
+    Document::load_mem(bytes).expect("load").objects.len()
+}
+
+#[test]
+fn pdf_page_background_imports_form() {
+    // links.pdf page 1 behind hello.pdf.
+    let out = add_background(&bytes("hello.pdf"), &[0], &pdf_page("links.pdf", 0), 1.0).expect("pdf bg");
+    assert_eq!(form_xobjects(&out).len(), 1, "the source page becomes one Form XObject");
+    let c = page_content(&out, 1);
+    let (form, orig) = (c.find("Bgpdf").expect("Do"), c.find("Hello").expect("orig"));
+    assert!(form < orig, "the imported page draws behind hello's own text");
+}
+
+#[test]
+fn pdf_background_copies_page_resources_and_content() {
+    let out = add_background(&bytes("hello.pdf"), &[0], &pdf_page("links.pdf", 0), 1.0).expect("pdf bg");
+    let form = &form_xobjects(&out)[0];
+    let res = form.dict.get(b"Resources").and_then(Object::as_dict).expect("form resources");
+    assert!(res.has(b"Font"), "the source page's /Font is copied into the Form's /Resources");
+    let stream = String::from_utf8_lossy(&form.content);
+    assert!(stream.contains("Tj"), "the source page's content (a text show) is the Form's stream");
+}
+
+#[test]
+fn pdf_background_embeds_once() {
+    // links.pdf (3 pages) as target; hello.pdf page 1 as the shared source.
+    let out = add_background(&bytes("links.pdf"), &[0, 1, 2], &pdf_page("hello.pdf", 0), 1.0).expect("pdf bg");
+    assert_eq!(form_xobjects(&out).len(), 1, "one Form, referenced from every page");
+    for p in 1..=3 {
+        assert!(page_content(&out, p).contains("Bgpdf Do"), "page {p} paints it");
+    }
+}
+
+#[test]
+fn pdf_background_copies_only_the_page_subtree_not_whole_source() {
+    // The subtree copy must add far fewer objects than absorbing all of links.pdf.
+    let out = add_background(&bytes("hello.pdf"), &[0], &pdf_page("links.pdf", 0), 1.0).expect("pdf bg");
+    let (hello_n, links_n, out_n) =
+        (object_count(&bytes("hello.pdf")), object_count(&bytes("links.pdf")), object_count(&out));
+    assert!(out_n < hello_n + links_n, "out={out_n} must be < hello={hello_n} + links={links_n} (no whole-doc copy)");
+}
+
+#[test]
+fn source_page_out_of_range_errors() {
+    // hello.pdf has 1 page; source page index 5 is out of range.
+    assert!(add_background(&bytes("hello.pdf"), &[0], &pdf_page("hello.pdf", 5), 1.0).is_err());
+}
+
+#[tokio::test]
+async fn actor_pdf_background_then_undo() {
+    let dir = std::env::temp_dir().join(format!("vibepdf-pdfbg-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let out = dir.join("pdfbg.pdf");
+
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    let state = handle.add_background(vec![0], pdf_page("links.pdf", 0), 1.0).await.expect("pdf bg");
+    assert!(state.can_undo, "a PDF-page background must be undoable");
+
+    handle.save(Some(out.clone())).await.expect("save");
+    assert_eq!(form_xobjects(&std::fs::read(&out).unwrap()).len(), 1, "Form present after save");
+
+    handle.undo().await.expect("undo");
+    handle.save(Some(out.clone())).await.expect("save after undo");
+    assert!(form_xobjects(&std::fs::read(&out).unwrap()).is_empty(), "undo removes the imported Form");
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Writes a backgrounded PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test background bg_writes_verification_artifact -- --ignored
@@ -135,7 +224,10 @@ async fn bg_writes_verification_artifact() {
     }
     let id = uuid::Uuid::new_v4();
     let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
-    handle.add_background(vec![0], color("#e6f0ff"), 1.0).await.expect("bg");
+    // Two backgrounds to exercise both D1a (colour) and D1b (a PDF page): a faint
+    // colour wash, then links.pdf page 1 behind it. Both behind hello's text.
+    handle.add_background(vec![0], color("#e6f0ff"), 1.0).await.expect("colour bg");
+    handle.add_background(vec![0], pdf_page("links.pdf", 0), 0.35).await.expect("pdf bg");
     handle.save(Some(out.clone())).await.expect("save");
     eprintln!("wrote background verification artifact to {}", out.display());
 

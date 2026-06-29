@@ -2698,6 +2698,34 @@ source deferred to D1b** (cross-doc page → Form XObject). Left `[~]`.
 
 ---
 
+### P4.D1b — Background from a PDF page (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 359/359 (no frontend test delta — D1b reuses parsePageRange)
+npm run test:rust      # EXIT 0. background.rs: 14 (8 D1a + 6 D1b: imports Form behind content;
+#   copies page /Resources + content; embeds once across pages; subtree-copy-not-whole-source;
+#   source-page out-of-range; actor add+undo) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test background bg_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-background.pdf (→ /tmp/vibepdf-verify.pdf): a colour wash + 
+#   links.pdf page 1 (35% opacity) behind hello.pdf. Apple PDFKit text extraction:
+#   "Page 1 (link to page 3) Hello, VibePDF." — imported page renders, behind, with its font.
+```
+
+Completes P4-EDIT-008 (Track-D background). `import_page_as_form` renumbers the source's ids above
+the dest's (`renumber_objects_with`), copies **only** the chosen page's resource object closure (BFS
+over references — not the whole source), and wraps the page content in a `/Form` XObject (`BBox` =
+source `MediaBox`); each target page references that one Form, drawn **contain-fit** + centred.
+`BackgroundKind::PdfPage` + `pdf_add_pdf_background` (reads source file; reuses the `AddBackground`
+message) + the dialog's "PDF page" source. Source `/Rotate` ignored (documented). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

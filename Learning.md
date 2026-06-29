@@ -5978,6 +5978,60 @@ than add its own.
 
 ---
 
+## P4.D1b — Background from a PDF page
+
+#### Problem
+
+Use a page from *another* PDF as the background — e.g. drop a company letterhead behind every page
+of a document. The spec's third background source, and the only one that's genuinely new work.
+
+#### Concepts learned
+
+- **You can't reference a page; you embed it as a Form XObject.** A PDF page isn't a thing other
+  pages can point at. The standard move is to convert it into a **Form XObject** — a self-contained
+  bundle of `(BBox, /Resources, content stream)` that *is* referable and paintable with `Do`. So
+  "page as background" = "import page → Form XObject → `Do` it behind content." This is the same
+  primitive Acrobat calls a "stamp," and it's the building block for N-up, booklets, and overlays.
+- **Cross-document object ids collide; renumber first.** The source and destination each number
+  their objects from 1, so copying source object `6 0 R` into a dest that already has a `6 0 R`
+  would clobber it. lopdf's `renumber_objects_with(dest.max_id + 1)` shifts the *whole* source above
+  the dest's range first, so every copied object lands in free space. (This is exactly what
+  `cos::merge_documents` does per source — the same trick, one source.)
+- **Copy the closure, not the corpus.** The naive import absorbs the entire source document (every
+  page, every font) just to use one page — bloating the file. The right scope is the **transitive
+  object closure** of the page's `/Resources`: a BFS that follows every reference (Reference →
+  Array → Dictionary → Stream-dict) and copies only what's reachable. A test
+  (`…copies_only_the_page_subtree_not_whole_source`) pins this by asserting the output has fewer
+  objects than dest + source combined.
+- **Resources can be inherited.** A page may rely on a `/Resources` dict declared on its `/Pages`
+  parent, not on itself — so resolving "effective resources" means walking the `/Parent` chain
+  (same shape as `page_media_box`). Miss this and the imported page renders with no fonts.
+- **A Form draws in its own coordinate space; place it with one `cm`.** The Form's `BBox` is the
+  source `MediaBox`, so its content draws in *source* coordinates. To put it on a (possibly
+  different-sized) target page you set the CTM: contain-fit `scale = min(tw/sw, th/sh)`, then
+  translate to centre — `e = tx0 + (tw − sw·scale)/2 − scale·sx0`, likewise for `f`. The `−sx0`
+  term handles a source `MediaBox` whose origin isn't `(0,0)`.
+- **Apple PDFKit's text extraction *is* a render check.** Extracting the output page's text returned
+  "Page 1 (link to page 3) Hello, VibePDF." — the imported page's words *and* the host page's,
+  imported-first (behind). One cheap call proved the closure copy brought the font, the content
+  copied, and the layering is right — without pixels.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/background.rs` | `BackgroundKind::PdfPage` + `import_page_as_form` (renumber + closure-copy + build Form) + `collect_refs` BFS + `effective_resources` + `pdf_content` (contain-fit). |
+| `src-tauri/src/pdf/commands/pdf.rs`, `lib.rs` | `pdf_add_pdf_background` (reads the source file); no new actor message (reuses `AddBackground`). |
+| `src/ipc/background.ts`, `src/app/BackgroundDialog.tsx` | `addPdfBackground` + a "PDF page" source (file picker + 1-based page input, sent 0-based). |
+| `tests/background.rs` | +6 (imports-form-behind, copies resources + content, embeds-once, subtree-not-whole-source, source-page out-of-range, actor undo). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §8.10 (Form XObjects) — `BBox`, `/Matrix`, `/Resources`, and `Do`.
+- PDF 32000-1:2008 §7.3.9 / §7.3.10 (indirect objects) — why cross-document ids must be renumbered.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

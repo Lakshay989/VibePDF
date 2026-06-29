@@ -717,12 +717,16 @@ C4a/b, B3b). Four issues found + fixed this session:
   range, with opacity. New `background.rs` (always prepends; image cover-fit + clipped to the
   MediaBox) + `BackgroundDialog`. Verified via Apple PDFKit render (corner pixel = the fill colour).
   Pending the in-app eyeball (`[~]`).
-- **⏭️ TODO — D1b: PDF-page background.** The spec's third source (a page from another PDF). Needs
-  cross-document page → Form `XObject` import: load the source, copy the chosen page's content +
-  `/Resources` + transitive object closure into the dest with `renumber_objects_with` (the
-  `cos::merge_documents` technique), build a `/Form` XObject (`BBox` = source `MediaBox`), then
-  prepend `Do`. Watch for resource-name collisions, page rotation, and **object bloat** (copy the
-  page's subtree, not the whole source doc). Its own ship.
+- ✅ **DONE 2026-06-29 (D1b, P4-EDIT-008)** — PDF-page background. `import_page_as_form` renumbers the
+  source above the dest (`renumber_objects_with`), copies **only** the page's resource object closure
+  (BFS, not the whole source), wraps the page content in a `/Form` XObject (`BBox` = source
+  `MediaBox`), drawn contain-fit + centred. Verified via Apple PDFKit (imported page's text renders
+  behind the host page's). Pending the in-app eyeball (`[~]`).
+- **Source page `/Rotate` ignored** — a rotated source page imports unrotated (Form XObjects don't
+  carry page rotation). Bake-rotation-into-the-matrix is the follow-up.
+- **Contain-fit only** for the PDF-page source (whole page visible, centred) — no cover/stretch/
+  position. Source `/CropBox` not honoured (uses `/MediaBox`).
+- **Encrypted source PDFs** error cleanly (lopdf can't load) — no decrypt-on-import.
 - **Image is cover-fit only** (fills + crops); no contain/stretch/tile toggle, no position control.
 - **Solid colour only** — no gradients/patterns.
 - **Can't edit/remove an applied background** — page content; removal is in-session undo. A
