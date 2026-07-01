@@ -846,6 +846,43 @@ pub async fn pdf_add_pdf_background(
     run_background(&state, &id, pages, BackgroundKind::PdfPage { source, page }, opacity).await
 }
 
+/// SPEC: P4-EDIT-010 (P4.D3) — draw left/center/right header or footer text on
+/// `pages` (0-based). `position` is `header` | `footer`; `{n}`/`{total}`/`{date}`
+/// are substituted per page (`date` is the caller's formatted today). Undoable.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_header_footer(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    position: String,
+    left: String,
+    center: String,
+    right: String,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    margin: f32,
+    date: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_header_footer_request(
+            pages, position, left, center, right, font_family, font_size, color, margin, date,
+        )?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// Shared tail for both background commands: resolve the actor + dispatch.
 async fn run_background(
     state: &State<'_, AppState>,

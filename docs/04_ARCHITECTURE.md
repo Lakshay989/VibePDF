@@ -40,6 +40,7 @@ vibepdf/
 │   │   │   ├── image_edit.rs     # Image transform (PDFium reset_matrix) + delete + replace (lopdf) (P4.C2/C2b)
 │   │   │   ├── watermark.rs      # Text/image watermark over selected pages, on-top/behind (P4.D2)
 │   │   │   ├── background.rs     # Colour/image/PDF-page background behind page content (P4.D1)
+│   │   │   ├── header_footer.rs  # Header/footer text with {n}/{total}/{date} placeholders (P4.D3)
 │   │   │   ├── form.rs           # Form fields
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
@@ -465,6 +466,15 @@ resources** into the dest (a BFS over references — *not* the whole source doc,
 bloat) and wraps the content in a `/Form` XObject (`BBox` = source `MediaBox`). Each target page
 references that one Form, drawn **contain-fit** + centred so the whole source page stays visible.
 Limitation: the source page's `/Rotate` is ignored (Form XObjects don't carry page rotation).
+
+**Header / footer (P4.D3)** is watermark's text path, positioned in the margin: `header_footer.rs`
+draws left/centre/right text as **appended** page content (it overlays). Per page, each non-empty
+position's template has its `{n}` (absolute 1-based page) / `{total}` / `{date}` placeholders
+substituted (pure `substitute`, unit-tested), then a `BT … Tf x y Td (…) Tj ET` at the aligned
+`x` (`font_avg_em` width estimate) and the header/footer baseline `y`. The `{date}` **value** comes
+from the frontend (its locale-formatted today) so Rust needs no date dependency — offline-first for
+free. This ship promoted `escape_pdf_string` to `cos.rs` `pub(crate)` (both text writers use it),
+mirroring `page_media_box` in D1a. Start-offset / roman / alpha numbering is **D4**, not D3.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

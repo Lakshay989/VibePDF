@@ -44,6 +44,7 @@ use crate::pdf::annotation::{
     ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
 };
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
+use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::watermark::{WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
@@ -380,6 +381,21 @@ pub enum Message {
         pages: Vec<i32>,
         kind: BackgroundKind,
         opacity: f32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-010 — draw left/center/right header or footer text (with
+    /// `{n}`/`{total}`/`{date}` placeholders) on `pages` (0-based). Undoable.
+    AddHeaderFooter {
+        pages: Vec<i32>,
+        position: String,
+        left: String,
+        center: String,
+        right: String,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+        date: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1356,6 +1372,61 @@ impl DocumentActorHandle {
                 pages,
                 kind,
                 opacity,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-010 (P4.D3) — draw a header/footer. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_header_footer(
+        &self,
+        pages: Vec<i32>,
+        position: String,
+        left: String,
+        center: String,
+        right: String,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+        date: String,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_header_footer_request(
+            pages, position, left, center, right, font_family, size, color, margin, date,
+        )?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_header_footer_request(
+        &self,
+        pages: Vec<i32>,
+        position: String,
+        left: String,
+        center: String,
+        right: String,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+        date: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddHeaderFooter {
+                pages,
+                position,
+                left,
+                center,
+                right,
+                font_family,
+                size,
+                color,
+                margin,
+                date,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2729,6 +2800,43 @@ fn run_worker(
                 // SPEC: P4-EDIT-008 (P4.D1) — background as prepended page content; the
                 // inverse is a pre-write byte snapshot (RestoreDocEdit).
                 let edit = BackgroundEdit { pages, kind, opacity };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        dirty = true;
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddHeaderFooter {
+                pages,
+                position,
+                left,
+                center,
+                right,
+                font_family,
+                size,
+                color,
+                margin,
+                date,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-010 (P4.D3) — header/footer appended as page content;
+                // the inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = HeaderFooterEdit {
+                    pages,
+                    position,
+                    left,
+                    center,
+                    right,
+                    font_family,
+                    size,
+                    color,
+                    margin,
+                    date,
+                };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

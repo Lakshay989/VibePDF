@@ -6032,6 +6032,56 @@ of a document. The spec's third background source, and the only one that's genui
 
 ---
 
+## P4.D3 — Header / footer with placeholders
+
+#### Problem
+
+Put "Page 3 of 50" in the footer and the date in a corner — text in the top/bottom margin, with
+left/centre/right positions and per-page placeholders.
+
+#### Concepts learned
+
+- **It's watermark, un-rotated, in the margin.** Same text machinery (register a base-14 font, a
+  `BT … Tj ET` show), just positioned at a margin `y` and an aligned `x` instead of rotated-centred.
+  The third Track-D text feature confirmed the pattern is a genuine reusable core — hence promoting
+  `escape_pdf_string` to `cos.rs` alongside `page_media_box` and `font_avg_em`.
+- **Placeholders that depend on page context live server-side; ones that don't come from the
+  client.** `{n}` and `{total}` are page-context (Rust knows each page's number and the count), so
+  Rust substitutes them. `{date}` is *not* page-context and the project deliberately ships no date
+  library — so the **frontend passes the formatted date string** (`new Date()` → `YYYY-MM-DD`) and
+  Rust just splices it in. Result: no dependency, no timezone ambiguity, offline-first for free.
+  Splitting a feature across the IPC boundary by *what each side actually knows* is often cleaner
+  than forcing it all into one layer.
+- **Left/centre/right is three shows, one fill.** A header carries all three positions together
+  (any empty skipped). They share one `q…Q`, one fill colour, one font — only the `x` differs:
+  left = `x0+margin`, centre = `x0+(w−tw)/2`, right = `x1−margin−tw`, where `tw` is the estimated
+  text width (`size·font_avg_em·len`). One undoable edit writes all three.
+- **Append vs. prepend encodes layering, again.** A header *overlays* content, so it's
+  `append_page_content` (draws last, on top) — the mirror of the background's `prepend`. Same knob,
+  opposite setting.
+- **Assert your own marks, not "any text."** The first cut asserted "page 2 has no `Tj`" — but every
+  fixture page already draws its own `(Page N) Tj`. The fix: tests search for the *distinctive*
+  string the feature wrote ("Page 2 of 50", "HEADER", "/Fhf") rather than a generic operator. When
+  you inject content into a document that already has content, your assertions must be specific
+  enough to tell yours apart.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/header_footer.rs` | `add_header_footer` (L/C/R, header/footer `y`, per-page placeholders) + pure `substitute` + `HeaderFooterEdit`. |
+| `src-tauri/src/pdf/cos.rs` | `escape_pdf_string` promoted to `pub(crate)` (moved out of `watermark.rs`). |
+| `src-tauri/src/pdf/{actor,commands/pdf,lib}.rs` | `AddHeaderFooter` message + `pdf_add_header_footer` command. |
+| `src/ipc/header-footer.ts`, `src/app/HeaderFooterDialog.tsx` | IPC wrapper + the dialog (formats today's date, three text fields, mounted in `PdfViewer`, opened from `ZoomToolbar`). |
+| `tests/header_footer.rs` | 9 (substitute unit; footer page-of-total; header-vs-footer y; L/C/R x order; only-non-empty; errors; actor undo). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.4.2 (Text-positioning operators) — `Td` / `Tf` and the text matrix.
+- PDF 32000-1:2008 §9.4.3 (Text-showing operators) — `Tj`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

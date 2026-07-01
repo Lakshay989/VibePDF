@@ -17,7 +17,7 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, font_avg_em, page_media_box, parse_hex_color,
+    append_page_content, base_font, escape_pdf_string, font_avg_em, page_media_box, parse_hex_color,
     prepend_page_content, register_page_resource,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
@@ -159,20 +159,6 @@ fn font_dict(base: &str) -> Object {
     font.set("Subtype", Object::Name(b"Type1".to_vec()));
     font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
     Object::Dictionary(font)
-}
-
-/// Escape a string for a PDF literal-string `(…)` operand.
-fn escape_pdf_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '(' => out.push_str("\\("),
-            ')' => out.push_str("\\)"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }
 
 /// `q … Q` fragment: rotate about the page centre (`cm`), then draw the centred

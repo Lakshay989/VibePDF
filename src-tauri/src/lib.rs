@@ -116,6 +116,7 @@ pub fn run() {
             commands::pdf::pdf_add_color_background,
             commands::pdf::pdf_add_image_background,
             commands::pdf::pdf_add_pdf_background,
+            commands::pdf::pdf_add_header_footer,
             commands::pdf::pdf_extract_images,
             commands::pdf::pdf_transform_image,
             commands::pdf::pdf_delete_image,

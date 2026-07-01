@@ -2726,6 +2726,34 @@ message) + the dialog's "PDF page" source. Source `/Rotate` ignored (documented)
 
 ---
 
+### P4.D3 — Header / footer (this commit)
+
+No new dependencies (`{date}` value is supplied by the frontend — no Rust date lib).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 359/359 (no frontend test delta — reuses parsePageRange)
+npm run test:rust      # EXIT 0. header_footer.rs: 9 (substitute unit; footer "Page {n} of {total}";
+#   header-high/footer-low y; L/C/R distinct x; only-non-empty positions; all-empty / unknown-
+#   position / out-of-range errors; actor add+undo) + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test header_footer hf_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-header-footer.pdf (→ /tmp/vibepdf-verify.pdf): footer
+#   "Page {n} of {total}" + "{date}" on all 50 pages. Apple PDFKit per-page text:
+#   p1 "Page 1 of 50 2026-07-01", p25 "Page 25 of 50 …", p50 "Page 50 of 50 …".
+```
+
+New `header_footer.rs` `add_header_footer` draws L/C/R text in the top/bottom margin as **appended**
+page content (overlays). Per page, each non-empty position's `{n}`/`{total}`/`{date}` are substituted
+(pure `substitute`, unit-tested) and drawn at the aligned x + header/footer baseline y. `{date}` value
+comes from the frontend (its formatted today) — no Rust date dep. **Consolidation:** `escape_pdf_string`
+→ `cos.rs` `pub(crate)`. `AddHeaderFooter` message + `pdf_add_header_footer` + `HeaderFooterDialog`
+(three fields + placeholder hint). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

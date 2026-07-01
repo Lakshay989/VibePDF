@@ -38,6 +38,9 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
+  /** SPEC: P4-EDIT-010 — open the header/footer dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onHeaderFooter?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -47,6 +50,7 @@ export function ZoomToolbar({
   onInsertFromPdf,
   onWatermark,
   onBackground,
+  onHeaderFooter,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -224,6 +228,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Background…
+        </button>
+      ) : null}
+
+      {onHeaderFooter ? (
+        <button
+          type="button"
+          onClick={onHeaderFooter}
+          title="Add a header or footer with page-number / date placeholders"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Header/Footer…
         </button>
       ) : null}
 

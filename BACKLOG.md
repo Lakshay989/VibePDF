@@ -734,6 +734,24 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Consolidation:** `parsePageRange` now lives in `src/tools/page-range.ts` and `page_media_box` in
   `cos.rs` (`pub(crate)`) — shared by watermark + background (and Track D's remaining features).
 
+## From P4.D3 (header/footer)
+
+- ✅ **DONE 2026-07-01 (D3, P4-EDIT-010)** — left/centre/right header/footer text over a page range,
+  font/size/colour/margin, with `{n}`/`{total}`/`{date}` placeholders substituted per page. `{date}`
+  value supplied by the frontend (no Rust date dep). New `header_footer.rs` + `HeaderFooterDialog`.
+  Verified via Apple PDFKit (per-page "Page N of 50" + date). Pending the in-app eyeball (`[~]`).
+- **`{n}` is the absolute page number.** Start-number offset and `1/N` / `Page 1 of N` presets /
+  roman (`i`,`I`) / alpha (`a`,`A`) numbering are **P4.D4 (page numbers)**, not D3.
+- **Right/centre alignment uses an estimated glyph width** (`font_avg_em`), so it can be a few points
+  off with proportional fonts — inside the margin, acceptable. A real glyph-metrics table would fix
+  this here *and* in watermark centring (shared follow-up).
+- **One `{date}` format** (whatever the frontend sends, default `YYYY-MM-DD`) — no in-dialog format
+  picker/locale control.
+- **Single line per position** — no multi-line headers, odd/even (mirrored) headers, or a background
+  box behind the header text.
+- **Consolidation:** `escape_pdf_string` now lives in `cos.rs` (`pub(crate)`), shared by watermark +
+  header/footer (and D4).
+
 ## From P4.D2 (watermark)
 
 - ✅ **DONE 2026-06-29 (D2, P4-EDIT-009)** — text/image watermark over a page range, on top of or

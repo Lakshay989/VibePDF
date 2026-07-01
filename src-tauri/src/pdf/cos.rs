@@ -1410,6 +1410,21 @@ pub(crate) fn prepend_page_content(
     Ok(())
 }
 
+/// Escape a string for a PDF literal-string `(…)` operand. Shared by the
+/// page-decoration text writers (watermark, header/footer).
+pub(crate) fn escape_pdf_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '(' => out.push_str("\\("),
+            ')' => out.push_str("\\)"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// A page's `/MediaBox` `[x0, y0, x1, y1]`, walking up the `/Parent` chain (it
 /// can be inherited), defaulting to US-Letter when absent. Shared by the page-
 /// decoration writers (watermark, background).
