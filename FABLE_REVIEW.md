@@ -23,9 +23,12 @@ every write path verified against a real PDF.
 
 The risks are not where one would guess. The engine's correctness on *typical* PDFs is strong;
 the exposure is on **atypical pages** (rotated pages, CropBox ≠ MediaBox), **non-ASCII text**,
-**encrypted documents crossing the save path**, and — dominating everything — **process debt: 59
-shipped-but-human-unverified `[~]` steps**. A single afternoon of in-app verification would
-retire more risk than any code change in this document.
+**encrypted documents crossing the save path**, and — dominating everything — **process debt:
+every Phase-4 feature (~14 features, 23 `[~]` markers) has shipped without a single in-app
+human verification**, plus lingering Phase-2 viewer checks. (A raw `[~]` grep says 59, but
+Phase 3's markers are record-keeping bullets under headers verified in the June sweeps — the
+*live* debt is Phase 4 + P2 leftovers.) A single afternoon of in-app verification would retire
+more risk than any code change in this document.
 
 | Area | Grade | One-line assessment |
 |---|---|---|
@@ -417,13 +420,19 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 
 ## 8. Process findings
 
-1. **59 `[~]` shipped-but-unverified steps** (P1: 2, P2: 14, P3: 20, P4: 23). The ritual's
-   final gate — a human eyeballing each feature in the running app — has been deferred
-   feature-by-feature since Phase 2. The automated gates are strong, so most will pass; but
-   UI-level defects (focus, dark mode, drag feel, dialog validation quirks) are exactly what
-   automated gates miss, and 59 of them compound. **Recommendation:** a dedicated verification
-   session against `MANUAL_TESTING.md` before starting P4.D4; batch-flip to `[x]` as you go.
-   *(Also still open: the P2.A2 force-kill → crash-recovery ritual, deferred since June.)*
+1. **Phase 4 is entirely human-unverified.** A raw grep finds 59 `[~]` markers (P1: 2, P2: 14,
+   P3: 20, P4: 23), but context matters: Phases 2–3 had dedicated verification sweeps
+   (2026-06-18/22/25) that flipped feature headers to `[x]`, with P3's remaining `[~]`
+   markers being per-feature acceptance bullets kept as the record under verified headers.
+   The **live debt** is: *all ~14 Phase-4 features* (font fallback, text edit/add/delete,
+   image add/edit/replace, links + appearance, watermark, background ×3 sources,
+   header/footer) — shipped with green gates and cross-engine PDFKit checks but **zero
+   in-app eyeballs** — plus the Phase-2 viewer items in `MANUAL_TESTING.md §E`. UI-level
+   defects (focus, dark mode, drag feel, dialog quirks) are exactly what automated gates
+   miss; the June P3 sweep caught four such bugs in one afternoon. **Recommendation:** run
+   the same sweep for Phase 4 before starting P4.D4. *(Also still open: the P2.A2
+   force-kill → crash-recovery ritual, deferred since June; and the per-edit page-blank
+   flash, an open bug in BACKLOG.)*
 2. **P4 A-track leftovers:** A3 shipped "edit-only" by explicit decision; the full
    redact-and-reflow (delete + line re-layout) remains open — it's the last substantial engine
    item in P4 besides D4/D5.
@@ -493,11 +502,11 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.14 | Low | `collect_refs` recursion depth | S |
 | 3.15 | Low | Nine assorted small items | S each |
 | §4 | Debt | `cos.rs` 3.9k lines; `actor.rs` 40 copy-pasted arms; doc drift | M |
-| §8 | Process | **59 unverified `[~]` steps**; A2 recovery ritual; A3 reflow half | human time |
+| §8 | Process | **All of Phase 4 human-unverified** (+P2 viewer items); A2 recovery ritual; A3 reflow half | human time |
 
-**If only three things get done:** (1) the encrypted-save test (3.3), (2) the in-app
-verification session for the 59 `[~]` items (§8), (3) rotation + CropBox handling (3.1/3.4)
-before D4 stamps page numbers onto real-world documents.
+**If only three things get done:** (1) the encrypted-save test (3.3), (2) the Phase-4 in-app
+verification sweep (§8), (3) rotation + CropBox handling (3.1/3.4) before D4 stamps page
+numbers onto real-world documents.
 
 ---
 
