@@ -6136,6 +6136,48 @@ legal `/Contents` shape corrupted on append, and the encrypted-save path had nev
 
 ---
 
+## P4.HF2 — Marked-content tags on decorations
+
+#### Problem
+
+A saved watermark/background/header becomes an anonymous `q…Q` fragment — removing or
+re-stamping it later (Bates re-runs after inserting pages, "remove watermark") would need
+heuristics. Lay the identity rail *now*, before D4/D5 stamp page numbers everywhere.
+
+#### Concepts learned
+
+- **Marked content is the content-stream analogue of `/NM`.** Annotations get a stable identity
+  via `/NM`; raw content has no such slot — but PDF's *marked content* (`BDC tag props … EMC`,
+  §14.6) lets you label a run of operators without changing what renders. Tag `/VibePDF`, inline
+  dict `<< /Kind (…) /Id (uuid) >>` — no `/Properties` resource needed when the dict is inline.
+- **Prove the rail with the consumer you haven't built.** The tag's only purpose is future
+  removal, so the test *performs* the removal: decode operations, find the `/VibePDF BDC`, drain
+  through its `EMC`, re-encode — DRAFT gone, "Hello" intact, PDFium reopens. Infrastructure
+  shipped with a working proof-of-consumer beats infrastructure shipped on faith.
+- **PDFium compresses streams on save — your bytes aren't grep-able.** The tag is plainly visible
+  in lopdf-written bytes, but once the actor's save path (PDFium `save_to_bytes`) runs, content
+  streams come out Flate-compressed and a raw `grep "/VibePDF"` finds nothing. The tag *is*
+  still there — at the operator layer after decoding. Lesson: verify content-stream facts with a
+  decoder, never with byte search on a saved file.
+- **Consume-and-return beats format-borrow.** clippy's `needless_pass_by_value` on
+  `wrap_decoration(kind, content: String)`: `format!("{content}")` only *borrows* content, so
+  taking `String` was dishonest. `insert_str(0, header)` + `push_str("EMC\n")` actually consumes
+  and reuses the allocation — the signature now tells the truth.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `wrap_decoration(kind, content)` — the `/VibePDF` BDC/EMC wrapper. |
+| `watermark.rs` / `background.rs` / `header_footer.rs` | wrap their fragment with kind `watermark` / `background` / `header-footer`. |
+| writer test suites + `tests/hardening.rs` | 3 tag tests + `decoration_tag_is_operator_spliceable` (the removal proof). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §14.6 (Marked content) — `BMC`/`BDC`/`EMC`, inline property lists.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -237,6 +237,16 @@ fn color_fill_still_covers_mediabox_on_cropped_page() {
     assert!(c.contains("0.00 0.00 612.00 792.00 re"), "fills the MediaBox, not the crop; got:\n{c}");
 }
 
+/// FABLE_REVIEW 3.13 — every background kind is wrapped in a `/VibePDF`
+/// marked-content block carrying its kind.
+#[test]
+fn background_is_tagged() {
+    let out = add_background(&bytes("hello.pdf"), &[0], &color("#e6f0ff"), 1.0).expect("bg");
+    let c = page_content(&out, 1);
+    assert!(c.contains("/VibePDF") && c.contains("/Kind (background)"), "tag + kind; got:\n{c}");
+    assert_eq!(c.matches("BDC").count(), c.matches("EMC").count(), "balanced BDC/EMC");
+}
+
 /// Writes a backgrounded PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test background bg_writes_verification_artifact -- --ignored

@@ -160,6 +160,65 @@ async fn hf_writes_verification_artifact() {
     drop(handle);
 }
 
+/// FABLE_REVIEW 3.13 (proof) — a tagged decoration is removable by a mechanical
+/// operator splice: decode the content, drop the `/VibePDF BDC … EMC` range,
+/// re-encode. This is the exact machinery a future "remove watermark" feature
+/// will use; the test proves the rail works end to end (mark gone, original
+/// content intact, document still opens in PDFium).
+#[test]
+fn decoration_tag_is_operator_spliceable() {
+    use lopdf::content::Content;
+    use vibepdf_lib::pdf::watermark::{add_watermark, WatermarkKind};
+
+    let src = std::fs::read("../tests/fixtures/basic/hello.pdf").expect("fixture");
+    let kind = WatermarkKind::Text {
+        text: "DRAFT".into(),
+        font_family: "Helvetica".into(),
+        size: 64.0,
+        color: "#808080".into(),
+        bold: false,
+        italic: false,
+    };
+    let marked = add_watermark(&src, &[0], &kind, 0.3, 45.0, true).expect("watermark");
+
+    // Splice: find the /VibePDF BDC … EMC operator range and drop it.
+    let mut doc = Document::load_mem(&marked).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let mut ops = doc
+        .get_and_decode_page_content(page_id)
+        .expect("decode content")
+        .operations;
+    let start = ops
+        .iter()
+        .position(|op| {
+            op.operator == "BDC"
+                && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")
+        })
+        .expect("a /VibePDF BDC");
+    let end = start
+        + ops[start..]
+            .iter()
+            .position(|op| op.operator == "EMC")
+            .expect("its EMC");
+    ops.drain(start..=end);
+    let encoded = Content { operations: ops }.encode().expect("re-encode");
+    doc.change_page_content(page_id, encoded).expect("swap content");
+    let mut out = Vec::new();
+    doc.save_to(&mut out).expect("save");
+
+    // The mark is gone, the page's own content survives, and PDFium reopens it.
+    let after = Document::load_mem(&out).expect("reload");
+    let pid = *after.get_pages().get(&1).unwrap();
+    let c = String::from_utf8_lossy(&after.get_page_content(pid).unwrap()).into_owned();
+    assert!(!c.contains("DRAFT"), "the spliced-out watermark is gone; got:\n{c}");
+    assert!(c.contains("Hello"), "the page's own content survives");
+
+    let tmp = std::env::temp_dir().join(format!("vibepdf-splice-{}.pdf", uuid::Uuid::new_v4()));
+    std::fs::write(&tmp, &out).expect("write temp");
+    assert!(open_pdf(&tmp, None).is_ok(), "PDFium reopens the spliced document");
+    let _ = std::fs::remove_file(&tmp);
+}
+
 fn encrypted_fixture() -> Option<PathBuf> {
     let p = PathBuf::from("../tests/fixtures/acceptance/p1-encrypted.pdf");
     if p.is_file() {

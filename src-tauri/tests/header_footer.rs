@@ -238,6 +238,16 @@ fn footer_respects_cropbox() {
     assert!((x - 36.0).abs() < 0.01 && (y - 36.0).abs() < 0.01, "crop-relative margins, got ({x}, {y})");
 }
 
+/// FABLE_REVIEW 3.13 — the fragment is wrapped in a `/VibePDF` marked-content
+/// block carrying its kind.
+#[test]
+fn header_footer_is_tagged() {
+    let out = one("footer", "tagged", "d");
+    let c = page_content(&out, 1);
+    assert!(c.contains("/VibePDF") && c.contains("/Kind (header-footer)"), "tag + kind; got:\n{c}");
+    assert_eq!(c.matches("BDC").count(), c.matches("EMC").count(), "balanced BDC/EMC");
+}
+
 /// Writes a header/footer PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test header_footer hf_writes_verification_artifact -- --ignored

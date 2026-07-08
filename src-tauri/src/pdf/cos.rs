@@ -1508,6 +1508,26 @@ pub(crate) fn visual_transform(rotate: i64, [x0, y0, x1, y1]: [f32; 4]) -> ([f32
     }
 }
 
+/// Wrap a decoration fragment in a `/VibePDF` marked-content block:
+/// `/VibePDF << /Kind (kind) /Id (uuid) >> BDC … EMC`.
+///
+/// `FABLE_REVIEW` 3.13 — the identity rail for page decorations. Marked content
+/// (PDF 1.2, §14.6) is semantically inert to renderers, but it turns a future
+/// "remove / re-stamp this watermark" into a mechanical operator splice (find
+/// the `BDC` whose tag is `VibePDF`, drop through its `EMC`) instead of a
+/// heuristic — the same splice machinery `delete_image` / `delete_text_run`
+/// already use. Contract: `content` is a balanced `q … Q` fragment that never
+/// straddles `BT`/`ET`; the inline dict needs no `/Properties` registration.
+/// The content-stream analogue of `/NM` on annotations.
+pub(crate) fn wrap_decoration(kind: &str, mut content: String) -> String {
+    content.insert_str(
+        0,
+        &format!("/VibePDF << /Kind ({kind}) /Id ({id}) >> BDC\n", id = uuid::Uuid::new_v4()),
+    );
+    content.push_str("EMC\n");
+    content
+}
+
 /// [`visual_transform`] as a ready-to-emit `cm` line.
 pub(crate) fn visual_cm_line(m: [f32; 6]) -> String {
     format!(

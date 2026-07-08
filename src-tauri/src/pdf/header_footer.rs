@@ -16,7 +16,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::{
     append_page_content, base_font, escape_pdf_string, font_avg_em, page_effective_box,
-    page_rotation, parse_hex_color, visual_cm_line, visual_transform,
+    page_rotation, parse_hex_color, visual_cm_line, visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
@@ -105,7 +105,7 @@ pub fn add_header_footer(
             date,
         );
         // A header/footer draws on top of the page's own content.
-        append_page_content(&mut doc, page_id, content)?;
+        append_page_content(&mut doc, page_id, wrap_decoration("header-footer", content))?;
     }
 
     let mut buf = Vec::new();

@@ -488,6 +488,17 @@ verification — before this, **encrypted documents could not be saved at all** 
 encryption on save; the verify re-opened the temp file with no password and failed). Save now
 succeeds and the copy stays encrypted, pinned by `tests/hardening.rs`.
 
+**Decoration identity (P4.HF2).** Every Track-D fragment is wrapped in a marked-content block —
+`/VibePDF << /Kind (watermark|background|header-footer) /Id (uuid) >> BDC … EMC`
+(`cos::wrap_decoration`) — the content-stream analogue of `/NM` on annotations. Marked content is
+semantically inert to renderers, but it makes a future "remove / re-stamp this decoration" a
+mechanical operator splice (find the tagged `BDC…EMC` range, drain, re-encode — the same machinery
+`delete_image` uses), proven end-to-end by `hardening.rs::decoration_tag_is_operator_spliceable`.
+Two caveats: PDFium **compresses** content streams on save, so the tag is found at the operator
+layer (`get_and_decode_page_content`), not by raw byte search; and PDFium's `Manual` content
+regeneration (the text-edit path) may drop tags on a page it regenerates. D4/D5 inherit tagging
+through the shared writers and must pass their own `/Kind`.
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend

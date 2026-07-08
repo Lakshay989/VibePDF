@@ -2783,6 +2783,31 @@ FABLE_REVIEW annotated with ✅ FIXED/RESOLVED notes. Left `[~]`.
 
 ---
 
+### P4.HF2 — Marked-content tags on decorations (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 359/359 (engine-only)
+npm run test:rust      # EXIT 0. +4: watermark/background/header_footer *_is_tagged +
+#   hardening.rs decoration_tag_is_operator_spliceable (removes the tagged watermark by
+#   operator splice; original content intact; PDFium reopens).
+
+# Write path → verification artifact (regenerated with tags):
+cargo test --test hardening hf_writes_verification_artifact -- --ignored
+#   → /tmp/vibepdf-verify.pdf. NOTE: PDFium compresses content streams on save — the
+#   /VibePDF tag is found at the operator layer (get_and_decode_page_content), not by grep.
+```
+
+FABLE_REVIEW 3.13. `cos::wrap_decoration` wraps every Track-D fragment in
+`/VibePDF << /Kind (…) /Id (uuid) >> BDC … EMC` — the content-stream `/NM`. Future
+removal/re-stamp = mechanical operator splice (proven by test). D4/D5 inherit via the shared
+writers. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

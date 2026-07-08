@@ -298,6 +298,11 @@ a threshold (lopdf supports setting the filter + compressed content), used by al
 
 ### 3.13 LOW — Decorations are unremovable after save (no marked-content tagging)
 
+> **✅ FIXED 2026-07-06 (P4.HF2)** — `cos::wrap_decoration` wraps every Track-D fragment in
+> `/VibePDF << /Kind (…) /Id (uuid) >> BDC … EMC`. Proven by a splice test: the tagged
+> watermark is removed by a mechanical operator splice, original content intact, PDFium
+> reopens. D4/D5 inherit the tag through the shared writers.
+
 **Where:** all Track-D writers.
 
 **What:** watermark/background/header-footer become anonymous `q…Q` fragments; after save +
@@ -518,7 +523,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.10 | Low | Average-width alignment drift | S |
 | 3.11 | Low | Dirty-flag edge cases (undo-to-saved, save-as) | S |
 | 3.12 | Low | New streams uncompressed | S |
-| 3.13 | Low | Decorations untagged → unremovable later | S |
+| 3.13 | Low | ~~Decorations untagged~~ **FIXED (P4.HF2)**: `/VibePDF` BDC/EMC + splice-proof test | S |
 | 3.14 | Low | `collect_refs` recursion depth | S |
 | 3.15 | Low | Nine assorted small items | S each |
 | §4 | Debt | `cos.rs` 3.9k lines; `actor.rs` 40 copy-pasted arms; doc drift | M |

@@ -213,6 +213,17 @@ fn watermark_centres_on_cropbox() {
     assert!(c.contains("206.00 296.00 cm"), "centred on the crop centre; got:\n{c}");
 }
 
+/// FABLE_REVIEW 3.13 — the fragment is wrapped in a `/VibePDF` marked-content
+/// block carrying its kind, so future removal is an operator splice.
+#[test]
+fn watermark_is_tagged() {
+    let out = add_watermark(&bytes("hello.pdf"), &[0], &text_kind("DRAFT"), 0.3, 45.0, true).expect("wm");
+    let c = page_content(&out, 1);
+    assert!(c.contains("/VibePDF") && c.contains("/Kind (watermark)"), "tag + kind; got:\n{c}");
+    assert_eq!(c.matches("BDC").count(), c.matches("EMC").count(), "balanced BDC/EMC");
+    assert!(c.matches("BDC").count() >= 1);
+}
+
 /// Writes a watermarked PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test watermark watermark_writes_verification_artifact -- --ignored

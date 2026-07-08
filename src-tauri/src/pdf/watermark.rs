@@ -19,7 +19,7 @@ use crate::error::CommandError;
 use crate::pdf::cos::{
     append_page_content, base_font, escape_pdf_string, font_avg_em, page_effective_box,
     page_rotation, parse_hex_color, prepend_page_content, register_page_resource, visual_cm_line,
-    visual_transform,
+    visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_xobject::embed_image;
@@ -127,6 +127,7 @@ pub fn add_watermark(
             }
         };
 
+        let content = wrap_decoration("watermark", content);
         if behind {
             prepend_page_content(&mut doc, page_id, content)?;
         } else {

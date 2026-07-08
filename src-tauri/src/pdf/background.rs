@@ -20,7 +20,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::{
     page_effective_box, page_media_box, page_rotation, parse_hex_color, prepend_page_content,
-    register_page_resource, visual_cm_line, visual_transform,
+    register_page_resource, visual_cm_line, visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_xobject::embed_image;
@@ -133,7 +133,7 @@ pub fn add_background(
         };
 
         // A background always draws behind the page's own content.
-        prepend_page_content(&mut doc, page_id, content)?;
+        prepend_page_content(&mut doc, page_id, wrap_decoration("background", content))?;
     }
 
     let mut buf = Vec::new();
