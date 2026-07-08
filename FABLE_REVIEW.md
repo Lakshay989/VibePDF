@@ -66,6 +66,10 @@ more risk than any code change in this document.
 
 ### 3.1 HIGH — Page decorations ignore `/Rotate` (rotated pages get sideways output)
 
+> **✅ FIXED 2026-07-06 (P4.HF)** — `cos::page_rotation` + `visual_transform`; all three
+> writers lay out in visual space and prepend the compensating `cm`. Tested per-angle on the
+> new `rotated.pdf` fixture.
+
 **Where:** `pdf/watermark.rs`, `pdf/background.rs`, `pdf/header_footer.rs` (all placement math);
 `cos::page_media_box` is rotation-blind by design.
 
@@ -117,6 +121,15 @@ requires font embedding + a proper `/Encoding` or CID/Type0 with a `/ToUnicode` 
 
 ### 3.3 HIGH — Encrypted document ⇢ save path behavior is unverified (likely silent decryption)
 
+> **✅ RESOLVED 2026-07-06 (P4.HF)** — the pinning test revealed the *other* failure mode this
+> section listed as the alternative: `PDFium` **preserves** encryption on save, and our own
+> `verify_pdf_reopens(tmp, None)` then rejected the (correctly encrypted) temp file — so
+> **encrypted documents could not be saved at all** (`PasswordRequired` on every save). Fixed
+> by threading the open password into `save_document` → `verify_pdf_reopens`. Pinned by test:
+> save succeeds, the copy still requires the password, `/Encrypt` survives in the trailer. No
+> silent decryption exists; no save-time warning is needed. P6's re-encryption scope shrinks
+> to "change/remove password" features.
+
 **Where:** `pdf/document.rs::save_document`; opened-with-password flow from P1.B2.
 
 **What:** PDFium's `FPDF_SaveAsCopy` (behind `save_to_bytes`) is documented/known to write the
@@ -137,6 +150,10 @@ remove this file's password protection — continue?"). (3) *P6:* re-encrypt on 
 planned `security/encrypt.rs`.
 
 ### 3.4 MEDIUM — Decorations place against `MediaBox`, ignoring `CropBox`
+
+> **✅ FIXED 2026-07-06 (P4.HF)** — `cos::page_effective_box` (CropBox∩MediaBox); placement
+> targets it, the background colour fill deliberately keeps the full MediaBox. Tested on the
+> new `cropped.pdf` fixture.
 
 **Where:** `cos::page_media_box` + all three decoration writers; note `resize.rs` deliberately
 *removes* Crop/Bleed/Trim/Art boxes, and `split`/`extract` already have a known CropBox carry
@@ -187,6 +204,9 @@ snapshots (consecutive saves share most bytes — even a naive common-prefix/suf
 big). All three are contained in `undo.rs`/`restore.rs`; the `Edit` trait doesn't change.
 
 ### 3.7 MEDIUM — Latent corruption: `/Contents` as an indirect reference **to an array**
+
+> **✅ FIXED 2026-07-06 (P4.HF)** — `existing_contents` derefs the reference and flattens a
+> referenced array; unit-tested against a synthetically constructed ref→array document.
 
 **Where:** `cos::append_page_content` / `prepend_page_content`:
 `Ok(Object::Reference(id)) => vec![Object::Reference(*id)]`.
@@ -486,13 +506,13 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 
 | # | Severity | Finding | Fix size |
 |---|---|---|---|
-| 3.1 | High | Decorations ignore `/Rotate` → sideways output on rotated pages | M |
+| 3.1 | High | ~~Decorations ignore `/Rotate`~~ **FIXED (P4.HF)** | M |
 | 3.2 | High | Non-ASCII text silently corrupts (base-14, no embedding) | S now / L full |
-| 3.3 | High | Encrypted-doc save unverified; likely silent decryption | S test / M guard |
-| 3.4 | Medium | Placement uses MediaBox, ignores CropBox | S |
+| 3.3 | High | ~~Encrypted-doc save unverified~~ **RESOLVED (P4.HF)**: saves failed entirely; now save + keep encryption | S |
+| 3.4 | Medium | ~~Placement ignores CropBox~~ **FIXED (P4.HF)** | S |
 | 3.5 | Medium | Canvas tools swallow errors (`console.warn`) | S |
 | 3.6 | Medium | Undo = up to 100 full-doc snapshots in RAM | M |
-| 3.7 | Medium | `/Contents` ref-to-array shape corrupts (latent) | S |
+| 3.7 | Medium | ~~`/Contents` ref-to-array corrupts (latent)~~ **FIXED (P4.HF)** | S |
 | 3.8 | Medium | CSP disabled | S |
 | 3.9 | Medium | No Windows CI; `split("/")` path-display bug | S |
 | 3.10 | Low | Average-width alignment drift | S |

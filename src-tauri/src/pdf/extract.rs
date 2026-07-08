@@ -39,7 +39,7 @@ pub(crate) fn write_subset_pdf(
 
     // Reuse the explicit-save write path: atomic temp+rename + round-trip
     // verification. No backup — `dest` is a brand-new file.
-    save_document(&out, dest, false)
+    save_document(&out, dest, false, None)
 }
 
 /// Build a new PDF containing `pages` (0-based indices) of `source` and

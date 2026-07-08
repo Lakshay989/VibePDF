@@ -2341,7 +2341,7 @@ fn run_worker(
                     // make_backup only when overwriting the original; a
                     // same-path save that reaches here is, by the branch
                     // above, necessarily dirty.
-                    let outcome = save_document(&doc, &dest, same_path);
+                    let outcome = save_document(&doc, &dest, same_path, password.as_deref());
                     if outcome.is_ok() && same_path {
                         dirty = false;
                         // SPEC: P2.A2 — a clean same-path save supersedes

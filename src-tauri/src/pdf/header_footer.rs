@@ -15,7 +15,8 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, escape_pdf_string, font_avg_em, page_media_box, parse_hex_color,
+    append_page_content, base_font, escape_pdf_string, font_avg_em, page_effective_box,
+    page_rotation, parse_hex_color, visual_cm_line, visual_transform,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::restore::RestoreDocEdit;
@@ -82,15 +83,20 @@ pub fn add_header_footer(
     }
 
     for (page_no, page_id) in targets {
-        let [x0, y0, x1, y1] = page_media_box(&doc, page_id);
+        // Lay out in the page's VISUAL space (the displayed CropBox, after
+        // /Rotate), so the footer lands at the visible bottom even on rotated
+        // or cropped pages; `vt` maps visual coords back into page space.
+        let rotate = page_rotation(&doc, page_id);
+        let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
         let font_name = register_hf_font(&mut doc, page_id, base)?;
-        let y = if header { y1 - margin - sz } else { y0 + margin };
+        let y = if header { vh - margin - sz } else { margin };
         let content = header_footer_content(
             &font_name,
             rgb,
             sz,
             base,
-            [x0, x1],
+            vt,
+            [0.0, vw],
             y,
             margin,
             &[(left, Align::Left), (center, Align::Center), (right, Align::Right)],
@@ -129,13 +135,15 @@ fn register_hf_font(doc: &mut Document, page_id: ObjectId, base: &str) -> Result
 }
 
 /// Build the `q … Q` fragment drawing each non-empty position at its aligned `x`
-/// and the shared baseline `y`. All three share one fill colour + font.
+/// and the shared baseline `y`, in visual coordinates mapped through `vt`. All
+/// three positions share one fill colour + font.
 #[allow(clippy::too_many_arguments, clippy::many_single_char_names, clippy::cast_precision_loss)]
 fn header_footer_content(
     font: &str,
     (r, g, b): (f32, f32, f32),
     size: f32,
     base: &str,
+    vt: [f32; 6],
     [x0, x1]: [f32; 2],
     y: f32,
     margin: f32,
@@ -146,7 +154,7 @@ fn header_footer_content(
 ) -> String {
     use std::fmt::Write as _;
     let mut content = String::new();
-    let _ = writeln!(content, "q\n{r:.4} {g:.4} {b:.4} rg");
+    let _ = writeln!(content, "q\n{}\n{r:.4} {g:.4} {b:.4} rg", visual_cm_line(vt));
     for (template, align) in parts {
         if template.trim().is_empty() {
             continue;

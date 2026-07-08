@@ -18,7 +18,10 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::cos::{page_media_box, parse_hex_color, prepend_page_content, register_page_resource};
+use crate::pdf::cos::{
+    page_effective_box, page_media_box, page_rotation, parse_hex_color, prepend_page_content,
+    register_page_resource, visual_cm_line, visual_transform,
+};
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
@@ -82,8 +85,13 @@ pub fn add_background(
     };
 
     for page_id in targets {
+        // A colour fill covers the full MediaBox (bleed-safe); image / PDF-page
+        // placement targets the VISUAL box (displayed CropBox, after /Rotate)
+        // so it reads upright and covers what the user actually sees.
         let [x0, y0, x1, y1] = page_media_box(&doc, page_id);
         let (w, h) = (x1 - x0, y1 - y0);
+        let rotate = page_rotation(&doc, page_id);
+        let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
 
         let mut gs = Dictionary::new();
         gs.set("Type", Object::Name(b"ExtGState".to_vec()));
@@ -108,7 +116,7 @@ pub fn add_background(
                     "Imgbg",
                     Object::Reference(img.id),
                 )?;
-                image_content(&gs_name, &name, [x0, y0, w, h], img.width, img.height)
+                image_content(&gs_name, &name, vt, [vw, vh], img.width, img.height)
             }
             BackgroundKind::PdfPage { .. } => {
                 let (form_id, src_bbox) =
@@ -120,7 +128,7 @@ pub fn add_background(
                     "Bgpdf",
                     Object::Reference(form_id),
                 )?;
-                pdf_content(&gs_name, &name, src_bbox, [x0, y0, w, h])
+                pdf_content(&gs_name, &name, vt, src_bbox, [vw, vh])
             }
         };
 
@@ -228,18 +236,21 @@ fn collect_refs(doc: &Document, obj: &Object, acc: &mut HashSet<ObjectId>) {
     }
 }
 
-/// `q … Q`: paint the imported page Form (drawn in its `src_bbox` space)
-/// contain-fit and centred inside the target page rect `[tx0, ty0, tw, th]`
-/// (the whole source page stays visible — never cropped).
+/// `q … Q`: map visual → page space (`vt`), then paint the imported page Form
+/// (drawn in its `src_bbox` space) contain-fit and centred inside the visual
+/// box `[tw, th]` (the whole source page stays visible — never cropped).
 #[allow(clippy::many_single_char_names)]
-fn pdf_content(gs: &str, name: &str, [sx0, sy0, sx1, sy1]: [f32; 4], [tx0, ty0, tw, th]: [f32; 4]) -> String {
+fn pdf_content(gs: &str, name: &str, vt: [f32; 6], [sx0, sy0, sx1, sy1]: [f32; 4], [tw, th]: [f32; 2]) -> String {
     let (sw, sh) = (sx1 - sx0, sy1 - sy0);
     let scale = if sw > 0.0 && sh > 0.0 { (tw / sw).min(th / sh) } else { 1.0 };
     let (pw, ph) = (sw * scale, sh * scale);
     // Map a BBox point (x, y) → scale·(x − sx0) + ox, scale·(y − sy0) + oy.
-    let e = tx0 + (tw - pw) / 2.0 - scale * sx0;
-    let f = ty0 + (th - ph) / 2.0 - scale * sy0;
-    format!("q\n/{gs} gs\n{scale:.5} 0 0 {scale:.5} {e:.2} {f:.2} cm\n/{name} Do\nQ\n")
+    let e = (tw - pw) / 2.0 - scale * sx0;
+    let f = (th - ph) / 2.0 - scale * sy0;
+    format!(
+        "q\n/{gs} gs\n{vtl}\n{scale:.5} 0 0 {scale:.5} {e:.2} {f:.2} cm\n/{name} Do\nQ\n",
+        vtl = visual_cm_line(vt),
+    )
 }
 
 /// `q … Q`: fill the page rect `[x0, y0, w, h]` with `(r, g, b)`.
@@ -248,17 +259,19 @@ fn color_content(gs: &str, (r, g, b): (f32, f32, f32), [x0, y0, w, h]: [f32; 4])
     format!("q\n/{gs} gs\n{r:.4} {g:.4} {b:.4} rg\n{x0:.2} {y0:.2} {w:.2} {h:.2} re\nf\nQ\n")
 }
 
-/// `q … Q`: clip to the page rect, then paint the image cover-fit (fills the
-/// page, preserves aspect, crops overflow). The image draws in the unit square,
-/// so the `cm` scales it to `sw`×`sh` and centres it on the rect.
+/// `q … Q`: map visual → page space (`vt`), clip to the visual box, then paint
+/// the image cover-fit (fills the visible page, preserves aspect, crops
+/// overflow). The image draws in the unit square, so the second `cm` scales it
+/// to `sw`×`sh` and centres it in visual coordinates.
 #[allow(clippy::cast_precision_loss, clippy::many_single_char_names)]
-fn image_content(gs: &str, name: &str, [x0, y0, w, h]: [f32; 4], iw: u32, ih: u32) -> String {
+fn image_content(gs: &str, name: &str, vt: [f32; 6], [w, h]: [f32; 2], iw: u32, ih: u32) -> String {
     let cover = (w / iw as f32).max(h / ih as f32);
     let (sw, sh) = (iw as f32 * cover, ih as f32 * cover);
-    let (tx, ty) = (x0 + (w - sw) / 2.0, y0 + (h - sh) / 2.0);
+    let (tx, ty) = ((w - sw) / 2.0, (h - sh) / 2.0);
     format!(
-        "q\n/{gs} gs\n{x0:.2} {y0:.2} {w:.2} {h:.2} re\nW n\n\
+        "q\n/{gs} gs\n{vtl}\n0.00 0.00 {w:.2} {h:.2} re\nW n\n\
          {sw:.2} 0 0 {sh:.2} {tx:.2} {ty:.2} cm\n/{name} Do\nQ\n",
+        vtl = visual_cm_line(vt),
     )
 }
 

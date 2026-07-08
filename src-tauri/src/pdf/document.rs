@@ -164,10 +164,18 @@ pub fn open_document_metadata(path: &Path) -> Result<DocumentMetadata, CommandEr
 ///   3. when `make_backup`, rotate an existing `dest` to `<name>.bak`
 ///      (one save cycle only — a prior `.bak` is overwritten);
 ///   4. atomically rename the temp file onto `dest`.
+///
+/// `password` is the password the document was *opened* with, if any:
+/// `PDFium` preserves the source encryption when serializing, so the
+/// round-trip verification must unlock the temp file with the same
+/// password — otherwise every save of an encrypted document fails
+/// `verify_pdf_reopens` with `PasswordRequired` (the P4.HF bug this
+/// parameter fixes).
 pub fn save_document(
     doc: &PdfDocument<'_>,
     dest: &Path,
     make_backup: bool,
+    password: Option<&str>,
 ) -> Result<SaveOutcome, CommandError> {
     let dir = dest.parent().ok_or_else(|| {
         CommandError::InvalidInput(format!("destination has no parent directory: {}", dest.display()))
@@ -195,7 +203,7 @@ pub fn save_document(
 
     // 2. Round-trip verification. A bad temp file is cleaned up and the
     //    error surfaced; `dest` is still untouched at this point.
-    if let Err(e) = verify_pdf_reopens(&tmp) {
+    if let Err(e) = verify_pdf_reopens(&tmp, password) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
@@ -229,8 +237,10 @@ fn sibling_with_suffix(dest: &Path, suffix: &str) -> PathBuf {
 /// Confirm a freshly-written file re-opens in `PDFium` with at least one
 /// page. Runs on the actor thread, which already owns the source
 /// document; `PDFium` permits multiple documents open per binding.
-fn verify_pdf_reopens(path: &Path) -> Result<(), CommandError> {
-    let (doc, meta) = open_pdf(path, None)?;
+/// `password` unlocks the copy when the source document was encrypted
+/// (`PDFium` carries the encryption through the save).
+fn verify_pdf_reopens(path: &Path, password: Option<&str>) -> Result<(), CommandError> {
+    let (doc, meta) = open_pdf(path, password)?;
     let pages = meta.page_count;
     drop(doc);
     if pages == 0 {

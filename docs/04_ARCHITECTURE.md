@@ -476,6 +476,18 @@ from the frontend (its locale-formatted today) so Rust needs no date dependency 
 free. This ship promoted `escape_pdf_string` to `cos.rs` `pub(crate)` (both text writers use it),
 mirroring `page_media_box` in D1a. Start-offset / roman / alpha numbering is **D4**, not D3.
 
+**Hardening (P4.HF)** made every Track-D writer rotation- and crop-aware: writers lay content out in
+**visual space** — the displayed `CropBox` (`cos::page_effective_box`, CropBox∩MediaBox) after the
+inheritable `/Rotate` (`cos::page_rotation`) — and prepend the compensating `cm` from
+`cos::visual_transform`, so a footer lands at the *visible* bottom of a `/Rotate 90` page and a
+watermark centres on what the user actually sees. (The background colour fill deliberately still
+covers the full MediaBox — bleed-safe.) Two companion fixes: `/Contents` held as an indirect
+reference **to an array** is now dereferenced and flattened by the content appenders
+(`existing_contents`), and `save_document` threads the document's open password into the round-trip
+verification — before this, **encrypted documents could not be saved at all** (PDFium preserves
+encryption on save; the verify re-opened the temp file with no password and failed). Save now
+succeeds and the copy stays encrypted, pinned by `tests/hardening.rs`.
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend

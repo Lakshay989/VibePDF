@@ -6082,6 +6082,60 @@ left/centre/right positions and per-page placeholders.
 
 ---
 
+## P4.HF — Hardening (the FABLE_REVIEW bug batch)
+
+#### Problem
+
+A full-project audit (`FABLE_REVIEW.md`) found four engine bugs worth fixing before D4 stamps
+page numbers onto real-world documents: decorations ignored page `/Rotate` and `/CropBox`, a
+legal `/Contents` shape corrupted on append, and the encrypted-save path had never been tested.
+
+#### Concepts learned
+
+- **Draw in visual space; let one matrix translate.** Pages can carry `/Rotate` (the viewer
+  displays them turned) and a `/CropBox` (the viewer shows only that region). Instead of teaching
+  every writer per-angle math, define **visual space** — the displayed crop box, y-up — lay all
+  content out there, and prepend a single compensating `cm` (`visual_transform`) mapping visual →
+  page coordinates. Writers stay simple; the transform is derived once, tested per-angle. This is
+  the same "move the coordinate system, not the content" idea as the watermark's rotation `cm`,
+  one level up.
+- **Derive rotation matrices from corners, not intuition.** The 90°-case matrix
+  `[0 1 −1 0 x1 y0]` isn't guessable; it falls out of mapping the four page corners under the
+  viewer's clockwise rotation and inverting. Doing the corner table on paper first made all four
+  cases land on the first test run.
+- **A pinning test can out-argue a code review.** The audit predicted encrypted docs would save
+  *silently decrypted*. The test proved the opposite failure: PDFium preserves encryption, and
+  our own round-trip verifier — re-opening the temp file with **no password** — rejected every
+  save (`PasswordRequired`). One test replaced a plausible-sounding wrong diagnosis with the real
+  bug and its one-line fix (thread the open password into the verify). Write the pin *before*
+  designing the mitigation.
+- **"Infallible by design" pays off in strange places.** The save path runs
+  `prune_dangling_destinations` on the serialized bytes — which, for an encrypted doc, lopdf
+  can't meaningfully parse. Because prune was built to return the input unchanged on *any*
+  error, the encrypted-save fix needed no changes there. Designing side-passes to fail open
+  (keep bytes) rather than fail the operation is what made the fix one parameter.
+- **Handle every legal shape of a spec field, not the shapes you've seen.** `/Contents` can be a
+  stream ref, an array, *or a reference to an array*. The third shape never appears in
+  PDFium-normalized bytes — which is exactly why it survived 50 test files. The fix derefs and
+  flattens; the test *constructs* the exotic shape synthetically instead of hunting for a fixture.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `page_rotation`, `page_effective_box`, `visual_transform` + `visual_cm_line`; `existing_contents` deref/flatten fix. |
+| `watermark.rs` / `background.rs` / `header_footer.rs` | lay out in visual space; prepend the compensating `cm`; colour fill stays MediaBox. |
+| `src-tauri/src/pdf/document.rs` | `save_document`/`verify_pdf_reopens` take the open password — encrypted docs become saveable, encryption preserved. |
+| `tests/fixtures/basic/{rotated,cropped}.pdf` (+ generators) | per-angle `/Rotate` and CropBox⊂MediaBox fixtures. |
+| `tests/{watermark,background,header_footer}.rs` + `tests/hardening.rs` | +9 tests: per-angle matrices, crop placement, ref→array `/Contents`, encrypted-save pin. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §14.8.4.2 / Table 30 (`/Rotate`) and §7.7.3.3 Table 30 (`/CropBox`).
+- PDF 32000-1:2008 §7.8.2 — `/Contents` "shall be a stream or an array of streams".
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

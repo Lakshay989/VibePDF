@@ -734,6 +734,20 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Consolidation:** `parsePageRange` now lives in `src/tools/page-range.ts` and `page_media_box` in
   `cos.rs` (`pub(crate)`) — shared by watermark + background (and Track D's remaining features).
 
+## From P4.HF (FABLE_REVIEW hardening)
+
+- ✅ **DONE 2026-07-06 (P4.HF)** — review items **3.1** (decorations compensate `/Rotate`),
+  **3.4** (placement vs. CropBox; colour fill stays MediaBox), **3.7** (`/Contents` ref→array),
+  **3.3** (encrypted docs were **unsaveable** — verify now uses the open password; save works,
+  encryption preserved, pinned by test). Fixtures `rotated.pdf` + `cropped.pdf` added.
+- **Still open from FABLE_REVIEW** (each its own ship): **3.2** non-ASCII text (WinAnsi
+  transcode + reject now, font embedding later), **3.5** error toasts for canvas tools,
+  **3.6** undo snapshot memory, **3.8** CSP, **3.9** Windows CI + `split("/")` path display,
+  **3.10** AFM glyph metrics, **3.13** marked-content tagging (land before D4 if possible).
+- **Note:** annotation `/AP` writers (shapes, notes, free-text) still place in page space —
+  viewers rotate annotations themselves, so they were *not* part of the 3.1 bug; re-check only
+  if a reader renders them oddly on rotated pages.
+
 ## From P4.D3 (header/footer)
 
 - ✅ **DONE 2026-07-01 (D3, P4-EDIT-010)** — left/centre/right header/footer text over a page range,

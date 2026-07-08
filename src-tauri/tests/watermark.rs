@@ -185,6 +185,34 @@ async fn actor_watermark_then_undo() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// --- P4.HF: rotation + CropBox compensation ------------------------------------
+
+/// SPEC: P4-EDIT-009 — the mark reads upright on a rotated page: content carries
+/// the compensating visual→page `cm`, and the centre is the *visual* centre
+/// (swapped dims for 90/270).
+#[test]
+fn watermark_compensates_for_page_rotation() {
+    let out = add_watermark(&bytes("rotated.pdf"), &[1], &text_kind("DRAFT"), 0.3, 0.0, true)
+        .expect("watermark on /Rotate 90 page");
+    let c = page_content(&out, 2);
+    assert!(
+        c.contains("0.00000 1.00000 -1.00000 0.00000 612.00 0.00 cm"),
+        "compensating cm for /Rotate 90; got:\n{c}"
+    );
+    // Visual dims are 792×612 → visual centre (396, 306).
+    assert!(c.contains("396.00 306.00 cm"), "centred on the visual centre; got:\n{c}");
+}
+
+/// SPEC: P4-EDIT-009 — the mark centres on the visible CropBox, not the MediaBox.
+#[test]
+fn watermark_centres_on_cropbox() {
+    let out = add_watermark(&bytes("cropped.pdf"), &[0], &text_kind("DRAFT"), 0.3, 0.0, true)
+        .expect("watermark on cropped page");
+    let c = page_content(&out, 1);
+    // CropBox [100 100 512 692] → visual 412×592 → centre (206, 296).
+    assert!(c.contains("206.00 296.00 cm"), "centred on the crop centre; got:\n{c}");
+}
+
 /// Writes a watermarked PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test watermark watermark_writes_verification_artifact -- --ignored

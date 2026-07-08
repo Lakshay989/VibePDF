@@ -90,7 +90,7 @@ async fn save_document_rotates_bak_when_overwriting() {
     std::fs::copy(hello_pdf(), &orig).expect("copy fixture into temp");
 
     let (doc, _meta) = open_pdf(&orig, None).expect("open temp copy");
-    let outcome = save_document(&doc, &orig, true).expect("save with backup");
+    let outcome = save_document(&doc, &orig, true, None).expect("save with backup");
     assert!(!outcome.no_op);
     drop(doc);
 

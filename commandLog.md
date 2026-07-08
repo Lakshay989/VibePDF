@@ -2754,6 +2754,35 @@ comes from the frontend (its formatted today) — no Rust date dep. **Consolidat
 
 ---
 
+### P4.HF — FABLE_REVIEW bug batch (this commit)
+
+No new dependencies. Two fixtures generated once:
+
+```bash
+python3 tests/fixtures/basic/generate-rotated.py   # → rotated.pdf (4pp, /Rotate 0/90/180/270)
+python3 tests/fixtures/basic/generate-cropped.py   # → cropped.pdf (CropBox ⊂ MediaBox)
+
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 359/359 (no frontend delta — engine-only batch)
+npm run test:rust      # EXIT 0. +9: per-angle compensating-cm tests (watermark 2, background 2,
+#   header_footer 2), hardening.rs: /Contents ref→array preserved; encrypted open→save pin.
+
+# Write path → verification artifact:
+cargo test --test hardening hf_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-hardening.pdf (→ /tmp/vibepdf-verify.pdf): DRAFT watermark
+#   + "Page {n} of {total}" footer on all 4 rotated pages. Apple PDFKit: every page carries both.
+```
+
+Fixes FABLE_REVIEW 3.1/3.4/3.7/3.3. Writers lay out in **visual space** (`page_rotation` +
+`page_effective_box` + `visual_transform`) → upright, crop-aware decorations; colour fill stays
+MediaBox. `existing_contents` derefs a `/Contents` reference-to-array. **3.3's pin found the real
+bug:** encrypted docs couldn't be saved at all (verify re-opened the still-encrypted temp with no
+password) — `save_document` now takes the open password; save works and encryption is preserved.
+FABLE_REVIEW annotated with ✅ FIXED/RESOLVED notes. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -174,6 +174,70 @@ async fn actor_header_footer_then_undo() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// --- P4.HF: rotation + CropBox compensation ------------------------------------
+
+/// SPEC: P4-EDIT-010 — a footer must land at the *visual* bottom of a rotated
+/// page: the content carries the compensating visual→page `cm` per /Rotate.
+#[test]
+fn footer_compensates_for_page_rotation() {
+    let out = add_header_footer(
+        &bytes("rotated.pdf"),
+        &[0, 1, 2, 3],
+        "footer",
+        "",
+        "F{n}",
+        "",
+        "Helvetica",
+        10.0,
+        "#000000",
+        36.0,
+        "d",
+    )
+    .expect("footer on rotated pages");
+    // Per-angle compensating matrices (visual space → page space).
+    let expect = [
+        (1, "1.00000 0.00000 0.00000 1.00000 0.00 0.00 cm"), // /Rotate 0
+        (2, "0.00000 1.00000 -1.00000 0.00000 612.00 0.00 cm"), // /Rotate 90
+        (3, "-1.00000 0.00000 0.00000 -1.00000 612.00 792.00 cm"), // /Rotate 180
+        (4, "0.00000 -1.00000 1.00000 0.00000 0.00 792.00 cm"), // /Rotate 270
+    ];
+    for (page_no, cm) in expect {
+        let c = page_content(&out, page_no);
+        assert!(c.contains(cm), "page {page_no} carries its compensating cm ({cm}); got:\n{c}");
+        // The footer text itself is drawn at the visual bottom (y = margin).
+        let (_, y) = show_pos(&c, &format!("F{page_no}")).expect("footer show");
+        assert!((y - 36.0).abs() < 0.01, "visual footer baseline is the margin, got {y}");
+    }
+}
+
+/// SPEC: P4-EDIT-010 — placement targets the visible CropBox, not the MediaBox:
+/// the visual origin shifts to the crop corner and margins are crop-relative.
+#[test]
+fn footer_respects_cropbox() {
+    let out = add_header_footer(
+        &bytes("cropped.pdf"),
+        &[0],
+        "footer",
+        "LC",
+        "",
+        "",
+        "Helvetica",
+        10.0,
+        "#000000",
+        36.0,
+        "d",
+    )
+    .expect("footer on cropped page");
+    let c = page_content(&out, 1);
+    // CropBox [100 100 512 692] → visual origin (100, 100).
+    assert!(
+        c.contains("1.00000 0.00000 0.00000 1.00000 100.00 100.00 cm"),
+        "visual cm shifts to the crop origin; got:\n{c}"
+    );
+    let (x, y) = show_pos(&c, "LC").expect("left show");
+    assert!((x - 36.0).abs() < 0.01 && (y - 36.0).abs() < 0.01, "crop-relative margins, got ({x}, {y})");
+}
+
 /// Writes a header/footer PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test header_footer hf_writes_verification_artifact -- --ignored

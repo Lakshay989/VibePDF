@@ -49,5 +49,5 @@ pub fn merge_documents(sources: &[PathBuf], dest: &Path) -> Result<SaveOutcome, 
             .map_err(CommandError::from)?
     };
 
-    save_document(&out, dest, false)
+    save_document(&out, dest, false, None)
 }

@@ -17,8 +17,9 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, escape_pdf_string, font_avg_em, page_media_box, parse_hex_color,
-    prepend_page_content, register_page_resource,
+    append_page_content, base_font, escape_pdf_string, font_avg_em, page_effective_box,
+    page_rotation, parse_hex_color, prepend_page_content, register_page_resource, visual_cm_line,
+    visual_transform,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_xobject::embed_image;
@@ -86,9 +87,11 @@ pub fn add_watermark(
     };
 
     for page_id in targets {
-        let [mx0, my0, mx1, my1] = page_media_box(&doc, page_id);
-        let (pw, ph) = (mx1 - mx0, my1 - my0);
-        let (cx, cy) = (mx0 + pw / 2.0, my0 + ph / 2.0);
+        // Lay out in VISUAL space (displayed CropBox, after /Rotate) so the
+        // mark reads upright and centred on what the user actually sees.
+        let rotate = page_rotation(&doc, page_id);
+        let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
+        let (cx, cy) = (vw / 2.0, vh / 2.0);
 
         let mut gs = Dictionary::new();
         gs.set("Type", Object::Name(b"ExtGState".to_vec()));
@@ -106,7 +109,7 @@ pub fn add_watermark(
                 let sz = size.max(1.0);
                 #[allow(clippy::cast_precision_loss)]
                 let width = sz * font_avg_em(base) * text.chars().count() as f32;
-                text_content(&gs_name, &font_name, rgb, sz, text, width, (cos, sin), (cx, cy))
+                text_content(&gs_name, &font_name, rgb, sz, text, width, (cos, sin), (cx, cy), vt)
             }
             WatermarkKind::Image(_) => {
                 let img = image
@@ -119,8 +122,8 @@ pub fn add_watermark(
                     "Imgwm",
                     Object::Reference(img.id),
                 )?;
-                let (sw, sh) = fit_dims(img.width, img.height, pw * 0.7, ph * 0.7);
-                image_content(&gs_name, &name, (sw, sh), (cos, sin), (cx, cy))
+                let (sw, sh) = fit_dims(img.width, img.height, vw * 0.7, vh * 0.7);
+                image_content(&gs_name, &name, (sw, sh), (cos, sin), (cx, cy), vt)
             }
         };
 
@@ -161,8 +164,9 @@ fn font_dict(base: &str) -> Object {
     Object::Dictionary(font)
 }
 
-/// `q … Q` fragment: rotate about the page centre (`cm`), then draw the centred
-/// text in `rgb` at `size`. `width` (the estimated text advance) centres it.
+/// `q … Q` fragment: map visual → page space (`vt`), rotate about the visual
+/// centre (`cm`), then draw the centred text in `rgb` at `size`. `width` (the
+/// estimated text advance) centres it.
 #[allow(clippy::many_single_char_names, clippy::too_many_arguments)]
 fn text_content(
     gs: &str,
@@ -173,12 +177,14 @@ fn text_content(
     width: f32,
     (cos, sin): (f32, f32),
     (cx, cy): (f32, f32),
+    vt: [f32; 6],
 ) -> String {
     let (r, g, b) = rgb;
     format!(
-        "q\n/{gs} gs\n{r:.4} {g:.4} {b:.4} rg\n\
+        "q\n/{gs} gs\n{r:.4} {g:.4} {b:.4} rg\n{vtl}\n\
          {cos:.5} {sin:.5} {nsin:.5} {cos:.5} {cx:.2} {cy:.2} cm\n\
          BT\n/{font} {size:.2} Tf\n{tx:.2} {ty:.2} Td\n({esc}) Tj\nET\nQ\n",
+        vtl = visual_cm_line(vt),
         nsin = -sin,
         tx = -width / 2.0,
         ty = -size / 3.0,
@@ -186,19 +192,22 @@ fn text_content(
     )
 }
 
-/// `q … Q` fragment: rotate about the page centre, then paint the image (drawn
-/// in the unit square) scaled to `sw`×`sh` and centred on the origin.
+/// `q … Q` fragment: map visual → page space (`vt`), rotate about the visual
+/// centre, then paint the image (drawn in the unit square) scaled to `sw`×`sh`
+/// and centred on the origin.
 fn image_content(
     gs: &str,
     name: &str,
     (sw, sh): (f32, f32),
     (cos, sin): (f32, f32),
     (cx, cy): (f32, f32),
+    vt: [f32; 6],
 ) -> String {
     format!(
-        "q\n/{gs} gs\n\
+        "q\n/{gs} gs\n{vtl}\n\
          {cos:.5} {sin:.5} {nsin:.5} {cos:.5} {cx:.2} {cy:.2} cm\n\
          {sw:.2} 0 0 {sh:.2} {hsw:.2} {hsh:.2} cm\n/{name} Do\nQ\n",
+        vtl = visual_cm_line(vt),
         nsin = -sin,
         hsw = -sw / 2.0,
         hsh = -sh / 2.0,

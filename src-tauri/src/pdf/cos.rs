@@ -1379,14 +1379,25 @@ pub(crate) fn append_page_content(
 ) -> Result<(), CommandError> {
     content.insert(0, '\n');
     let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
-    let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
-        Ok(Object::Reference(id)) => vec![Object::Reference(*id)],
-        Ok(Object::Array(a)) => a.clone(),
-        _ => Vec::new(),
-    };
+    let mut contents = existing_contents(doc, page_id)?;
     contents.push(Object::Reference(content_id));
     doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Contents", Object::Array(contents));
     Ok(())
+}
+
+/// The page's `/Contents` as an owned element list. Handles all three legal
+/// shapes: a direct stream reference, a direct array, and — the trap — an
+/// **indirect reference to an array** (treating that one as a stream ref would
+/// nest an array inside the new `/Contents` array, which is malformed).
+fn existing_contents(doc: &Document, page_id: ObjectId) -> Result<Vec<Object>, CommandError> {
+    Ok(match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
+        Ok(Object::Reference(id)) => match doc.get_object(*id) {
+            Ok(Object::Array(a)) => a.clone(),
+            _ => vec![Object::Reference(*id)],
+        },
+        Ok(Object::Array(a)) => a.clone(),
+        _ => Vec::new(),
+    })
 }
 
 /// Insert `content` (a balanced `q … Q` fragment) as a new content stream **before**
@@ -1400,11 +1411,7 @@ pub(crate) fn prepend_page_content(
 ) -> Result<(), CommandError> {
     content.push('\n');
     let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
-    let mut contents: Vec<Object> = match doc.get_dictionary(page_id).map_err(cos_err)?.get(b"Contents") {
-        Ok(Object::Reference(id)) => vec![Object::Reference(*id)],
-        Ok(Object::Array(a)) => a.clone(),
-        _ => Vec::new(),
-    };
+    let mut contents = existing_contents(doc, page_id)?;
     contents.insert(0, Object::Reference(content_id));
     doc.get_dictionary_mut(page_id).map_err(cos_err)?.set("Contents", Object::Array(contents));
     Ok(())
@@ -1441,6 +1448,72 @@ pub(crate) fn page_media_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
         cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
     }
     [0.0, 0.0, 612.0, 792.0]
+}
+
+/// A page's `/Rotate` (inheritable, like `MediaBox`), normalized to
+/// {0, 90, 180, 270}. Anything unset or not a multiple of 90 → 0.
+pub(crate) fn page_rotation(doc: &Document, page_id: ObjectId) -> i64 {
+    let mut cur = Some(page_id);
+    while let Some(id) = cur {
+        let Ok(dict) = doc.get_dictionary(id) else { break };
+        if let Ok(r) = dict.get(b"Rotate").and_then(Object::as_i64) {
+            let norm = ((r % 360) + 360) % 360;
+            return if norm % 90 == 0 { norm } else { 0 };
+        }
+        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
+    }
+    0
+}
+
+/// The page's **effective (visible) box**: `CropBox` (inheritable) intersected
+/// with the `MediaBox`, falling back to the `MediaBox` when absent or empty.
+/// Viewers display the `CropBox`, so decoration *placement* targets this.
+pub(crate) fn page_effective_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
+    let [mx0, my0, mx1, my1] = page_media_box(doc, page_id);
+    let mut cur = Some(page_id);
+    while let Some(id) = cur {
+        let Ok(dict) = doc.get_dictionary(id) else { break };
+        if let Ok(cb) = dict.get(b"CropBox").and_then(Object::as_array) {
+            if cb.len() == 4 {
+                let v: Vec<f32> = cb.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
+                let (x0, y0) = (v[0].min(v[2]).max(mx0), v[1].min(v[3]).max(my0));
+                let (x1, y1) = (v[0].max(v[2]).min(mx1), v[1].max(v[3]).min(my1));
+                if x1 > x0 && y1 > y0 {
+                    return [x0, y0, x1, y1];
+                }
+            }
+            break; // malformed CropBox → MediaBox
+        }
+        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
+    }
+    [mx0, my0, mx1, my1]
+}
+
+/// SPEC: P4-EDIT-008/009/010 — the transform from a page's **visual space**
+/// (what the user sees after the viewer applies `/Rotate`; origin bottom-left
+/// of the displayed box, y up) into page space, plus the visual width/height.
+///
+/// Decoration writers lay content out in visual coordinates `[0, vw] × [0, vh]`
+/// and prepend this as a `cm`, so a "footer at the bottom" lands at the bottom
+/// of the *displayed* page even when the page carries `/Rotate 90/180/270`.
+pub(crate) fn visual_transform(rotate: i64, [x0, y0, x1, y1]: [f32; 4]) -> ([f32; 6], f32, f32) {
+    let (w, h) = (x1 - x0, y1 - y0);
+    match rotate {
+        // Viewer rotates 90° clockwise: visual +u runs along page +y.
+        90 => ([0.0, 1.0, -1.0, 0.0, x1, y0], h, w),
+        180 => ([-1.0, 0.0, 0.0, -1.0, x1, y1], w, h),
+        // 270° clockwise (= 90° CCW): visual +u runs along page −y.
+        270 => ([0.0, -1.0, 1.0, 0.0, x0, y1], h, w),
+        _ => ([1.0, 0.0, 0.0, 1.0, x0, y0], w, h),
+    }
+}
+
+/// [`visual_transform`] as a ready-to-emit `cm` line.
+pub(crate) fn visual_cm_line(m: [f32; 6]) -> String {
+    format!(
+        "{:.5} {:.5} {:.5} {:.5} {:.2} {:.2} cm",
+        m[0], m[1], m[2], m[3], m[4], m[5]
+    )
 }
 
 /// Give `page_id` its own `/Resources /Font` carrying a fresh base-14 font, and

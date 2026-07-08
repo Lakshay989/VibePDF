@@ -212,6 +212,31 @@ async fn actor_pdf_background_then_undo() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// --- P4.HF: rotation + CropBox compensation ------------------------------------
+
+/// SPEC: P4-EDIT-008 — an image background covers the *visual* box of a rotated
+/// page (swapped dims), clipped there, with the compensating `cm`.
+#[test]
+fn image_background_covers_visual_box_on_rotated_page() {
+    let kind = BackgroundKind::Image(bytes("sample.jpg"));
+    let out = add_background(&bytes("rotated.pdf"), &[1], &kind, 1.0).expect("image bg on /Rotate 90");
+    let c = page_content(&out, 2);
+    assert!(
+        c.contains("0.00000 1.00000 -1.00000 0.00000 612.00 0.00 cm"),
+        "compensating cm for /Rotate 90; got:\n{c}"
+    );
+    assert!(c.contains("0.00 0.00 792.00 612.00 re"), "clips to the visual (swapped) box; got:\n{c}");
+}
+
+/// SPEC: P4-EDIT-008 — the colour fill still covers the full MediaBox on a
+/// cropped page (bleed-safe), while placement-sensitive kinds go visual.
+#[test]
+fn color_fill_still_covers_mediabox_on_cropped_page() {
+    let out = add_background(&bytes("cropped.pdf"), &[0], &color("#ff0000"), 1.0).expect("bg");
+    let c = page_content(&out, 1);
+    assert!(c.contains("0.00 0.00 612.00 792.00 re"), "fills the MediaBox, not the crop; got:\n{c}");
+}
+
 /// Writes a backgrounded PDF to the git-ignored `Sample PDFs/` for the manual
 /// cross-reader ritual. Ignored; run on demand:
 ///   cargo test --test background bg_writes_verification_artifact -- --ignored
