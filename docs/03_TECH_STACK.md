@@ -89,6 +89,10 @@ The newer `pdfium` crate (with thread-safe init via `parking_lot::ReentrantMutex
 
 **Known limits:** encrypted-PDF *structural* edits and exotic object-stream layouts are not yet exercised beyond our fixtures; revisit when a real file needs them.
 
+### Font embedding — through PDFium, not a new font parser (P4.HF5)
+
+Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic, Greek, …) requires an *embedded* font, which normally means a TrueType-parsing/subsetting crate. We **do not** add one: PDFium (already linked) contains a full font engine, so `pdf/font_embed.rs` calls `PdfFonts::load_true_type_from_bytes` + `create_text_object` and PDFium writes the `/Type0` + `/CIDFontType2` + `/ToUnicode` + `/FontFile2` itself. This keeps `font_resolver.rs`'s deliberate "no font parser" stance intact (that module still only *matches names*; embedding hands raw bytes to PDFium, never parsing them in Rust). **Trade-off, tracked in BACKLOG:** PDFium embeds the *full* font on save — it does not subset — so an embedded run bloats the file by the font's size. Self-subsetting (which *would* want a font-parsing dependency, to be re-evaluated then) or small per-script faces is the follow-up.
+
 ---
 
 ## OCR — Tesseract via `leptess` (Rust)

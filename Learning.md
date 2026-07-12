@@ -6282,6 +6282,62 @@ input is worth a ~15-line fix.
 
 ---
 
+## P4.HF5 — Font embedding through the engine you already have
+
+#### Problem
+
+HF3 made non-WinAnsi text fail *loudly* instead of corrupting silently, but the built-in base-14
+fonts still can't draw CJK / Cyrillic / Greek / … Stage-2 is the real fix: embed a font that
+covers the glyphs. The catch: real font embedding means parsing TrueType (cmap, glyf, hmtx,
+subsetting) — exactly the dependency `docs/03_TECH_STACK.md` deliberately refuses.
+
+#### Concepts learned
+
+- **The dependency you're avoiding may already be linked.** PDFium — bound for rendering and a few
+  mutations — contains a complete font engine. `fonts_mut().load_true_type_from_bytes(bytes, cid)`
+  + `objects_mut().create_text_object(...)` embeds a font as a `/Type0` `/CIDFontType2` with a
+  `/ToUnicode` map and `/FontFile2`, no Rust font crate needed. Before reaching for a new
+  dependency, check whether a heavyweight you already carry exposes the capability. Here it let us
+  honour a documented "no font parser" stance *and* ship Unicode.
+- **Spike the one thing that can sink the approach, first.** The whole plan rested on "does a
+  PDFium-loaded font survive our `save_to_bytes` → reload round-trip, with the text still
+  extractable?" That was increment 1, in isolation, ~40 lines. It passed in a minute — and every
+  later increment built on proven ground instead of hope. If it had failed, I'd have thrown away
+  40 lines, not a feature.
+- **Branch at the predicate, don't rip out the working path.** `ensure_winansi` (reject) became
+  `winansi_fits` (predicate). WinAnsi text still takes the cheap, unchanged, fully-tested base-14
+  lopdf path; only genuinely non-WinAnsi text pays for embedding. A plain "Page 1 of 10" footer is
+  byte-identical to before. Two backends, chosen per-string, beat one backend that's worse at both
+  jobs.
+- **`get_object` transparency and font size were both "read the null result" moments.** As in HF4,
+  a first attempt that returned something surprising (here: a 15 MB output) was the library telling
+  me how it actually behaves — PDFium embeds the *whole* font, it does not subset on save. That's
+  not a bug to fix under deadline; it's a constraint to name loudly (the top follow-up) and design
+  around later (self-subsetting, or small per-script faces).
+- **Reuse the geometry, not the code.** The lopdf writers lay text in visual space via
+  `visual_transform` to survive `/Rotate` and CropBox. The PDFium path is a totally different
+  backend, but the *matrix* is portable: compute the run's visual origin, push it through the same
+  `[a b c d e f]`, and hand PDFium the composed matrix as the text object's transform. Rotation
+  support fell out for free — no second rotation implementation.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/font_embed.rs` | New. `embed_runs` — the PDFium load-font + place-text-objects primitive (dumb: draws at a caller matrix), under the reflow.rs chassis. Inline round-trip + preserve-existing tests. |
+| `src-tauri/src/pdf/cos.rs` | `winansi_fits` predicate (the branch half of `ensure_winansi`). |
+| `src-tauri/src/pdf/header_footer.rs` | The tracer consumer: non-WinAnsi → `add_header_footer_embedded` (visual-space matrices → `embed_runs`); WinAnsi keeps the base-14 path. Inline deterministic embed test. |
+| `src-tauri/src/pdf/font_resolver.rs` | `covering_font_bytes` — best-effort broad system-face locator (coverage-checking deferred). |
+| `tests/fixtures/fonts/NotoSansCoptic-Regular.ttf` (+ OFL notice) | 28 KB committed OFL font for a deterministic, offline embed regression. |
+| `src-tauri/tests/winansi.rs` | `non_winansi_header_footer_rejected` → `…_now_embeds` (tracks the intentional behaviour change). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.7 — composite (Type 0 / CIDFont) fonts and `/ToUnicode` CMaps.
+- PDFium `FPDFText_LoadFont` / `FPDFPageObj_CreateTextObj` — the C API pdfium-render wraps.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

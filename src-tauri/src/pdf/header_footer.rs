@@ -19,6 +19,7 @@ use crate::pdf::cos::{
     page_rotation, parse_hex_color, visual_cm_line, visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::font_embed::{embed_runs, EmbedRun};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -61,14 +62,30 @@ pub fn add_header_footer(
     if left.trim().is_empty() && center.trim().is_empty() && right.trim().is_empty() {
         return Err(CommandError::InvalidInput("header/footer text is empty".into()));
     }
-    // FABLE_REVIEW 3.2 — reject text base-14 fonts can't render ({n}/{total}
-    // substitute to ASCII digits, so validating the templates + date suffices).
-    for s in [left, center, right, date] {
-        crate::pdf::cos::ensure_winansi(s)?;
-    }
     let base = base_font(font_family, false, false)?;
     let rgb = parse_hex_color(color)?;
     let sz = size.max(1.0);
+
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF5): if any text needs glyphs the base-14
+    // fonts lack ({n}/{total} substitute to ASCII digits, so the templates + date
+    // decide), embed a covering system font through `PDFium` instead of the base-14
+    // lopdf path. WinAnsi text keeps the cheap, unchanged path below.
+    if [left, center, right, date].iter().any(|s| !crate::pdf::cos::winansi_fits(s)) {
+        let combined = format!("{left}{center}{right}{date}");
+        let Some(font_bytes) = crate::pdf::font_resolver::covering_font_bytes(&combined) else {
+            // No embeddable font on this machine — fall back to the honest HF3
+            // rejection, which names the offending characters. (The trailing
+            // return is unreachable: `combined` is non-WinAnsi here, so
+            // `ensure_winansi` always errors.)
+            crate::pdf::cos::ensure_winansi(&combined)?;
+            return Err(CommandError::Internal(
+                "non-WinAnsi header/footer text unexpectedly passed the WinAnsi check".into(),
+            ));
+        };
+        return add_header_footer_embedded(
+            bytes, pages, header, left, center, right, base, rgb, sz, margin, date, &font_bytes,
+        );
+    }
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let total = doc.get_pages().len();
@@ -116,6 +133,94 @@ pub fn add_header_footer(
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// The non-WinAnsi header/footer path (`FABLE_REVIEW` 3.2 stage-2): place each
+/// position as a `PDFium` text object drawn with an embedded covering font. Page
+/// geometry (rotation, effective box, count) is read from an lopdf pass; the
+/// placement matrix is the *same* visual-space transform the base-14 path uses,
+/// so rotated/cropped pages still land upright. Alignment width reuses the base-14
+/// `font_avg_em` estimate — slightly off for the embedded face (centre/right may
+/// drift a little); exact metrics are a follow-up shared with `FABLE_REVIEW` 3.10.
+///
+/// Known gap vs. the base-14 path: these runs are **not** wrapped in the HF2
+/// `/VibePDF` marked-content tag (`PDFium` builds the objects), so an embedded
+/// header/footer isn't yet removable by operator splice — also a follow-up.
+#[allow(clippy::too_many_arguments)]
+fn add_header_footer_embedded(
+    bytes: &[u8],
+    pages: &[usize],
+    header: bool,
+    left: &str,
+    center: &str,
+    right: &str,
+    base: &str,
+    rgb: (f32, f32, f32),
+    sz: f32,
+    margin: f32,
+    date: &str,
+    font_bytes: &[u8],
+) -> Result<Vec<u8>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let total = doc.get_pages().len();
+    let page_map = doc.get_pages();
+
+    let mut runs: Vec<EmbedRun> = Vec::new();
+    for &p in pages {
+        let page_no = u32::try_from(p)
+            .ok()
+            .map(|n| n + 1)
+            .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {p}")))?;
+        let page_id = *page_map
+            .get(&page_no)
+            .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {p}")))?;
+        let rotate = page_rotation(&doc, page_id);
+        let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
+        let vy = if header { vh - margin - sz } else { margin };
+        for (template, align) in
+            [(left, Align::Left), (center, Align::Center), (right, Align::Right)]
+        {
+            if template.trim().is_empty() {
+                continue;
+            }
+            let shown = substitute(template, p + 1, total, date);
+            let vx = aligned_x(align, vw, margin, embed_text_width(&shown, base, sz));
+            runs.push(EmbedRun {
+                page: p,
+                text: shown,
+                size: sz,
+                color: rgb,
+                // Compose the run's origin `(vx, vy)` through the visual transform
+                // `vt = [a b c d e f]` so the object's matrix carries both the
+                // rotation (a,b,c,d) and the page-space baseline.
+                matrix: place_in_visual_space(vt, vx, vy),
+            });
+        }
+    }
+    embed_runs(bytes, font_bytes, &runs)
+}
+
+/// Estimated rendered width of `text` at `size`, using base-14 average-em metrics
+/// (the embedded face's real metrics aren't known here — see 3.10).
+#[allow(clippy::cast_precision_loss)]
+fn embed_text_width(text: &str, base: &str, size: f32) -> f32 {
+    size * font_avg_em(base) * text.chars().count() as f32
+}
+
+/// The left edge for `align` within a `[0, vw]` visual box, `margin` inset.
+fn aligned_x(align: Align, vw: f32, margin: f32, width: f32) -> f32 {
+    match align {
+        Align::Left => margin,
+        Align::Center => (vw - width) / 2.0,
+        Align::Right => vw - margin - width,
+    }
+}
+
+/// Map a visual-space origin `(vx, vy)` through `vt = [a b c d e f]` into the
+/// page-space text matrix `[a b c d e' f']`.
+#[allow(clippy::many_single_char_names)]
+fn place_in_visual_space([a, b, c, d, e, f]: [f32; 6], vx: f32, vy: f32) -> [f32; 6] {
+    [a, b, c, d, a * vx + c * vy + e, b * vx + d * vy + f]
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -246,4 +351,67 @@ fn header_footer_apply<'a>(
             .map_err(CommandError::from)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use pdfium_render::prelude::*;
+
+    use super::add_header_footer_embedded;
+    use crate::pdf::document::{pdfium, pdfium_lock};
+
+    fn hello() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/basic/hello.pdf").expect("hello.pdf")
+    }
+
+    fn coptic_font() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/fonts/NotoSansCoptic-Regular.ttf")
+            .expect("committed Coptic fixture font")
+    }
+
+    /// Concatenate every text object's text on page 0 (proves the `/ToUnicode`
+    /// map round-trips through save/reopen).
+    fn page0_text(bytes: &[u8]) -> String {
+        let _guard = pdfium_lock().expect("lock");
+        let doc = pdfium()
+            .expect("pdfium")
+            .load_pdf_from_byte_vec(bytes.to_vec(), None)
+            .expect("reopen");
+        let page = doc.pages().get(0).expect("page 0");
+        let mut out = String::new();
+        for object in page.objects().iter() {
+            if let Some(t) = object.as_text_object() {
+                out.push_str(&t.text());
+            }
+        }
+        drop(doc);
+        out
+    }
+
+    /// P4.HF5: a non-WinAnsi footer takes the `PDFium`-embed path and the Unicode
+    /// survives reopen, alongside the page's own (base-14) text. Deterministic —
+    /// drives the private embedded path with the committed Coptic fixture font.
+    #[test]
+    fn embedded_footer_renders_and_extracts_unicode() {
+        let coptic = "\u{2C81}\u{2C83}\u{2C85}"; // Ⲁ Ⲃ Ⲅ
+        let out = add_header_footer_embedded(
+            &hello(),
+            &[0],
+            false, // footer
+            "",
+            coptic,
+            "",
+            "Helvetica",
+            (0.0, 0.0, 0.0),
+            24.0,
+            36.0,
+            "d",
+            &coptic_font(),
+        )
+        .expect("embed footer");
+        let text = page0_text(&out);
+        assert!(text.contains(coptic), "embedded Coptic footer round-trips; got {text:?}");
+        assert!(text.contains("VibePDF"), "the page's own base-14 text is intact");
+    }
 }

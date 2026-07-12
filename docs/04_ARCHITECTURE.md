@@ -526,6 +526,26 @@ unchanged. Testing surfaced a lopdf subtlety worth recording: `get_object` trans
 bare `M 0 R` indirection, so the genuine overflow shape is a chain of *containers*
 (`<< /Next n+1 0 R >>`), which the regression test uses.
 
+**Font embedding (P4.HF5, FABLE_REVIEW 3.2 stage-2).** True-Unicode text arrives through a second
+text-writing backend, chosen at the last moment: `cos::ensure_winansi` (the HF3 hard gate) split
+into a predicate `cos::winansi_fits`, and each rendered-text writer can now branch. WinAnsi-safe
+text keeps the existing base-14 lopdf path — small, unchanged, byte-for-byte identical — while text
+outside WinAnsi routes to the new `pdf/font_embed.rs`. Rather than take the font-parsing dependency
+`docs/03` deliberately avoids, embedding rides the **PDFium engine already in the binary**:
+`font_embed::embed_runs` loads a system TrueType face (`load_true_type_from_bytes`) and places
+PDFium *text objects* (not hand-built `BT…ET`), so PDFium writes the `/Type0` + `/CIDFontType2` +
+`/ToUnicode` + `/FontFile2` itself. The write chassis is reflow.rs's — load under `PDFIUM_LOCK`,
+mutate under Manual regeneration, `regenerate_content`, `save_to_bytes` — so this is a genuine
+"PDFium mutates" path, not the usual lopdf byte-splice. `embed_runs` is a dumb primitive: it draws
+each run at a caller-supplied `[a b c d e f]` matrix, so the *same* `visual_transform` the lopdf
+writers use for rotation/CropBox carries straight over (header/footer computes it in
+`place_in_visual_space`). Font bytes come from `font_resolver::covering_font_bytes` (best-effort
+broad system face; per-glyph coverage checking is deferred). **Wired into one writer as a tracer —
+header/footer;** the other six stay HF3 reject-only until converted. Two honest gaps live in the
+code comments: PDFium embeds the *full* font (no subsetting → files grow by the font's size — the
+top follow-up), and PDFium-built objects carry no HF2 `/VibePDF` marked-content tag (so an embedded
+decoration isn't yet splice-removable).
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend

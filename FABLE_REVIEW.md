@@ -101,6 +101,20 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 > Café/résumé/Página/dashes/€ now render (Apple PDFKit confirmed); CJK/Cyrillic/etc. fail loudly
 > (dialogs show the message; canvas tools toast it via 3.5) instead of silent mojibake. **Stage 2
 > — font embedding for true Unicode — remains** (below, "the real feature"); still its own ship.
+>
+> **✅ STAGE 2 STARTED 2026-07-12 (P4.HF5)** — true Unicode via **PDFium font embedding** (no new
+> Rust dependency — PDFium already ships a font engine, honouring `docs/03`'s deliberate
+> no-font-parser stance). New `font_embed::embed_runs` loads a system TrueType font
+> (`load_true_type_from_bytes`) and places PDFium text objects — PDFium writes the CIDFontType2 /
+> Type0 + `/ToUnicode` + subsetting on save. `cos::ensure_winansi` became a **branch**
+> (`cos::winansi_fits`): WinAnsi text keeps the cheap base-14 lopdf path; non-WinAnsi routes to
+> embedding, falling back to the HF3 rejection only when no covering font exists. **Wired into one
+> writer as a tracer — header/footer** (CJK/Coptic footers now render, proven by fixture-font
+> round-trip + re-extraction). **Remaining (each its own ship):** the other 6 text writers
+> (watermark, text box, free-text ×2, stamp, image-stamp), precise per-glyph font *coverage*
+> selection (today: best-effort broad face; exotic scripts may show `.notdef`), the HF2
+> marked-content tag on embedded runs, and exact embedded-font metrics for centre/right alignment
+> (shared with 3.10).
 
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,

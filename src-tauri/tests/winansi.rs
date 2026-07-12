@@ -83,16 +83,22 @@ fn non_winansi_watermark_rejected() {
 }
 
 #[test]
-fn non_winansi_header_footer_rejected() {
+fn non_winansi_header_footer_now_embeds() {
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF5): header/footer no longer *rejects*
+    // non-WinAnsi text — it embeds a covering system font via PDFium. Where one is
+    // present (dev / macOS), the call succeeds and the bytes reopen; where none is
+    // (a minimal CI box), it falls back to the honest HF3 rejection. Either way,
+    // never silent corruption. (The other writers below still reject — stage-2 is
+    // scoped to header/footer for now.)
     let r = add_header_footer(
         &hello(), &[0], "footer", "", "日付", "", "Helvetica", 10.0, "#000000", 36.0, "d",
     );
-    assert!(is_invalid(r), "CJK in a header position must be rejected");
-    // The date field is validated too.
-    let r2 = add_header_footer(
-        &hello(), &[0], "footer", "ok", "", "", "Helvetica", 10.0, "#000000", 36.0, "２０２６",
-    );
-    assert!(is_invalid(r2), "fullwidth digits in {{date}} must be rejected");
+    if vibepdf_lib::pdf::font_resolver::covering_font_bytes("日付").is_some() {
+        let out = r.expect("embeds a covering font when one exists");
+        assert!(Document::load_mem(&out).is_ok(), "embedded header/footer reopens cleanly");
+    } else {
+        assert!(is_invalid(r), "with no covering font, falls back to the HF3 rejection");
+    }
 }
 
 #[test]

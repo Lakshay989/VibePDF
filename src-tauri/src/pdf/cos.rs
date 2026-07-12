@@ -1459,6 +1459,16 @@ fn winansi_byte(ch: char) -> Option<u8> {
     }
 }
 
+/// Whether every character in `text` maps to a `WinAnsiEncoding` byte — i.e. the
+/// built-in base-14 fonts can render it directly. When false, a writer can route
+/// to `PDFium` font embedding (`FABLE_REVIEW` 3.2 stage-2, [`crate::pdf::font_embed`])
+/// instead of rejecting via [`ensure_winansi`]. The two are exact opposites on
+/// the "any unmappable char?" question.
+#[must_use]
+pub(crate) fn winansi_fits(text: &str) -> bool {
+    text.chars().all(|ch| winansi_byte(ch).is_some())
+}
+
 /// SPEC: P3-ANN-003 / P4-EDIT-003/009/010 — reject text the built-in base-14
 /// fonts cannot render (`FABLE_REVIEW` 3.2: previously such text silently
 /// corrupted). The error names up to three offending characters. Called at the

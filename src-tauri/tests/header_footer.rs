@@ -281,3 +281,35 @@ async fn hf_writes_verification_artifact() {
 
     drop(handle);
 }
+
+#[tokio::test]
+#[ignore = "produces a verification artifact; run on demand"]
+async fn hf_embedded_unicode_verification_artifact() {
+    // P4.HF5: a non-WinAnsi footer takes the PDFium font-embedding path. Cyrillic +
+    // Greek are covered by the broad system face `covering_font_bytes` picks.
+    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-hf-unicode.pdf");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
+    }
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("many-pages.pdf"), None).expect("spawn");
+    handle
+        .add_header_footer(
+            vec![0, 1, 2],
+            "footer".into(),
+            "Πρόχειρο".into(),                 // Greek, left
+            "Привет — Σελίδα {n}/{total}".into(), // Cyrillic + Greek + digits, centre
+            "{date}".into(),
+            "Helvetica".into(),
+            12.0,
+            "#1040a0".into(),
+            36.0,
+            "2026-07-12".into(),
+        )
+        .await
+        .expect("embedded footer");
+    handle.save(Some(out.clone())).await.expect("save");
+    eprintln!("wrote embedded-Unicode header/footer artifact to {}", out.display());
+
+    drop(handle);
+}

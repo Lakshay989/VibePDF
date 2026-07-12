@@ -2863,6 +2863,36 @@ Left `[~]`.
 
 ---
 
+### P4.HF5 — Font embedding stage-2, tracer on header/footer (this commit)
+
+No new dependencies (embedding rides the already-linked PDFium engine). One committed asset:
+a 28 KB SIL-OFL fixture font.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (fixed: doc_markdown backticks via `clippy --fix`; one many_single_char_names allow)
+npm run test:rust      # EXIT 0, 367 passed (+3). New inline: font_embed::tests (embed round-trips +
+#   re-extracts Coptic; preserves existing base-14 text), header_footer::tests (embedded footer
+#   renders + extracts, page text intact). winansi.rs non_winansi_header_footer_rejected → _now_embeds.
+
+# Write path (embedded header/footer) → verification artifact:
+cargo test --test header_footer hf_embedded_unicode_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-hf-unicode.pdf (→ /tmp/vibepdf-verify.pdf): Greek + Cyrillic
+#   footer on 3 pages. Structure check: /Type0 + /CIDFontType2 + /ToUnicode + /FontFile2 present.
+#   NOTE: 15 MB — PDFium embeds the FULL covering font (no subsetting). Top follow-up.
+```
+
+FABLE_REVIEW **3.2 stage-2 (start)**. `cos::ensure_winansi` → branch via `cos::winansi_fits`:
+WinAnsi text keeps the base-14 lopdf path; non-WinAnsi routes to new `font_embed::embed_runs`
+(PDFium `load_true_type_from_bytes` + text objects → `/Type0`/`/CIDFontType2`/`/ToUnicode`).
+`font_resolver::covering_font_bytes` supplies a best-effort broad system face; falls back to the
+HF3 rejection when none. Tracer wired into **header/footer** only. Follow-ups: font subsetting
+(the size fix), the other 6 writers, per-glyph coverage, HF2 tag on embedded runs, exact metrics
+(3.10). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

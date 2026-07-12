@@ -8,6 +8,7 @@ pub mod delete_page;
 pub mod document;
 pub mod extract;
 pub mod flatten;
+pub mod font_embed;
 pub mod font_resolver;
 pub mod header_footer;
 pub mod image_edit;

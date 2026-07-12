@@ -1,0 +1,204 @@
+//! Font embedding (P4.HF5 / `FABLE_REVIEW` 3.2 stage-2) — render text the built-in
+//! base-14 fonts can't, by embedding a system TrueType font through `PDFium`.
+//!
+//! `PDFium` already ships a full font engine; `load_true_type_from_bytes` embeds a
+//! TTF as a CIDFontType2/Type0 with a `/ToUnicode` map and subsets it on save. So
+//! true-Unicode text needs **no Rust font-parsing dependency** (the one
+//! `docs/03_TECH_STACK.md` deliberately avoids): we hand `PDFium` the font bytes and
+//! Unicode strings, and it does the rest. Callers branch here only when
+//! [`crate::pdf::cos::winansi_fits`] is false — `WinAnsi` text keeps the cheap
+//! base-14 lopdf path, so a plain "Page 1" footer never pays for an embedded font.
+//!
+//! The write chassis mirrors [`crate::pdf::reflow`]: load under the global `PDFium`
+//! lock, mutate each page under **Manual** content regeneration, `regenerate_content`
+//! once per page, then `save_to_bytes`. Bytes → bytes, verified by the actor's reload.
+//!
+//! [`embed_runs`] is a dumb placement primitive: it draws each run at the exact
+//! text-space → page-space `matrix` the caller computed (position + rotation), so
+//! the same rotation/CropBox math the lopdf writers already use ([`visual_transform`])
+//! carries straight over. Alignment width is the caller's problem (see the
+//! header/footer note on estimate-based centring).
+//!
+//! [`visual_transform`]: crate::pdf::cos::visual_transform
+
+use std::collections::BTreeMap;
+
+use pdfium_render::prelude::*;
+
+use crate::error::CommandError;
+use crate::pdf::document::{pdfium, pdfium_lock};
+
+/// One positioned run of embedded Unicode text.
+pub(crate) struct EmbedRun {
+    /// 0-based page index.
+    pub page: usize,
+    /// The text to render (arbitrary Unicode the font covers).
+    pub text: String,
+    /// Font size in points.
+    pub size: f32,
+    /// Fill colour, RGB in `0.0..=1.0`.
+    pub color: (f32, f32, f32),
+    /// Text-space → page-space transform `[a b c d e f]` (position + rotation),
+    /// applied verbatim as the text object's matrix.
+    pub matrix: [f32; 6],
+}
+
+/// Embed `runs` into `bytes` using `font_bytes` (a TrueType program that must
+/// cover every run's glyphs), returning the new document bytes. The font is
+/// loaded once and shared across all runs; pages are touched once each.
+pub(crate) fn embed_runs(
+    bytes: &[u8],
+    font_bytes: &[u8],
+    runs: &[EmbedRun],
+) -> Result<Vec<u8>, CommandError> {
+    if runs.is_empty() {
+        return Ok(bytes.to_vec());
+    }
+
+    let _guard = pdfium_lock()?;
+    let mut doc = pdfium()?
+        .load_pdf_from_byte_vec(bytes.to_vec(), None)
+        .map_err(CommandError::from)?;
+
+    // Load the font once (the mutable borrow ends with this statement; the token
+    // is an owned handle). `is_cid_font = true` addresses glyphs beyond the 8-bit
+    // range (CJK, Indic, …) via a 16-bit CID keyspace.
+    let token = doc
+        .fonts_mut()
+        .load_true_type_from_bytes(font_bytes, true)
+        .map_err(CommandError::from)?;
+
+    place_and_save(doc, token, runs)
+}
+
+/// Place every run (grouped per page, one regeneration each) and serialize.
+fn place_and_save(
+    doc: PdfDocument<'_>,
+    token: PdfFontToken,
+    runs: &[EmbedRun],
+) -> Result<Vec<u8>, CommandError> {
+    let mut by_page: BTreeMap<usize, Vec<&EmbedRun>> = BTreeMap::new();
+    for run in runs {
+        by_page.entry(run.page).or_default().push(run);
+    }
+
+    for (page, page_runs) in by_page {
+        let page_index = i32::try_from(page)
+            .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+        // Stage under Manual regeneration and commit once per page (see reflow.rs):
+        // adding objects mutates handles but doesn't flag the page, so without an
+        // explicit `regenerate_content` the runs are lost on save.
+        let mut pdf_page = doc.pages().get(page_index).map_err(CommandError::from)?;
+        pdf_page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
+        for run in page_runs {
+            place_run(&mut pdf_page, token, run)?;
+        }
+        pdf_page.regenerate_content().map_err(CommandError::from)?;
+    }
+
+    let out = doc.save_to_bytes().map_err(CommandError::from)?;
+    drop(doc); // FPDF_CloseDocument is FFI; drop under the still-held lock.
+    Ok(out)
+}
+
+/// Create one text object at the origin, colour it, then override its matrix with
+/// the caller's `[a b c d e f]` (which carries both position and rotation).
+fn place_run(page: &mut PdfPage<'_>, token: PdfFontToken, run: &EmbedRun) -> Result<(), CommandError> {
+    let (r, g, b) = run.color;
+    let color = PdfColor::new(to_u8(r), to_u8(g), to_u8(b), 255);
+    let [ma, mb, mc, md, me, mf] = run.matrix;
+
+    let mut object = page
+        .objects_mut()
+        .create_text_object(
+            PdfPoints::new(0.0),
+            PdfPoints::new(0.0),
+            &run.text,
+            token,
+            PdfPoints::new(run.size),
+        )
+        .map_err(CommandError::from)?;
+    object.set_fill_color(color).map_err(CommandError::from)?;
+    // create_text_object left an identity(+origin) matrix, so apply == set here.
+    object
+        .apply_matrix(PdfMatrix::new(ma, mb, mc, md, me, mf))
+        .map_err(CommandError::from)?;
+    Ok(())
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn to_u8(channel: f32) -> u8 {
+    (channel.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn hello_bytes() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/basic/hello.pdf").expect("read hello.pdf")
+    }
+
+    /// Concatenate every text object's text on page 0 (mirrors `text_extract`'s
+    /// per-object read). Re-extraction is the strongest proof the `/ToUnicode`
+    /// map round-trips.
+    fn page0_text(bytes: &[u8]) -> String {
+        let _guard = pdfium_lock().expect("lock");
+        let doc = pdfium()
+            .expect("pdfium")
+            .load_pdf_from_byte_vec(bytes.to_vec(), None)
+            .expect("reopen");
+        let page = doc.pages().get(0).expect("page 0");
+        let mut out = String::new();
+        for object in page.objects().iter() {
+            if let Some(t) = object.as_text_object() {
+                out.push_str(&t.text());
+            }
+        }
+        drop(doc);
+        out
+    }
+
+    fn coptic_font() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/fonts/NotoSansCoptic-Regular.ttf")
+            .expect("read committed Coptic fixture font")
+    }
+
+    /// P4.HF5 core regression (was increment 1's spike): `PDFium` embeds a loaded
+    /// TrueType font and the Unicode text survives our save round-trip *and*
+    /// re-extracts — proving the `/ToUnicode` map is written. If this ever fails,
+    /// the whole `PDFium`-embed approach is broken.
+    #[test]
+    fn pdfium_embeds_truetype_and_unicode_survives_roundtrip() {
+        let text = "\u{2C81}\u{2C83}\u{2C85}"; // Coptic Ⲁ Ⲃ Ⲅ — outside WinAnsi
+        let runs = [EmbedRun {
+            page: 0,
+            text: text.to_string(),
+            size: 24.0,
+            color: (0.0, 0.0, 0.0),
+            matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 700.0],
+        }];
+        let out = embed_runs(&hello_bytes(), &coptic_font(), &runs).expect("embed");
+        let extracted = page0_text(&out);
+        assert!(
+            extracted.contains(text),
+            "embedded Coptic text must survive reopen; got: {extracted:?}",
+        );
+    }
+
+    /// The base-14 (`WinAnsi`) content is untouched by embedding: the original
+    /// "Hello, `VibePDF`." text object is still present after we add an embedded run.
+    #[test]
+    fn embedding_preserves_existing_page_text() {
+        let runs = [EmbedRun {
+            page: 0,
+            text: "\u{2C81}".to_string(),
+            size: 18.0,
+            color: (0.0, 0.0, 0.0),
+            matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 500.0],
+        }];
+        let out = embed_runs(&hello_bytes(), &coptic_font(), &runs).expect("embed");
+        assert!(page0_text(&out).contains("VibePDF"), "original page text survives");
+    }
+}

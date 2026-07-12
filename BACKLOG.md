@@ -750,10 +750,25 @@ C4a/b, B3b). Four issues found + fixed this session:
   Latin-1/CP1252 + `/WinAnsiEncoding` font, and **reject** non-WinAnsi text with a typed
   character-naming error (all 7 text entries); failed canvas-tool writes now show **toasts**
   (`toast-store` + `Toasts` + `report-error`) instead of `console.warn`.
-- **⏭️ TODO — 3.2 stage 2: font embedding.** The real Unicode fix (CJK, Cyrillic, Greek, …).
-  Subset a system TTF (the `font_resolver.rs` scan already finds candidates) into a
-  Type0/CIDFontType2 with `/ToUnicode`; unlocks arbitrary text across free-text/text-box/
-  watermark/header-footer + OCR text layers (P7). Lifts the `ensure_winansi` gate. Big; own ship.
+- ✅ **STARTED 2026-07-12 (P4.HF5, review 3.2 stage-2)** — true Unicode via **PDFium font
+  embedding** (no new dep): `font_embed::embed_runs` loads a system TTF (`load_true_type_from_bytes`)
+  and places PDFium text objects → `/Type0` + `/CIDFontType2` + `/ToUnicode` + `/FontFile2`.
+  `ensure_winansi` → branch (`winansi_fits`); WinAnsi keeps base-14, non-WinAnsi embeds (falls back
+  to HF3 reject when no covering font). Tracer wired into **header/footer**. Committed fixture
+  `tests/fixtures/fonts/NotoSansCoptic-Regular.ttf` (28 KB, OFL).
+- **⏭️ TODO — 3.2 stage-2 follow-ups (ordered):**
+  1. **Font subsetting — the size fix (top priority).** PDFium embeds the *full* font on save (a
+     Cyrillic footer with Arial Unicode → ~15 MB). Need either self-subsetting or picking small
+     per-script faces. Blocks real-world use and blocks converting the other writers.
+  2. **The other 6 text writers** (watermark, text box, free-text add/update, stamp, image-stamp):
+     each grows the same `winansi_fits` branch → `embed_runs`. Free-text/stamps are `/AP` streams,
+     so they need embedding *inside* an annotation appearance — trickier than page-content writers.
+  3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
+     verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.
+  4. **HF2 marked-content tag on embedded runs** — PDFium objects aren't wrapped in `/VibePDF`
+     BDC/EMC, so an embedded decoration isn't splice-removable (blocks "remove watermark/footer").
+  5. **Exact embedded-font metrics** for centre/right alignment (shared with 3.10; today uses the
+     base-14 `font_avg_em` estimate).
 - **Note (3.2):** `/WinAnsiEncoding` renders `'`/`` ` `` straight instead of curly — pre-HF3
   free-text/stamps with apostrophes change appearance slightly (arguably more correct).
 - **Note (3.5):** toasts cover *user-action write* failures; passive read/sync failures still

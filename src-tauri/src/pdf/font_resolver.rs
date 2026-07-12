@@ -227,6 +227,51 @@ pub fn load_system_fonts() -> &'static SystemFontIndex {
     CACHE.get_or_init(scan_system_fonts)
 }
 
+/// Best-effort: locate a system TrueType font likely to cover `text`'s scripts
+/// and return its bytes, for embedding via [`crate::pdf::font_embed`]
+/// (`FABLE_REVIEW` 3.2 stage-2). Tracer-grade — it tries a short ordered list of
+/// known broad-coverage faces by path per OS and returns the first present.
+///
+/// It does **not** yet verify per-glyph coverage (that needs the font-parsing
+/// dependency `docs/03_TECH_STACK.md` avoids), so a chosen face missing an exotic
+/// script would render `.notdef` boxes; precise per-script selection — and
+/// bundling a guaranteed-coverage face — is deliberate follow-up. The `text`
+/// argument is threaded now so that follow-up needs no signature change.
+#[must_use]
+pub fn covering_font_bytes(text: &str) -> Option<Vec<u8>> {
+    let _ = text; // reserved for per-script selection (see doc comment)
+    broad_coverage_font_paths()
+        .into_iter()
+        .find_map(|path| std::fs::read(path).ok())
+}
+
+/// Ordered candidate paths for a broad-Unicode system face, most-covering first.
+fn broad_coverage_font_paths() -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut paths = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        paths.push(PathBuf::from("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"));
+        paths.push(PathBuf::from("/Library/Fonts/Arial Unicode.ttf"));
+        paths.push(PathBuf::from("/System/Library/Fonts/Supplemental/NotoSans-Regular.ttf"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        paths.push(PathBuf::from("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"));
+        paths.push(PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"));
+        paths.push(PathBuf::from("/usr/share/fonts/noto/NotoSans-Regular.ttf"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(windir) = std::env::var("SystemRoot") {
+            paths.push(PathBuf::from(&windir).join("Fonts/arialuni.ttf"));
+            paths.push(PathBuf::from(&windir).join("Fonts/seguisym.ttf"));
+            paths.push(PathBuf::from(windir).join("Fonts/arial.ttf"));
+        }
+    }
+    paths
+}
+
 fn font_dirs() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
     let mut dirs = Vec::new();

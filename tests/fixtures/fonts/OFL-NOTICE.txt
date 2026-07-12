@@ -1,0 +1,8 @@
+Font: NotoSansCoptic-Regular.ttf (Noto Sans Coptic)
+Copyright: © The Noto Project Authors (https://github.com/notofonts/noto-fonts)
+License: SIL Open Font License, Version 1.1 (https://openfontlicense.org)
+
+This font is redistributed under the SIL OFL 1.1. It is a test fixture: a
+small (~28 KB), single-script TrueType font whose glyphs sit entirely outside
+the WinAnsi range, used to exercise VibePDF's font-embedding path
+(P4.HF5 / FABLE_REVIEW 3.2 stage-2). It is not shipped in the application.
