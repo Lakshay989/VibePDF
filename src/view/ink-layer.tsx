@@ -9,6 +9,7 @@
 // renders the variable-width ribbon. While drawing, this layer only previews the
 // raw path.
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
 import { addInk } from "@/ipc/ink";
@@ -116,7 +117,7 @@ export function InkLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add ink failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add ink", err));
   };
 
   const screenPts = stroke.map((p) => pdfToScreen({ page, x: p.x, y: p.y }, geo));

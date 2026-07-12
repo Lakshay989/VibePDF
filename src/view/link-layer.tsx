@@ -6,6 +6,7 @@
 // invisible hot-zone — nothing is painted into the page. Pointer events, not
 // HTML5 DnD (WKWebView; docs/04).
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useState } from "react";
 
 import { addLink, type LinkRect } from "@/ipc/links";
@@ -137,7 +138,7 @@ export function LinkLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add link failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add link", err));
   };
 
   if (!placing) return null;

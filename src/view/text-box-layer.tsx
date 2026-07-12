@@ -6,6 +6,7 @@
 // Edit Text tool (B1/B3). Drag to size a box, type, commit. Pointer events, not
 // HTML5 DnD (WKWebView; docs/04).
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useState } from "react";
 
 import { addTextBox, type TextBoxRect } from "@/ipc/text-box";
@@ -129,7 +130,7 @@ export function TextBoxLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add text box failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add text", err));
   };
 
   if (!placing && !editor) return null;

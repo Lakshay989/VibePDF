@@ -1231,6 +1231,7 @@ pub fn add_free_text(
     let rect = grow_free_text_rect(rect, text, size, font_avg_em(base));
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    ensure_winansi(text)?; // FABLE_REVIEW 3.2
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1288,6 +1289,7 @@ pub fn add_text_box(
     if text.trim().is_empty() {
         return Err(CommandError::InvalidInput("text-box text is empty".into()));
     }
+    ensure_winansi(text)?; // FABLE_REVIEW 3.2
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
@@ -1417,19 +1419,109 @@ pub(crate) fn prepend_page_content(
     Ok(())
 }
 
-/// Escape a string for a PDF literal-string `(…)` operand. Shared by the
-/// page-decoration text writers (watermark, header/footer).
+/// The `WinAnsiEncoding` (CP1252) byte for `ch`, or `None` when the built-in
+/// base-14 fonts cannot render it. ASCII and the Latin-1 supplement map to
+/// their own byte; the CP1252 0x80–0x9F block covers € „ … † ‡ ‰ Š ‹ Œ Ž
+/// curly quotes, bullets, en/em dashes, ™ š › œ ž Ÿ.
+fn winansi_byte(ch: char) -> Option<u8> {
+    match ch {
+        // In-range by the match arm, so the truncation is exact.
+        #[allow(clippy::cast_possible_truncation)]
+        '\u{0000}'..='\u{007E}' | '\u{00A0}'..='\u{00FF}' => Some(ch as u32 as u8),
+        '\u{20AC}' => Some(0x80),
+        '\u{201A}' => Some(0x82),
+        '\u{0192}' => Some(0x83),
+        '\u{201E}' => Some(0x84),
+        '\u{2026}' => Some(0x85),
+        '\u{2020}' => Some(0x86),
+        '\u{2021}' => Some(0x87),
+        '\u{02C6}' => Some(0x88),
+        '\u{2030}' => Some(0x89),
+        '\u{0160}' => Some(0x8A),
+        '\u{2039}' => Some(0x8B),
+        '\u{0152}' => Some(0x8C),
+        '\u{017D}' => Some(0x8E),
+        '\u{2018}' => Some(0x91),
+        '\u{2019}' => Some(0x92),
+        '\u{201C}' => Some(0x93),
+        '\u{201D}' => Some(0x94),
+        '\u{2022}' => Some(0x95),
+        '\u{2013}' => Some(0x96),
+        '\u{2014}' => Some(0x97),
+        '\u{02DC}' => Some(0x98),
+        '\u{2122}' => Some(0x99),
+        '\u{0161}' => Some(0x9A),
+        '\u{203A}' => Some(0x9B),
+        '\u{0153}' => Some(0x9C),
+        '\u{017E}' => Some(0x9E),
+        '\u{0178}' => Some(0x9F),
+        _ => None,
+    }
+}
+
+/// SPEC: P3-ANN-003 / P4-EDIT-003/009/010 — reject text the built-in base-14
+/// fonts cannot render (`FABLE_REVIEW` 3.2: previously such text silently
+/// corrupted). The error names up to three offending characters. Called at the
+/// entry of every rendered-text writer; embedded-font support will lift this.
+pub(crate) fn ensure_winansi(text: &str) -> Result<(), CommandError> {
+    let mut bad: Vec<char> = Vec::new();
+    for ch in text.chars() {
+        if winansi_byte(ch).is_none() && !bad.contains(&ch) {
+            bad.push(ch);
+            if bad.len() == 3 {
+                break;
+            }
+        }
+    }
+    if bad.is_empty() {
+        return Ok(());
+    }
+    let list = bad.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
+    Err(CommandError::InvalidInput(format!(
+        "text contains characters the built-in PDF fonts cannot render yet: {list} — \
+         embedded-font support will lift this"
+    )))
+}
+
+/// Escape a string for a PDF literal-string `(…)` operand, transcoding to
+/// `WinAnsiEncoding` (`FABLE_REVIEW` 3.2): ASCII passes through (with `\`, `(`,
+/// `)` escaped); Latin-1 / CP1252 characters emit octal escapes of their
+/// `WinAnsi` byte (`é` → `\351`), which render correctly through fonts built by
+/// [`base14_font_dict`]. Unmappable characters become `?` — unreachable when
+/// callers gate input through [`ensure_winansi`] first.
 pub(crate) fn escape_pdf_string(s: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
             '\\' => out.push_str("\\\\"),
             '(' => out.push_str("\\("),
             ')' => out.push_str("\\)"),
-            _ => out.push(ch),
+            _ => match winansi_byte(ch) {
+                Some(b) if b < 0x80 => out.push(ch),
+                Some(b) => {
+                    let _ = write!(out, "\\{b:03o}");
+                }
+                None => out.push('?'),
+            },
         }
     }
     out
+}
+
+/// A base-14 `Type1` font dictionary with `/Encoding /WinAnsiEncoding` — the
+/// one true way to build the fonts our text writers reference. The explicit
+/// encoding is load-bearing: without it the base-14 *Standard* encoding
+/// applies and [`escape_pdf_string`]'s transcoded bytes render as the wrong
+/// glyphs. Shared by text box, free-text `/AP`, stamps, measure labels,
+/// watermark, and header/footer.
+pub(crate) fn base14_font_dict(base: &str) -> Dictionary {
+    let mut font = Dictionary::new();
+    font.set("Type", Object::Name(b"Font".to_vec()));
+    font.set("Subtype", Object::Name(b"Type1".to_vec()));
+    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    font.set("Encoding", Object::Name(b"WinAnsiEncoding".to_vec()));
+    font
 }
 
 /// A page's `/MediaBox` `[x0, y0, x1, y1]`, walking up the `/Parent` chain (it
@@ -1543,10 +1635,7 @@ fn register_page_font(
     page_id: ObjectId,
     base: &str,
 ) -> Result<String, CommandError> {
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    let font = base14_font_dict(base);
     register_page_resource(doc, page_id, b"Font", "Fvibe", Object::Dictionary(font))
 }
 
@@ -1620,6 +1709,7 @@ pub fn update_free_text(
     let size = font_size.max(1.0);
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    ensure_winansi(text)?; // FABLE_REVIEW 3.2
     let id = find_annotation_by_nm(&doc, nm)
         .ok_or_else(|| CommandError::InvalidInput(format!("free-text not found: {nm}")))?;
     let dict = doc.get_dictionary(id).map_err(cos_err)?;
@@ -1789,10 +1879,7 @@ fn free_text_appearance(
 
     // The appearance's own font resource — `/AP` is self-contained, so display
     // doesn't depend on an AcroForm `/DR`.
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    let font = base14_font_dict(base);
     let mut fonts = Dictionary::new();
     fonts.set("F1", Object::Dictionary(font));
     let mut resources = Dictionary::new();
@@ -1916,7 +2003,7 @@ fn free_text_appearance_content(
         if i > 0 {
             let _ = writeln!(out, "T*");
         }
-        let _ = writeln!(out, "({}) Tj", pdf_escape(line));
+        let _ = writeln!(out, "({}) Tj", escape_pdf_string(line));
     }
     let _ = writeln!(out, "ET");
 
@@ -1963,21 +2050,6 @@ pub(crate) fn base_font(family: &str, bold: bool, italic: bool) -> Result<&'stat
     Ok(name)
 }
 
-/// Escape a PDF literal-string body (`\`, `(`, `)`). Non-ASCII passes through —
-/// base-14 fonts only render the ASCII/WinAnsi range (documented limit).
-fn pdf_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '(' => out.push_str("\\("),
-            ')' => out.push_str("\\)"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 /// Average Helvetica-Bold glyph advance (em) — used to auto-fit + centre a
 /// single line of label text (stamps, measurement values). Exact metrics aren't
 /// needed for one centred line.
@@ -2009,6 +2081,7 @@ pub fn add_stamp(
     let opacity = opacity.clamp(0.0, 1.0);
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    ensure_winansi(text)?; // FABLE_REVIEW 3.2
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -2027,10 +2100,7 @@ pub fn add_stamp(
     gs.set("CA", Object::Real(opacity));
     let mut ext = Dictionary::new();
     ext.set("GS", Object::Dictionary(gs));
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(b"Helvetica-Bold".to_vec()));
+    let font = base14_font_dict("Helvetica-Bold");
     let mut fonts = Dictionary::new();
     fonts.set("F1", Object::Dictionary(font));
     let mut resources = Dictionary::new();
@@ -2085,6 +2155,9 @@ pub fn add_image_stamp(
 ) -> Result<Vec<u8>, CommandError> {
     let opacity = opacity.clamp(0.0, 1.0);
     let label = text.map(str::trim).filter(|t| !t.is_empty());
+    if let Some(l) = label {
+        ensure_winansi(l)?; // FABLE_REVIEW 3.2
+    }
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
@@ -2123,10 +2196,7 @@ pub fn add_image_stamp(
     resources.set("ExtGState", Object::Dictionary(ext));
     resources.set("XObject", Object::Dictionary(xobjects));
     if label.is_some() {
-        let mut font = Dictionary::new();
-        font.set("Type", Object::Name(b"Font".to_vec()));
-        font.set("Subtype", Object::Name(b"Type1".to_vec()));
-        font.set("BaseFont", Object::Name(b"Helvetica-Bold".to_vec()));
+        let font = base14_font_dict("Helvetica-Bold");
         let mut fonts = Dictionary::new();
         fonts.set("F1", Object::Dictionary(font));
         resources.set("Font", Object::Dictionary(fonts));
@@ -2203,7 +2273,7 @@ fn image_stamp_content(rect: [f32; 4], label: Option<&str>) -> String {
         let _ = writeln!(out, "BT");
         let _ = writeln!(out, "/F1 {size:.2} Tf");
         let _ = writeln!(out, "{tx:.2} {baseline:.2} Td");
-        let _ = writeln!(out, "({}) Tj", pdf_escape(&upper));
+        let _ = writeln!(out, "({}) Tj", escape_pdf_string(&upper));
         let _ = writeln!(out, "ET");
     }
     out
@@ -2257,7 +2327,7 @@ fn stamp_appearance_content(rect: [f32; 4], label: &str, color: (f32, f32, f32))
     let _ = writeln!(out, "BT");
     let _ = writeln!(out, "/F1 {size:.2} Tf");
     let _ = writeln!(out, "{tx:.2} {baseline:.2} Td");
-    let _ = writeln!(out, "({}) Tj", pdf_escape(&upper));
+    let _ = writeln!(out, "({}) Tj", escape_pdf_string(&upper));
     let _ = writeln!(out, "ET");
     out
 }
@@ -2695,10 +2765,7 @@ pub fn add_measure(
     gs.set("CA", Object::Real(opacity));
     let mut ext = Dictionary::new();
     ext.set("GS", Object::Dictionary(gs));
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(b"Helvetica-Bold".to_vec()));
+    let font = base14_font_dict("Helvetica-Bold");
     let mut fonts = Dictionary::new();
     fonts.set("F1", Object::Dictionary(font));
     let mut resources = Dictionary::new();
@@ -2865,7 +2932,7 @@ fn measure_appearance_content(
     let _ = writeln!(out, "BT");
     let _ = writeln!(out, "/F1 {size:.2} Tf");
     let _ = writeln!(out, "{tx:.2} {ty:.2} Td");
-    let _ = writeln!(out, "({}) Tj", pdf_escape(label));
+    let _ = writeln!(out, "({}) Tj", escape_pdf_string(label));
     let _ = writeln!(out, "ET");
     out
 }

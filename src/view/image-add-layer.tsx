@@ -5,6 +5,7 @@
 // (aspect-fit into the box) via `addImage`. No editor — the image is the content.
 // Pointer events, not HTML5 DnD (WKWebView; docs/04).
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useState } from "react";
 
 import { addImage, type ImageRect } from "@/ipc/image";
@@ -99,7 +100,7 @@ export function ImageAddLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add image failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add image", err));
   };
 
   if (!placing) return null;

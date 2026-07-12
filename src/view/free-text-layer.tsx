@@ -7,6 +7,7 @@
 // commit we persist through the actor and drop the tool; the canvas then renders
 // the result. Pointer events, not HTML5 DnD (WKWebView; docs/04).
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
 import { readAnnotations } from "@/ipc/annotations";
@@ -202,7 +203,7 @@ export function FreeTextLayer({
       bumpEpoch(documentId);
       setHistory(documentId, h);
     };
-    const fail = (err: unknown) => console.warn("free-text commit failed", documentId, err);
+    const fail = (err: unknown) => reportError("Couldn't save the text", err);
     const promise = ed.editNm
       ? updateFreeText(
           documentId,

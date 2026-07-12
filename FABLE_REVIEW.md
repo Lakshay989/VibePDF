@@ -94,6 +94,14 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 
 ### 3.2 HIGH — Non-ASCII text silently corrupts (all text writers, base-14 fonts only)
 
+> **✅ STAGE 1 FIXED 2026-07-06 (P4.HF3)** — the "loud failure + WinAnsi" half. Text writers now
+> build fonts with `/Encoding /WinAnsiEncoding` (`cos::base14_font_dict`), transcode Latin-1 /
+> CP1252 to octal escapes (`cos::escape_pdf_string`), and **reject** anything outside WinAnsi with
+> a typed `InvalidInput` naming the characters (`cos::ensure_winansi`, gating all 7 text entries).
+> Café/résumé/Página/dashes/€ now render (Apple PDFKit confirmed); CJK/Cyrillic/etc. fail loudly
+> (dialogs show the message; canvas tools toast it via 3.5) instead of silent mojibake. **Stage 2
+> — font embedding for true Unicode — remains** (below, "the real feature"); still its own ship.
+
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,
 watermark, header/footer, stamps.
@@ -170,6 +178,12 @@ fill should arguably still fill the MediaBox (behind bleed) — decide and test 
 fixture with CropBox ≠ MediaBox covers all three writers.
 
 ### 3.5 MEDIUM — Silent failure UX: canvas-tool IPC errors go to `console.warn` only
+
+> **✅ FIXED 2026-07-06 (P4.HF3)** — `state/toast-store.ts` + `app/Toasts.tsx` (mounted in App) +
+> `app/report-error.ts` (`CommandError.code` → friendly copy). All ~21 user-action write catches
+> (annotation/free-text/image-edit ×3/image-add/ink/link/note/polygon/stamp/measure/text-edit/
+> text-box + PdfViewer extract/split/merge/insert) now `reportError(...)` → a visible toast;
+> passive reads keep `console.warn`.
 
 **Where:** every overlay layer: `link-layer.tsx`, `image-add-layer.tsx`, `image-edit-layer.tsx`,
 `annotation-layer.tsx`, `free-text-layer.tsx`, `ink/stamp/measure/polygon` layers, plus
@@ -512,7 +526,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | # | Severity | Finding | Fix size |
 |---|---|---|---|
 | 3.1 | High | ~~Decorations ignore `/Rotate`~~ **FIXED (P4.HF)** | M |
-| 3.2 | High | Non-ASCII text silently corrupts (base-14, no embedding) | S now / L full |
+| 3.2 | High | Non-ASCII text ~~silently corrupts~~ **STAGE 1 FIXED (P4.HF3)**: WinAnsi + loud reject; embedding (stage 2) open | L full |
 | 3.3 | High | ~~Encrypted-doc save unverified~~ **RESOLVED (P4.HF)**: saves failed entirely; now save + keep encryption | S |
 | 3.4 | Medium | ~~Placement ignores CropBox~~ **FIXED (P4.HF)** | S |
 | 3.5 | Medium | Canvas tools swallow errors (`console.warn`) | S |

@@ -9,6 +9,7 @@ import {
   type PageVirtualizerHandle,
 } from "@/view/PageVirtualizer";
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
+import { reportError } from "@/app/report-error";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { MarkupToolbar } from "@/app/MarkupToolbar";
 import { ExtractDialog } from "@/app/ExtractDialog";
@@ -92,7 +93,7 @@ export function PdfViewer({ documentId, path }: Props) {
         if (typeof dest !== "string") return; // user cancelled the dialog
         await extractPages(documentId, pages, dest);
       } catch (err) {
-        console.warn("extract failed", documentId, err);
+        reportError("Couldn't extract pages", err);
       }
     },
     [documentId],
@@ -112,7 +113,7 @@ export function PdfViewer({ documentId, path }: Props) {
         const stem = base.replace(/\.pdf$/i, "") || "split";
         await splitDocument(documentId, mode, destDir, stem);
       } catch (err) {
-        console.warn("split failed", documentId, err);
+        reportError("Couldn't split the PDF", err);
       }
     },
     [documentId, path],
@@ -135,7 +136,7 @@ export function PdfViewer({ documentId, path }: Props) {
         if (typeof dest !== "string") return; // user cancelled the dialog
         await mergeDocuments(paths, dest);
       } catch (err) {
-        console.warn("merge failed", err);
+        reportError("Couldn't merge PDFs", err);
       }
     },
     [],
@@ -166,7 +167,7 @@ export function PdfViewer({ documentId, path }: Props) {
         bumpEpoch(documentId);
         setHistory(documentId, history);
       } catch (err) {
-        console.warn("insert-from-pdf failed", documentId, err);
+        reportError("Couldn't insert pages", err);
       }
     },
     [documentId, bumpEpoch, setHistory],

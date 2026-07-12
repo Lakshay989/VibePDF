@@ -2,6 +2,7 @@ import { useCallback } from "react";
 
 import { PasswordPromptDialog } from "@/app/PasswordPromptDialog";
 import { RecoveryDialog } from "@/app/RecoveryDialog";
+import { Toasts } from "@/app/Toasts";
 import { basename } from "@/app/paths";
 import { useFileOpen } from "@/app/use-file-open";
 import { useHistory } from "@/app/use-history";
@@ -157,6 +158,7 @@ export function App() {
         onRecover={(e) => void recover(e)}
         onDiscard={(e) => void discardRecovery(e)}
       />
+      <Toasts />
     </div>
   );
 }

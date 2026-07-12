@@ -499,6 +499,22 @@ layer (`get_and_decode_page_content`), not by raw byte search; and PDFium's `Man
 regeneration (the text-edit path) may drop tags on a page it regenerates. D4/D5 inherit tagging
 through the shared writers and must pass their own `/Kind`.
 
+**Text correctness + error surface (P4.HF3).** The built-in base-14 fonts render only the
+`WinAnsiEncoding` (CP1252) range, and previously any text outside ASCII silently corrupted — even
+Latin-1 the fonts *can* draw. Three coordinated changes in `cos.rs` fix it: `base14_font_dict`
+(the one builder for every text writer's font) sets `/Encoding /WinAnsiEncoding`;
+`escape_pdf_string` transcodes Latin-1 / CP1252 characters to octal escapes of their WinAnsi byte
+(`é` → `\351`), which those fonts then render correctly; and `ensure_winansi` gates all seven
+rendered-text entries (watermark, header/footer, text box, free-text add/update, stamp,
+image-stamp), returning a typed `InvalidInput` that names up to three offending characters when
+the text needs glyphs the built-in fonts lack. Silent mojibake becomes a loud, honest rejection;
+true-Unicode support waits on font embedding (`FABLE_REVIEW` 3.2 stage 2). On the frontend, that
+rejection — and every other failed canvas-tool write — now lands in a **toast**
+(`state/toast-store.ts` → `app/Toasts.tsx`, pushed by `app/report-error.ts` which maps
+`CommandError.code` to friendly copy), the missing last hop of the typed-error chain; the ~21
+`console.warn`-only catches on user actions were replaced (passive read/sync failures still just
+log).
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend

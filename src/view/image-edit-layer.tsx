@@ -6,6 +6,7 @@
 // computes a new placement matrix the actor applies. Pointer events, not HTML5
 // DnD (WKWebView; docs/04).
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
@@ -116,7 +117,7 @@ export function ImageEditLayer({
     if (selected === null) return;
     transformImage(documentId, page, selected, matrix)
       .then(applyHistory)
-      .catch((err: unknown) => console.warn("transform image failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't move the image", err));
   };
 
   // SPEC: P4-EDIT-006 (P4.C2b) — pick a new PNG/JPEG and swap the image's pixels
@@ -132,7 +133,7 @@ export function ImageEditLayer({
       .then((picked) =>
         typeof picked === "string" ? replaceImage(documentId, page, idx, picked).then(applyHistory) : undefined,
       )
-      .catch((err: unknown) => console.warn("replace image failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't replace the image", err));
   };
 
   const startDrag = (kind: "move" | "resize", corner: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -278,7 +279,7 @@ export function ImageEditLayer({
                     bumpEpoch(documentId);
                     setHistory(documentId, h);
                   })
-                  .catch((err: unknown) => console.warn("delete image failed", documentId, err));
+                  .catch((err: unknown) => reportError("Couldn't delete the image", err));
               }}
               aria-label="Delete image"
               className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700 hover:bg-red-200"

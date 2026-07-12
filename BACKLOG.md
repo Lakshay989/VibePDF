@@ -746,10 +746,21 @@ C4a/b, B3b). Four issues found + fixed this session:
   tagged range in `get_and_decode_page_content`, drain, re-encode — the `delete_image` pattern).
   Note: PDFium compresses content streams on save, so the tag isn't raw-`grep`-able in saved
   files — find it at the operator layer.
-- **Still open from FABLE_REVIEW** (each its own ship): **3.2** non-ASCII text (WinAnsi
-  transcode + reject now, font embedding later), **3.5** error toasts for canvas tools,
-  **3.6** undo snapshot memory, **3.8** CSP, **3.9** Windows CI + `split("/")` path display,
-  **3.10** AFM glyph metrics.
+- ✅ **DONE 2026-07-06 (P4.HF3, review 3.2 stage-1 + 3.5)** — text writers WinAnsi-transcode
+  Latin-1/CP1252 + `/WinAnsiEncoding` font, and **reject** non-WinAnsi text with a typed
+  character-naming error (all 7 text entries); failed canvas-tool writes now show **toasts**
+  (`toast-store` + `Toasts` + `report-error`) instead of `console.warn`.
+- **⏭️ TODO — 3.2 stage 2: font embedding.** The real Unicode fix (CJK, Cyrillic, Greek, …).
+  Subset a system TTF (the `font_resolver.rs` scan already finds candidates) into a
+  Type0/CIDFontType2 with `/ToUnicode`; unlocks arbitrary text across free-text/text-box/
+  watermark/header-footer + OCR text layers (P7). Lifts the `ensure_winansi` gate. Big; own ship.
+- **Note (3.2):** `/WinAnsiEncoding` renders `'`/`` ` `` straight instead of curly — pre-HF3
+  free-text/stamps with apostrophes change appearance slightly (arguably more correct).
+- **Note (3.5):** toasts cover *user-action write* failures; passive read/sync failures still
+  `console.warn` only. Re-editing a pre-HF3 annotation that stored non-WinAnsi (mojibake) text now
+  errors on save — rare; the message explains.
+- **Still open from FABLE_REVIEW** (each its own ship): **3.6** undo snapshot memory, **3.8**
+  CSP, **3.9** Windows CI + `split("/")` path display, **3.10** AFM glyph metrics.
 - **Note:** annotation `/AP` writers (shapes, notes, free-text) still place in page space —
   viewers rotate annotations themselves, so they were *not* part of the 3.1 bug; re-check only
   if a reader renders them oddly on rotated pages.

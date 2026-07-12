@@ -2808,6 +2808,34 @@ writers. Left `[~]`.
 
 ---
 
+### P4.HF3 — WinAnsi text + error toasts (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+npm run test           # 368/368 (+9: toast-store ×4, report-error ×5)
+npm run test:rust      # EXIT 0. winansi.rs (9): Latin-1/CP1252 → octal + /WinAnsiEncoding;
+#   ASCII byte-stable; parens/backslash escaped; reject CJK per entry (watermark/header-footer/
+#   text-box/free-text add+update); error names ≤3 offenders. + 1 ignored artifact.
+
+# Write path → verification artifact:
+cargo test --test winansi winansi_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-winansi.pdf (→ /tmp/vibepdf-verify.pdf): "Café résumé"
+#   watermark + "Página 1 – 50 %" footer + "naïve € 5" free text. Apple PDFKit render:
+#   Café/résumé/Página/– all correct (annotation-AP text not in page.string, expected).
+```
+
+FABLE_REVIEW **3.2 stage 1** + **3.5**. Text writers: `base14_font_dict` sets
+`/Encoding /WinAnsiEncoding`; `escape_pdf_string` transcodes Latin-1/CP1252 → octal;
+`ensure_winansi` rejects non-WinAnsi at all 7 text entries with a character-naming error (old
+`pdf_escape` collapsed in). Frontend: `toast-store` + `Toasts` (App-mounted) + `report-error`
+(`CommandError.code`→copy); 21 user-action `console.warn` catches → `reportError`. Font embedding
+(3.2 stage 2, real Unicode) still deferred. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

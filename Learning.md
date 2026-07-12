@@ -6178,6 +6178,60 @@ heuristics. Lay the identity rail *now*, before D4/D5 stamp page numbers everywh
 
 ---
 
+## P4.HF3 — WinAnsi text + error toasts
+
+#### Problem
+
+Two review findings that pair naturally. 3.2: text writers emitted raw UTF-8 into base-14-font
+literal strings, so anything past ASCII rendered as mojibake — silently. 3.5: when a canvas tool's
+backend write failed, the only trace was a `console.warn`; to the user the click did nothing.
+They ship together because "reject bad text loudly" needs somewhere loud to land.
+
+#### Concepts learned
+
+- **A PDF string's bytes are interpreted in the font's encoding, not UTF-8.** The base-14 fonts
+  default to *StandardEncoding*; to render `é` you must (a) declare `/Encoding /WinAnsiEncoding`
+  on the font, and (b) put the WinAnsi *byte* (0xE9) in the string. Both, or neither works. The
+  transcoder emits `\351` (octal 0xE9) and the font dict now carries the encoding — the two are a
+  matched pair, which is why a single `base14_font_dict` builder (not six inline dicts) matters:
+  it makes the encoding impossible to forget.
+- **CP1252 is WinAnsi's superset of Latin-1.** Beyond U+00A0–U+00FF (Latin-1), the 0x80–0x9F
+  block carries the "smart" punctuation users actually type: curly quotes, en/em dashes, €, …, ™.
+  Mapping those (U+2019 → 0x92, U+2014 → 0x97, U+20AC → 0x80) covers the overwhelming majority of
+  real-world "non-ASCII" text without any font embedding.
+- **Reject at the boundary, render past it.** `ensure_winansi` runs at each writer's *entry* and
+  fails the whole operation with a character-naming message; by the time `escape_pdf_string` runs
+  at emit time, unmappable characters are unreachable (it defensively maps them to `?`). Splitting
+  "can we?" (validate, user-facing error) from "do it" (escape, infallible) keeps each simple.
+- **Finish the wire you already built.** The typed-error chain (`CommandError` → `invoke.ts` →
+  `.code`) existed end-to-end but the frontend dropped it into `console.warn` at the last hop.
+  `reportError` is ~10 lines: map the code to copy (our `InvalidInput` messages are already
+  user-authored, so show them verbatim; other codes get a context prefix), push a toast, still
+  log for devs. The lesson: when errors vanish, look for where a good pipe stops one node short of
+  the UI.
+- **Know what your verifier does and doesn't see.** Apple PDFKit's `page.string` extracts *page
+  content* text — so the watermark and footer "Café résumé / Página … –" proved the transcode
+  end-to-end — but not *annotation appearance* text, so the free-text "naïve € 5" simply wasn't in
+  the string (not a bug). Reading a null result correctly is as important as reading a positive
+  one.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `winansi_byte` + `ensure_winansi` (reject) + `escape_pdf_string` (transcode) + `base14_font_dict` (the one WinAnsi font builder); collapsed the old `pdf_escape`. |
+| `watermark.rs` / `header_footer.rs` | `ensure_winansi` at entry; shared font builder. |
+| `src/state/toast-store.ts`, `src/app/Toasts.tsx`, `src/app/report-error.ts` | the toast surface + `CommandError`→copy mapper (mounted in `App.tsx`). |
+| ~13 view files + `PdfViewer.tsx` | 21 user-action `console.warn` catches → `reportError`. |
+| `tests/winansi.rs` + toast/report-error frontend tests | transcode/encoding/reject (9) + toast + mapping (9). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.6.6.4 + Annex D (WinAnsiEncoding) — the CP1252 code table.
+- PDF 32000-1:2008 §7.3.4.2 — literal strings and octal escapes.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

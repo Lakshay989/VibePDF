@@ -9,6 +9,7 @@
 // against the doc's calibration and persists a `/Line`/`/PolyLine`/`/Polygon`
 // (with a dimension `/IT`) via the actor. Self-contained like the other overlays.
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
 import { addMeasure } from "@/ipc/measure";
@@ -107,7 +108,7 @@ export function MeasureLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add measure failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add measurement", err));
   };
 
   // Leaving the tool abandons an in-progress measurement (no lingering rubber-band).

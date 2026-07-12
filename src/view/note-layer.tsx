@@ -12,6 +12,7 @@
 // store id doubles as the annotation's `/NM`, so later edits address this exact
 // note.
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useState } from "react";
 
 import { addTextNote, deleteAnnotation, updateTextNote } from "@/ipc/notes";
@@ -102,7 +103,7 @@ export function NoteLayer({
         // Roll the optimistic icon back if the actor rejected the write.
         removeAnnotation(documentId, note.id);
         setEditingId(null);
-        console.warn("add note failed", documentId, err);
+        reportError("Couldn't add note", err);
       });
   };
 
@@ -119,7 +120,7 @@ export function NoteLayer({
     setEditingId(null);
     deleteAnnotation(documentId, note.id)
       .then((h) => setHistory(documentId, h))
-      .catch((err: unknown) => console.warn("delete note failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't delete note", err));
   };
 
   const editing = notes.find((n) => n.id === editingId) ?? null;

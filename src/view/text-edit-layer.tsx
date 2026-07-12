@@ -7,6 +7,7 @@
 // the epoch reload re-renders the canvas. No committed state lives here — only the
 // transient editor. Pointer events, not HTML5 DnD (WKWebView; docs/04).
 
+import { reportError } from "@/app/report-error";
 import { useEffect, useState } from "react";
 
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
@@ -133,7 +134,7 @@ export function TextEditLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("replace text run failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't edit text", err));
   };
 
   // SPEC: P4-EDIT-004 (P4.B3) — remove the run from the content stream entirely.
@@ -146,7 +147,7 @@ export function TextEditLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("delete text run failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't delete text", err));
   };
 
   if (!active) return null;

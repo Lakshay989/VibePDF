@@ -8,6 +8,7 @@
 // /Polygon with a generated /AP) and the canvas renders it; the overlay only
 // draws the in-progress shape.
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
 /** A click within this many CSS px of the FIRST vertex (with ≥3 points down)
@@ -94,7 +95,7 @@ export function PolygonLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add polygon failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add shape", err));
   };
 
   // Leaving the polygon tool (picking another tool, or a finished shape)

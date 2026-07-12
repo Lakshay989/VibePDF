@@ -10,7 +10,7 @@
 //! actor wraps it in the snapshot → reload chassis ([`header_footer_apply`]),
 //! inverse `RestoreDocEdit`.
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Document, Object, ObjectId};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
@@ -60,6 +60,11 @@ pub fn add_header_footer(
     };
     if left.trim().is_empty() && center.trim().is_empty() && right.trim().is_empty() {
         return Err(CommandError::InvalidInput("header/footer text is empty".into()));
+    }
+    // FABLE_REVIEW 3.2 — reject text base-14 fonts can't render ({n}/{total}
+    // substitute to ASCII digits, so validating the templates + date suffices).
+    for s in [left, center, right, date] {
+        crate::pdf::cos::ensure_winansi(s)?;
     }
     let base = base_font(font_family, false, false)?;
     let rgb = parse_hex_color(color)?;
@@ -127,10 +132,7 @@ enum Align {
 
 /// Give `page_id` its own base-14 header/footer font, returning the resource name.
 fn register_hf_font(doc: &mut Document, page_id: ObjectId, base: &str) -> Result<String, CommandError> {
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
+    let font = crate::pdf::cos::base14_font_dict(base);
     crate::pdf::cos::register_page_resource(doc, page_id, b"Font", "Fhf", Object::Dictionary(font))
 }
 

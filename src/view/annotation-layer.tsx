@@ -12,6 +12,7 @@
 // drag uses `setPointerCapture`. No PDF bytes are touched here; persistence is
 // P3.B1.
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 
 import { addLine } from "@/ipc/lines";
@@ -174,7 +175,7 @@ export function AnnotationLayer({
         options.strokeWidth,
       )
         .then(persisted)
-        .catch((err: unknown) => console.warn("add line failed", documentId, err));
+        .catch((err: unknown) => reportError("Couldn't add line", err));
       return;
     }
     if (committed.type !== "rectangle" && committed.type !== "ellipse") {
@@ -194,7 +195,7 @@ export function AnnotationLayer({
       options.strokeWidth,
     )
       .then(persisted)
-      .catch((err: unknown) => console.warn("add shape failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add shape", err));
   };
 
   // Notes carry no `/AP` and are drawn by the HTML `NoteLayer` overlay, not as

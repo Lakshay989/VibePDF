@@ -58,6 +58,8 @@ pub fn add_watermark(
         if text.trim().is_empty() {
             return Err(CommandError::InvalidInput("watermark text is empty".into()));
         }
+        // FABLE_REVIEW 3.2 — reject text base-14 fonts can't render.
+        crate::pdf::cos::ensure_winansi(text)?;
     }
     let opacity = opacity.clamp(0.0, 1.0);
     let theta = rotation_deg.to_radians();
@@ -158,11 +160,7 @@ fn fit_dims(iw: u32, ih: u32, bw: f32, bh: f32) -> (f32, f32) {
 }
 
 fn font_dict(base: &str) -> Object {
-    let mut font = Dictionary::new();
-    font.set("Type", Object::Name(b"Font".to_vec()));
-    font.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font.set("BaseFont", Object::Name(base.as_bytes().to_vec()));
-    Object::Dictionary(font)
+    Object::Dictionary(crate::pdf::cos::base14_font_dict(base))
 }
 
 /// `q … Q` fragment: map visual → page space (`vt`), rotate about the visual

@@ -6,6 +6,7 @@
 // like the note / polygon / ink layers — a single click-to-place gesture that
 // doesn't fit `stepTool`'s drag lifecycle.
 
+import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent } from "react";
 
 import { addImageStamp, addStamp } from "@/ipc/stamps";
@@ -88,7 +89,7 @@ export function StampLayer({
         bumpEpoch(documentId);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => console.warn("add stamp failed", documentId, err));
+      .catch((err: unknown) => reportError("Couldn't add stamp", err));
   };
 
   return (
