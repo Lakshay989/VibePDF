@@ -189,6 +189,13 @@ fn source_page_out_of_range_errors() {
     assert!(add_background(&bytes("hello.pdf"), &[0], &pdf_page("hello.pdf", 5), 1.0).is_err());
 }
 
+// The FABLE_REVIEW 3.14 hardening (untrusted source PDF → resource closure must
+// not recurse on the object graph) is a unit test in `background.rs` that calls
+// `collect_refs` directly: the deep-chain reproducer needs 100k container links,
+// and driving those through the full `add_background` round-trip is dominated by
+// lopdf renumber/serialize cost, not the walk. Transitive resource copying stays
+// covered end-to-end by `pdf_background_copies_page_resources_and_content`.
+
 #[tokio::test]
 async fn actor_pdf_background_then_undo() {
     let dir = std::env::temp_dir().join(format!("vibepdf-pdfbg-{}", uuid::Uuid::new_v4()));

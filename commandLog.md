@@ -2836,6 +2836,33 @@ FABLE_REVIEW **3.2 stage 1** + **3.5**. Text writers: `base14_font_dict` sets
 
 ---
 
+### P4.HF4 — collect_refs recursion → worklist (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (fixed: collapsible_match → match guard; doc_markdown backtick)
+npm run test:rust      # EXIT 0, 364 passed (+2). New: background::tests::
+#   collect_refs_survives_deep_reference_chain (100k container links, 0.3 s) +
+#   …_terminates_on_a_reference_cycle. Frontend untouched (no npm run test needed).
+
+# Write path (D1b import) → verification artifact:
+cargo test --test background bg_writes_verification_artifact -- --ignored
+#   → ../Sample PDFs/vibepdf-verify-background.pdf (→ /tmp/vibepdf-verify.pdf): links.pdf p1
+#   imported behind hello.pdf; PDFium-verified via save's verify_pdf_reopens.
+```
+
+FABLE_REVIEW **3.14**. `background.rs::collect_refs` (walks the untrusted source PDF's resource
+graph in D1b import) is now iterative — `pending` id worklist + per-object `inline` stack — so a
+crafted deep container chain can't overflow the actor thread's stack; `acc` still bounds each id
+to one visit and behaviour on valid input is unchanged. Learned: lopdf `get_object` collapses bare
+`M 0 R` chains, so the overflow shape is *container* links, not bare refs (the test uses that).
+Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

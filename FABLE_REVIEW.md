@@ -332,6 +332,13 @@ findable/replaceable from day one — Bates re-numbering after page insertion is
 
 ### 3.14 LOW — `collect_refs` recursion on hostile PDFs
 
+> **✅ FIXED 2026-07-11 (P4.HF4)** — `collect_refs` is now two explicit worklists (`pending`
+> object ids for the reference chain, `inline` stack for nested direct objects); neither can
+> overflow the actor thread's stack. Regression pins a 100k-deep container chain and a reference
+> cycle (`background::tests`). Note discovered while testing: lopdf's `get_object` transparently
+> collapses bare `M 0 R` indirection, so the real overflow shape is a chain of *containers*
+> (`<< /Next n+1 0 R >>`), not bare references — the test uses that.
+
 **Where:** `background.rs::collect_refs` (D1b closure copy).
 
 **What:** recursion depth is bounded by object-graph depth; cycles are handled (`acc.insert`
@@ -538,7 +545,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.11 | Low | Dirty-flag edge cases (undo-to-saved, save-as) | S |
 | 3.12 | Low | New streams uncompressed | S |
 | 3.13 | Low | ~~Decorations untagged~~ **FIXED (P4.HF2)**: `/VibePDF` BDC/EMC + splice-proof test | S |
-| 3.14 | Low | `collect_refs` recursion depth | S |
+| 3.14 | Low | ~~`collect_refs` recursion depth~~ **FIXED (P4.HF4)**: iterative worklists; 100k-chain + cycle tests | S |
 | 3.15 | Low | Nine assorted small items | S each |
 | §4 | Debt | `cos.rs` 3.9k lines; `actor.rs` 40 copy-pasted arms; doc drift | M |
 | §8 | Process | **All of Phase 4 human-unverified** (+P2 viewer items); A2 recovery ritual; A3 reflow half | human time |

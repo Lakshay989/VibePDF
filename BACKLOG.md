@@ -759,8 +759,14 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **Note (3.5):** toasts cover *user-action write* failures; passive read/sync failures still
   `console.warn` only. Re-editing a pre-HF3 annotation that stored non-WinAnsi (mojibake) text now
   errors on save — rare; the message explains.
+- ✅ **DONE 2026-07-11 (P4.HF4, review 3.14)** — `background.rs::collect_refs` (walks the
+  **untrusted source PDF**'s resource graph during D1b import) is now iterative (two worklists:
+  `pending` ids + `inline` stack), so a crafted deep container chain can't overflow the actor
+  thread's stack. Pinned by `background::tests` (100k-link chain + a reference cycle). Discovered:
+  lopdf `get_object` collapses bare `M 0 R` chains, so the overflow shape is *container* links.
 - **Still open from FABLE_REVIEW** (each its own ship): **3.6** undo snapshot memory, **3.8**
-  CSP, **3.9** Windows CI + `split("/")` path display, **3.10** AFM glyph metrics.
+  CSP, **3.9** Windows CI + `split("/")` path display, **3.10** AFM glyph metrics, plus the
+  remaining low items **3.11** dirty-flag, **3.12** stream compression, **3.15** assorted.
 - **Note:** annotation `/AP` writers (shapes, notes, free-text) still place in page space —
   viewers rotate annotations themselves, so they were *not* part of the 3.1 bug; re-check only
   if a reader renders them oddly on rotated pages.

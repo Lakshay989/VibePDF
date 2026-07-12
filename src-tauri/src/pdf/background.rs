@@ -222,17 +222,37 @@ fn effective_resources(doc: &Document, page_id: ObjectId) -> Dictionary {
 }
 
 /// Collect every object id transitively referenced from `obj`.
+///
+/// The source PDF is user-picked and untrusted, so this must not recurse on the
+/// object graph: a crafted deep reference chain (obj 1 → 2 → … → 100k) would
+/// overflow the actor thread's stack. Two explicit worklists keep it iterative —
+/// `pending` walks the *reference* chain by id, `inline` walks each object's
+/// nested arrays/dicts (also unbounded in hostile input). `acc` guards cycles,
+/// so every id is resolved at most once.
 fn collect_refs(doc: &Document, obj: &Object, acc: &mut HashSet<ObjectId>) {
-    match obj {
-        Object::Reference(id) if acc.insert(*id) => {
-            if let Ok(o) = doc.get_object(*id) {
-                collect_refs(doc, o, acc);
-            }
+    let mut pending: Vec<ObjectId> = Vec::new();
+    push_child_refs(obj, acc, &mut pending);
+    while let Some(id) = pending.pop() {
+        if let Ok(resolved) = doc.get_object(id) {
+            push_child_refs(resolved, acc, &mut pending);
         }
-        Object::Array(a) => a.iter().for_each(|o| collect_refs(doc, o, acc)),
-        Object::Dictionary(d) => d.iter().for_each(|(_, o)| collect_refs(doc, o, acc)),
-        Object::Stream(s) => s.dict.iter().for_each(|(_, o)| collect_refs(doc, o, acc)),
-        _ => {}
+    }
+}
+
+/// Push every not-yet-seen object id reachable through `obj`'s inline structure
+/// (nested arrays / dicts / stream dicts) onto `pending`, marking them in `acc`.
+/// The inline walk is itself iterative (`inline` stack) so arbitrarily nested
+/// direct objects cannot overflow the stack either.
+fn push_child_refs(obj: &Object, acc: &mut HashSet<ObjectId>, pending: &mut Vec<ObjectId>) {
+    let mut inline: Vec<&Object> = vec![obj];
+    while let Some(o) = inline.pop() {
+        match o {
+            Object::Reference(id) if acc.insert(*id) => pending.push(*id),
+            Object::Array(a) => inline.extend(a.iter()),
+            Object::Dictionary(d) => inline.extend(d.iter().map(|(_, v)| v)),
+            Object::Stream(s) => inline.extend(s.dict.iter().map(|(_, v)| v)),
+            _ => {}
+        }
     }
 }
 
@@ -322,4 +342,51 @@ fn background_apply<'a>(
             .map_err(CommandError::from)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_refs, Document, HashSet, Object};
+    use lopdf::dictionary;
+
+    /// `FABLE_REVIEW` 3.14 regression: the source PDF is untrusted, so a crafted
+    /// deep reference chain must not overflow the actor thread's stack. Each
+    /// link is a *container* (`<< /Next n+1 0 R >>`) — `get_object` returns it
+    /// as-is (it collapses only bare `M 0 R` indirection), so the old recursive
+    /// walk descended one frame per link and blew the stack around this depth.
+    /// The iterative worklist resolves all of them flat. (Called directly — the
+    /// full `add_background` round-trip is dominated by lopdf serialize cost,
+    /// not the walk, so it belongs here, not in the integration suite.)
+    #[test]
+    fn collect_refs_survives_deep_reference_chain() {
+        let mut doc = Document::with_version("1.5");
+        let leaf = doc.add_object(dictionary! { "Type" => "Font" });
+        // `depth` dict links stacked on the leaf: each holds a ref to the next.
+        let depth = 100_000usize;
+        let mut head = leaf;
+        for _ in 0..depth {
+            head = doc.add_object(dictionary! { "Next" => Object::Reference(head) });
+        }
+        let seed = Object::Dictionary(dictionary! { "Chain" => Object::Reference(head) });
+        let mut acc = HashSet::new();
+        collect_refs(&doc, &seed, &mut acc);
+        // depth links + the leaf, each resolved exactly once.
+        assert_eq!(acc.len(), depth + 1, "every link in the chain is resolved once");
+    }
+
+    /// A reference cycle must terminate via the `acc` guard, not spin. Uses
+    /// container links so `get_object` returns each node rather than chasing the
+    /// cycle itself.
+    #[test]
+    fn collect_refs_terminates_on_a_reference_cycle() {
+        let mut doc = Document::with_version("1.5");
+        let a = doc.new_object_id();
+        let b = doc.add_object(dictionary! { "Next" => Object::Reference(a) }); // b → a
+        doc.objects
+            .insert(a, Object::Dictionary(dictionary! { "Next" => Object::Reference(b) })); // a → b
+        let seed = Object::Dictionary(dictionary! { "Loop" => Object::Reference(a) });
+        let mut acc = HashSet::new();
+        collect_refs(&doc, &seed, &mut acc);
+        assert_eq!(acc.len(), 2, "both cycle nodes seen once; traversal terminates");
+    }
 }

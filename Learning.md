@@ -6232,6 +6232,56 @@ They ship together because "reject bad text loudly" needs somewhere loud to land
 
 ---
 
+## P4.HF4 — Recursion → worklist on the untrusted resource walk
+
+#### Problem
+
+`background.rs::collect_refs` computes the transitive object closure of a page's `/Resources` so
+D1b can copy exactly that subtree into the destination. It's the one Track-D code path that parses
+**a PDF VibePDF didn't produce** — the user picks the source file. It recursed once per graph edge,
+so a hostile source with a deep reference chain (`obj 1 → 2 → … → 100k`) could overflow the actor
+thread's stack and kill the document. Low likelihood, but a hard crash on attacker-influenceable
+input is worth a ~15-line fix.
+
+#### Concepts learned
+
+- **Never recurse on untrusted structure.** Depth you don't control belongs on the heap, not the
+  call stack. The fix is two explicit worklists: `pending: Vec<ObjectId>` walks the *reference*
+  chain (resolve an id, enqueue its children's ids), and a per-object `inline: Vec<&Object>` walks
+  each object's nested arrays/dicts. Both loops are `while let Some(x) = stack.pop()`. The `acc`
+  set still guards cycles, so every id is resolved exactly once — the change is purely *where the
+  depth lives*, not what gets visited.
+- **A lifetime wrinkle forces the two-list shape.** The naive single `Vec<&Object>` worklist won't
+  type-check: the seed object borrows a caller *temporary* (`&Object::Dictionary(resources.clone())`)
+  while `doc.get_object(id)` returns a borrow of `doc` — two different lifetimes that can't share
+  one `Vec`. Splitting into "ids to resolve" (owned `ObjectId`, no lifetime) and a *fresh, locally
+  scoped* inline stack per object sidesteps it and, bonus, keeps the walk allocation-cheap (no
+  cloning resolved objects, unlike an owned-object worklist would).
+- **lopdf `get_object` transparently collapses bare-reference chains.** This bit the first test:
+  `N 0 obj  M 0 R` links resolve straight through to the final object, so a bare-ref chain never
+  recurses — my initial 50k-bare-ref fixture reported a closure of *one*. The genuine overflow
+  shape (and the correct hostile model) is a chain of **containers**, `<< /Next n+1 0 R >>`, which
+  `get_object` returns as-is. Read a "too small" result as a signal that your model of the library
+  is wrong, not that the code is.
+- **Put the regression where it's fast.** Driving a 100k-deep chain through the whole
+  `add_background` round-trip took ~60 s — dominated by lopdf renumber/serialize over 100k objects,
+  not by `collect_refs`. Calling the private function directly from a `#[cfg(test)] mod tests`
+  (build graph → `collect_refs` → assert `acc.len()`) runs in 0.3 s and targets exactly the
+  behavior under change. Test the unit, not the universe around it.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/background.rs` | `collect_refs` rewritten to `pending`/`inline` worklists + `push_child_refs` helper; inline `mod tests` (deep-chain + cycle). |
+| `src-tauri/tests/background.rs` | note pointing at the unit test (removed the slow round-trip attempt); existing suite still guards transitive copy. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §7.3.10 — indirect objects and the `R` reference syntax (why a chain is legal).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -515,6 +515,17 @@ rejection — and every other failed canvas-tool write — now lands in a **toas
 `console.warn`-only catches on user actions were replaced (passive read/sync failures still just
 log).
 
+**Untrusted-input hardening (P4.HF4).** D1b's `import_page_as_form` copies a page's resource
+closure out of a **user-picked source PDF** — the one place a Track-D writer parses bytes VibePDF
+didn't produce. `background.rs::collect_refs`, which computes that closure, previously recursed on
+the object graph, so a crafted deep reference chain could overflow the actor thread's stack. It is
+now two explicit worklists — `pending` (object ids, driving the reference chain) and a per-object
+`inline` stack (nested arrays/dicts) — so neither reference depth nor inline nesting can grow the
+call stack; the `acc` set still bounds each id to one visit. Behaviour on valid input is
+unchanged. Testing surfaced a lopdf subtlety worth recording: `get_object` transparently collapses
+bare `M 0 R` indirection, so the genuine overflow shape is a chain of *containers*
+(`<< /Next n+1 0 R >>`), which the regression test uses.
+
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,
 mark dirty, return `HistoryState`), exposed as `pdf_replace_text_run`. The frontend
