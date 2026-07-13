@@ -102,19 +102,25 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 > (dialogs show the message; canvas tools toast it via 3.5) instead of silent mojibake. **Stage 2
 > — font embedding for true Unicode — remains** (below, "the real feature"); still its own ship.
 >
-> **✅ STAGE 2 STARTED 2026-07-12 (P4.HF5)** — true Unicode via **PDFium font embedding** (no new
-> Rust dependency — PDFium already ships a font engine, honouring `docs/03`'s deliberate
-> no-font-parser stance). New `font_embed::embed_runs` loads a system TrueType font
-> (`load_true_type_from_bytes`) and places PDFium text objects — PDFium writes the CIDFontType2 /
-> Type0 + `/ToUnicode` + subsetting on save. `cos::ensure_winansi` became a **branch**
-> (`cos::winansi_fits`): WinAnsi text keeps the cheap base-14 lopdf path; non-WinAnsi routes to
-> embedding, falling back to the HF3 rejection only when no covering font exists. **Wired into one
-> writer as a tracer — header/footer** (CJK/Coptic footers now render, proven by fixture-font
-> round-trip + re-extraction). **Remaining (each its own ship):** the other 6 text writers
-> (watermark, text box, free-text ×2, stamp, image-stamp), precise per-glyph font *coverage*
-> selection (today: best-effort broad face; exotic scripts may show `.notdef`), the HF2
-> marked-content tag on embedded runs, and exact embedded-font metrics for centre/right alignment
-> (shared with 3.10).
+> **✅ STAGE 2 STARTED 2026-07-12 (P4.HF5)** — true Unicode via **PDFium font embedding**. New
+> `font_embed::embed_runs` loads a system TrueType font (`load_true_type_from_bytes`) and places
+> PDFium text objects — PDFium writes the CIDFontType2 / Type0 + `/ToUnicode` + `/FontFile2`.
+> `cos::ensure_winansi` became a **branch** (`cos::winansi_fits`): WinAnsi text keeps the cheap
+> base-14 lopdf path; non-WinAnsi routes to embedding, falling back to the HF3 rejection only when
+> no covering font exists. **Wired into one writer as a tracer — header/footer** (CJK/Coptic
+> footers render, proven by fixture-font round-trip + re-extraction).
+>
+> **✅ SIZE FIXED 2026-07-12 (P4.HF6)** — PDFium embeds the *whole* face (its native subset flag is
+> unreachable through `pdfium-render` 0.9.1), so a Cyrillic footer was **15 MB**. Now
+> `font_embed::subset_font` subsets the face to just the used glyphs *before* embedding, via
+> **`subsetter` 0.1 + `ttf-parser` 0.25** (both MIT/Apache, zero-dependency; the size cost of the
+> "no font parser" call is finally paid, justified in `docs/03`). Same footer → **60 KB** (~256×).
+> `subsetter`'s PDF profile preserves original glyph-ids + cmap, so PDFium still resolves Unicode
+> on the subset; unparseable faces embed whole (correct, not small). **Remaining (each its own
+> ship):** the other 6 text writers (watermark, text box, free-text ×2, stamp, image-stamp),
+> precise per-glyph font *coverage* selection (today: best-effort broad face; exotic scripts may
+> show `.notdef`), the HF2 marked-content tag on embedded runs, and exact embedded-font metrics for
+> centre/right alignment (shared with 3.10).
 
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,

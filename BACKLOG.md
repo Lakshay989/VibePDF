@@ -756,11 +756,13 @@ C4a/b, B3b). Four issues found + fixed this session:
   `ensure_winansi` → branch (`winansi_fits`); WinAnsi keeps base-14, non-WinAnsi embeds (falls back
   to HF3 reject when no covering font). Tracer wired into **header/footer**. Committed fixture
   `tests/fixtures/fonts/NotoSansCoptic-Regular.ttf` (28 KB, OFL).
+- ✅ **DONE 2026-07-12 (P4.HF6)** — **Font subsetting (was the top follow-up).**
+  `font_embed::subset_font` subsets the face to the used glyphs before embedding, via `subsetter`
+  0.1 + `ttf-parser` 0.25 (MIT/Apache, zero-dep). Cyrillic footer **15 MB → 60 KB**. PDFium's
+  native `FPDF_SUBSET_NEW_FONTS` flag was unreachable through pdfium-render 0.9.1 (a future
+  pdfium-render bump could switch to it and drop these deps).
 - **⏭️ TODO — 3.2 stage-2 follow-ups (ordered):**
-  1. **Font subsetting — the size fix (top priority).** PDFium embeds the *full* font on save (a
-     Cyrillic footer with Arial Unicode → ~15 MB). Need either self-subsetting or picking small
-     per-script faces. Blocks real-world use and blocks converting the other writers.
-  2. **The other 6 text writers** (watermark, text box, free-text add/update, stamp, image-stamp):
+  1. **The other 6 text writers** (watermark, text box, free-text add/update, stamp, image-stamp):
      each grows the same `winansi_fits` branch → `embed_runs`. Free-text/stamps are `/AP` streams,
      so they need embedding *inside* an annotation appearance — trickier than page-content writers.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without

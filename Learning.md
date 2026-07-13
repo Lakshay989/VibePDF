@@ -6338,6 +6338,55 @@ subsetting) — exactly the dependency `docs/03_TECH_STACK.md` deliberately refu
 
 ---
 
+## P4.HF6 — Font subsetting: the size fix HF5 left behind
+
+#### Problem
+
+HF5 shipped Unicode footers — but a Cyrillic footer came out **15 MB**, because PDFium embeds the
+*whole* face and doesn't subset. The fix is to embed only the glyphs the text uses, which means
+parsing the font — exactly the dependency `docs/03` had refused.
+
+#### Concepts learned
+
+- **The engine *has* the feature; the binding hides it.** PDFium exposes `FPDF_SUBSET_NEW_FONTS`,
+  a save flag that subsets newly-added fonts — the zero-dependency fix. But `pdfium-render` 0.9.1
+  hardcodes `flags = 0` in `save_to_writer` and keeps the document handle + the `FPDF_FILEWRITE`
+  callback `pub(crate)`, so there's no way to reach it. Lesson: "the capability exists in the C
+  library" and "the capability is reachable from safe Rust" are different questions — check the
+  *binding's* surface, not just the engine's.
+- **When you must add the dependency you swore off, add the smallest one — and verify the tree,
+  don't trust the pitch.** I told the user `subsetter` was "tiny," then `cargo add` resolved
+  `subsetter 0.2.6`, which drags in the whole **fontations** stack (skrifa/read-fonts/write-fonts/
+  kurbo/euclid/…, 11 crates) *and* needs rustc 1.85 > our 1.80 MSRV. Pinning `subsetter 0.1` gave
+  the crate I actually meant: **zero transitive dependencies**, MSRV-clean. Always `cargo tree` +
+  check `license` + check the MSRV note after adding, before believing your own justification.
+- **The subset must stay self-consistent for whoever renders it.** `subsetter`'s PDF profile keeps
+  *original* glyph-ids (emptying the unused ones) and preserves the `cmap`. That's the property
+  that lets us keep the whole HF5 PDFium path unchanged: PDFium re-runs its Unicode→GID cmap lookup
+  on the subset and finds the (same-numbered) kept glyph. Had it renumbered glyphs or dropped the
+  cmap, PDFium would render `.notdef` and I'd have been forced into building the CID font by hand.
+  The one-line spike (`subset_font` → `embed_runs` → re-extract) settled that before any wiring.
+- **Degrade to correct, not to broken.** `subset_font` returns the *full* font on any parse/subset
+  error (odd container, `.ttc`, subsetter edge case). A bloated-but-correct embed always beats a
+  hard failure or a corrupt font — the same "never silently break a PDF" rule the save path lives
+  by, applied one layer down.
+
+Result: the same footer went **15 MB → 60 KB** (~256×), with the render byte-identical.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/Cargo.toml` | `subsetter = "0.1"`, `ttf-parser = "0.25"` (both MIT/Apache, zero-dep; justified inline + in docs/03). |
+| `src-tauri/src/pdf/font_embed.rs` | `subset_font` (codepoints → gids via ttf-parser → `subsetter::subset`); `embed_runs` subsets before `load_true_type_from_bytes`. Spike/regression test: subset shrinks + still round-trips. |
+
+#### Further reading
+
+- `subsetter` docs — `Profile::pdf`, what tables it keeps/drops for embedding.
+- PDFium `fpdf_save.h` — `FPDF_SUBSET_NEW_FONTS` and the save-flag bitmask (the road not taken).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

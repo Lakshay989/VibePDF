@@ -42,6 +42,15 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # default-features off: we need only the core object model + nom parser, not
 # date parsing (chrono/jiff/time) or rayon parallelism.
 lopdf = { version = "0.36.0", default-features = false }
+# Font subsetting for embedded-Unicode text (P4.HF6 / docs/03 "Font embedding +
+# subsetting"). PDFium embeds the *whole* face and its native subset flag is
+# unreachable through pdfium-render 0.9.1, so we subset before embedding: a
+# Cyrillic footer went 15 MB → 60 KB. Both crates are MIT/Apache-2.0 with **zero
+# transitive dependencies**, read/produce font bytes only (no PDF render/edit, no
+# overlap with PDFium/lopdf). `subsetter` pinned to 0.1 on purpose — 0.2.x pulls
+# the whole fontations stack (11 crates) and requires rustc 1.85 > our MSRV.
+ttf-parser = "0.25.1"       # RazrFalcon; read-only: codepoint → glyph-id lookup
+subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
 
 [dev-dependencies]
 pdfium-render = "0.9"

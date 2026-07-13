@@ -89,9 +89,16 @@ The newer `pdfium` crate (with thread-safe init via `parking_lot::ReentrantMutex
 
 **Known limits:** encrypted-PDF *structural* edits and exotic object-stream layouts are not yet exercised beyond our fixtures; revisit when a real file needs them.
 
-### Font embedding — through PDFium, not a new font parser (P4.HF5)
+### Font embedding + subsetting — PDFium for encoding, `subsetter`/`ttf-parser` for size (P4.HF5 + HF6)
 
-Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic, Greek, …) requires an *embedded* font, which normally means a TrueType-parsing/subsetting crate. We **do not** add one: PDFium (already linked) contains a full font engine, so `pdf/font_embed.rs` calls `PdfFonts::load_true_type_from_bytes` + `create_text_object` and PDFium writes the `/Type0` + `/CIDFontType2` + `/ToUnicode` + `/FontFile2` itself. This keeps `font_resolver.rs`'s deliberate "no font parser" stance intact (that module still only *matches names*; embedding hands raw bytes to PDFium, never parsing them in Rust). **Trade-off, tracked in BACKLOG:** PDFium embeds the *full* font on save — it does not subset — so an embedded run bloats the file by the font's size. Self-subsetting (which *would* want a font-parsing dependency, to be re-evaluated then) or small per-script faces is the follow-up.
+Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic, Greek, …) requires an *embedded* font. **The encoding side takes no font parser:** PDFium (already linked) contains a full font engine, so `pdf/font_embed.rs` calls `PdfFonts::load_true_type_from_bytes` + `create_text_object` and PDFium writes the `/Type0` + `/CIDFontType2` + `/ToUnicode` + `/FontFile2` itself. `font_resolver.rs`'s "no font parser for *name matching*" stance is unchanged (it still only matches names).
+
+**The size side, however, does need a parser (P4.HF6).** PDFium embeds the *whole* face — it does not subset — so a Cyrillic footer using Arial Unicode came out **15 MB**. PDFium's native subset flag (`FPDF_SUBSET_NEW_FONTS`) is unreachable through `pdfium-render` 0.9.1 (the document handle + file-writer are `pub(crate)`, and `save_to_writer` hardcodes `flags = 0`). So we subset the face *ourselves* before handing it to PDFium, in `font_embed::subset_font`:
+
+- **`subsetter` (0.1, MIT/Apache, zero-dependency)** — the Typst team's PDF font subsetter. `Profile::pdf(&glyph_ids)` keeps only the used glyphs *and preserves original glyph-ids + the `cmap`*, so PDFium's Unicode→GID lookup still resolves on the subset (verified: the same footer is now **60 KB**, ~256× smaller).
+- **`ttf-parser` (0.25, MIT/Apache, zero-dependency)** — RazrFalcon's read-only parser, used only to map the runs' codepoints → glyph-ids for the subset set.
+
+**Why this is consistent with the "no double engine / minimal deps" rules:** both crates are permissive, zero-transitive-dependency, and read/produce font *bytes* — they don't render or edit PDFs (no overlap with PDFium or lopdf). They're the smallest tools that do exactly one thing PDFium won't. `subset_font` degrades gracefully — an unparseable or un-subsettable face embeds whole (bloated but correct), never a hard failure. *(The heavier `subsetter` 0.2.x / `fontations` stack and `allsorts` were passed over for tree size.)*
 
 ---
 

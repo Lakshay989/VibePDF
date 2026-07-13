@@ -2893,6 +2893,38 @@ HF3 rejection when none. Tracer wired into **header/footer** only. Follow-ups: f
 
 ---
 
+### P4.HF6 — Font subsetting, the HF5 size fix (this commit)
+
+**New dependencies** (the "no font parser" call, finally paid — justified in docs/03):
+`subsetter = "0.1"` + `ttf-parser = "0.25"`, both **MIT/Apache-2.0, zero transitive deps**.
+
+```bash
+# Dependency add + audit (pinned 0.1 — the 0.2.x subsetter drags in the fontations
+# stack (skrifa/read-fonts/write-fonts/kurbo/euclid, 11 crates) and needs rustc 1.85 > our 1.80).
+cargo add subsetter@0.1 ttf-parser
+cargo tree -p subsetter    # → subsetter v0.1.1 (no children)
+
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (doc_markdown backticks via clippy --fix)
+npm run test:rust      # EXIT 0, 368 passed (+1). New: font_embed::tests::
+#   subset_shrinks_font_and_still_embeds_unicode — subset < full AND PDFium re-extracts through it.
+
+# Write path → verification artifact (regenerated HF5 footer):
+cargo test --test header_footer hf_embedded_unicode_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-hf-unicode.pdf (→ /tmp/vibepdf-verify.pdf).
+#   SIZE: 15 MB → 60 KB (~256×). Structure intact: /Type0 /CIDFontType2 /ToUnicode /FontFile2.
+```
+
+FABLE_REVIEW **3.2 stage-2 size fix**. PDFium embeds the whole face; its native
+`FPDF_SUBSET_NEW_FONTS` save flag is unreachable through pdfium-render 0.9.1 (handle + file-writer
+`pub(crate)`, `flags` hardcoded 0). So `font_embed::subset_font` subsets the face to just the runs'
+glyphs before `load_true_type_from_bytes` (ttf-parser: codepoints→gids; subsetter: `Profile::pdf`,
+which keeps original gids + cmap so PDFium still resolves Unicode). Unparseable faces embed whole
+(correct, not small). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -2,10 +2,11 @@
 //! base-14 fonts can't, by embedding a system TrueType font through `PDFium`.
 //!
 //! `PDFium` already ships a full font engine; `load_true_type_from_bytes` embeds a
-//! TTF as a CIDFontType2/Type0 with a `/ToUnicode` map and subsets it on save. So
-//! true-Unicode text needs **no Rust font-parsing dependency** (the one
-//! `docs/03_TECH_STACK.md` deliberately avoids): we hand `PDFium` the font bytes and
-//! Unicode strings, and it does the rest. Callers branch here only when
+//! TTF as a CIDFontType2/Type0 with a `/ToUnicode` map — so the *rendering* side
+//! needs **no Rust font-parsing dependency** for encoding. `PDFium` does **not**
+//! subset, though (it embeds the whole face), so [`subset_font`] first reduces the
+//! font to just the glyphs the runs use, via the lightweight `subsetter` +
+//! `ttf-parser` crates (P4.HF6). Callers branch here only when
 //! [`crate::pdf::cos::winansi_fits`] is false — `WinAnsi` text keeps the cheap
 //! base-14 lopdf path, so a plain "Page 1" footer never pays for an embedded font.
 //!
@@ -21,12 +22,41 @@
 //!
 //! [`visual_transform`]: crate::pdf::cos::visual_transform
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use pdfium_render::prelude::*;
 
 use crate::error::CommandError;
 use crate::pdf::document::{pdfium, pdfium_lock};
+
+/// Subset `font_bytes` down to only the glyphs needed to render `texts`, so the
+/// embedded `/FontFile2` carries a handful of glyphs instead of the whole face
+/// (`FABLE_REVIEW` 3.2 stage-2 size fix). `PDFium` won't subset for us, so we do it
+/// up front with `subsetter` — its PDF profile keeps original glyph-ids and the
+/// `cmap`, so `PDFium`'s Unicode→GID lookup still resolves on the subset.
+///
+/// **Correctness over size:** if the face can't be parsed or subsetted (an
+/// unusual container, a `.ttc`, a subsetter edge case), this returns the full
+/// font unchanged — a bloated-but-correct embed, never a hard failure.
+fn subset_font(font_bytes: &[u8], texts: &[&str]) -> Vec<u8> {
+    let Ok(face) = ttf_parser::Face::parse(font_bytes, 0) else {
+        return font_bytes.to_vec();
+    };
+    // `.notdef` (gid 0) plus every covered codepoint's glyph. Uncovered chars are
+    // simply skipped — that's the existing coverage gap, not this step's concern.
+    let mut gids: BTreeSet<u16> = BTreeSet::new();
+    gids.insert(0);
+    for text in texts {
+        for ch in text.chars() {
+            if let Some(gid) = face.glyph_index(ch) {
+                gids.insert(gid.0);
+            }
+        }
+    }
+    let gids: Vec<u16> = gids.into_iter().collect();
+    subsetter::subset(font_bytes, 0, subsetter::Profile::pdf(&gids))
+        .unwrap_or_else(|_| font_bytes.to_vec())
+}
 
 /// One positioned run of embedded Unicode text.
 pub(crate) struct EmbedRun {
@@ -55,6 +85,13 @@ pub(crate) fn embed_runs(
         return Ok(bytes.to_vec());
     }
 
+    // Subset the face to just the glyphs these runs use *before* handing it to
+    // PDFium — PDFium embeds whatever font it's given without subsetting, so this
+    // is what keeps an embedded run from bloating the file by the whole font
+    // (`FABLE_REVIEW` 3.2 stage-2 size fix). Parsing is pure Rust, no lock needed.
+    let texts: Vec<&str> = runs.iter().map(|run| run.text.as_str()).collect();
+    let subset = subset_font(font_bytes, &texts);
+
     let _guard = pdfium_lock()?;
     let mut doc = pdfium()?
         .load_pdf_from_byte_vec(bytes.to_vec(), None)
@@ -65,7 +102,7 @@ pub(crate) fn embed_runs(
     // range (CJK, Indic, …) via a 16-bit CID keyspace.
     let token = doc
         .fonts_mut()
-        .load_true_type_from_bytes(font_bytes, true)
+        .load_true_type_from_bytes(&subset, true)
         .map_err(CommandError::from)?;
 
     place_and_save(doc, token, runs)
@@ -184,6 +221,36 @@ mod tests {
         assert!(
             extracted.contains(text),
             "embedded Coptic text must survive reopen; got: {extracted:?}",
+        );
+    }
+
+    /// P4.HF6 spike / regression: subsetting shrinks the font *and* `PDFium` still
+    /// renders + re-extracts the Unicode through the subset (proving `subsetter`'s
+    /// PDF profile keeps a cmap `PDFium` can resolve). If this fails, Path 1 is dead
+    /// and we'd fall back to building the CID font in lopdf — stop and report.
+    #[test]
+    fn subset_shrinks_font_and_still_embeds_unicode() {
+        let full = coptic_font();
+        let text = "\u{2C81}\u{2C83}\u{2C85}"; // Ⲁ Ⲃ Ⲅ
+        let sub = subset_font(&full, &[text]);
+        assert!(
+            sub.len() < full.len(),
+            "subset ({}) must be smaller than the full font ({})",
+            sub.len(),
+            full.len(),
+        );
+        let runs = [EmbedRun {
+            page: 0,
+            text: text.to_string(),
+            size: 24.0,
+            color: (0.0, 0.0, 0.0),
+            matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 700.0],
+        }];
+        let out = embed_runs(&hello_bytes(), &sub, &runs).expect("embed subset");
+        assert!(
+            page0_text(&out).contains(text),
+            "subset-embedded Coptic must survive reopen; got {:?}",
+            page0_text(&out),
         );
     }
 
