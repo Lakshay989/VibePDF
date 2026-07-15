@@ -196,6 +196,7 @@ fn add_header_footer_embedded(
                 // rotation (a,b,c,d) and the page-space baseline.
                 matrix: place_in_visual_space(vt, vx, vy),
                 behind: false,
+                underline: None,
             });
         }
     }

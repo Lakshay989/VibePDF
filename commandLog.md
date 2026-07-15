@@ -2951,6 +2951,32 @@ WinAnsi keeps the base-14 `/ExtGState` path unchanged. 4 text writers remain (te
 
 ---
 
+### P4.HF8 — Text-box text embedding (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (doc_markdown backticks via clippy --fix)
+npm run test:rust      # EXIT 0, 378 passed. New: font_embed underline path spike;
+#   cos::text_box_embed_tests (wrap into >1 run, one underline rule/line, base-14 unchanged).
+#   winansi non_winansi_text_box → _now_embeds; error_names repointed text-box → free-text.
+
+# Write path → verification artifact:
+cargo test --test text_box text_box_embedded_unicode_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-text-box-unicode.pdf (→ /tmp/vibepdf-verify.pdf): multi-line
+#   underlined Russian text box. 48 KB (subsetted). /Type0 + /ToUnicode.
+```
+
+FABLE_REVIEW **3.2 stage-2**, third (last page-content) writer. `EmbedRun.underline: Option<f32>`
+drawn as a PDFium `create_path_object_line` rule under the run matrix. `cos::add_text_box_embedded`
+reuses the base-14 `wrap_lines`/`free_text_inner_width` layout → one run per wrapped line;
+`add_text_box` branches on `winansi_fits`. WinAnsi keeps `free_text_appearance_content`. 3
+annotation-`/AP` writers remain (free-text ×2, stamp). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -77,6 +77,10 @@ pub(crate) struct EmbedRun {
     /// Draw *under* the page's existing content (inserted at z-index 0) instead
     /// of on top. Used by a "behind" watermark.
     pub behind: bool,
+    /// When `Some(width)`, draw an underline rule `width` points long beneath the
+    /// text (a text box with underline). `None` leaves it un-ruled. The rule rides
+    /// the same `matrix`, so it lands under the run wherever the run lands.
+    pub underline: Option<f32>,
 }
 
 /// Embed `runs` into `bytes` using `font_bytes` (a TrueType program that must
@@ -183,6 +187,28 @@ fn place_run<'a>(
         object.set_fill_color(color).map_err(CommandError::from)?;
         object.apply_matrix(matrix).map_err(CommandError::from)?;
     }
+
+    // Underline: a stroked rule under the baseline, in the run's local space (so
+    // the run matrix carries it under the text). Same offset/thickness the base-14
+    // `free_text_appearance_content` uses.
+    if let Some(width) = run.underline {
+        if width > 0.0 {
+            let uy = PdfPoints::new(-run.size * 0.12);
+            let thickness = PdfPoints::new((run.size * 0.06).max(0.4));
+            let mut rule = page
+                .objects_mut()
+                .create_path_object_line(
+                    PdfPoints::new(0.0),
+                    uy,
+                    PdfPoints::new(width),
+                    uy,
+                    color,
+                    thickness,
+                )
+                .map_err(CommandError::from)?;
+            rule.apply_matrix(matrix).map_err(CommandError::from)?;
+        }
+    }
     Ok(())
 }
 
@@ -239,6 +265,7 @@ mod tests {
             color: (0.0, 0.0, 0.0),
             opacity: 1.0,
             behind: false,
+            underline: None,
             matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 700.0],
         }];
         let out = embed_runs(&hello_bytes(), &coptic_font(), &runs).expect("embed");
@@ -271,6 +298,7 @@ mod tests {
             color: (0.0, 0.0, 0.0),
             opacity: 1.0,
             behind: false,
+            underline: None,
             matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 700.0],
         }];
         let out = embed_runs(&hello_bytes(), &sub, &runs).expect("embed subset");
@@ -292,6 +320,7 @@ mod tests {
             color: (0.0, 0.0, 0.0),
             opacity: 1.0,
             behind: false,
+            underline: None,
             matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 500.0],
         }];
         let out = embed_runs(&hello_bytes(), &coptic_font(), &runs).expect("embed");
@@ -306,6 +335,7 @@ mod tests {
             color: (0.0, 0.0, 0.0),
             opacity,
             behind,
+            underline: None,
             matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 650.0],
         }];
         embed_runs(&hello_bytes(), &coptic_font(), &runs).expect("embed")
@@ -339,5 +369,40 @@ mod tests {
             on_top.find("VibePDF") < on_top.find(mark),
             "on-top: embedded run follows page content; got {on_top:?}",
         );
+    }
+
+    fn page0_path_count(bytes: &[u8]) -> usize {
+        let _guard = pdfium_lock().expect("lock");
+        let doc = pdfium()
+            .expect("pdfium")
+            .load_pdf_from_byte_vec(bytes.to_vec(), None)
+            .expect("reopen");
+        let page = doc.pages().get(0).expect("page 0");
+        let n = page.objects().iter().filter(|o| o.as_path_object().is_some()).count();
+        drop(doc);
+        n
+    }
+
+    /// P4.HF8: an `underline: Some(width)` run adds a stroked path rule; `None`
+    /// adds none. (hello.pdf has no path objects of its own, so the count is ours.)
+    #[test]
+    fn underline_run_adds_a_path_rule() {
+        let text = "\u{2C81}\u{2C83}";
+        let run = |underline| {
+            [EmbedRun {
+                page: 0,
+                text: text.to_string(),
+                size: 24.0,
+                color: (0.0, 0.0, 0.0),
+                opacity: 1.0,
+                behind: false,
+                underline,
+                matrix: [1.0, 0.0, 0.0, 1.0, 72.0, 650.0],
+            }]
+        };
+        let ruled = embed_runs(&hello_bytes(), &coptic_font(), &run(Some(40.0))).expect("embed");
+        let plain = embed_runs(&hello_bytes(), &coptic_font(), &run(None)).expect("embed");
+        assert_eq!(page0_path_count(&ruled), 1, "underline adds exactly one path rule");
+        assert_eq!(page0_path_count(&plain), 0, "no underline → no path rule");
     }
 }

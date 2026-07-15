@@ -112,9 +112,17 @@ fn non_winansi_header_footer_now_embeds() {
 }
 
 #[test]
-fn non_winansi_text_box_rejected() {
+fn non_winansi_text_box_now_embeds() {
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF8): text box, like watermark/header-footer,
+    // now embeds a covering system font for non-WinAnsi text. With a face present
+    // it succeeds + reopens; without one it falls back to the HF3 rejection.
     let r = add_text_box(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "日本語", "Helvetica", 12.0, "#000000", false, false, false);
-    assert!(is_invalid(r));
+    if vibepdf_lib::pdf::font_resolver::covering_font_bytes("日本語").is_some() {
+        let out = r.expect("embeds a covering font when one exists");
+        assert!(Document::load_mem(&out).is_ok(), "embedded text box reopens cleanly");
+    } else {
+        assert!(is_invalid(r), "with no covering font, falls back to the HF3 rejection");
+    }
 }
 
 #[test]
@@ -143,8 +151,8 @@ fn non_winansi_free_text_rejected() {
 #[test]
 fn error_names_the_offending_characters() {
     // Four distinct offenders; the list is capped at three. Uses a writer still on
-    // the HF3 reject path (text box) — watermark/header-footer now embed instead.
-    match add_text_box(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "a日b本c語d文e", "Helvetica", 12.0, "#000000", false, false, false) {
+    // the HF3 reject path (free text) — watermark/header-footer/text-box now embed.
+    match add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "a日b本c語d文e", "Helvetica", 12.0, "#000000", false, false, false) {
         Err(CommandError::InvalidInput(m)) => {
             assert!(m.contains('日') && m.contains('本') && m.contains('語'), "names offenders: {m}");
             assert!(!m.contains('文'), "caps the list at three: {m}");

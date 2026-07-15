@@ -122,10 +122,17 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 > `EmbedRun` gained `opacity` (→ `PDFium` fill alpha) and `behind` (→ `insert_object_at_index(0)`),
 > the two watermark features header/footer lacked; the rotate-about-centre placement is baked into
 > the run matrix via a shared `cos::compose`. Cyrillic/Greek watermarks now render (subsetted-small,
-> 56 KB). **Remaining (each its own ship):** the other **4** text writers (text box, free-text ×2,
-> stamp/image-stamp label), precise per-glyph font *coverage* selection (today: best-effort broad
-> face; exotic scripts may show `.notdef`), the HF2 marked-content tag on embedded runs, and exact
-> embedded-font metrics for centre/right alignment (shared with 3.10).
+> 56 KB).
+>
+> **✅ TEXT BOX CONVERTED 2026-07-15 (P4.HF8)** — the third (and last page-content) text writer.
+> `EmbedRun` gained `underline: Option<f32>` (drawn as a `PDFium` path rule via
+> `create_path_object_line`); `add_text_box_embedded` reuses the base-14 `wrap_lines` /
+> `free_text_inner_width` layout to place **one run per wrapped line**. Multi-line Cyrillic text
+> boxes render + underline, subsetted-small. **Remaining (each its own ship):** the **3**
+> annotation-`/AP` text writers (free-text add/update, stamp/image-stamp label) — harder, since
+> `PDFium` objects live on a *page*, not inside an appearance stream — plus precise per-glyph
+> font *coverage*, the HF2 marked-content tag on embedded runs, and exact embedded-font metrics
+> (shared with 3.10).
 
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,

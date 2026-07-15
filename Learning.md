@@ -6436,6 +6436,51 @@ lever.
 
 ---
 
+## P4.HF8 — Third writer: text box (wrapping + underline)
+
+#### Problem
+
+The third text writer, text box, wraps text across multiple lines and can underline it. The
+base-14 path did both in one content-stream fragment (a `BT … T* … Tj … ET` with `re`/`S` rules).
+The PDFium embed path builds *objects*, and a text object is a single string with no underline —
+so multi-line and underline each needed decomposing.
+
+#### Concepts learned
+
+- **Reuse the layout function, not just the idea.** The base-14 text box and free-text share
+  `free_text_appearance_content`, and its wrapping lives in a standalone `wrap_lines(text, size,
+  em, max_width) -> Vec<String>`. The embed path calls the *same* `wrap_lines` on the *same*
+  `free_text_inner_width`, then emits one `EmbedRun` per line at `y_top - i*leading`. Because both
+  paths consume the identical layout primitive, a page flips between base-14 and embedded with the
+  same line breaks — no "two wrapping implementations that drift" bug waiting to happen.
+- **Underline is a path object, and it rides the text matrix.** PDFium has no text-underline
+  property, but `create_path_object_line(x1,y1,x2,y2, stroke, width)` draws the rule. Emitting it
+  in the run's *local* space — `(0, -size*0.12)` to `(width, -size*0.12)` — then `apply_matrix`ing
+  the run's matrix puts it under the glyphs wherever the run lands (and would follow rotation, if a
+  future writer rotates underlined text). Modelling underline as `EmbedRun.underline: Option<f32>`
+  (the rule width) kept the primitive's shape: text-plus-optional-rule, one object each.
+- **Every conversion re-points the "still rejects" test.** `winansi.rs`'s
+  `error_names_the_offending_characters` proves `ensure_winansi` names ≤3 offenders — it needs a
+  writer that *still* rejects. HF7 pointed it at text box; HF8 makes text box embed, so it moved to
+  free-text. There's a lesson in the churn: a test asserting "X still rejects" is really asserting
+  a *shrinking* set, and each stage-2 ship must walk it to the next un-converted writer. When the
+  last one converts, that test graduates to calling `ensure_winansi` directly.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/font_embed.rs` | `EmbedRun.underline: Option<f32>`; `place_run` draws the rule via `create_path_object_line` under the matrix. Spike test: underline adds exactly one path object. |
+| `src-tauri/src/pdf/cos.rs` | `add_text_box_embedded` — `wrap_lines` → one run per line + underline width; `winansi_fits` branch in `add_text_box`. Inline tests (wrap, underline count, base-14 unchanged). |
+| `src-tauri/tests/winansi.rs` | `non_winansi_text_box_rejected` → `…_now_embeds`; `error_names` repointed text-box → free-text. |
+| `src-tauri/tests/text_box.rs` | New: the embedded-Unicode artifact (multi-line Russian + underline). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.4.3 — text-showing operators and `TL`/`T*` leading (what the per-line runs replace).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

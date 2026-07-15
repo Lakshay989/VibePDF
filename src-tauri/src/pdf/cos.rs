@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
+use crate::pdf::font_embed::{embed_runs, EmbedRun};
 use crate::pdf::image_xobject::{embed_image, embed_png};
 
 /// Map an `lopdf` error onto our typed error. Takes the error by value so it
@@ -1289,7 +1290,18 @@ pub fn add_text_box(
     if text.trim().is_empty() {
         return Err(CommandError::InvalidInput("text-box text is empty".into()));
     }
-    ensure_winansi(text)?; // FABLE_REVIEW 3.2
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF8): non-WinAnsi text embeds a covering system
+    // font via PDFium; WinAnsi text keeps the base-14 page-content path below.
+    if !winansi_fits(text) {
+        let Some(font_bytes) = crate::pdf::font_resolver::covering_font_bytes(text) else {
+            // No embeddable face — fall back to the honest HF3 rejection.
+            ensure_winansi(text)?;
+            return Err(CommandError::Internal(
+                "non-WinAnsi text-box text unexpectedly passed the WinAnsi check".into(),
+            ));
+        };
+        return add_text_box_embedded(bytes, page, rect, text, base, size, (r, g, b), underline, &font_bytes);
+    }
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
@@ -1315,6 +1327,58 @@ pub fn add_text_box(
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// The non-WinAnsi text-box path (`FABLE_REVIEW` 3.2 stage-2): place the wrapped
+/// text as `PDFium` text objects drawn with an embedded, subsetted covering font,
+/// one run per line. Reuses the base-14 layout exactly — [`wrap_lines`] on
+/// [`free_text_inner_width`], first baseline `y1 - size`, `x0 + 2` inset,
+/// `size*1.2` leading — so a page falls back and forth between the two paths with
+/// the same geometry. Underline rides each run (drawn as a `PDFium` path rule).
+///
+/// Placement is page-space (matching the base-14 text box, which is not rotation-
+/// compensated). Known gaps vs. base-14 (shared with the other embed writers): no
+/// HF2 marked-content tag, and wrap points use the base-14 width estimate (3.10).
+#[allow(clippy::too_many_arguments)]
+fn add_text_box_embedded(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    text: &str,
+    base: &str,
+    size: f32,
+    rgb: (f32, f32, f32),
+    underline: bool,
+    font_bytes: &[u8],
+) -> Result<Vec<u8>, CommandError> {
+    let em = font_avg_em(base);
+    let [x0, _y0, _x1, y1] = rect;
+    let leading = size * 1.2;
+    let tx = x0 + 2.0; // small left inset (matches free_text_appearance_content)
+    let y_top = y1 - size; // first baseline a little below the top edge
+    let lines = wrap_lines(text, size, em, free_text_inner_width(rect));
+
+    let mut runs: Vec<EmbedRun> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim().is_empty() {
+            continue; // blank line: no run, but its index still consumes a slot
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let baseline = y_top - i as f32 * leading;
+        #[allow(clippy::cast_precision_loss)]
+        let width = size * em * line.chars().count() as f32;
+        runs.push(EmbedRun {
+            page,
+            text: line.clone(),
+            size,
+            color: rgb,
+            opacity: 1.0,
+            behind: false,
+            underline: (underline && width > 0.0).then_some(width),
+            matrix: [1.0, 0.0, 0.0, 1.0, tx, baseline],
+        });
+    }
+    embed_runs(bytes, font_bytes, &runs)
 }
 
 /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (not an
@@ -4064,4 +4128,115 @@ fn parse_pdf_date(raw: &[u8]) -> Option<i64> {
     let days = era * 146_097 + doe - 719_468;
 
     Some((days * 86_400 + hh * 3600 + mm * 60 + ss) * 1000)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod text_box_embed_tests {
+    use pdfium_render::prelude::*;
+
+    use super::{add_text_box, add_text_box_embedded};
+    use crate::pdf::document::{pdfium, pdfium_lock};
+
+    fn hello() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/basic/hello.pdf").expect("hello.pdf")
+    }
+
+    fn coptic_font() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/fonts/NotoSansCoptic-Regular.ttf")
+            .expect("committed Coptic fixture font")
+    }
+
+    /// (concatenated page-0 text, count of text objects, count of path objects).
+    fn page0_stats(bytes: &[u8]) -> (String, usize, usize) {
+        let _guard = pdfium_lock().expect("lock");
+        let doc = pdfium()
+            .expect("pdfium")
+            .load_pdf_from_byte_vec(bytes.to_vec(), None)
+            .expect("reopen");
+        let page = doc.pages().get(0).expect("page 0");
+        let (mut text, mut texts, mut paths) = (String::new(), 0usize, 0usize);
+        for object in page.objects().iter() {
+            if let Some(t) = object.as_text_object() {
+                text.push_str(&t.text());
+                texts += 1;
+            } else if object.as_path_object().is_some() {
+                paths += 1;
+            }
+        }
+        drop(doc);
+        (text, texts, paths)
+    }
+
+    /// P4.HF8: a non-WinAnsi text box wraps into multiple embedded runs and every
+    /// line's Unicode survives reopen. Narrow rect forces the wrap. Deterministic —
+    /// drives the private embedded path with the committed Coptic fixture font.
+    #[test]
+    fn embedded_text_box_wraps_and_extracts() {
+        // Six space-separated Coptic tokens in a ~50pt-wide box → several lines.
+        let coptic = "\u{2C81} \u{2C83} \u{2C85} \u{2C87} \u{2C89} \u{2C8B}";
+        let out = add_text_box_embedded(
+            &hello(),
+            0,
+            [72.0, 600.0, 122.0, 740.0],
+            coptic,
+            "Helvetica",
+            18.0,
+            (0.0, 0.0, 0.0),
+            false,
+            &coptic_font(),
+        )
+        .expect("embed text box");
+        let (text, texts, _paths) = page0_stats(&out);
+        for ch in coptic.chars().filter(|c| !c.is_whitespace()) {
+            assert!(text.contains(ch), "line glyph {ch:?} survived; got {text:?}");
+        }
+        // hello.pdf has one text object; wrapping added ≥2 more.
+        assert!(texts >= 3, "wrapped into multiple runs (text objects = {texts})");
+    }
+
+    /// Underline draws one path rule per non-blank line.
+    #[test]
+    fn embedded_text_box_underline_draws_rules() {
+        let coptic = "\u{2C81} \u{2C83} \u{2C85} \u{2C87}";
+        let out = add_text_box_embedded(
+            &hello(),
+            0,
+            [72.0, 600.0, 122.0, 740.0],
+            coptic,
+            "Helvetica",
+            18.0,
+            (0.0, 0.0, 0.0),
+            true, // underline
+            &coptic_font(),
+        )
+        .expect("embed underlined text box");
+        let (_text, texts, paths) = page0_stats(&out);
+        let lines = texts - 1; // minus hello's own text object
+        assert!(paths >= 1 && paths == lines, "one rule per line (lines={lines}, paths={paths})");
+    }
+
+    /// The `WinAnsi` path is untouched — an ASCII text box still produces a base-14
+    /// lopdf content fragment with the literal text show, not a `PDFium` embed.
+    #[test]
+    fn winansi_text_box_keeps_base14_path() {
+        let out = add_text_box(
+            &hello(),
+            0,
+            [72.0, 600.0, 500.0, 640.0],
+            "ZZWORD",
+            "Helvetica",
+            14.0,
+            "#000000",
+            false,
+            false,
+            false,
+        )
+        .expect("text box");
+        let doc = lopdf::Document::load_mem(&out).expect("load");
+        let page_id = *doc.get_pages().get(&1).expect("page 1");
+        let content =
+            String::from_utf8_lossy(&doc.get_page_content(page_id).expect("content")).into_owned();
+        assert!(content.contains("(ZZWORD) Tj"), "base-14 literal text show present");
+    }
 }

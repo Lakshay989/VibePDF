@@ -764,10 +764,14 @@ C4a/b, B3b). Four issues found + fixed this session:
 - ✅ **DONE 2026-07-12 (P4.HF7)** — **Watermark** converted (second text writer). `EmbedRun` gained
   `opacity` (→ PDFium fill alpha) + `behind` (→ `insert_object_at_index(0)`); `cos::compose` bakes
   the rotate-about-centre transform into the run matrix. Cyrillic/Greek watermarks render, ~56 KB.
+- ✅ **DONE 2026-07-15 (P4.HF8)** — **Text box** converted (third, last page-content writer).
+  `EmbedRun.underline: Option<f32>` (PDFium path rule); `add_text_box_embedded` reuses the base-14
+  `wrap_lines` layout → one run per line. Multi-line Cyrillic + underline render, ~48 KB.
 - **⏭️ TODO — 3.2 stage-2 follow-ups (ordered):**
-  1. **The other 4 text writers** (text box, free-text add/update, stamp/image-stamp label):
-     text box is page-content (cheap, like watermark). Free-text/stamps are `/AP` annotation streams,
-     so they need embedding *inside* an annotation appearance — trickier than page-content writers.
+  1. **The 3 annotation-`/AP` text writers** (free-text add/update, stamp/image-stamp label):
+     these embed *inside* an annotation appearance stream, not on the page — PDFium text objects
+     live on a page, so this is the genuinely harder class (may need building the CID font +
+     GID-indexed `/AP` in lopdf, or a different PDFium path). All page-content writers are done.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
      verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.
   4. **HF2 marked-content tag on embedded runs** — PDFium objects aren't wrapped in `/VibePDF`

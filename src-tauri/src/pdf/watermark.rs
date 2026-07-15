@@ -220,6 +220,7 @@ fn add_watermark_embedded(
             opacity,
             matrix: compose(compose(t_mat, r_mat), vt),
             behind,
+            underline: None,
         });
     }
     embed_runs(bytes, font_bytes, &runs)
