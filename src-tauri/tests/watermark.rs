@@ -246,3 +246,24 @@ async fn watermark_writes_verification_artifact() {
 
     drop(handle);
 }
+
+/// P4.HF7: a non-WinAnsi watermark takes the PDFium font-embed path (subsetted).
+/// Cyrillic + Greek, translucent, rotated, drawn behind the page content.
+#[tokio::test]
+#[ignore = "produces a verification artifact; run on demand"]
+async fn watermark_embedded_unicode_verification_artifact() {
+    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-watermark-unicode.pdf");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
+    }
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("many-pages.pdf"), None).expect("spawn");
+    handle
+        .add_watermark(vec![0, 1, 2], text_kind("Черновик Πρόχειρο"), 0.3, 45.0, true)
+        .await
+        .expect("embedded watermark");
+    handle.save(Some(out.clone())).await.expect("save");
+    eprintln!("wrote embedded-Unicode watermark artifact to {}", out.display());
+
+    drop(handle);
+}

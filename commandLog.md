@@ -2925,6 +2925,32 @@ which keeps original gids + cmap so PDFium still resolves Unicode). Unparseable 
 
 ---
 
+### P4.HF7 — Watermark text embedding (this commit)
+
+No new dependencies.
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (doc_markdown backticks via clippy --fix; float_cmp allow on the compose test)
+npm run test:rust      # EXIT 0, 370 passed. New inline: font_embed opacity/behind spikes,
+#   watermark embed + behind + winansi-base14-unchanged + compose. winansi non_winansi_watermark
+#   → _now_embeds; error_names test repointed to add_text_box (still rejects).
+
+# Write path → verification artifact:
+cargo test --test watermark watermark_embedded_unicode_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-watermark-unicode.pdf (→ /tmp/vibepdf-verify.pdf): "Черновик
+#   Πρόχειρο" behind, opacity 0.3, rotated 45°, 3 pages. 56 KB (subsetted). /Type0 + /ToUnicode.
+```
+
+FABLE_REVIEW **3.2 stage-2**, second writer. `EmbedRun` + `opacity` (→ PDFium fill alpha) + `behind`
+(→ `insert_object_at_index(0)`); `cos::compose` bakes `vt·R@centre·Td` into the run matrix.
+`watermark::add_watermark` branches on `winansi_fits` → `add_watermark_embedded` for non-WinAnsi;
+WinAnsi keeps the base-14 `/ExtGState` path unchanged. 4 text writers remain (text box, free-text
+×2, stamp/image-stamp). Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

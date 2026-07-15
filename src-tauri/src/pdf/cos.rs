@@ -1638,6 +1638,25 @@ pub(crate) fn visual_cm_line(m: [f32; 6]) -> String {
     )
 }
 
+/// Compose two PDF affine matrices `[a b c d e f]` in "apply `a` first, then `b`"
+/// order — i.e. a point `p` maps as `p · a · b`, matching a content stream that
+/// does `a cm` followed by `b cm`. Used to bake the base-14 writers' stacked
+/// `cm`/`Td` transforms into a single matrix for a `PDFium`-embedded text object.
+#[must_use]
+#[allow(clippy::many_single_char_names)]
+pub(crate) fn compose(a: [f32; 6], b: [f32; 6]) -> [f32; 6] {
+    let [a1, b1, c1, d1, e1, f1] = a;
+    let [a2, b2, c2, d2, e2, f2] = b;
+    [
+        a1 * a2 + b1 * c2,
+        a1 * b2 + b1 * d2,
+        c1 * a2 + d1 * c2,
+        c1 * b2 + d1 * d2,
+        e1 * a2 + f1 * c2 + e2,
+        e1 * b2 + f1 * d2 + f2,
+    ]
+}
+
 /// Give `page_id` its own `/Resources /Font` carrying a fresh base-14 font, and
 /// return the (collision-free) resource name to reference in a `Tf` operator.
 fn register_page_font(

@@ -6387,6 +6387,55 @@ Result: the same footer went **15 MB → 60 KB** (~256×), with the render byte-
 
 ---
 
+## P4.HF7 — Second writer onto the embed path: watermark
+
+#### Problem
+
+HF5/HF6 proved font embedding on *one* writer (header/footer). Watermark is the second — but it
+has three things header/footer didn't: **opacity**, **arbitrary rotation**, and **behind-vs-on-top**
+z-order. The base-14 path did these with an `/ExtGState`, a rotation `cm`, and `prepend` vs
+`append`. The PDFium embed path builds *objects*, not a content stream, so each needed a different
+lever.
+
+#### Concepts learned
+
+- **A tracer's real payoff is the second consumer.** The first embed writer (header/footer) proved
+  the mechanism; the second told me whether the *seam* was right. `EmbedRun` grew two fields
+  (`opacity`, `behind`) and the shared primitive absorbed both — no rewrite. That the abstraction
+  bent instead of breaking is the signal the tracer-bullet was drawn in the right place. The
+  remaining four writers should now be nearly free.
+- **Find the object-level lever for each content-stream trick.** Content streams do opacity with an
+  `/ExtGState /ca`, z-order by *where* you concatenate, rotation with a `cm`. PDFium objects have
+  one-to-one equivalents: fill **alpha** on the colour (`FPDFPageObj_SetFillColor` takes it and
+  emits the `/ca` for you), **`insert_object_at_index(0)`** for "behind", and the object's own
+  **matrix** for rotation. Same PDF concepts, different API surface — the trick is knowing they map.
+- **Bake stacked `cm`/`Td` into one matrix with a compose helper.** The base-14 watermark applies
+  `vt cm` · `R@centre cm` · `Td(-w/2,-size/3)` — three transforms. A PDFium object takes exactly one
+  matrix, so `cos::compose(a, b)` (apply `a` then `b`, i.e. `p·a·b`) collapses the stack:
+  `compose(compose(T, R), vt)`. Deriving it once and unit-testing it (identity is a no-op,
+  translate∘translate adds) made both header/footer and watermark share the geometry instead of
+  each hand-rolling it.
+- **Behind-insert forced a lifetime tie.** Creating a *detached* text object (`PdfPageTextObject::new`,
+  needs `&doc`) and inserting it into the page (needs `&mut PdfPage`) made the borrow checker
+  demand a shared `'a` across `doc` and `page` — because a `&mut PdfPage<'2>` is invariant. One
+  named lifetime on `place_run<'a>` fixed it. Mutable references being invariant over their type
+  parameter is the kind of thing you re-learn exactly when a two-borrow function stops compiling.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/font_embed.rs` | `EmbedRun` + `opacity`/`behind`; `place_run` branches append vs `insert_object_at_index(0)`, alpha from opacity. Spike tests: opacity round-trips, behind precedes content. |
+| `src-tauri/src/pdf/cos.rs` | `compose` — shared 2D affine multiply (with a unit test in watermark). |
+| `src-tauri/src/pdf/watermark.rs` | `winansi_fits` branch → `add_watermark_embedded` (rotate-about-centre matrix, opacity, behind). WinAnsi keeps the ExtGState path. Inline tests. |
+| `src-tauri/tests/winansi.rs` | `non_winansi_watermark_rejected` → `…_now_embeds`; `error_names_the_offending_characters` repointed to a still-rejecting writer (text box). |
+
+#### Further reading
+
+- PDF 32000-1:2008 §8.3.3 — coordinate transforms and `cm` composition order.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

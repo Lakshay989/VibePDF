@@ -761,9 +761,12 @@ C4a/b, B3b). Four issues found + fixed this session:
   0.1 + `ttf-parser` 0.25 (MIT/Apache, zero-dep). Cyrillic footer **15 MB → 60 KB**. PDFium's
   native `FPDF_SUBSET_NEW_FONTS` flag was unreachable through pdfium-render 0.9.1 (a future
   pdfium-render bump could switch to it and drop these deps).
+- ✅ **DONE 2026-07-12 (P4.HF7)** — **Watermark** converted (second text writer). `EmbedRun` gained
+  `opacity` (→ PDFium fill alpha) + `behind` (→ `insert_object_at_index(0)`); `cos::compose` bakes
+  the rotate-about-centre transform into the run matrix. Cyrillic/Greek watermarks render, ~56 KB.
 - **⏭️ TODO — 3.2 stage-2 follow-ups (ordered):**
-  1. **The other 6 text writers** (watermark, text box, free-text add/update, stamp, image-stamp):
-     each grows the same `winansi_fits` branch → `embed_runs`. Free-text/stamps are `/AP` streams,
+  1. **The other 4 text writers** (text box, free-text add/update, stamp/image-stamp label):
+     text box is page-content (cheap, like watermark). Free-text/stamps are `/AP` annotation streams,
      so they need embedding *inside* an annotation appearance — trickier than page-content writers.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
      verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.

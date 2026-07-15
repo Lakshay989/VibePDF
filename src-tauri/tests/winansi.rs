@@ -78,8 +78,18 @@ fn is_invalid(r: Result<Vec<u8>, CommandError>) -> bool {
 }
 
 #[test]
-fn non_winansi_watermark_rejected() {
-    assert!(is_invalid(add_watermark(&hello(), &[0], &text_kind("日本語"), 0.3, 0.0, true)));
+fn non_winansi_watermark_now_embeds() {
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF7): watermark, like header/footer, now embeds
+    // a covering system font for non-WinAnsi text instead of rejecting. Where a
+    // face is present it succeeds + reopens; where none is, it falls back to the
+    // HF3 rejection. Never silent corruption.
+    let r = add_watermark(&hello(), &[0], &text_kind("日本語"), 0.3, 0.0, true);
+    if vibepdf_lib::pdf::font_resolver::covering_font_bytes("日本語").is_some() {
+        let out = r.expect("embeds a covering font when one exists");
+        assert!(Document::load_mem(&out).is_ok(), "embedded watermark reopens cleanly");
+    } else {
+        assert!(is_invalid(r), "with no covering font, falls back to the HF3 rejection");
+    }
 }
 
 #[test]
@@ -132,8 +142,9 @@ fn non_winansi_free_text_rejected() {
 
 #[test]
 fn error_names_the_offending_characters() {
-    // Four distinct offenders; the list is capped at three.
-    match add_watermark(&hello(), &[0], &text_kind("a日b本c語d文e"), 0.3, 0.0, true) {
+    // Four distinct offenders; the list is capped at three. Uses a writer still on
+    // the HF3 reject path (text box) — watermark/header-footer now embed instead.
+    match add_text_box(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "a日b本c語d文e", "Helvetica", 12.0, "#000000", false, false, false) {
         Err(CommandError::InvalidInput(m)) => {
             assert!(m.contains('日') && m.contains('本') && m.contains('語'), "names offenders: {m}");
             assert!(!m.contains('文'), "caps the list at three: {m}");

@@ -116,11 +116,16 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 > **`subsetter` 0.1 + `ttf-parser` 0.25** (both MIT/Apache, zero-dependency; the size cost of the
 > "no font parser" call is finally paid, justified in `docs/03`). Same footer → **60 KB** (~256×).
 > `subsetter`'s PDF profile preserves original glyph-ids + cmap, so PDFium still resolves Unicode
-> on the subset; unparseable faces embed whole (correct, not small). **Remaining (each its own
-> ship):** the other 6 text writers (watermark, text box, free-text ×2, stamp, image-stamp),
-> precise per-glyph font *coverage* selection (today: best-effort broad face; exotic scripts may
-> show `.notdef`), the HF2 marked-content tag on embedded runs, and exact embedded-font metrics for
-> centre/right alignment (shared with 3.10).
+> on the subset; unparseable faces embed whole (correct, not small).
+>
+> **✅ WATERMARK CONVERTED 2026-07-12 (P4.HF7)** — the second text writer joins the embed path.
+> `EmbedRun` gained `opacity` (→ `PDFium` fill alpha) and `behind` (→ `insert_object_at_index(0)`),
+> the two watermark features header/footer lacked; the rotate-about-centre placement is baked into
+> the run matrix via a shared `cos::compose`. Cyrillic/Greek watermarks now render (subsetted-small,
+> 56 KB). **Remaining (each its own ship):** the other **4** text writers (text box, free-text ×2,
+> stamp/image-stamp label), precise per-glyph font *coverage* selection (today: best-effort broad
+> face; exotic scripts may show `.notdef`), the HF2 marked-content tag on embedded runs, and exact
+> embedded-font metrics for centre/right alignment (shared with 3.10).
 
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,

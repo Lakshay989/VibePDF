@@ -17,11 +17,12 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, escape_pdf_string, font_avg_em, page_effective_box,
+    append_page_content, base_font, compose, escape_pdf_string, font_avg_em, page_effective_box,
     page_rotation, parse_hex_color, prepend_page_content, register_page_resource, visual_cm_line,
     visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::font_embed::{embed_runs, EmbedRun};
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -58,8 +59,26 @@ pub fn add_watermark(
         if text.trim().is_empty() {
             return Err(CommandError::InvalidInput("watermark text is empty".into()));
         }
-        // FABLE_REVIEW 3.2 — reject text base-14 fonts can't render.
-        crate::pdf::cos::ensure_winansi(text)?;
+        // FABLE_REVIEW 3.2 stage-2 (P4.HF7): non-WinAnsi watermark text embeds a
+        // covering system font via PDFium; WinAnsi text keeps the base-14 path.
+        if !crate::pdf::cos::winansi_fits(text) {
+            let Some(font_bytes) = crate::pdf::font_resolver::covering_font_bytes(text) else {
+                // No embeddable face — fall back to the honest HF3 rejection.
+                crate::pdf::cos::ensure_winansi(text)?;
+                return Err(CommandError::Internal(
+                    "non-WinAnsi watermark text unexpectedly passed the WinAnsi check".into(),
+                ));
+            };
+            return add_watermark_embedded(
+                bytes,
+                pages,
+                kind,
+                opacity,
+                rotation_deg,
+                behind,
+                &font_bytes,
+            );
+        }
     }
     let opacity = opacity.clamp(0.0, 1.0);
     let theta = rotation_deg.to_radians();
@@ -140,6 +159,70 @@ pub fn add_watermark(
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// The non-WinAnsi text-watermark path (`FABLE_REVIEW` 3.2 stage-2): place the
+/// mark as a `PDFium` text object drawn with an embedded, subsetted covering font.
+/// Geometry (rotation, effective box) comes from an lopdf pass; the placement
+/// matrix bakes the *same* `vt · R@centre · Td(-w/2,-size/3)` transform the base-14
+/// `text_content` applies, so rotated/cropped pages still land centred and upright.
+/// `opacity` becomes the object's fill alpha and `behind` inserts it under the
+/// page content — the two watermark features the base-14 path did with an
+/// `/ExtGState` + `prepend`.
+///
+/// Known gaps vs. the base-14 path (shared with header/footer): no HF2 marked-
+/// content tag on the run, and centring uses the base-14 width estimate (3.10).
+#[allow(clippy::too_many_arguments, clippy::many_single_char_names)]
+fn add_watermark_embedded(
+    bytes: &[u8],
+    pages: &[usize],
+    kind: &WatermarkKind,
+    opacity: f32,
+    rotation_deg: f32,
+    behind: bool,
+    font_bytes: &[u8],
+) -> Result<Vec<u8>, CommandError> {
+    let WatermarkKind::Text { text, font_family, size, color, bold, italic } = kind else {
+        return Err(CommandError::Internal("embedded watermark path requires text".into()));
+    };
+    let base = base_font(font_family, *bold, *italic)?;
+    let rgb = parse_hex_color(color)?;
+    let sz = size.max(1.0);
+    let opacity = opacity.clamp(0.0, 1.0);
+    let theta = rotation_deg.to_radians();
+    let (cos, sin) = (theta.cos(), theta.sin());
+    #[allow(clippy::cast_precision_loss)]
+    let width = sz * font_avg_em(base) * text.chars().count() as f32;
+    let (tx, ty) = (-width / 2.0, -sz / 3.0);
+
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_map = doc.get_pages();
+    let mut runs: Vec<EmbedRun> = Vec::with_capacity(pages.len());
+    for &p in pages {
+        let page_no = u32::try_from(p)
+            .ok()
+            .map(|n| n + 1)
+            .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {p}")))?;
+        let page_id = *page_map
+            .get(&page_no)
+            .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {p}")))?;
+        let rotate = page_rotation(&doc, page_id);
+        let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
+        let (cx, cy) = (vw / 2.0, vh / 2.0);
+        // Glyph maps as p · T · R · vt (Td, then rotate-about-centre, then visual).
+        let r_mat = [cos, sin, -sin, cos, cx, cy];
+        let t_mat = [1.0, 0.0, 0.0, 1.0, tx, ty];
+        runs.push(EmbedRun {
+            page: p,
+            text: text.clone(),
+            size: sz,
+            color: rgb,
+            opacity,
+            matrix: compose(compose(t_mat, r_mat), vt),
+            behind,
+        });
+    }
+    embed_runs(bytes, font_bytes, &runs)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -264,4 +347,122 @@ fn watermark_apply<'a>(
             .map_err(CommandError::from)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use pdfium_render::prelude::*;
+
+    use super::{add_watermark, add_watermark_embedded, WatermarkKind};
+    use crate::pdf::cos::compose;
+    use crate::pdf::document::{pdfium, pdfium_lock};
+
+    fn hello() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/basic/hello.pdf").expect("hello.pdf")
+    }
+
+    fn coptic_font() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/fonts/NotoSansCoptic-Regular.ttf")
+            .expect("committed Coptic fixture font")
+    }
+
+    fn text_kind(text: &str) -> WatermarkKind {
+        WatermarkKind::Text {
+            text: text.to_owned(),
+            font_family: "Helvetica".to_owned(),
+            size: 48.0,
+            color: "#808080".to_owned(),
+            bold: false,
+            italic: false,
+        }
+    }
+
+    fn page0_text(bytes: &[u8]) -> String {
+        let _guard = pdfium_lock().expect("lock");
+        let doc = pdfium()
+            .expect("pdfium")
+            .load_pdf_from_byte_vec(bytes.to_vec(), None)
+            .expect("reopen");
+        let page = doc.pages().get(0).expect("page 0");
+        let mut out = String::new();
+        for object in page.objects().iter() {
+            if let Some(t) = object.as_text_object() {
+                out.push_str(&t.text());
+            }
+        }
+        drop(doc);
+        out
+    }
+
+    /// `compose` bakes stacked `cm`s into one matrix: composing with identity is a
+    /// no-op, and translate-then-translate adds. (Exact integer-valued arithmetic,
+    /// so strict `f32` equality is intentional here.)
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn compose_matches_stacked_transforms() {
+        let id = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let m = [2.0, 0.0, 0.0, 3.0, 5.0, 7.0];
+        assert_eq!(compose(id, m), m);
+        assert_eq!(compose(m, id), m);
+        // p·T1·T2 translates by the sum.
+        let t1 = [1.0, 0.0, 0.0, 1.0, 10.0, 20.0];
+        let t2 = [1.0, 0.0, 0.0, 1.0, 3.0, 4.0];
+        assert_eq!(compose(t1, t2), [1.0, 0.0, 0.0, 1.0, 13.0, 24.0]);
+    }
+
+    /// P4.HF7: a non-WinAnsi text watermark takes the PDFium-embed path (rotated,
+    /// centred) and the Unicode survives reopen alongside the page's base-14 text.
+    /// Deterministic — drives the private embedded path with the fixture font.
+    #[test]
+    fn embedded_watermark_renders_and_extracts_unicode() {
+        let coptic = "\u{2C81}\u{2C83}\u{2C85}\u{2C87}"; // Ⲁ Ⲃ Ⲅ Ⲇ
+        let out = add_watermark_embedded(
+            &hello(),
+            &[0],
+            &text_kind(coptic),
+            0.3,   // translucent
+            45.0,  // rotated
+            false, // on top
+            &coptic_font(),
+        )
+        .expect("embed watermark");
+        let text = page0_text(&out);
+        assert!(text.contains(coptic), "embedded Coptic watermark round-trips; got {text:?}");
+        assert!(text.contains("VibePDF"), "the page's own base-14 text is intact");
+    }
+
+    /// A `behind` embedded watermark draws under the page content (z-index 0).
+    #[test]
+    fn embedded_watermark_behind_sits_under_content() {
+        let coptic = "\u{2C81}\u{2C83}";
+        let out = add_watermark_embedded(
+            &hello(),
+            &[0],
+            &text_kind(coptic),
+            1.0,
+            0.0,
+            true, // behind
+            &coptic_font(),
+        )
+        .expect("embed behind watermark");
+        let text = page0_text(&out);
+        assert!(
+            text.find(coptic) < text.find("VibePDF"),
+            "behind watermark precedes page content in draw order; got {text:?}",
+        );
+    }
+
+    /// The `WinAnsi` path is untouched — an ASCII "DRAFT" watermark still produces a
+    /// base-14 lopdf content fragment (`Tj` + the `/Fwm` font + opacity `ExtGState`),
+    /// not a `PDFium` embed.
+    #[test]
+    fn winansi_watermark_keeps_base14_path() {
+        let out = add_watermark(&hello(), &[0], &text_kind("DRAFT"), 0.5, 45.0, false).expect("wm");
+        let doc = lopdf::Document::load_mem(&out).expect("load");
+        let page_id = *doc.get_pages().get(&1).expect("page 1");
+        let content = String::from_utf8_lossy(&doc.get_page_content(page_id).expect("content")).into_owned();
+        assert!(content.contains("(DRAFT) Tj"), "base-14 text show still present");
+        assert!(content.contains("/Fwm"), "base-14 watermark font referenced");
+    }
 }

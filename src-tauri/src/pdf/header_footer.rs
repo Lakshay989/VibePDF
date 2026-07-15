@@ -190,10 +190,12 @@ fn add_header_footer_embedded(
                 text: shown,
                 size: sz,
                 color: rgb,
+                opacity: 1.0,
                 // Compose the run's origin `(vx, vy)` through the visual transform
                 // `vt = [a b c d e f]` so the object's matrix carries both the
                 // rotation (a,b,c,d) and the page-space baseline.
                 matrix: place_in_visual_space(vt, vx, vy),
+                behind: false,
             });
         }
     }
