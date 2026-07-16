@@ -128,11 +128,19 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 > `EmbedRun` gained `underline: Option<f32>` (drawn as a `PDFium` path rule via
 > `create_path_object_line`); `add_text_box_embedded` reuses the base-14 `wrap_lines` /
 > `free_text_inner_width` layout to place **one run per wrapped line**. Multi-line Cyrillic text
-> boxes render + underline, subsetted-small. **Remaining (each its own ship):** the **3**
-> annotation-`/AP` text writers (free-text add/update, stamp/image-stamp label) — harder, since
-> `PDFium` objects live on a *page*, not inside an appearance stream — plus precise per-glyph
-> font *coverage*, the HF2 marked-content tag on embedded runs, and exact embedded-font metrics
-> (shared with 3.10).
+> boxes render + underline, subsetted-small.
+>
+> **✅ FREE-TEXT `/AP` CONVERTED 2026-07-15 (P4.HF9)** — the annotation-`/AP` class, which PDFium
+> page-objects can't reach. New `font_embed_cid::build_cid_font` builds a `Type0` / `CIDFontType2`
+> font **by hand in lopdf** (subset via `subsetter`, real advances + metrics via `ttf-parser`,
+> `/FontFile2` + `/FontDescriptor` + `/W` + `/ToUnicode`, Identity-H). `free_text_appearance`
+> branches on `winansi_fits` → embeds the CID font into the `/AP` `/Resources` and writes
+> `<gid…> Tj` content; both `add_free_text` and `update_free_text` (which share it) get Unicode,
+> re-edit reads the plain text from `/Contents`. Spike proved a hand-built CID font renders +
+> re-extracts through PDFium. **Remaining:** only **stamp / image-stamp labels** (the same `/AP`
+> class — reuse `build_cid_font`), plus per-glyph font *coverage*, the HF2 tag, and font-program
+> compression. This CID path also *supersedes* the PDFium page-object one — a future unification
+> could move HF5–HF8 onto it for real metrics + marked-content tags.
 
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,

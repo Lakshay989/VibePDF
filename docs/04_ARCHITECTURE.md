@@ -540,11 +540,22 @@ mutate under Manual regeneration, `regenerate_content`, `save_to_bytes` — so t
 each run at a caller-supplied `[a b c d e f]` matrix, so the *same* `visual_transform` the lopdf
 writers use for rotation/CropBox carries straight over (header/footer computes it in
 `place_in_visual_space`). Font bytes come from `font_resolver::covering_font_bytes` (best-effort
-broad system face; per-glyph coverage checking is deferred). **Wired into one writer as a tracer —
-header/footer;** the other six stay HF3 reject-only until converted. Two honest gaps live in the
-code comments: PDFium embeds the *full* font (no subsetting → files grow by the font's size — the
-top follow-up), and PDFium-built objects carry no HF2 `/VibePDF` marked-content tag (so an embedded
-decoration isn't yet splice-removable).
+broad system face; per-glyph coverage checking is deferred). Subsequent ships extended this to the
+other page-content writers (HF6 added `subsetter`-based subsetting so files stay small; HF7
+watermark added opacity + behind; HF8 text box added wrapping + underline).
+
+**Two embedding backends, by necessity (P4.HF9).** The PDFium page-object path above can't reach an
+**annotation's `/AP` appearance stream** (PDFium creates text objects on a *page*, not inside a Form
+`XObject`). So free-text / stamps use a second backend: `pdf/font_embed_cid.rs::build_cid_font`
+builds a `Type0` / `CIDFontType2` font **by hand in lopdf** — subset via `subsetter` (glyph-ids
+preserved), real advances + descriptor metrics via `ttf-parser`, emitting `/FontFile2` +
+`/FontDescriptor` + `/W` + a `/ToUnicode` CMap, with Identity-H encoding. The `/AP` content then
+shows text as `<gid…> Tj` hex strings. `cos::free_text_appearance` (shared by `add_free_text` and
+`update_free_text`) branches on `winansi_fits`; the plain Unicode stays in the annotation's
+`/Contents` so re-edit reads it, not the appearance. This hand-built-CID path is strictly more
+capable than the PDFium one (works for `/AP` *and* page content, gives real metrics, can carry a
+marked-content tag) — a future unification could retire the PDFium page-object path onto it. For
+now they coexist: PDFium for page-content writers, lopdf-CID for `/AP` writers.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

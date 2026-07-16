@@ -156,3 +156,35 @@ async fn free_text_writes_verification_artifact() {
 
     drop(handle);
 }
+
+/// P4.HF9: a non-WinAnsi free-text annotation embeds a hand-built CID font into
+/// its `/AP`. Ignored; run on demand:
+///   cargo test --test free_text free_text_embedded_unicode_artifact -- --ignored
+#[tokio::test]
+#[ignore = "produces a verification artifact; run on demand"]
+async fn free_text_embedded_unicode_artifact() {
+    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-freetext-unicode.pdf");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
+    }
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+    handle
+        .add_free_text(
+            0,
+            [72.0, 560.0, 380.0, 700.0],
+            "Съешь ещё этих мягких булок — Πρόχειρο κείμενο, underlined.".into(),
+            "Helvetica".into(),
+            16.0,
+            "#103080".into(),
+            false,
+            false,
+            true, // underline
+        )
+        .await
+        .expect("embedded free text");
+    handle.save(Some(out.clone())).await.expect("save");
+    eprintln!("wrote embedded-Unicode free-text artifact to {}", out.display());
+
+    drop(handle);
+}

@@ -6481,6 +6481,58 @@ so multi-line and underline each needed decomposing.
 
 ---
 
+## P4.HF9 — Building a CID font by hand (the `/AP` class)
+
+#### Problem
+
+Free-text and stamps draw their text inside an annotation's `/AP` appearance stream — a Form
+`XObject` with its own `/Resources`. PDFium's font-embedding creates text objects on a *page*, not
+inside an `/AP`. So the entire HF5–HF8 approach doesn't reach here. The real fix is to build a
+`Type0` / `CIDFontType2` font **by hand in lopdf** and write the appearance content with
+GID-indexed strings — the largest single stage-2 piece.
+
+#### Concepts learned
+
+- **When the high-level tool can't reach, drop to the format.** A CID font is a specific object
+  graph: `/FontFile2` (the subset bytes) ← `/FontDescriptor` (flags, bbox, ascent/descent/cap from
+  the face) ← `CIDFontType2` (`/CIDToGIDMap /Identity`, `/W` widths, `/DW`) ← `Type0`
+  (`/Encoding /Identity-H`, `/DescendantFonts`, `/ToUnicode`). Assembling it is fiddly but
+  mechanical — the same shape printpdf / typst / pdf-writer all emit. Reading one working example's
+  dict layout is worth more than the spec prose.
+- **Identity-H means the 2-byte code *is* the glyph id.** With `/Encoding /Identity-H` and
+  `/CIDToGIDMap /Identity`, you don't encode characters — you encode *glyphs*: map codepoint → gid
+  (`ttf-parser`), write the gid as 4 hex, and the `/ToUnicode` CMap carries the reverse mapping so
+  copy/search still works. `subsetter` preserving original gids (HF6) is what makes this valid: the
+  gids you write still index the subset's `glyf`.
+- **Two things must agree or the text vanishes.** The `<gid> Tj` codes, the subset's glyph table,
+  and the `/ToUnicode` entries all key off the *same* glyph ids. Get one out of step and the glyph
+  renders but won't copy, or copies but renders `.notdef`. The spike — put the font in page content,
+  reopen, extract — is the single test that proves all three agree at once; it passed first try,
+  which is the payoff for matching a known-good layout exactly.
+- **Spike the risky thing in the *reachable* place.** I couldn't easily extract `/AP` text via
+  PDFium (annotation text isn't page text), so the spike put the hand-built font in **page content**
+  — same font, same encoding, extractable — proving the font works before wiring the harder `/AP`.
+  De-risk where you can observe, then wire where you can't.
+- **The plain text lives in `/Contents`, not the appearance.** Re-editing a free-text reads the
+  annotation's `/Contents` (the literal Unicode string) and regenerates the `/AP` from scratch — so
+  embedding a CID font in the `/AP` never traps the text. Keeping the source-of-truth text separate
+  from its rendered form is what makes lossy-appearance embedding safe to re-edit.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/font_embed_cid.rs` | New. `build_cid_font` — the hand-built `Type0`/`CIDFontType2` + `/ToUnicode`; `encode_hex` / `width`. Spike: PDFium renders + extracts it. |
+| `src-tauri/src/pdf/cos.rs` | `free_text_appearance` → `Result` + `winansi_fits` branch; `free_text_appearance_embedded` + `free_text_cid_content` (GID-hex `Tj`, real-advance underline). Callers drop the `ensure_winansi` gate. Inline tests. |
+| `src-tauri/tests/winansi.rs` | free-text `…_now_embeds`; `error_names` repointed free-text → stamp (the last reject-path writer). |
+| `src-tauri/tests/free_text.rs` | embedded-Unicode artifact. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §9.7.4 (CIDFonts), §9.7.5 (CMaps), §9.10.3 (`/ToUnicode`).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

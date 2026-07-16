@@ -1232,7 +1232,6 @@ pub fn add_free_text(
     let rect = grow_free_text_rect(rect, text, size, font_avg_em(base));
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
-    ensure_winansi(text)?; // FABLE_REVIEW 3.2
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1242,7 +1241,9 @@ pub fn add_free_text(
         .get(&page_no)
         .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
 
-    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b), underline);
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF9): `free_text_appearance` embeds a CID font
+    // for non-WinAnsi text, or rejects if no covering face exists.
+    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b), underline)?;
 
     let mut annot = Dictionary::new();
     annot.set("Type", Object::Name(b"Annot".to_vec()));
@@ -1802,7 +1803,6 @@ pub fn update_free_text(
     let size = font_size.max(1.0);
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
-    ensure_winansi(text)?; // FABLE_REVIEW 3.2
     let id = find_annotation_by_nm(&doc, nm)
         .ok_or_else(|| CommandError::InvalidInput(format!("free-text not found: {nm}")))?;
     let dict = doc.get_dictionary(id).map_err(cos_err)?;
@@ -1812,7 +1812,8 @@ pub fn update_free_text(
     // Keep the top edge + width; grow only downward to fit the new text.
     let rect = grow_free_text_rect(rect_bounds(dict), text, size, font_avg_em(base));
 
-    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b), underline);
+    // Non-WinAnsi text embeds a CID font (P4.HF9); rejects if no covering face.
+    let (ap, da) = free_text_appearance(&mut doc, rect, text, base, size, (r, g, b), underline)?;
     let dict = doc.get_dictionary_mut(id).map_err(cos_err)?;
     dict.set("Contents", Object::string_literal(text));
     dict.set("Rect", rect_array(rect));
@@ -1966,15 +1967,57 @@ fn free_text_appearance(
     size: f32,
     (r, g, b): (f32, f32, f32),
     underline: bool,
-) -> (Dictionary, String) {
+) -> Result<(Dictionary, String), CommandError> {
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF9): text the base-14 fonts can't render
+    // embeds a hand-built CID font into the `/AP`; WinAnsi keeps the base-14 path.
+    if !winansi_fits(text) {
+        let Some(font_bytes) = crate::pdf::font_resolver::covering_font_bytes(text) else {
+            // No embeddable face — fall back to the honest HF3 rejection.
+            ensure_winansi(text)?;
+            return Err(CommandError::Internal(
+                "non-WinAnsi free-text unexpectedly passed the WinAnsi check".into(),
+            ));
+        };
+        return free_text_appearance_embedded(doc, rect, text, &font_bytes, size, (r, g, b), underline);
+    }
+
     let content =
         free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline, "F1");
 
     // The appearance's own font resource — `/AP` is self-contained, so display
     // doesn't depend on an AcroForm `/DR`.
     let font = base14_font_dict(base);
+    let ap = wrap_free_text_ap(doc, rect, content, Object::Dictionary(font));
+    let da = format!("/F1 {size:.2} Tf {r:.4} {g:.4} {b:.4} rg");
+    Ok((ap, da))
+}
+
+/// The non-WinAnsi free-text `/AP` (P4.HF9): a hand-built `Type0` CID font
+/// (`font_embed_cid`) in the appearance's `/Resources`, and content that shows
+/// each wrapped line as an Identity-H hex string. Layout mirrors the base-14
+/// `free_text_appearance_content`; the underline rule uses the CID font's **real**
+/// advances, so it exactly spans the glyphs.
+fn free_text_appearance_embedded(
+    doc: &mut Document,
+    rect: [f32; 4],
+    text: &str,
+    font_bytes: &[u8],
+    size: f32,
+    (r, g, b): (f32, f32, f32),
+    underline: bool,
+) -> Result<(Dictionary, String), CommandError> {
+    let cid = crate::pdf::font_embed_cid::build_cid_font(doc, font_bytes, text)?;
+    let content = free_text_cid_content(rect, text, size, (r, g, b), underline, "F1", &cid);
+    let ap = wrap_free_text_ap(doc, rect, content, Object::Dictionary(cid.font_dict.clone()));
+    let da = format!("/F1 {size:.2} Tf {r:.4} {g:.4} {b:.4} rg");
+    Ok((ap, da))
+}
+
+/// Wrap a free-text appearance content string in the `/AP /N` Form `XObject`
+/// (`BBox` = `rect`, one `/Font /F1` resource), returning the annotation `/AP` dict.
+fn wrap_free_text_ap(doc: &mut Document, rect: [f32; 4], content: String, f1: Object) -> Dictionary {
     let mut fonts = Dictionary::new();
-    fonts.set("F1", Object::Dictionary(font));
+    fonts.set("F1", f1);
     let mut resources = Dictionary::new();
     resources.set("Font", Object::Dictionary(fonts));
 
@@ -1988,10 +2031,62 @@ fn free_text_appearance(
 
     let mut ap = Dictionary::new();
     ap.set("N", Object::Reference(ap_id));
-    // `/DA` (default appearance) — best-effort fallback for a reader that
-    // regenerates appearance instead of using `/AP`.
-    let da = format!("/F1 {size:.2} Tf {r:.4} {g:.4} {b:.4} rg");
-    (ap, da)
+    ap
+}
+
+/// Like [`free_text_appearance_content`], but the text is shown as Identity-H
+/// hex strings (`<gid…> Tj`) through a CID font, and the underline width comes
+/// from the CID font's real advances. Line breaks reuse [`wrap_lines`] with the
+/// base-14 average-em estimate (the box clips, so over-wide is safe).
+#[allow(clippy::many_single_char_names)]
+fn free_text_cid_content(
+    rect: [f32; 4],
+    text: &str,
+    size: f32,
+    (r, g, b): (f32, f32, f32),
+    underline: bool,
+    font_res: &str,
+    cid: &crate::pdf::font_embed_cid::CidFont,
+) -> String {
+    use std::fmt::Write as _;
+    let [x0, _y0, _x1, y1] = rect;
+    let leading = size * 1.2;
+    let tx = x0 + 2.0;
+    let y_top = y1 - size;
+    let lines = wrap_lines(text, size, 0.6, free_text_inner_width(rect));
+
+    let mut out = String::new();
+    let _ = writeln!(out, "q");
+    let _ = writeln!(out, "BT");
+    let _ = writeln!(out, "/{font_res} {size:.2} Tf");
+    let _ = writeln!(out, "{leading:.2} TL");
+    let _ = writeln!(out, "{r:.4} {g:.4} {b:.4} rg");
+    let _ = writeln!(out, "{tx:.2} {y_top:.2} Td");
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            let _ = writeln!(out, "T*");
+        }
+        let _ = writeln!(out, "<{}> Tj", cid.encode_hex(line));
+    }
+    let _ = writeln!(out, "ET");
+
+    if underline {
+        let thickness = (size * 0.06).max(0.4);
+        let _ = writeln!(out, "{r:.4} {g:.4} {b:.4} RG");
+        let _ = writeln!(out, "{thickness:.2} w");
+        for (i, line) in lines.iter().enumerate() {
+            let width = cid.width(line, size);
+            if width <= 0.0 {
+                continue;
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let baseline = y_top - i as f32 * leading;
+            let uy = baseline - size * 0.12;
+            let _ = writeln!(out, "{tx:.2} {uy:.2} m {:.2} {uy:.2} l S", tx + width);
+        }
+    }
+    out.push_str("Q\n");
+    out
 }
 
 /// Parse a free-text `/DA` (`/F1 <size> Tf <r> <g> <b> rg`) into `(size, #hex)`.
@@ -4238,5 +4333,86 @@ mod text_box_embed_tests {
         let content =
             String::from_utf8_lossy(&doc.get_page_content(page_id).expect("content")).into_owned();
         assert!(content.contains("(ZZWORD) Tj"), "base-14 literal text show present");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod free_text_embed_tests {
+    use lopdf::{Document, Object};
+
+    use super::{add_free_text, update_free_text};
+
+    fn hello() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/basic/hello.pdf").expect("hello.pdf")
+    }
+
+    fn has(bytes: &[u8], needle: &[u8]) -> bool {
+        bytes.windows(needle.len()).any(|w| w == needle)
+    }
+
+    /// The first `FreeText` annotation's `/Contents` (the plain text — what re-edit reads).
+    fn free_text_contents(bytes: &[u8]) -> String {
+        let doc = Document::load_mem(bytes).expect("load");
+        for o in doc.objects.values() {
+            let Ok(d) = o.as_dict() else { continue };
+            if d.get(b"Subtype").and_then(Object::as_name).ok() == Some(&b"FreeText"[..]) {
+                if let Ok(s) = d.get(b"Contents").and_then(Object::as_str) {
+                    return String::from_utf8_lossy(s).into_owned();
+                }
+            }
+        }
+        panic!("no free-text /Contents");
+    }
+
+    fn free_text_nm(bytes: &[u8]) -> String {
+        let doc = Document::load_mem(bytes).expect("load");
+        for o in doc.objects.values() {
+            let Ok(d) = o.as_dict() else { continue };
+            if d.get(b"Subtype").and_then(Object::as_name).ok() == Some(&b"FreeText"[..]) {
+                if let Ok(s) = d.get(b"NM").and_then(Object::as_str) {
+                    return String::from_utf8_lossy(s).into_owned();
+                }
+            }
+        }
+        panic!("no free-text /NM");
+    }
+
+    /// P4.HF9: a non-WinAnsi free-text `/AP` embeds a hand-built CID font, and the
+    /// annotation keeps the plain Unicode in `/Contents` (so re-edit reads it, not
+    /// the `/AP`). Render/extract of the CID font itself is proven by
+    /// `font_embed_cid`'s spike.
+    #[test]
+    fn embedded_free_text_ap_uses_cid_font() {
+        let cy = "\u{041F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}"; // Привет
+        let out = add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 660.0], cy, "Helvetica", 14.0, "#000000", false, false, false)
+            .expect("add free text");
+        assert!(
+            has(&out, b"/Type0") && has(&out, b"/CIDFontType2") && has(&out, b"/FontFile2"),
+            "the /AP embeds a hand-built CID font",
+        );
+        assert_eq!(free_text_contents(&out), cy, "/Contents keeps the Unicode for re-edit");
+    }
+
+    /// Re-editing a non-WinAnsi free-text reads `/Contents` and rewrites the `/AP`
+    /// (rejecting nothing), preserving the annotation.
+    #[test]
+    fn embedded_free_text_reedit_updates_contents() {
+        let out = add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 660.0], "\u{041F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}", "Helvetica", 14.0, "#000000", false, false, false)
+            .expect("add");
+        let nm = free_text_nm(&out);
+        let out2 = update_free_text(&out, &nm, "\u{043C}\u{0438}\u{0440}", "Helvetica", 14.0, "#ff0000", false, false, false)
+            .expect("update to new Cyrillic");
+        assert_eq!(free_text_contents(&out2), "\u{043C}\u{0438}\u{0440}", "re-edit updated /Contents");
+        assert!(has(&out2, b"/Type0"), "the rewritten /AP still embeds a CID font");
+    }
+
+    /// `WinAnsi` free-text keeps the base-14 `/AP` — no CID font.
+    #[test]
+    fn winansi_free_text_keeps_base14_ap() {
+        let out = add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 660.0], "ZZWORD", "Helvetica", 14.0, "#000000", false, false, false)
+            .expect("add");
+        assert!(!has(&out, b"/Type0"), "ASCII stays base-14 (no embedded CID font)");
+        assert_eq!(free_text_contents(&out), "ZZWORD");
     }
 }

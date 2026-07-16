@@ -767,11 +767,20 @@ C4a/b, B3b). Four issues found + fixed this session:
 - ✅ **DONE 2026-07-15 (P4.HF8)** — **Text box** converted (third, last page-content writer).
   `EmbedRun.underline: Option<f32>` (PDFium path rule); `add_text_box_embedded` reuses the base-14
   `wrap_lines` layout → one run per line. Multi-line Cyrillic + underline render, ~48 KB.
+- ✅ **DONE 2026-07-15 (P4.HF9)** — **Free-text `/AP`** converted (the annotation class). New
+  `font_embed_cid::build_cid_font` hand-builds a Type0/CIDFontType2 in lopdf (subsetter + ttf-parser
+  → /FontFile2 + /FontDescriptor + /W + /ToUnicode, Identity-H). `free_text_appearance` (add +
+  update) branches on `winansi_fits`; /Contents keeps plain text for re-edit. ~24 KB, searchable.
 - **⏭️ TODO — 3.2 stage-2 follow-ups (ordered):**
-  1. **The 3 annotation-`/AP` text writers** (free-text add/update, stamp/image-stamp label):
-     these embed *inside* an annotation appearance stream, not on the page — PDFium text objects
-     live on a page, so this is the genuinely harder class (may need building the CID font +
-     GID-indexed `/AP` in lopdf, or a different PDFium path). All page-content writers are done.
+  1. **Stamp / image-stamp labels** — the last `/AP` writers (`add_stamp` / `add_image_stamp`).
+     Should be a quick reuse of `build_cid_font` + `free_text_cid_content`-style content, in the
+     stamp's `/AP`. Then all 7 rendered-text entries embed.
+  2. **CID-path unification** — the hand-built-CID `/AP` path is strictly more capable than the
+     PDFium page-object path (real metrics, marked-content tags, no PDFium round-trip). Consider
+     retiring HF5–HF8's PDFium path onto `build_cid_font`, which would also fix their HF2-tag gap
+     and 3.10 metrics in one move. Larger refactor; design first.
+  3. **`/FontFile2` compression** (FlateDecode) — the subset is small but deflating it shrinks the
+     embed further; a shared helper (see 3.12) would cover it.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
      verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.
   4. **HF2 marked-content tag on embedded runs** — PDFium objects aren't wrapped in `/VibePDF`

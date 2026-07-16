@@ -9,7 +9,7 @@
 
 use lopdf::{Document, Object};
 use vibepdf_lib::error::CommandError;
-use vibepdf_lib::pdf::cos::{add_free_text, add_text_box, update_free_text};
+use vibepdf_lib::pdf::cos::{add_free_text, add_stamp, add_text_box, update_free_text};
 use vibepdf_lib::pdf::header_footer::add_header_footer;
 use vibepdf_lib::pdf::watermark::{add_watermark, WatermarkKind};
 
@@ -126,13 +126,20 @@ fn non_winansi_text_box_now_embeds() {
 }
 
 #[test]
-fn non_winansi_free_text_rejected() {
-    let add = add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "日本語", "Helvetica", 12.0, "#000000", false, false, false);
-    assert!(is_invalid(add), "add");
-    // update rejects too (a re-edit into non-WinAnsi text).
-    let ok = add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "ok", "Helvetica", 12.0, "#000000", false, false, false)
-        .expect("seed free text");
-    let doc = Document::load_mem(&ok).expect("load");
+fn non_winansi_free_text_now_embeds() {
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF9): free-text (add + update) now embeds a
+    // hand-built CID font into the /AP for non-WinAnsi text instead of rejecting.
+    // Where a covering face exists it succeeds; where none, it falls back to HF3.
+    let text = "日本語";
+    let add = add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 640.0], text, "Helvetica", 12.0, "#000000", false, false, false);
+    if vibepdf_lib::pdf::font_resolver::covering_font_bytes(text).is_none() {
+        assert!(is_invalid(add), "with no covering font, falls back to the HF3 rejection");
+        return;
+    }
+    let out = add.expect("add embeds a covering font");
+    assert!(Document::load_mem(&out).is_ok(), "embedded free-text reopens cleanly");
+    // Re-edit into other non-WinAnsi text also embeds (reads /Contents, not /AP).
+    let doc = Document::load_mem(&out).expect("load");
     let mut nm = None;
     for o in doc.objects.values() {
         let Ok(d) = o.as_dict() else { continue };
@@ -144,15 +151,15 @@ fn non_winansi_free_text_rejected() {
         }
     }
     let nm = nm.expect("a /NM on the free-text annotation");
-    let upd = update_free_text(&ok, &nm, "日本語", "Helvetica", 12.0, "#000000", false, false, false);
-    assert!(is_invalid(upd), "update");
+    let upd = update_free_text(&out, &nm, "한국어", "Helvetica", 12.0, "#000000", false, false, false);
+    assert!(upd.is_ok(), "update embeds too");
 }
 
 #[test]
 fn error_names_the_offending_characters() {
     // Four distinct offenders; the list is capped at three. Uses a writer still on
-    // the HF3 reject path (free text) — watermark/header-footer/text-box now embed.
-    match add_free_text(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "a日b本c語d文e", "Helvetica", 12.0, "#000000", false, false, false) {
+    // the HF3 reject path (stamp) — the text writers now all embed instead.
+    match add_stamp(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "a日b本c語d文e", "Draft", "#000000", 1.0) {
         Err(CommandError::InvalidInput(m)) => {
             assert!(m.contains('日') && m.contains('本') && m.contains('語'), "names offenders: {m}");
             assert!(!m.contains('文'), "caps the list at three: {m}");

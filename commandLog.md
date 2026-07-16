@@ -2977,6 +2977,33 @@ annotation-`/AP` writers remain (free-text ×2, stamp). Left `[~]`.
 
 ---
 
+### P4.HF9 — Free-text /AP font embedding via hand-built CID font (this commit)
+
+No new dependencies (reuses subsetter + ttf-parser from HF6).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (doc_markdown backticks via clippy --fix; module allow for font-metric casts)
+npm run test:rust      # EXIT 0, 384 passed. New: font_embed_cid (spike: PDFium renders + extracts a
+#   hand-built CID font; dict shape; Identity-H encoding). cos free_text_embed_tests (/AP has CID
+#   font; re-edit updates /Contents; WinAnsi keeps base-14 /AP). winansi free_text → _now_embeds;
+#   error_names repointed free-text → stamp.
+
+# Write path → verification artifact:
+cargo test --test free_text free_text_embedded_unicode_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-freetext-unicode.pdf (→ /tmp/vibepdf-verify.pdf): Cyrillic + Greek
+#   underlined free-text. 24 KB. /Type0 + /CIDFontType2 + /ToUnicode + /FontFile2.
+```
+
+FABLE_REVIEW **3.2 stage-2**, the annotation-`/AP` class (PDFium page-objects can't reach an /AP).
+New `font_embed_cid::build_cid_font` hand-builds Type0/CIDFontType2 in lopdf (subset via subsetter,
+metrics/advances via ttf-parser, /FontFile2 + /FontDescriptor + /W + /ToUnicode, Identity-H).
+`cos::free_text_appearance` (shared by add + update) branches on `winansi_fits` → CID `/AP` with
+`<gid> Tj`; /Contents keeps the plain text for re-edit. Only stamp labels remain. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
