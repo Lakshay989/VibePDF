@@ -6576,6 +6576,46 @@ Stage-2's writer surface is done: **all 7 rendered-text entries embed Unicode.**
 
 ---
 
+## P4.HF11 — Stream compression (investigation → NON-ISSUE, no code shipped)
+
+#### Problem
+
+FABLE_REVIEW §3.12 claimed our new content streams (imported PDF-page backgrounds, `/AP`
+appearance streams, embedded `/FontFile2` fonts) were written **uncompressed**, so files grow
+faster than they need to. The planned fix was a shared `add_flate_stream` helper.
+
+#### Concepts learned
+
+- **Who compresses a PDF stream?** A PDF stream can carry a `/Filter` (e.g. `/FlateDecode`) that
+  says "my bytes are deflated." Two layers could add it: *you*, when you build the `Stream`
+  object, or the *serializer*, when it writes the document to disk. We assumed neither did — wrong.
+- **lopdf compresses on save by default.** `lopdf::Document::save_to` runs each stream through
+  flate2 as it serializes, *unless* a stream opts out. That opt-out is exactly why
+  `image_xobject.rs` calls `.with_compression(false)` — an already-deflated JPEG/PNG must NOT be
+  re-deflated. That single opt-out was the tell we'd misread the default.
+- **Measure before you optimise.** Regenerating a real embedded-font artifact with our explicit
+  `compress()` *disabled* still produced `/FontFile2 … /Length 20893 /Length1 332560
+  /Filter /FlateDecode` — a 332 KB subset stored as 20 KB (94% smaller) with zero work from us.
+  Forcing `Compression::best()` moved 20893 → 20365 B (~2.5%). The "fix" was redundant.
+- **Ship discipline: a false premise is a stop, not a pivot.** Rather than quietly re-scope HF11
+  to "squeeze 2.5% more," the change was reverted and the finding recorded here + in §3.12. A
+  commit whose stated rationale is false is worse than no commit.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `FABLE_REVIEW.md` | §3.12 marked **NON-ISSUE** with the measured evidence; summary tables updated. |
+| `BACKLOG.md` | "`/FontFile2` compression" follow-up struck through — done for free by lopdf. |
+| *(no `src/` changes)* | Prototype (`add_flate_stream` + routing) was reverted via `git checkout`. |
+
+#### Further reading
+
+- lopdf `Document::save_to` / `Stream::set_content` + compression (crate docs).
+- PDF 32000-1:2008 §7.4 (Filters) — `/FlateDecode` and the `/Filter` entry.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

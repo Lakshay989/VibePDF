@@ -781,8 +781,9 @@ C4a/b, B3b). Four issues found + fixed this session:
      PDFium page-object path (real metrics, marked-content tags, no PDFium round-trip). Consider
      retiring HF5–HF8's PDFium path onto `build_cid_font`, which would also fix their HF2-tag gap
      and 3.10 metrics in one move. Larger refactor; design first.
-  3. **`/FontFile2` compression** (FlateDecode) — the subset is small but deflating it shrinks the
-     embed further; a shared helper (see 3.12) would cover it.
+  3. ~~**`/FontFile2` compression** (FlateDecode)~~ **DONE FOR FREE** — investigated P4.HF11:
+     lopdf's `save_to` already FlateDecode-compresses every stream on save (a 332 KB subset stores
+     as 20 KB). No helper needed; see FABLE_REVIEW §3.12.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
      verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.
   4. **HF2 marked-content tag on embedded runs** — PDFium objects aren't wrapped in `/VibePDF`

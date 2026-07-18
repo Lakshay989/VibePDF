@@ -349,15 +349,26 @@ self-contained in the actor.
 
 ### 3.12 LOW — New content streams are written uncompressed
 
+> **✅ INVESTIGATED 2026-07-18 (P4.HF11) — NON-ISSUE, no code change.** The premise below
+> ("lopdf does not auto-compress") is **false for our output**. `lopdf::Document::save_to`
+> FlateDecode-compresses every stream *by default*; the only reason `image_xobject.rs` calls
+> `.with_compression(false)` is to opt *out*. Measured on a real embedded-font artifact: with
+> our explicit `compress()` **disabled**, the subsetted `/FontFile2` still saved at `/Length
+> 20893` (`/Length1 332560`, `FlateDecode=True`) — i.e. a 332 KB font stored as 20 KB, 94%
+> smaller, with zero work from us. Forcing `Compression::best()` only moved it to 20365 B
+> (~2.5%). So D1b imports and `/AP` streams are already compressed on save; there is nothing to
+> fix. The `add_flate_stream` helper was prototyped, proven redundant, and reverted.
+
 **Where:** `append_page_content`, `prepend_page_content`, `import_page_as_form` (form stream),
 markup/free-text `/AP` streams — all `Stream::new(Dictionary::new(), …)` with no filter;
-lopdf does not auto-compress.
+~~lopdf does not auto-compress.~~ (It does — see callout above.)
 
 **What:** text fragments are tiny (noise), but D1b's imported page content can be hundreds of
-KB per import, stored raw. Files grow faster than they need to.
+KB per import, stored raw. Files grow faster than they need to. *(Superseded: streams are not
+stored raw — lopdf compresses them on save.)*
 
-**Fix:** one shared `add_flate_stream(doc, dict, bytes)` helper that FlateDecodes bodies above
-a threshold (lopdf supports setting the filter + compressed content), used by all writers.
+**Fix:** ~~one shared `add_flate_stream(doc, dict, bytes)` helper~~ — not needed; lopdf's
+default save already FlateDecodes stream bodies.
 
 ### 3.13 LOW — Decorations are unremovable after save (no marked-content tagging)
 
@@ -505,7 +516,7 @@ PDF engine" honored by every phase.
 | `bumpEpoch` full re-render | imperceptible | 4K displays + many visible pages | per-page epochs (§4) |
 | `prune_dangling_destinations` on every save | no-op fast-path exists | docs with thousands of links | already returns input unchanged when clean — fine |
 | One global PDFium lock | invisible interactively | P8 batch | worker processes, not threads |
-| Uncompressed new streams | negligible | D1b PDF-page backgrounds | §3.12 |
+| ~~Uncompressed new streams~~ non-issue | none | — | §3.12 — lopdf `save_to` auto-compresses (verified P4.HF11) |
 | cos edits load/save whole doc per operation | ~ms on test docs | 500 MB docs, multi-edit macros | batch API: one load → N transforms → one save (D4/D5 will already want this for "number all pages") |
 
 The one measured budget in the repo (watermark 50 pages < 2 s) came in at **0.12 s** — the
@@ -592,7 +603,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.9 | Medium | No Windows CI; `split("/")` path-display bug | S |
 | 3.10 | Low | Average-width alignment drift | S |
 | 3.11 | Low | Dirty-flag edge cases (undo-to-saved, save-as) | S |
-| 3.12 | Low | New streams uncompressed | S |
+| 3.12 | Low | ~~New streams uncompressed~~ **NON-ISSUE (P4.HF11)**: lopdf auto-compresses on save | — |
 | 3.13 | Low | ~~Decorations untagged~~ **FIXED (P4.HF2)**: `/VibePDF` BDC/EMC + splice-proof test | S |
 | 3.14 | Low | ~~`collect_refs` recursion depth~~ **FIXED (P4.HF4)**: iterative worklists; 100k-chain + cycle tests | S |
 | 3.15 | Low | Nine assorted small items | S each |

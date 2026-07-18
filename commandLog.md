@@ -3030,6 +3030,37 @@ test graduated to a direct `ensure_winansi` unit test. Stage-2 writer surface co
 
 ---
 
+### P4.HF11 — Stream compression (investigation, NON-ISSUE — bookkeeping-only commit)
+
+No `cargo add` / `npm install`. No fixtures generated. Prototype source (`add_flate_stream` +
+routing in `cos.rs` / `font_embed_cid.rs` / `background.rs`) was written then **reverted**:
+
+```
+git checkout -- src-tauri/src/pdf/background.rs \
+                src-tauri/src/pdf/cos.rs \
+                src-tauri/src/pdf/font_embed_cid.rs
+```
+
+Verification that drove the conclusion (measuring the saved artifact's `/FontFile2`):
+
+```
+# regenerate an embedded-font artifact with explicit compress() disabled, then inspect it
+cargo test -p vibepdf-lib font_embed_cid   # produced the artifact
+#   → /FontFile2 … /Length 20893 /Length1 332560 /Filter /FlateDecode
+#   i.e. already compressed on save; explicit Compression::best() only reached 20365 B (~2.5%)
+```
+
+Post-revert build gate (clean, back to HF10 state):
+
+```
+cargo build -p vibepdf-lib     # Finished, no warnings
+```
+
+No new test committed (nothing shipped). Docs updated: `FABLE_REVIEW.md` §3.12, `BACKLOG.md`,
+`Learning.md`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
