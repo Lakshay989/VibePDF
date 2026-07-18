@@ -137,10 +137,19 @@ one-liner setting `/Rotate 90`) and one test per writer asserting the compensate
 > branches on `winansi_fits` → embeds the CID font into the `/AP` `/Resources` and writes
 > `<gid…> Tj` content; both `add_free_text` and `update_free_text` (which share it) get Unicode,
 > re-edit reads the plain text from `/Contents`. Spike proved a hand-built CID font renders +
-> re-extracts through PDFium. **Remaining:** only **stamp / image-stamp labels** (the same `/AP`
-> class — reuse `build_cid_font`), plus per-glyph font *coverage*, the HF2 tag, and font-program
-> compression. This CID path also *supersedes* the PDFium page-object one — a future unification
-> could move HF5–HF8 onto it for real metrics + marked-content tags.
+> re-extracts through PDFium.
+>
+> **✅ STAGE 2 WRITER SURFACE COMPLETE 2026-07-15 (P4.HF10)** — stamp + image-stamp labels, the last
+> text writers, reuse `build_cid_font`. `stamp_appearance_content` / `image_stamp_content` gained a
+> `show: Fn(&str)->String` closure (base-14 literal vs. CID hex); `add_stamp` / `add_image_stamp`
+> branch on `winansi_fits(label.to_uppercase())`. **All 7 rendered-text entries now embed Unicode**
+> (header/footer, watermark, text box, free-text add/update, stamp, image-stamp) — no writer rejects
+> unconditionally, so the `ensure_winansi` character-naming test *graduated* to a direct unit test.
+> **Stage 2 is functionally done.** Residual polish (each its own small ship): per-glyph font
+> *coverage* (best-effort face today), `/FontFile2` compression, the HF2 marked-content tag on
+> embedded runs, exact metrics (3.10), and the **CID-path unification** — the lopdf-CID `/AP` path is
+> strictly more capable than the PDFium page-object path (HF5–HF8), so a future refactor could retire
+> the latter onto `build_cid_font` and fix the tag + metrics gaps in one move.
 
 **Where:** `cos::escape_pdf_string` (documented at `cos.rs:1873`: "Non-ASCII passes through —
 base-14 fonts only render the ASCII/WinAnsi range"), used by free-text `/AP`, text boxes,

@@ -156,15 +156,18 @@ fn non_winansi_free_text_now_embeds() {
 }
 
 #[test]
-fn error_names_the_offending_characters() {
-    // Four distinct offenders; the list is capped at three. Uses a writer still on
-    // the HF3 reject path (stamp) — the text writers now all embed instead.
-    match add_stamp(&hello(), 0, [72.0, 600.0, 300.0, 640.0], "a日b本c語d文e", "Draft", "#000000", 1.0) {
-        Err(CommandError::InvalidInput(m)) => {
-            assert!(m.contains('日') && m.contains('本') && m.contains('語'), "names offenders: {m}");
-            assert!(!m.contains('文'), "caps the list at three: {m}");
-        }
-        other => panic!("expected InvalidInput, got {other:?}"),
+fn non_winansi_stamp_now_embeds() {
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF10): a stamp label now embeds a CID font for
+    // non-WinAnsi text instead of rejecting (the last writer to convert). The
+    // `ensure_winansi` character-naming behaviour graduated to a direct unit test
+    // in `cos::stamp_embed_tests` — no writer rejects unconditionally any more.
+    let label = "日本語";
+    let r = add_stamp(&hello(), 0, [72.0, 600.0, 300.0, 640.0], label, "Draft", "#000000", 1.0);
+    if vibepdf_lib::pdf::font_resolver::covering_font_bytes(&label.to_uppercase()).is_some() {
+        let out = r.expect("embeds a covering font when one exists");
+        assert!(Document::load_mem(&out).is_ok(), "embedded stamp reopens cleanly");
+    } else {
+        assert!(is_invalid(r), "with no covering font, falls back to the HF3 rejection");
     }
 }
 

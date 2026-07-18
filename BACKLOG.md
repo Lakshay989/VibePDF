@@ -771,11 +771,13 @@ C4a/b, B3b). Four issues found + fixed this session:
   `font_embed_cid::build_cid_font` hand-builds a Type0/CIDFontType2 in lopdf (subsetter + ttf-parser
   → /FontFile2 + /FontDescriptor + /W + /ToUnicode, Identity-H). `free_text_appearance` (add +
   update) branches on `winansi_fits`; /Contents keeps plain text for re-edit. ~24 KB, searchable.
-- **⏭️ TODO — 3.2 stage-2 follow-ups (ordered):**
-  1. **Stamp / image-stamp labels** — the last `/AP` writers (`add_stamp` / `add_image_stamp`).
-     Should be a quick reuse of `build_cid_font` + `free_text_cid_content`-style content, in the
-     stamp's `/AP`. Then all 7 rendered-text entries embed.
-  2. **CID-path unification** — the hand-built-CID `/AP` path is strictly more capable than the
+- ✅ **DONE 2026-07-15 (P4.HF10)** — **Stamp + image-stamp labels** converted (the last text
+  writers). `show: Fn(&str)->String` closure on the two stamp content builders; `add_stamp` /
+  `add_image_stamp` branch on `winansi_fits(label.to_uppercase())` → `build_cid_font`. **Stage-2
+  writer surface complete: all 7 rendered-text entries embed Unicode.** The `ensure_winansi`
+  char-naming test graduated to a direct unit test (no writer rejects unconditionally now).
+- **⏭️ TODO — 3.2 stage-2 residual polish (each its own small ship):**
+  1. **CID-path unification** — the hand-built-CID `/AP` path is strictly more capable than the
      PDFium page-object path (real metrics, marked-content tags, no PDFium round-trip). Consider
      retiring HF5–HF8's PDFium path onto `build_cid_font`, which would also fix their HF2-tag gap
      and 3.10 metrics in one move. Larger refactor; design first.

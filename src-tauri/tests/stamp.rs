@@ -185,6 +185,20 @@ fn image_stamp_with_text_sets_contents() {
     assert_eq!(infos[0].contents, "DRAFT");
 }
 
+// P4.HF10: a non-WinAnsi image-stamp label embeds a CID font into the /AP.
+#[test]
+fn image_stamp_unicode_label_embeds_cid_font() {
+    let png = make_png(4, 4, png::ColorType::Rgb);
+    let label = "\u{041F}\u{0440}\u{043E}\u{0432}"; // Пров
+    let r = add_image_stamp(&fixture_bytes("hello.pdf"), 0, 100.0, 100.0, 48.0, &png, Some(label), 1.0);
+    if vibepdf_lib::pdf::font_resolver::covering_font_bytes(&label.to_uppercase()).is_some() {
+        let out = r.expect("image stamp embeds a covering font");
+        assert!(out.windows(6).any(|w| w == b"/Type0"), "image-stamp label embeds a CID font");
+    } else {
+        assert!(r.is_err(), "with no covering font, the non-WinAnsi label is rejected");
+    }
+}
+
 #[test]
 fn image_stamp_rejects_non_png() {
     let err = add_image_stamp(&fixture_bytes("hello.pdf"), 0, 100.0, 100.0, 48.0, b"\xff\xd8 not a png", None, 1.0);
@@ -264,6 +278,30 @@ async fn stamp_writes_verification_artifact() {
         .expect("image+text stamp");
     handle.save(Some(out.clone())).await.expect("save");
     eprintln!("wrote stamp verification artifact to {}", out.display());
+
+    drop(handle);
+}
+
+/// P4.HF10: non-WinAnsi stamp labels embed a CID font into the /AP.
+#[tokio::test]
+#[ignore = "produces a verification artifact; run on demand"]
+async fn stamp_embedded_unicode_artifact() {
+    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-stamp-unicode.pdf");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
+    }
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+    handle
+        .add_stamp(0, [80.0, 660.0, 320.0, 710.0], "Утверждено".into(), "Approved".into(), "#1e8449".into(), 1.0)
+        .await
+        .expect("cyrillic text stamp");
+    handle
+        .add_image_stamp(0, 200.0, 520.0, 70.0, make_png(64, 32, png::ColorType::Rgba), Some("Εγκρίθηκε".into()), 0.9)
+        .await
+        .expect("greek image+label stamp");
+    handle.save(Some(out.clone())).await.expect("save");
+    eprintln!("wrote embedded-Unicode stamp artifact to {}", out.display());
 
     drop(handle);
 }

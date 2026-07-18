@@ -2269,7 +2269,6 @@ pub fn add_stamp(
     let opacity = opacity.clamp(0.0, 1.0);
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
-    ensure_winansi(text)?; // FABLE_REVIEW 3.2
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -2279,18 +2278,19 @@ pub fn add_stamp(
         .get(&page_no)
         .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
 
-    let content = stamp_appearance_content(rect, label, (r, g, b));
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF10): the label is uppercased; if that needs
+    // glyphs the base-14 fonts lack, embed a covering CID font, else stay base-14.
+    let (content, f1_font) = stamp_label_appearance(&mut doc, rect, label, (r, g, b))?;
 
-    // `/AP` resources: an ExtGState for the stamp's opacity + the bold base-14
-    // font the label is drawn with (self-contained, no AcroForm `/DR` needed).
+    // `/AP` resources: an ExtGState for the stamp's opacity + the font (base-14
+    // bold, or an embedded CID font) the label is drawn with (self-contained).
     let mut gs = Dictionary::new();
     gs.set("ca", Object::Real(opacity));
     gs.set("CA", Object::Real(opacity));
     let mut ext = Dictionary::new();
     ext.set("GS", Object::Dictionary(gs));
-    let font = base14_font_dict("Helvetica-Bold");
     let mut fonts = Dictionary::new();
-    fonts.set("F1", Object::Dictionary(font));
+    fonts.set("F1", f1_font);
     let mut resources = Dictionary::new();
     resources.set("ExtGState", Object::Dictionary(ext));
     resources.set("Font", Object::Dictionary(fonts));
@@ -2343,9 +2343,6 @@ pub fn add_image_stamp(
 ) -> Result<Vec<u8>, CommandError> {
     let opacity = opacity.clamp(0.0, 1.0);
     let label = text.map(str::trim).filter(|t| !t.is_empty());
-    if let Some(l) = label {
-        ensure_winansi(l)?; // FABLE_REVIEW 3.2
-    }
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_no = u32::try_from(page)
@@ -2369,10 +2366,30 @@ pub fn add_image_stamp(
     let mb = effective_media_box(&doc, page_id).unwrap_or([0.0, 0.0, 612.0, 792.0]);
     let rect = image_stamp_rect(x, y, w, h, mb);
 
-    let content = image_stamp_content(rect, label);
+    // FABLE_REVIEW 3.2 stage-2 (P4.HF10): a non-WinAnsi label embeds a CID font
+    // into the `/AP`; a WinAnsi label (or none) keeps base-14 bold.
+    let (content, label_font) = match label {
+        None => (image_stamp_content(rect, None, |_| String::new()), None),
+        Some(lbl) if winansi_fits(&lbl.to_uppercase()) => {
+            let content = image_stamp_content(rect, Some(lbl), |u| format!("({})", escape_pdf_string(u)));
+            (content, Some(Object::Dictionary(base14_font_dict("Helvetica-Bold"))))
+        }
+        Some(lbl) => {
+            let upper = lbl.to_uppercase();
+            let Some(font_bytes) = crate::pdf::font_resolver::covering_font_bytes(&upper) else {
+                ensure_winansi(&upper)?;
+                return Err(CommandError::Internal(
+                    "non-WinAnsi stamp label unexpectedly passed the WinAnsi check".into(),
+                ));
+            };
+            let cid = crate::pdf::font_embed_cid::build_cid_font(&mut doc, &font_bytes, &upper)?;
+            let content = image_stamp_content(rect, Some(lbl), |u| format!("<{}>", cid.encode_hex(u)));
+            (content, Some(Object::Dictionary(cid.font_dict)))
+        }
+    };
 
     // `/AP` resources: the image under `/Im0`, an ExtGState for opacity, and the
-    // bold base-14 font only when there's a label to draw.
+    // label font only when there's a label to draw.
     let mut gs = Dictionary::new();
     gs.set("ca", Object::Real(opacity));
     gs.set("CA", Object::Real(opacity));
@@ -2383,10 +2400,9 @@ pub fn add_image_stamp(
     let mut resources = Dictionary::new();
     resources.set("ExtGState", Object::Dictionary(ext));
     resources.set("XObject", Object::Dictionary(xobjects));
-    if label.is_some() {
-        let font = base14_font_dict("Helvetica-Bold");
+    if let Some(font) = label_font {
         let mut fonts = Dictionary::new();
-        fonts.set("F1", Object::Dictionary(font));
+        fonts.set("F1", font);
         resources.set("Font", Object::Dictionary(fonts));
     }
 
@@ -2436,7 +2452,7 @@ fn image_stamp_rect(x: f32, y: f32, w: f32, h: f32, mb: [f32; 4]) -> [f32; 4] {
 /// The `/AP` content for an image stamp: paint `/Im0` into `rect` (the image's
 /// unit square mapped onto the rect by `cm`), then optionally a bold `label`
 /// centred on top. Absolute page coords (`BBox == rect`).
-fn image_stamp_content(rect: [f32; 4], label: Option<&str>) -> String {
+fn image_stamp_content(rect: [f32; 4], label: Option<&str>, show: impl Fn(&str) -> String) -> String {
     use std::fmt::Write as _;
     let [x0, y0, x1, y1] = rect;
     let (w, h) = (x1 - x0, y1 - y0);
@@ -2461,7 +2477,7 @@ fn image_stamp_content(rect: [f32; 4], label: Option<&str>) -> String {
         let _ = writeln!(out, "BT");
         let _ = writeln!(out, "/F1 {size:.2} Tf");
         let _ = writeln!(out, "{tx:.2} {baseline:.2} Td");
-        let _ = writeln!(out, "({}) Tj", escape_pdf_string(&upper));
+        let _ = writeln!(out, "{} Tj", show(&upper));
         let _ = writeln!(out, "ET");
     }
     out
@@ -2479,11 +2495,44 @@ fn sanitize_stamp_name(name: &str) -> String {
     }
 }
 
+/// Build a text stamp's `/AP` content + its `/F1` font (`FABLE_REVIEW` 3.2 stage-2,
+/// P4.HF10). The label is uppercased; if that needs glyphs the base-14 fonts lack,
+/// embed a covering CID font ([`crate::pdf::font_embed_cid`]) and show the label as
+/// Identity-H hex; otherwise draw it in base-14 Helvetica-Bold. Rejects (naming the
+/// characters) when no covering face exists.
+fn stamp_label_appearance(
+    doc: &mut Document,
+    rect: [f32; 4],
+    label: &str,
+    color: (f32, f32, f32),
+) -> Result<(String, Object), CommandError> {
+    let upper = label.to_uppercase();
+    if !winansi_fits(&upper) {
+        let Some(font_bytes) = crate::pdf::font_resolver::covering_font_bytes(&upper) else {
+            ensure_winansi(&upper)?;
+            return Err(CommandError::Internal(
+                "non-WinAnsi stamp label unexpectedly passed the WinAnsi check".into(),
+            ));
+        };
+        let cid = crate::pdf::font_embed_cid::build_cid_font(doc, &font_bytes, &upper)?;
+        let content = stamp_appearance_content(rect, label, color, |u| format!("<{}>", cid.encode_hex(u)));
+        return Ok((content, Object::Dictionary(cid.font_dict)));
+    }
+    let content = stamp_appearance_content(rect, label, color, |u| format!("({})", escape_pdf_string(u)));
+    Ok((content, Object::Dictionary(base14_font_dict("Helvetica-Bold"))))
+}
+
 /// The `/AP` content stream for a stamp: a coloured border inset from the box,
 /// with the bold uppercase `label` auto-sized to fit and centred. Absolute page
 /// coords (`BBox == Rect`). Width is estimated with a Helvetica-Bold average
-/// glyph advance — exact metrics aren't needed to centre one line.
-fn stamp_appearance_content(rect: [f32; 4], label: &str, color: (f32, f32, f32)) -> String {
+/// glyph advance — exact metrics aren't needed to centre one line. `show` maps the
+/// uppercased label to the `Tj` operand (base-14 literal or CID hex).
+fn stamp_appearance_content(
+    rect: [f32; 4],
+    label: &str,
+    color: (f32, f32, f32),
+    show: impl Fn(&str) -> String,
+) -> String {
     use std::fmt::Write as _;
     let (cr, cg, cb) = color;
     let [x0, y0, x1, y1] = rect;
@@ -2515,7 +2564,7 @@ fn stamp_appearance_content(rect: [f32; 4], label: &str, color: (f32, f32, f32))
     let _ = writeln!(out, "BT");
     let _ = writeln!(out, "/F1 {size:.2} Tf");
     let _ = writeln!(out, "{tx:.2} {baseline:.2} Td");
-    let _ = writeln!(out, "({}) Tj", escape_pdf_string(&upper));
+    let _ = writeln!(out, "{} Tj", show(&upper));
     let _ = writeln!(out, "ET");
     out
 }
@@ -4414,5 +4463,58 @@ mod free_text_embed_tests {
             .expect("add");
         assert!(!has(&out, b"/Type0"), "ASCII stays base-14 (no embedded CID font)");
         assert_eq!(free_text_contents(&out), "ZZWORD");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod stamp_embed_tests {
+    use super::{add_stamp, ensure_winansi};
+    use crate::error::CommandError;
+
+    fn hello() -> Vec<u8> {
+        std::fs::read("../tests/fixtures/basic/hello.pdf").expect("hello.pdf")
+    }
+
+    fn has(bytes: &[u8], needle: &[u8]) -> bool {
+        bytes.windows(needle.len()).any(|w| w == needle)
+    }
+
+    /// P4.HF10: a non-WinAnsi stamp label embeds a CID font into the `/AP` (where a
+    /// covering face exists); otherwise it falls back to the HF3 rejection.
+    #[test]
+    fn embedded_stamp_ap_uses_cid_font() {
+        let label = "\u{041F}\u{0440}\u{043E}\u{0432}\u{0435}\u{0440}\u{0435}\u{043D}\u{043E}"; // Проверено
+        let r = add_stamp(&hello(), 0, [72.0, 600.0, 300.0, 660.0], label, "Draft", "#c81414", 1.0);
+        if crate::pdf::font_resolver::covering_font_bytes(&label.to_uppercase()).is_some() {
+            let out = r.expect("stamp embeds a covering font");
+            assert!(has(&out, b"/Type0") && has(&out, b"/CIDFontType2"), "stamp /AP embeds a CID font");
+        } else {
+            assert!(matches!(r, Err(CommandError::InvalidInput(_))), "no covering font → HF3 rejection");
+        }
+    }
+
+    /// A `WinAnsi` stamp keeps the base-14 `/AP` — no embedded CID font.
+    #[test]
+    fn winansi_stamp_keeps_base14_ap() {
+        let out = add_stamp(&hello(), 0, [72.0, 600.0, 300.0, 660.0], "APPROVED", "Draft", "#000000", 1.0)
+            .expect("stamp");
+        assert!(!has(&out, b"/Type0"), "ASCII stamp stays base-14 (no CID font)");
+    }
+
+    /// Graduated from `winansi.rs`: with every writer now embedding, the
+    /// character-naming behaviour is tested at its source, `ensure_winansi`.
+    #[test]
+    fn ensure_winansi_names_up_to_three_offenders() {
+        match ensure_winansi("a\u{65E5}b\u{672C}c\u{8A9E}d\u{6587}e") {
+            Err(CommandError::InvalidInput(m)) => {
+                assert!(
+                    m.contains('\u{65E5}') && m.contains('\u{672C}') && m.contains('\u{8A9E}'),
+                    "names the first three offenders: {m}",
+                );
+                assert!(!m.contains('\u{6587}'), "caps the list at three: {m}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
     }
 }

@@ -3004,6 +3004,32 @@ metrics/advances via ttf-parser, /FontFile2 + /FontDescriptor + /W + /ToUnicode,
 
 ---
 
+### P4.HF10 — Stamp label embedding, stage-2 writer surface complete (this commit)
+
+No new dependencies (reuses HF9's build_cid_font).
+
+```bash
+# Verification gates
+npm run check          # tsc + eslint(0 warn) + cargo clippy --all-targets -D warnings → clean
+                       #   (doc_markdown backticks via clippy --fix; renamed l→lbl for many_single_char_names)
+npm run test:rust      # EXIT 0, 388 passed. New: cos stamp_embed_tests (stamp /AP CID, base-14 kept,
+#   ensure_winansi names ≤3 — graduated); stamp.rs image_stamp_unicode_label. winansi
+#   error_names → removed; non_winansi_stamp_now_embeds added.
+
+# Write path → verification artifact:
+cargo test --test stamp stamp_embedded_unicode_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-stamp-unicode.pdf (→ /tmp/vibepdf-verify.pdf): Cyrillic text stamp +
+#   Greek image-stamp label. 40 KB. /Type0 + /CIDFontType2 + /ToUnicode.
+```
+
+FABLE_REVIEW **3.2 stage-2**, the last writers. `stamp_appearance_content` / `image_stamp_content`
+gained a `show: Fn(&str)->String` closure (base-14 `(literal)` vs CID `<hex>`); `add_stamp` /
+`add_image_stamp` branch on `winansi_fits(label.to_uppercase())` → `build_cid_font`. **All 7
+rendered-text entries now embed Unicode** — no writer rejects unconditionally, so the char-naming
+test graduated to a direct `ensure_winansi` unit test. Stage-2 writer surface complete. Left `[~]`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

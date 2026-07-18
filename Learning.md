@@ -6533,6 +6533,49 @@ GID-indexed strings — the largest single stage-2 piece.
 
 ---
 
+## P4.HF10 — The closer: stamp labels, and a test that graduated
+
+#### Problem
+
+The last two text writers — text stamps and image-stamp labels — both draw a single uppercased
+label in an `/AP`. With HF9's `build_cid_font` in hand, converting them is small; the interesting
+part is *finishing* — what the last conversion in a series reveals.
+
+#### Concepts learned
+
+- **Vary the one thing that differs; a closure is the cleanest seam.** Both stamp appearances
+  differed from their base-14 selves in exactly one place: the `Tj` operand (`(LITERAL)` vs.
+  `<gidhex>`). Threading a `show: Fn(&str) -> String` closure through the content builder — base-14
+  passes `|u| format!("({})", escape_pdf_string(u))`, CID passes `|u| format!("<{}>", cid.encode_hex(u))`
+  — kept the uppercasing + auto-size math in one place and touched the base-14 path minimally. When
+  two paths share 95% of a function, parameterise the 5%, don't fork it.
+- **Uppercasing is script-aware; embed the *rendered* text.** Stamps `to_uppercase()` the label, and
+  Cyrillic/Greek have case (е→Е). The CID font must cover the *uppercased* glyphs and the branch must
+  test `winansi_fits(&label.to_uppercase())`, not the raw label — otherwise a lowercase-WinAnsi label
+  that uppercases out of range would slip to the wrong path. Build for what you draw.
+- **A "still rejects" test graduates when the last case converts.** `error_names_the_offending_characters`
+  has been chasing the shrinking set of reject-only writers since HF7 (free-text → text-box →
+  free-text → stamp). HF10 converts stamp, so *no* writer rejects unconditionally any more — the test
+  had nowhere left to point. It graduated to calling `ensure_winansi` **directly** in a cos unit
+  test. That migration is the signal the series is complete: the behaviour that used to be observable
+  only *through* a writer is now tested at its source.
+
+Stage-2's writer surface is done: **all 7 rendered-text entries embed Unicode.**
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `stamp_appearance_content` / `image_stamp_content` take `show: Fn(&str)->String`; `stamp_label_appearance` + `add_stamp` / `add_image_stamp` branch on `winansi_fits`. Inline `stamp_embed_tests` (incl. the graduated `ensure_winansi` naming test). |
+| `src-tauri/tests/winansi.rs` | `error_names` → removed (graduated); `non_winansi_stamp_now_embeds` added. |
+| `src-tauri/tests/stamp.rs` | image-stamp Unicode-label test + embedded-Unicode artifact. |
+
+#### Further reading
+
+- (Same CID/CMap references as P4.HF9.)
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
