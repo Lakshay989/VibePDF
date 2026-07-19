@@ -7,6 +7,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 
+import type { HistoryState } from "@/ipc/history";
 import { addColorBackground, addImageBackground, addPdfBackground } from "@/ipc/background";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -80,7 +81,7 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
       return;
     }
 
-    const done = (h: Parameters<typeof setHistory>[1]) => {
+    const done = (h: HistoryState) => {
       bumpEpoch(documentId);
       setHistory(documentId, h);
       onClose();

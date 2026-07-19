@@ -16,13 +16,16 @@ import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
-import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
 import {
-  cssFontFamily,
   normalizeScreenRect,
+  type PageGeometry,
+  pdfToScreen,
+  type ScreenPoint,
   type ScreenRect,
+  screenToPdf,
   withDefaultSize,
-} from "@/tools/free-text/free-text";
+} from "@/tools/_framework";
+import { cssFontFamily } from "@/tools/free-text/free-text";
 
 export interface FreeTextLayerProps {
   documentId: string;

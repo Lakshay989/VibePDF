@@ -7,11 +7,13 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 
+import type { HistoryState } from "@/ipc/history";
 import { addImageWatermark, addTextWatermark } from "@/ipc/watermark";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { basename } from "@/app/paths";
-import { DEFAULT_WATERMARK, parsePageRange } from "@/tools/watermark/watermark";
+import { parsePageRange } from "@/tools/page-range";
+import { DEFAULT_WATERMARK } from "@/tools/watermark/watermark";
 
 export interface WatermarkDialogProps {
   open: boolean;
@@ -77,7 +79,7 @@ export function WatermarkDialog({ open, documentId, pageCount, onClose }: Waterm
       return;
     }
 
-    const done = (h: Parameters<typeof setHistory>[1]) => {
+    const done = (h: HistoryState) => {
       bumpEpoch(documentId);
       setHistory(documentId, h);
       onClose();

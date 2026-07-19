@@ -488,6 +488,18 @@ actor thread. Low likelihood, but this function runs on user-picked *source* fil
 
 ### 3.15 LOW — Assorted smaller items
 
+> **✅ 5 of 9 FIXED 2026-07-19 (P4.HF17).** Done: `parse_hex_color` now accepts
+> the `#rgb` short form (+unit tests); the `Parameters<typeof setHistory>[1]`
+> indirection replaced with `HistoryState` from `@/ipc/history`; the
+> `parsePageRange` re-export shim dropped; `ScreenRect` / `normalizeScreenRect`
+> / `withDefaultSize` (+ `MIN_DRAG_PX` / `DEFAULT_BOX_PX`) moved from
+> `tools/free-text` to `tools/_framework`; `pdf/mod.rs` alphabetized.
+> **Deferred (with reason):** header/footer double-apply dedupe (needs §3.13
+> marked-content for these writers); dialog state-reset consistency (a UX policy
+> decision spanning 3 dialogs); ZoomToolbar `Document ▾` dropdown (a UI
+> restructure, its own ship); `image_watermark` placement control (already in
+> BACKLOG; folds into a shared placement struct when D4 lands).
+
 | Item | Where | Fix |
 |---|---|---|
 | `parse_hex_color` rejects `#rgb` short form and named colors | `cos.rs` | expand 3-digit form; UI always sends 6-digit today, so cosmetic. |
@@ -685,7 +697,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.12 | Low | ~~New streams uncompressed~~ **NON-ISSUE (P4.HF11)**: lopdf auto-compresses on save | — |
 | 3.13 | Low | ~~Decorations untagged~~ **FIXED (P4.HF2)**: `/VibePDF` BDC/EMC + splice-proof test | S |
 | 3.14 | Low | ~~`collect_refs` recursion depth~~ **FIXED (P4.HF4)**: iterative worklists; 100k-chain + cycle tests | S |
-| 3.15 | Low | Nine assorted small items | S each |
+| 3.15 | Low | Nine assorted small items — **5 FIXED (P4.HF17)**; 4 deferred (need §3.13 / UX call / UI restructure / D4) | S each |
 | §4 | Debt | `cos.rs` 3.9k lines; `actor.rs` 40 copy-pasted arms; doc drift | M |
 | §8 | Process | **All of Phase 4 human-unverified** (+P2 viewer items); A2 recovery ritual; A3 reflow half | human time |
 

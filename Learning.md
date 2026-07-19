@@ -6874,6 +6874,54 @@ dates drifted several points and centred titles sat slightly off.
 
 ---
 
+## P4.HF17 — Assorted cleanups (FABLE_REVIEW §3.15)
+
+#### Problem
+
+The review's §3.15 collected nine small papercuts: a colour parser that rejected
+CSS `#rgb`, a couple of TypeScript indirections, a re-export shim, framework
+utilities misfiled under a specific tool, and an out-of-order module list.
+
+#### Concepts learned
+
+- **Robust-but-safe parsing.** `parse_hex_color` now accepts `#rgb` by doubling
+  each digit — but validate the character set *before* the length branch, so the
+  byte-slicing only ever runs on ASCII (a 3-*byte* non-ASCII char isn't 3
+  *digits*). Order the guards so later code can assume what it needs.
+- **Prefer the named type over a derived one.** `Parameters<typeof setHistory>[1]`
+  works, but `HistoryState` (the actual wire type) is clearer and doesn't couple a
+  handler's signature to a store method's shape. Import the real type.
+- **A re-export shim is debt once its callers can point at the source.** The
+  `parsePageRange` shim in `tools/watermark` had exactly one remaining consumer;
+  repointing it and deleting the shim removes a layer of indirection.
+- **Put utilities at the layer that owns them, not where they were born.**
+  `normalizeScreenRect` / `withDefaultSize` are used by *every* rect-drawing layer
+  (free-text, text box, link, image), so they belong in `tools/_framework`, not
+  `tools/free-text`. A `grep` for one symbol can miss multi-line imports —
+  `tsc` is the real safety net for a move refactor (it caught `free-text-layer`).
+- **Know when a "small" item isn't small.** Four of the nine were *deferred with a
+  reason*: they need other work (marked-content tagging), a UX policy decision, a
+  UI restructure, or a feature that hasn't landed (D4). Bundling those into a
+  grab-bag cleanup would have smuggled in scope; naming the blocker is the fix.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `parse_hex_color` `#rgb` support + unit tests. |
+| `src-tauri/src/pdf/mod.rs` | Alphabetized the module list. |
+| `src/app/{Watermark,Background}Dialog.tsx` | `HistoryState` type; direct `parsePageRange` import. |
+| `src/tools/watermark/watermark.ts` | Dropped the `parsePageRange` re-export shim. |
+| `src/tools/_framework/{coords,index}.ts` | New home for the screen-rect helpers. |
+| `src/tools/free-text/free-text.ts` + 4 importers | Removed the helpers; repointed imports. |
+
+#### Further reading
+
+- CSS `#rgb` / `#rrggbb` hex color notation (MDN).
+- Module boundaries / "features vs. framework" layering.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

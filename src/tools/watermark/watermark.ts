@@ -1,9 +1,6 @@
 // SPEC: P4-EDIT-009 (P4.D2) — pure helpers for the watermark dialog: the spec
 // shape and a default. The page-range parser lives in the shared
-// `@/tools/page-range` (used by every page-decoration dialog) and is re-exported
-// here for back-compat.
-
-export { parsePageRange, type PageRangeResult } from "@/tools/page-range";
+// `@/tools/page-range`; import it from there directly.
 
 /** A watermark's appearance + placement, independent of text-vs-image source. */
 export interface WatermarkCommon {

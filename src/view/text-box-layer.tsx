@@ -14,7 +14,8 @@ import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, type ScreenPoint, screenToPdf } from "@/tools/_framework";
-import { cssFontFamily, normalizeScreenRect, type ScreenRect, withDefaultSize } from "@/tools/free-text/free-text";
+import { normalizeScreenRect, type ScreenRect, withDefaultSize } from "@/tools/_framework";
+import { cssFontFamily } from "@/tools/free-text/free-text";
 
 export interface TextBoxLayerProps {
   documentId: string;

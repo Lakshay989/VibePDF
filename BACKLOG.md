@@ -800,10 +800,14 @@ C4a/b, B3b). Four issues found + fixed this session:
   `pending` ids + `inline` stack), so a crafted deep container chain can't overflow the actor
   thread's stack. Pinned by `background::tests` (100k-link chain + a reference cycle). Discovered:
   lopdf `get_object` collapses bare `M 0 R` chains, so the overflow shape is *container* links.
-- **Still open from FABLE_REVIEW** (each its own ship): **3.15** assorted. (**3.6** undo memory →
-  byte-budgeted P4.HF13; **3.8** CSP → strict policy P4.HF14; **3.9** Windows path + CI leg →
-  P4.HF15; **3.10** AFM metrics → alignment fixed P4.HF16; **3.11** dirty-flag → fixed P4.HF12;
-  **3.12** stream compression → non-issue, P4.HF11.)
+- **Cleared from FABLE_REVIEW §3**: **3.6** undo memory → byte-budgeted P4.HF13; **3.8** CSP →
+  strict policy P4.HF14; **3.9** Windows path + CI leg → P4.HF15; **3.10** AFM metrics →
+  alignment fixed P4.HF16; **3.11** dirty-flag → fixed P4.HF12; **3.12** stream compression →
+  non-issue P4.HF11; **3.15** → 5 of 9 fixed P4.HF17.
+  - **Still open (deferred §3.15 items, each needs other work):** header/footer double-apply
+    dedupe (needs §3.13 marked-content on those writers); dialog state-reset consistency (UX
+    policy decision); ZoomToolbar `Document ▾` dropdown (UI restructure); `image_watermark`
+    placement control (folds into a shared placement struct when D4 lands).
   - **Note (P4.HF16):** the free-text / text-box **wrap** still uses `font_avg_em`, not exact
     widths. `pdf::font_metrics::text_width` exists; the follow-up is to make the shared
     `cos::wrap_lines` width-based (it's also used by the embedded-CID path, so do it as its own

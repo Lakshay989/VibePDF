@@ -3429,11 +3429,20 @@ fn shape_appearance_content(
 #[allow(clippy::cast_precision_loss)] // 0..=255 → f32 is exact.
 pub(crate) fn parse_hex_color(hex: &str) -> Result<(f32, f32, f32), CommandError> {
     let h = hex.trim_start_matches('#');
-    if h.len() != 6 || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
+    // Validate hex digits first so the length branch only ever slices ASCII
+    // (each digit is one byte), then accept the CSS `#rgb` short form by
+    // doubling each digit (`f0a` → `ff00aa`) as well as the 6-digit form.
+    // FABLE_REVIEW §3.15.
+    if !h.bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err(CommandError::InvalidInput(format!("bad colour: {hex}")));
     }
+    let expanded = match h.len() {
+        3 => h.chars().flat_map(|c| [c, c]).collect::<String>(),
+        6 => h.to_string(),
+        _ => return Err(CommandError::InvalidInput(format!("bad colour: {hex}"))),
+    };
     let comp = |s: &str| f32::from(u8::from_str_radix(s, 16).unwrap_or(0)) / 255.0;
-    Ok((comp(&h[0..2]), comp(&h[2..4]), comp(&h[4..6])))
+    Ok((comp(&expanded[0..2]), comp(&expanded[2..4]), comp(&expanded[4..6])))
 }
 
 /// Bounding box [x0,y0,x1,y1] of all quads.
@@ -4272,6 +4281,34 @@ fn parse_pdf_date(raw: &[u8]) -> Option<i64> {
     let days = era * 146_097 + doe - 719_468;
 
     Some((days * 86_400 + hh * 3600 + mm * 60 + ss) * 1000)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::float_cmp)]
+mod hex_color_tests {
+    use super::parse_hex_color;
+
+    #[test]
+    fn six_digit_form_parses() {
+        assert_eq!(parse_hex_color("#ff0000").unwrap(), (1.0, 0.0, 0.0));
+        assert_eq!(parse_hex_color("00ff00").unwrap(), (0.0, 1.0, 0.0)); // no leading '#'
+    }
+
+    #[test]
+    fn rgb_short_form_expands_by_doubling() {
+        // FABLE_REVIEW §3.15 — `#f0a` is `#ff00aa`.
+        assert_eq!(parse_hex_color("#f0a").unwrap(), parse_hex_color("#ff00aa").unwrap());
+        assert_eq!(parse_hex_color("fff").unwrap(), (1.0, 1.0, 1.0));
+        assert_eq!(parse_hex_color("#000").unwrap(), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn invalid_colours_are_rejected() {
+        assert!(parse_hex_color("#12").is_err()); // wrong length
+        assert!(parse_hex_color("#ff00zz").is_err()); // non-hex digit
+        assert!(parse_hex_color("#abcd").is_err()); // 4 digits
+        assert!(parse_hex_color("").is_err());
+    }
 }
 
 #[cfg(test)]

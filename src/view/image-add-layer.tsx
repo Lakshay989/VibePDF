@@ -14,7 +14,7 @@ import { useHistoryStore } from "@/state/history-store";
 import { useImageAddStore } from "@/state/image-add-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, type ScreenPoint, screenToPdf } from "@/tools/_framework";
-import { normalizeScreenRect, withDefaultSize } from "@/tools/free-text/free-text";
+import { normalizeScreenRect, withDefaultSize } from "@/tools/_framework";
 
 export interface ImageAddLayerProps {
   documentId: string;

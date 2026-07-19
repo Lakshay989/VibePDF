@@ -3171,6 +3171,22 @@ alignment check: `vibepdf-verify-header-footer.pdf`, `vibepdf-verify-watermark.p
 
 ---
 
+### P4.HF17 — Assorted §3.15 cleanups (5 of 9)
+
+No `cargo add` / `npm install`; no new dependency; no PDF write-path behaviour
+change (`parse_hex_color` only *adds* `#rgb`; 6-digit unchanged) → no artifact.
+
+Verification gates:
+
+```
+cargo test --lib hex_color   # 3 passed (#rgb == #rrggbb, 6-digit, rejects invalid)
+npm run check                # tsc caught a multi-line import missed by grep (free-text-layer), then green
+npm run test                 # 376 passed (90 files) incl. the moved free-text.test.ts
+npm run test:rust            # full suite — every 'test result' 0 failed
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

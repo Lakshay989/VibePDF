@@ -23,36 +23,7 @@ export function cssFontFamily(family: FontFamily): string {
   }
 }
 
-/** A rectangle in CSS px within a page layer. */
-export interface ScreenRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-/** The minimum box (CSS px) a drag must reach; a smaller drag is a "click". */
-export const MIN_DRAG_PX = 8;
-
-/** Default box (CSS px) used when the gesture was a click, not a real drag. */
-export const DEFAULT_BOX_PX = { width: 160, height: 28 } as const;
-
-/** Normalize two pointer points (CSS px, layer-relative) into a positive rect. */
-export function normalizeScreenRect(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-): ScreenRect {
-  const left = Math.min(a.x, b.x);
-  const top = Math.min(a.y, b.y);
-  return { left, top, width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) };
-}
-
-/**
- * If `rect` is smaller than `MIN_DRAG_PX` in either axis (a click, not a drag),
- * grow it to `DEFAULT_BOX_PX` anchored at its top-left so the user still gets a
- * usable text box.
- */
-export function withDefaultSize(rect: ScreenRect): ScreenRect {
-  if (rect.width >= MIN_DRAG_PX && rect.height >= MIN_DRAG_PX) return rect;
-  return { left: rect.left, top: rect.top, width: DEFAULT_BOX_PX.width, height: DEFAULT_BOX_PX.height };
-}
+// Screen-rect drag helpers (`ScreenRect`, `normalizeScreenRect`,
+// `withDefaultSize`, `MIN_DRAG_PX`, `DEFAULT_BOX_PX`) moved to
+// `@/tools/_framework` — they're framework-level, used by every rect-drawing
+// layer, not free-text-specific (FABLE_REVIEW §3.15).

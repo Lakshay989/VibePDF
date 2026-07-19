@@ -28,11 +28,16 @@ export {
   type ToolStep,
 } from "./lifecycle";
 export {
+  DEFAULT_BOX_PX,
+  MIN_DRAG_PX,
   normalizeRect,
+  normalizeScreenRect,
   pdfRectFromPoints,
   pdfToScreen,
   screenToPdf,
+  withDefaultSize,
   type PageGeometry,
   type ScreenPoint,
+  type ScreenRect,
 } from "./coords";
 export { allTools, clearTools, getTool, registerTool } from "./registry";

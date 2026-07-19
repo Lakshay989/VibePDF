@@ -14,7 +14,7 @@ import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, type ScreenPoint, screenToPdf } from "@/tools/_framework";
-import { normalizeScreenRect, withDefaultSize } from "@/tools/free-text/free-text";
+import { normalizeScreenRect, withDefaultSize } from "@/tools/_framework";
 import {
   DEFAULT_LINK_COLOR,
   DEFAULT_LINK_STYLE,

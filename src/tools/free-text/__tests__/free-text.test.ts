@@ -5,12 +5,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  cssFontFamily,
   DEFAULT_BOX_PX,
-  FONT_FAMILIES,
   normalizeScreenRect,
   withDefaultSize,
-} from "@/tools/free-text/free-text";
+} from "@/tools/_framework";
+import { cssFontFamily, FONT_FAMILIES } from "@/tools/free-text/free-text";
 
 describe("free-text helpers", () => {
   it("offers the three base-14 families", () => {
