@@ -857,9 +857,15 @@ the change *and returns the inverse edit*. Undo pops the undo stack,
 applies the inverse, and pushes the result onto the redo stack; redo is
 the mirror. A new edit clears the redo stack (history forks). The stack is
 generic over the target `T` so its invariants are unit-testable without a
-live document; the actor instantiates `UndoStack<PdfDocument>`. Depth is
-capped (`MAX_UNDO_DEPTH`) because an inverse can retain page content (a
-deleted page must be remembered to restore it). See `pdf/undo.rs`.
+live document; the actor instantiates `UndoStack<PdfDocument>`. History is
+bounded two ways: by **count** (`MAX_UNDO_DEPTH`) and by **total heap**
+(`MAX_UNDO_BYTES`, 256 MiB). The byte budget matters because nearly every
+edit's inverse is a full-document byte snapshot (`restore::RestoreDocEdit`),
+so a count cap alone is not a memory bound on big scans; each `Edit` reports
+its `heap_bytes()` and the oldest undo entries are evicted once the running
+total exceeds the budget (one entry is always kept, so the most recent edit
+stays undoable). This keeps the history within NFR-PERF-002/003. See
+`pdf/undo.rs` and FABLE_REVIEW §3.6.
 
 Granularity is **page-level**: move, insert, delete, rotate, crop, resize
 are each one undoable action. The frontend mirrors only `{canUndo,

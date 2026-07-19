@@ -49,4 +49,10 @@ impl<'a> Edit<PdfDocument<'a>> for RestoreDocEdit {
     fn label(&self) -> &'static str {
         "restore-document"
     }
+
+    /// A full-document byte snapshot — the dominant undo-memory cost, and
+    /// the reason the history needs a byte budget. `FABLE_REVIEW` §3.6.
+    fn heap_bytes(&self) -> usize {
+        self.bytes.len()
+    }
 }

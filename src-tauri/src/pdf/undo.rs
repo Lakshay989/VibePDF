@@ -27,6 +27,16 @@ use crate::error::CommandError;
 /// older actions fall off the bottom.
 pub const MAX_UNDO_DEPTH: usize = 100;
 
+/// Total heap budget for retained undo + redo inverses. The count cap alone
+/// is not a memory bound: nearly every edit's inverse is a full-document
+/// byte snapshot (`restore::RestoreDocEdit`), so 100 of them on a big scan
+/// is multiple GB. Beyond this budget the *oldest* undo entries are evicted
+/// (at least one is always kept, so the most recent edit stays undoable even
+/// if it alone exceeds the budget). 256 MiB leaves headroom under
+/// NFR-PERF-002/003 when a large document is already resident.
+/// `FABLE_REVIEW` §3.6 (P4.HF13).
+pub const MAX_UNDO_BYTES: usize = 256 * 1024 * 1024;
+
 /// A reversible edit against a target `T`.
 ///
 /// [`Edit::apply`] performs the edit and returns the edit that *reverses*
@@ -41,6 +51,16 @@ pub trait Edit<T> {
 
     /// Short label for tracing and the UI ("rotate", "delete", …).
     fn label(&self) -> &'static str;
+
+    /// Approximate heap this edit retains while parked on the undo/redo
+    /// stack, used to bound total history memory (`MAX_UNDO_BYTES`). Cheap
+    /// inverses (a handful of fields) keep the default `0`; a large one — a
+    /// full-document byte snapshot — overrides it. Only an approximation:
+    /// the dominant cost is any owned `Vec<u8>` buffer, not the struct
+    /// itself. `FABLE_REVIEW` §3.6 (P4.HF13).
+    fn heap_bytes(&self) -> usize {
+        0
+    }
 }
 
 /// Snapshot of history availability, surfaced to the frontend so it can
@@ -55,9 +75,10 @@ pub struct HistoryState {
 
 /// Per-document undo and redo stacks over a target `T`.
 ///
-/// `undo` is a `VecDeque` so the depth cap can drop the *oldest* action
-/// from the front cheaply; `redo` is a `Vec` (LIFO, never capped beyond
-/// what `undo` already bounds).
+/// `undo` is a `VecDeque` so the depth cap *and* the byte budget can drop
+/// the *oldest* action from the front cheaply; `redo` is a `Vec` (LIFO,
+/// never capped beyond what `undo` already bounds). History is bounded by
+/// both a count (`MAX_UNDO_DEPTH`) and total heap (`MAX_UNDO_BYTES`).
 ///
 /// Each stack entry is paired with the **state id it returns to** — the id
 /// of the document state that existed *before* the recorded edit. Combined
@@ -76,6 +97,14 @@ pub struct UndoStack<T> {
     /// and only ever increases, even across the depth cap and undo/redo —
     /// that monotonicity is what makes forked history detectable.
     next_id: u64,
+    /// Running `heap_bytes()` sum over the undo stack — the figure the byte
+    /// budget (`MAX_UNDO_BYTES`) is enforced against.
+    undo_bytes: usize,
+    /// Running `heap_bytes()` sum over the redo stack. Bounded by
+    /// construction: entries only arrive by undoing from the already
+    /// byte-capped undo stack, and undo/redo conserve the total, so redo is
+    /// never evicted independently.
+    redo_bytes: usize,
 }
 
 impl<T> UndoStack<T> {
@@ -86,6 +115,8 @@ impl<T> UndoStack<T> {
             redo: Vec::new(),
             current_id: 0,
             next_id: 1,
+            undo_bytes: 0,
+            redo_bytes: 0,
         }
     }
 
@@ -124,18 +155,24 @@ impl<T> UndoStack<T> {
         let return_to = self.current_id;
         self.current_id = self.next_id;
         self.next_id += 1;
+        // A new action forks history: the redo stack (and its bytes) go.
         self.redo.clear();
+        self.redo_bytes = 0;
+        self.undo_bytes += inverse.heap_bytes();
         self.undo.push_back((return_to, inverse));
-        while self.undo.len() > MAX_UNDO_DEPTH {
-            self.undo.pop_front();
-        }
+        self.enforce_limits();
     }
 
     /// Undo the most recent action against `target`. A no-op (returns the
     /// unchanged state) when the undo stack is empty.
     pub fn undo(&mut self, target: &mut T) -> Result<HistoryState, CommandError> {
         if let Some((return_to, edit)) = self.undo.pop_back() {
+            // Read the parked cost before `apply` consumes the box; the
+            // returned inverse carries its own (≈ equal) cost onto redo, so
+            // the undo↔redo move conserves the total — no re-eviction needed.
+            self.undo_bytes = self.undo_bytes.saturating_sub(edit.heap_bytes());
             let inverse = edit.apply(target)?;
+            self.redo_bytes += inverse.heap_bytes();
             // The state we are leaving is `current_id`; redo restores it.
             self.redo.push((self.current_id, inverse));
             self.current_id = return_to;
@@ -148,12 +185,36 @@ impl<T> UndoStack<T> {
     /// undo stack (which cannot exceed the cap, since it came from there).
     pub fn redo(&mut self, target: &mut T) -> Result<HistoryState, CommandError> {
         if let Some((restore, edit)) = self.redo.pop() {
+            self.redo_bytes = self.redo_bytes.saturating_sub(edit.heap_bytes());
             let inverse = edit.apply(target)?;
+            self.undo_bytes += inverse.heap_bytes();
             // The state we are leaving is `current_id`; undo returns to it.
             self.undo.push_back((self.current_id, inverse));
             self.current_id = restore;
         }
         Ok(self.state())
+    }
+
+    /// Keep the history within both the depth cap and the byte budget by
+    /// dropping the *oldest* undo entries. At least one undo entry is always
+    /// retained, so the most recent edit stays undoable even if it alone
+    /// exceeds `MAX_UNDO_BYTES`. Only the undo stack is trimmed: redo is
+    /// bounded by construction (see `redo_bytes`), and `record` — the only
+    /// path that grows the total — has already cleared redo when this runs.
+    fn enforce_limits(&mut self) {
+        while self.undo.len() > MAX_UNDO_DEPTH {
+            self.pop_oldest_undo();
+        }
+        while self.undo.len() > 1 && self.undo_bytes + self.redo_bytes > MAX_UNDO_BYTES {
+            self.pop_oldest_undo();
+        }
+    }
+
+    /// Evict the oldest (front) undo entry, keeping `undo_bytes` in step.
+    fn pop_oldest_undo(&mut self) {
+        if let Some((_, edit)) = self.undo.pop_front() {
+            self.undo_bytes = self.undo_bytes.saturating_sub(edit.heap_bytes());
+        }
     }
 }
 
@@ -326,5 +387,102 @@ mod tests {
             0,
             "cap-evicted edits leave the floor non-pristine"
         );
+    }
+
+    // --- byte budget (FABLE_REVIEW §3.6 / P4.HF13) ---
+
+    /// Synthetic edit that reports a heap cost, to drive the byte budget with
+    /// no real `PdfDocument`. Applying it is a no-op on the target; its
+    /// inverse reports the same cost (a snapshot pair trades equal buffers).
+    struct Big(usize);
+
+    impl Edit<i32> for Big {
+        fn apply(self: Box<Self>, _t: &mut i32) -> Result<Box<dyn Edit<i32>>, CommandError> {
+            Ok(Box::new(Big(self.0)))
+        }
+        fn label(&self) -> &'static str {
+            "big"
+        }
+        fn heap_bytes(&self) -> usize {
+            self.0
+        }
+    }
+
+    fn record_big(stack: &mut UndoStack<i32>, target: &mut i32, bytes: usize) {
+        let inverse = Box::new(Big(bytes)).apply(target).expect("synthetic big edit");
+        stack.record(inverse);
+    }
+
+    #[test]
+    fn byte_budget_evicts_oldest_entries() {
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        let each = MAX_UNDO_BYTES / 4; // ~4 fit under budget
+        for _ in 0..10 {
+            record_big(&mut stack, &mut v, each);
+        }
+        assert!(stack.undo_bytes <= MAX_UNDO_BYTES, "undo heap stays within budget");
+        assert!(!stack.undo.is_empty(), "at least one entry is always kept");
+        assert!(
+            stack.undo.len() < 10,
+            "older snapshots were evicted, not all 10 retained"
+        );
+    }
+
+    #[test]
+    fn single_oversized_edit_is_still_undoable_once() {
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        record_big(&mut stack, &mut v, MAX_UNDO_BYTES * 2); // one huge snapshot
+        assert!(stack.state().can_undo, "an over-budget single edit stays undoable");
+        assert_eq!(stack.undo.len(), 1);
+
+        record_big(&mut stack, &mut v, MAX_UNDO_BYTES * 2);
+        assert_eq!(stack.undo.len(), 1, "only the most recent oversized entry is kept");
+    }
+
+    #[test]
+    fn cheap_edits_do_not_count_against_budget() {
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        for _ in 0..MAX_UNDO_DEPTH {
+            apply_and_record(&mut stack, &mut v, 1); // `Add` keeps the default heap_bytes 0
+        }
+        assert_eq!(stack.undo_bytes, 0, "cheap inverses contribute no bytes");
+        assert_eq!(stack.undo.len(), MAX_UNDO_DEPTH, "only the count cap applies");
+    }
+
+    #[test]
+    fn redo_snapshots_are_bounded_too() {
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        let each = MAX_UNDO_BYTES / 4;
+        for _ in 0..10 {
+            record_big(&mut stack, &mut v, each); // undo is byte-capped to ~budget
+        }
+        while stack.state().can_undo {
+            stack.undo(&mut v).unwrap(); // move the retained set onto redo
+        }
+        assert_eq!(stack.undo_bytes, 0);
+        assert!(
+            stack.redo_bytes <= MAX_UNDO_BYTES,
+            "redo inherits the capped set and never exceeds the budget"
+        );
+    }
+
+    #[test]
+    fn byte_eviction_keeps_state_id_correct() {
+        // Same guarantee as depth-cap eviction (HF12), reached via the byte
+        // budget: undoing to the un-undoable floor must not report pristine.
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        let each = MAX_UNDO_BYTES / 2;
+        for _ in 0..5 {
+            record_big(&mut stack, &mut v, each); // evicts oldest as it goes
+        }
+        while stack.state().can_undo {
+            stack.undo(&mut v).unwrap();
+        }
+        assert_ne!(stack.current_state_id(), 0, "byte-evicted floor stays non-pristine");
     }
 }

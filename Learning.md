@@ -6668,6 +6668,53 @@ file rewrites.
 
 ---
 
+## P4.HF13 — Bounding undo memory by a byte budget (FABLE_REVIEW §3.6)
+
+#### Problem
+
+Undo was capped by *count* (`MAX_UNDO_DEPTH = 100`) but not by *memory*. Since
+nearly every edit's inverse is a full-document byte snapshot
+(`RestoreDocEdit { bytes: Vec<u8> }`), a 150 MB scan × a long session could
+pin multiple GB — breaching NFR-PERF-002 (< 1 GB for a 100-page doc) and
+NFR-PERF-003 (open 500 MB without exhausting memory).
+
+#### Concepts learned
+
+- **A count cap is not a memory cap.** "Keep the last N actions" bounds memory
+  only if each action costs about the same. When one action can retain a whole
+  document, the meaningful bound is *bytes*, not *entries*. Cap by the quantity
+  you actually care about.
+- **Let each item price itself.** Adding `fn heap_bytes(&self) -> usize { 0 }`
+  to the `Edit` trait (default `0`, overridden by `RestoreDocEdit`) lets the
+  stack sum a running total without knowing anything about concrete edits. A
+  **defaulted trait method** is a non-breaking extension — the other ~35 `Edit`
+  impls compile untouched.
+- **Prove the invariant, then lean on it.** The budget is enforced only in
+  `record` (the one path that *grows* total memory). `undo`/`redo` just move an
+  inverse between stacks and produce an equal-sized inverse, so they *conserve*
+  the total — which means the redo stack never needs its own eviction, and
+  total memory stays ≤ budget by construction. Spotting that conservation law
+  let the change stay smaller than the plan first assumed (no `VecDeque`
+  conversion of the redo stack).
+- **Pick a humane failure mode.** Rather than make the newest edit
+  non-undoable when a single snapshot exceeds the whole budget, keep ≥1 entry
+  always. You bound memory *and* never silently drop the user's most recent
+  action.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/undo.rs` | `MAX_UNDO_BYTES` (256 MiB) + `heap_bytes()` on the `Edit` trait; `UndoStack` tracks `undo_bytes`/`redo_bytes` and evicts oldest undo entries over budget (keeps ≥1). 5 new unit tests. |
+| `src-tauri/src/pdf/restore.rs` | `RestoreDocEdit::heap_bytes` → `self.bytes.len()` — the dominant cost. |
+
+#### Further reading
+
+- Cache eviction policies (LRU / size-based) — the same "bound by cost, evict oldest" idea.
+- Rust default trait methods (non-breaking API evolution).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

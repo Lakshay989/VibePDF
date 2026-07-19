@@ -250,6 +250,20 @@ future-proofs every feature that starts rejecting input (3.2).
 
 ### 3.6 MEDIUM — Undo history can hold ~100 full document snapshots
 
+> **✅ FIXED 2026-07-18 (P4.HF13)** — the review's option (2): cap history by
+> **total bytes**, not just count. `Edit` gains `heap_bytes()` (default `0`;
+> `RestoreDocEdit` returns `bytes.len()`); `UndoStack` tracks a running total
+> and evicts the *oldest* undo entries once it exceeds `MAX_UNDO_BYTES`
+> (256 MiB), always keeping ≥1 so the most recent edit stays undoable even if
+> it alone is over budget. Redo is bounded by construction (entries only
+> arrive from the byte-capped undo stack; undo/redo conserve the total).
+> Proven by `undo.rs` units (`byte_budget_evicts_oldest_entries`,
+> `single_oversized_edit_is_still_undoable_once`, `cheap_edits_do_not_count…`,
+> `redo_snapshots_are_bounded_too`, `byte_eviction_keeps_state_id_correct`).
+> No dependency added. Follow-ups if more undo depth is wanted per byte:
+> zstd compression (needs a dep) or binary-delta snapshots — both compose
+> with this budget.
+
 **Where:** `undo.rs` (`MAX_UNDO_DEPTH = 100`) + `restore.rs` (`RestoreDocEdit { bytes: Vec<u8> }`),
 which nearly every edit now uses as its inverse.
 
@@ -527,7 +541,7 @@ PDF engine" honored by every phase.
 
 | Concern | Today | When it bites | Mitigation |
 |---|---|---|---|
-| Full-doc snapshot per edit (undo) | fine for <20 MB docs | large scans, long sessions | §3.6 (compress/byte-budget/delta) |
+| Full-doc snapshot per edit (undo) | fine for <20 MB docs | large scans, long sessions | §3.6 — **byte-budgeted at 256 MiB (P4.HF13)**; compress/delta still optional |
 | `bumpEpoch` full re-render | imperceptible | 4K displays + many visible pages | per-page epochs (§4) |
 | `prune_dangling_destinations` on every save | no-op fast-path exists | docs with thousands of links | already returns input unchanged when clean — fine |
 | One global PDFium lock | invisible interactively | P8 batch | worker processes, not threads |
@@ -612,7 +626,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.3 | High | ~~Encrypted-doc save unverified~~ **RESOLVED (P4.HF)**: saves failed entirely; now save + keep encryption | S |
 | 3.4 | Medium | ~~Placement ignores CropBox~~ **FIXED (P4.HF)** | S |
 | 3.5 | Medium | Canvas tools swallow errors (`console.warn`) | S |
-| 3.6 | Medium | Undo = up to 100 full-doc snapshots in RAM | M |
+| 3.6 | Medium | ~~Undo = up to 100 full-doc snapshots in RAM~~ **FIXED (P4.HF13)**: 256 MiB byte budget | M |
 | 3.7 | Medium | ~~`/Contents` ref-to-array corrupts (latent)~~ **FIXED (P4.HF)** | S |
 | 3.8 | Medium | CSP disabled | S |
 | 3.9 | Medium | No Windows CI; `split("/")` path-display bug | S |

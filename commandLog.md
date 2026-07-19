@@ -3086,6 +3086,23 @@ cargo test --test save_noop save_writes_verification_artifact -- --ignored
 
 ---
 
+### P4.HF13 — Undo byte budget (FABLE_REVIEW §3.6)
+
+No `cargo add` / `npm install`; no fixtures; no new dependency. Rust-only change
+in `undo.rs` + `restore.rs` (+ docs). No PDF write-path change → no verification
+artifact needed.
+
+Verification gates:
+
+```
+cargo test --lib undo::                 # 14 passed (9 prior + 5 byte-budget)
+cargo clippy --fix --lib --tests --allow-dirty --allow-staged   # doc_markdown (2) — len_zero fixed by hand
+npm run check                           # tsc + eslint + clippy -D warnings — green
+npm run test:rust                       # full suite — every 'test result' 0 failed
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
