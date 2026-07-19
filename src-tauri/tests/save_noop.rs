@@ -109,6 +109,77 @@ async fn save_document_rotates_bak_when_overwriting() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[tokio::test]
+async fn undo_to_saved_state_is_true_noop() {
+    // SPEC: P2-SAVE-001 / FABLE_REVIEW §3.11 (P4.HF12), bug (a). Editing
+    // then undoing back to the exact saved state must leave the document
+    // clean — a same-path save is a true no-op again, not a rewrite.
+    // Before the fix, undo unconditionally set `dirty = true`, so this save
+    // rewrote the file.
+    let dir = temp_subdir();
+    let orig = dir.join("orig.pdf");
+    std::fs::copy(hello_pdf(), &orig).expect("copy fixture into temp");
+    let before = std::fs::read(&orig).expect("read original bytes");
+
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, orig.clone(), None).expect("spawn");
+
+    handle.rotate_pages(vec![0], 1).await.expect("rotate 90 dirties the doc");
+    let after_undo = handle.undo().await.expect("undo back to the as-opened state");
+    assert!(!after_undo.can_undo, "undo stack is empty again");
+
+    let outcome = handle.save(None).await.expect("same-path save");
+    assert!(outcome.no_op, "undo-to-saved must make the same-path save a no-op");
+    assert_eq!(outcome.bytes_written, 0);
+
+    let after = std::fs::read(&orig).expect("read original bytes after");
+    assert_eq!(before, after, "a no-op save must leave the file byte-identical");
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn save_as_then_same_path_save_is_noop() {
+    // SPEC: P2-SAVE-001 / FABLE_REVIEW §3.11 (P4.HF12), bug (b). A save-as
+    // persists the in-memory doc, so it becomes clean regardless of path —
+    // the "unsaved changes" claim must clear. Before the fix, `dirty` only
+    // cleared on a *same-path* save, so a save-as left the identical doc
+    // marked dirty (→ stale recovery copy / false prompt).
+    //
+    // Observable via the same-path no-op: after edit + save-as to B, a
+    // same-path save to the original A is a no-op. NOTE (scoped quirk): the
+    // actor does not repoint its `path` on save-as, so the rotation lives
+    // in B and A stays the original — repointing is out of scope for §3.11.
+    let dir = temp_subdir();
+    let orig = dir.join("orig.pdf"); // path A
+    let other = dir.join("copy.pdf"); // path B (save-as target)
+    std::fs::copy(hello_pdf(), &orig).expect("copy fixture into temp");
+    let before_a = std::fs::read(&orig).expect("read A bytes");
+
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, orig.clone(), None).expect("spawn");
+
+    handle.rotate_pages(vec![0], 1).await.expect("rotate dirties the doc");
+    let as_outcome = handle.save(Some(other.clone())).await.expect("save-as to B");
+    assert!(!as_outcome.no_op, "a save-as always writes");
+    assert!(other.is_file(), "B should exist after save-as");
+
+    // The save-as cleaned the doc, so a same-path save to A no-ops.
+    let a_outcome = handle.save(None).await.expect("same-path save to A");
+    assert!(a_outcome.no_op, "save-as must clear dirty → same-path save is a no-op");
+    let after_a = std::fs::read(&orig).expect("read A bytes after");
+    assert_eq!(before_a, after_a, "A stays byte-identical (rotation lives in B)");
+
+    // B is a valid PDF and carries the edit's page count.
+    let (doc, meta) = open_pdf(&other, None).expect("B re-opens cleanly");
+    assert_eq!(meta.page_count, 1);
+    drop(doc);
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Writes a real saved PDF to `/tmp/vibepdf-verify.pdf` for the manual
 /// cross-reader verification ritual (Acrobat / Preview / a third reader).
 /// Ignored by default — produces an artifact, so run on demand:

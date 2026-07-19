@@ -6616,6 +6616,58 @@ faster than they need to. The planned fix was a shared `add_flate_stream` helper
 
 ---
 
+## P4.HF12 — Dirty-flag correctness (FABLE_REVIEW §3.11)
+
+#### Problem
+
+The actor tracked "are there unsaved changes?" with a plain `bool`. Two edges
+were wrong: undoing back to the exact saved state still reported dirty, and a
+save-as never cleared dirty. The visible cost was a **false "Recover unsaved
+changes?" prompt** on the next launch (a stale autosave copy) plus needless
+file rewrites.
+
+#### Concepts learned
+
+- **Derive state, don't track it in parallel.** A separate `dirty` bool has to
+  be poked by hand at every edit/undo/redo/save site (37 sites here) and drifts
+  from reality at the edges. Instead we *derive* it from the one thing that
+  already knows the document's state — the undo history.
+- **A monotonic state id beats a depth counter.** The review suggested a
+  `generation` counter that increments on edit and decrements on undo. That's a
+  *depth* — and it has a **false-clean** bug: save at depth 3, undo to 2, make a
+  new edit, and you're back at depth 3 but on a *different branch*, yet it
+  compares equal to the saved depth. The fix is to mint a **unique id per
+  state** that is never reused (`next_id` only ever increases). Two states at
+  the same stack depth on different branches get different ids.
+  - *False-clean* is the dangerous direction: reporting "saved" when you aren't
+    can lose work on close. Prefer designs whose failure mode is a *false-dirty*
+    (a harmless extra save prompt).
+- **Watch the eviction edge.** The undo stack is capped (`MAX_UNDO_DEPTH`). If
+  you derive "pristine" from *"undo stack is empty,"* then editing past the cap
+  and undoing everything still on the stack falsely reports pristine — the
+  evicted edits are still applied. Keeping `current_id` as an explicit field
+  (each entry stores the id it *returns to*) makes the floor a real, non-zero
+  id, so it stays dirty. This is exactly the case a "derive from `back()`"
+  shortcut gets wrong.
+- **Command-pattern payoff.** Because undo/redo already move between states,
+  once the id lives in `UndoStack`, the actor's undo/redo handlers need *zero*
+  dirty bookkeeping — the flag falls out of `current_state_id() != saved_state_id`.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/undo.rs` | Stacks now carry `(return_to_id, inverse)`; `next_id` + `current_id` fields; new `current_state_id()`. Unit tests for pristine/monotonic/undo-return/redo-restore/branch/eviction. |
+| `src-tauri/src/pdf/actor.rs` | `dirty: bool` → `saved_state_id: u64`; deleted 37 `dirty = true`/`false` pokes; save no-op + clear + recovery-discard now key off the state id (and clear on save-as); autosave writes iff `current != saved`. |
+| `src-tauri/tests/save_noop.rs` | `undo_to_saved_state_is_true_noop` (bug a), `save_as_then_same_path_save_is_noop` (bug b, with the scoped path-quirk note). |
+
+#### Further reading
+
+- Command pattern for undo/redo (Gamma et al., *Design Patterns*).
+- The general "derived vs. duplicated state" idea (single source of truth).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

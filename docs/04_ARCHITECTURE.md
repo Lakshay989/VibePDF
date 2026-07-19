@@ -831,7 +831,7 @@ Two save modes:
 1. **Explicit save** (Cmd/Ctrl+S): writes the current PDFium document to disk. Backs up the previous version as `<name>.bak` for one save cycle.
 2. **Auto-save**: every 30 seconds, if the document is dirty, write a copy under Tauri's `app_data_dir()` at `autosave/<documentId>.pdf`, plus a `<documentId>.json` sidecar recording the original path + timestamp. On startup, scan this directory and offer recovery for any open-at-crash documents.
 
-Auto-save is invisible to the user — it never touches the user's original file. The tick is a dedicated std thread (so no `tokio` `time` feature is needed) that pokes each document actor; a *dirty* actor writes its copy (atomic temp+rename) and clears it again on a clean save or a graceful close. A real crash never runs that cleanup, so the copy survives to be offered next launch (`recovery_list` / `recovery_discard`). Implemented in `pdf/autosave.rs`; the actor owns the write because PDFium is single-threaded per document.
+Auto-save is invisible to the user — it never touches the user's original file. The tick is a dedicated std thread (so no `tokio` `time` feature is needed) that pokes each document actor; a *dirty* actor (dirtiness derived from the undo history's state id — see "Undo/redo" below) writes its copy (atomic temp+rename) and drops it again on **any** successful save (same-path *or* save-as) or a graceful close. A real crash never runs that cleanup, so the copy survives to be offered next launch (`recovery_list` / `recovery_discard`). Implemented in `pdf/autosave.rs`; the actor owns the write because PDFium is single-threaded per document.
 
 **Path policy.** All persistent paths are derived from Tauri's `AppHandle::path()` helpers on every platform — there are **no hardcoded POSIX paths**:
 
@@ -868,6 +868,18 @@ learns the new availability from each `pdf_undo`/`pdf_redo` (and, later,
 each mutating command's) return value. This is "session history" — it is
 **not** persisted across restarts and is independent of what is saved to
 disk (cf. flatten in `docs/02`, line 126).
+
+**The dirty flag is derived from this history, not tracked separately.**
+`UndoStack` mints a unique, monotonically-increasing id for every state
+(0 = pristine/as-opened); `current_state_id()` returns the live one. The
+actor records that id at each successful save (`saved_state_id`) and treats
+the document as dirty whenever `current_state_id() != saved_state_id`.
+Because ids are never reused, this is correct where a bare bool or depth
+counter is not: undoing back to the saved state reports clean, a **save-as**
+(any path) clears dirty, a new edit that forks history after an undo is
+*not* mistaken for the branch it replaced, and a depth-cap eviction leaves
+the un-undoable floor dirty rather than falsely pristine. See FABLE_REVIEW
+§3.11 (P4.HF12).
 
 ---
 

@@ -3061,6 +3061,31 @@ No new test committed (nothing shipped). Docs updated: `FABLE_REVIEW.md` §3.12,
 
 ---
 
+### P4.HF12 — Dirty-flag correctness (FABLE_REVIEW §3.11)
+
+No `cargo add` / `npm install`; no fixtures generated. Pure Rust change in
+`undo.rs` + `actor.rs` + `save_noop.rs` (+ docs).
+
+Verification gates:
+
+```
+cargo test --lib undo::                 # 9 passed (state-id unit tests)
+cargo test --test save_noop             # 5 passed, 1 ignored (bug a + bug b)
+cargo test --test autosave              # 4 passed (touched behaviour unaffected)
+npm run check                           # tsc + eslint + clippy -D warnings — green
+cargo clippy --fix --lib --tests --allow-dirty --allow-staged   # 2 doc_markdown fixes (FABLE_REVIEW backticks)
+npm run test:rust                       # full suite — every 'test result' 0 failed
+```
+
+Verification artifact (save path unchanged in bytes, regenerated for the ritual):
+
+```
+cargo test --test save_noop save_writes_verification_artifact -- --ignored
+#   → /tmp/vibepdf-verify.pdf (693 bytes)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

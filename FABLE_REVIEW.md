@@ -335,6 +335,21 @@ change. (Full fix for arbitrary fonts arrives with 3.2's embedding work.)
 
 ### 3.11 LOW — Dirty-flag edge cases
 
+> **✅ FIXED 2026-07-18 (P4.HF12).** The dirty flag is no longer a standalone
+> `bool`; it is **derived** from the undo history. `UndoStack` mints a unique
+> monotonic id per state (`current_state_id()`, `0` = pristine); the actor
+> remembers it at each successful save (`saved_state_id`) and is dirty iff the
+> two differ. This fixes (a) undo-to-saved (id returns to the saved value →
+> clean) and (b) save-as (any successful save records the id + discards the
+> recovery copy). It also closes two edges a bare depth counter would miss:
+> a forked edit after undo gets a fresh id (no false-clean), and a depth-cap
+> eviction leaves the un-undoable floor dirty (never falsely pristine).
+> Proven by `undo.rs` unit tests (`new_edit_after_undo_gets_a_fresh_id_not_the_saved_one`,
+> `state_id_after_cap_eviction_is_not_falsely_pristine`, …) and integration
+> tests `save_noop::undo_to_saved_state_is_true_noop` +
+> `save_as_then_same_path_save_is_noop`. Out of scope (noted): the actor still
+> does not repoint its `path` on save-as.
+
 **Where:** `actor.rs` worker loop.
 
 **What:** (a) undoing back to the exact saved state leaves `dirty = true` — the app will claim
@@ -602,7 +617,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.8 | Medium | CSP disabled | S |
 | 3.9 | Medium | No Windows CI; `split("/")` path-display bug | S |
 | 3.10 | Low | Average-width alignment drift | S |
-| 3.11 | Low | Dirty-flag edge cases (undo-to-saved, save-as) | S |
+| 3.11 | Low | ~~Dirty-flag edge cases (undo-to-saved, save-as)~~ **FIXED (P4.HF12)**: dirty derived from undo state-id | S |
 | 3.12 | Low | ~~New streams uncompressed~~ **NON-ISSUE (P4.HF11)**: lopdf auto-compresses on save | — |
 | 3.13 | Low | ~~Decorations untagged~~ **FIXED (P4.HF2)**: `/VibePDF` BDC/EMC + splice-proof test | S |
 | 3.14 | Low | ~~`collect_refs` recursion depth~~ **FIXED (P4.HF4)**: iterative worklists; 100k-chain + cycle tests | S |

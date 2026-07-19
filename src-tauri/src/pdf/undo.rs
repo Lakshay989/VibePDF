@@ -58,9 +58,24 @@ pub struct HistoryState {
 /// `undo` is a `VecDeque` so the depth cap can drop the *oldest* action
 /// from the front cheaply; `redo` is a `Vec` (LIFO, never capped beyond
 /// what `undo` already bounds).
+///
+/// Each stack entry is paired with the **state id it returns to** — the id
+/// of the document state that existed *before* the recorded edit. Combined
+/// with the live `current_id`, this lets the actor derive its dirty flag
+/// (see [`UndoStack::current_state_id`]) without the false-clean bugs a
+/// bare depth counter has (`FABLE_REVIEW` §3.11 / P4.HF12).
 pub struct UndoStack<T> {
-    undo: VecDeque<Box<dyn Edit<T>>>,
-    redo: Vec<Box<dyn Edit<T>>>,
+    undo: VecDeque<(u64, Box<dyn Edit<T>>)>,
+    redo: Vec<(u64, Box<dyn Edit<T>>)>,
+    /// Unique id of the current document state. `0` is the pristine
+    /// (as-opened) state; every recorded edit mints a fresh id from
+    /// `next_id`. Ids are never reused, so a state reached by editing after
+    /// an undo is distinguishable from the branch it replaced.
+    current_id: u64,
+    /// Next id to hand out. Starts at `1` (`0` is reserved for pristine)
+    /// and only ever increases, even across the depth cap and undo/redo —
+    /// that monotonicity is what makes forked history detectable.
+    next_id: u64,
 }
 
 impl<T> UndoStack<T> {
@@ -69,6 +84,8 @@ impl<T> UndoStack<T> {
         Self {
             undo: VecDeque::new(),
             redo: Vec::new(),
+            current_id: 0,
+            next_id: 1,
         }
     }
 
@@ -81,15 +98,34 @@ impl<T> UndoStack<T> {
         }
     }
 
+    /// A unique id for the current document state; `0` iff the document is
+    /// in its pristine (as-opened) form. The actor remembers this id at
+    /// each successful save and treats the document as dirty whenever the
+    /// live id differs. Because ids are minted monotonically and never
+    /// reused, this stays correct across undo-to-saved, redo, forked
+    /// history, and depth-cap eviction (an evicted-past edit leaves
+    /// `current_id` at the un-undoable floor, never falsely back at `0`).
+    ///
+    /// SPEC: P2-SAVE-001 / P2.A2 — see `FABLE_REVIEW` §3.11 (P4.HF12).
+    #[must_use]
+    pub fn current_state_id(&self) -> u64 {
+        self.current_id
+    }
+
     /// Record that a forward edit was just applied: its `inverse` (the
-    /// value `Edit::apply` returned) goes onto the undo stack, and the
-    /// redo stack is cleared because a new action forks history.
+    /// value `Edit::apply` returned) goes onto the undo stack paired with
+    /// the id it returns to (the pre-edit state), the current state gets a
+    /// fresh id, and the redo stack is cleared because a new action forks
+    /// history.
     ///
     /// Used by the P2.B* mutating messages; unused by P2.A3 itself (no
     /// page operations exist yet), but exercised by this module's tests.
     pub fn record(&mut self, inverse: Box<dyn Edit<T>>) {
+        let return_to = self.current_id;
+        self.current_id = self.next_id;
+        self.next_id += 1;
         self.redo.clear();
-        self.undo.push_back(inverse);
+        self.undo.push_back((return_to, inverse));
         while self.undo.len() > MAX_UNDO_DEPTH {
             self.undo.pop_front();
         }
@@ -98,9 +134,11 @@ impl<T> UndoStack<T> {
     /// Undo the most recent action against `target`. A no-op (returns the
     /// unchanged state) when the undo stack is empty.
     pub fn undo(&mut self, target: &mut T) -> Result<HistoryState, CommandError> {
-        if let Some(edit) = self.undo.pop_back() {
+        if let Some((return_to, edit)) = self.undo.pop_back() {
             let inverse = edit.apply(target)?;
-            self.redo.push(inverse);
+            // The state we are leaving is `current_id`; redo restores it.
+            self.redo.push((self.current_id, inverse));
+            self.current_id = return_to;
         }
         Ok(self.state())
     }
@@ -109,9 +147,11 @@ impl<T> UndoStack<T> {
     /// the redo stack is empty. The re-applied action moves back onto the
     /// undo stack (which cannot exceed the cap, since it came from there).
     pub fn redo(&mut self, target: &mut T) -> Result<HistoryState, CommandError> {
-        if let Some(edit) = self.redo.pop() {
+        if let Some((restore, edit)) = self.redo.pop() {
             let inverse = edit.apply(target)?;
-            self.undo.push_back(inverse);
+            // The state we are leaving is `current_id`; undo returns to it.
+            self.undo.push_back((self.current_id, inverse));
+            self.current_id = restore;
         }
         Ok(self.state())
     }
@@ -207,5 +247,84 @@ mod tests {
             assert!(undos <= MAX_UNDO_DEPTH, "undo stack exceeded the depth cap");
         }
         assert_eq!(undos, MAX_UNDO_DEPTH);
+    }
+
+    // --- state-id tracking (FABLE_REVIEW §3.11 / P4.HF12) ---
+
+    #[test]
+    fn pristine_state_id_is_zero() {
+        let stack = UndoStack::<i32>::new();
+        assert_eq!(stack.current_state_id(), 0, "as-opened document is pristine");
+    }
+
+    #[test]
+    fn each_edit_mints_a_fresh_monotonic_id() {
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        apply_and_record(&mut stack, &mut v, 1);
+        let a = stack.current_state_id();
+        apply_and_record(&mut stack, &mut v, 1);
+        let b = stack.current_state_id();
+        assert!(a > 0 && b > a, "ids advance monotonically: 0 < {a} < {b}");
+    }
+
+    #[test]
+    fn undo_returns_to_prior_state_id_and_redo_restores_it() {
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        apply_and_record(&mut stack, &mut v, 5); // id A
+        let a = stack.current_state_id();
+        apply_and_record(&mut stack, &mut v, 3); // id B
+        let b = stack.current_state_id();
+
+        stack.undo(&mut v).unwrap();
+        assert_eq!(stack.current_state_id(), a, "undo returns to the prior state id");
+        stack.redo(&mut v).unwrap();
+        assert_eq!(stack.current_state_id(), b, "redo restores the exact same id");
+
+        // Undo all the way back reaches pristine again.
+        stack.undo(&mut v).unwrap();
+        stack.undo(&mut v).unwrap();
+        assert_eq!(stack.current_state_id(), 0, "undo-to-open is pristine (id 0)");
+    }
+
+    #[test]
+    fn new_edit_after_undo_gets_a_fresh_id_not_the_saved_one() {
+        // The branch case a bare depth counter gets wrong: "save" at a
+        // state, undo, then a *new* edit lands at the same stack depth but
+        // must NOT compare equal to the saved id (its content differs).
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        apply_and_record(&mut stack, &mut v, 5);
+        let saved = stack.current_state_id();
+
+        stack.undo(&mut v).unwrap();
+        apply_and_record(&mut stack, &mut v, 9); // forks history
+        assert_ne!(
+            stack.current_state_id(),
+            saved,
+            "a forked edit at the same depth must have a distinct id (no false-clean)"
+        );
+    }
+
+    #[test]
+    fn state_id_after_cap_eviction_is_not_falsely_pristine() {
+        // Edit past the cap so the oldest inverses (and the path back to
+        // pristine) are evicted, then undo everything still on the stack.
+        // The un-undoable floor is a real, edited state — its id must not
+        // collapse to 0, or the actor would report a modified doc as saved.
+        let mut stack = UndoStack::<i32>::new();
+        let mut v = 0;
+        for _ in 0..(MAX_UNDO_DEPTH + 5) {
+            apply_and_record(&mut stack, &mut v, 1);
+        }
+        while stack.state().can_undo {
+            stack.undo(&mut v).unwrap();
+        }
+        assert_ne!(
+            stack.current_state_id(),
+            0,
+            "cap-evicted edits leave the floor non-pristine"
+        );
     }
 }

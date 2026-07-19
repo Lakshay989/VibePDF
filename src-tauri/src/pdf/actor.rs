@@ -2168,10 +2168,13 @@ fn run_worker(
         },
     );
 
-    // SPEC: P2-SAVE-001 — tracks unsaved changes so a same-path save of
-    // a clean document is a true no-op. Nothing sets it `true` in P2.A1;
-    // the page-op steps (P2.B*) flip it on every mutating message.
-    let mut dirty = false;
+    // SPEC: P2-SAVE-001 / P2.A2 — the document is dirty whenever the undo
+    // history's live state id differs from the id we last persisted. This
+    // is derived (not a standalone flag) so undo-to-saved, redo, forked
+    // history, and depth-cap eviction all report correctly — see
+    // `UndoStack::current_state_id` and FABLE_REVIEW §3.11 (P4.HF12).
+    // `0` is the pristine (as-opened) state, which is what is on disk.
+    let mut saved_state_id: u64 = 0;
 
     // SPEC: P2-PAGE-003 / session history — per-document undo/redo. Empty
     // in P2.A3 (no page operations exist yet to record onto it); the
@@ -2239,7 +2242,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2257,7 +2259,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2281,7 +2282,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2295,7 +2295,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2314,7 +2313,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2331,7 +2329,8 @@ fn run_worker(
                 // save-as (an explicit `dest_arg`) always writes.
                 let dest = dest_arg.unwrap_or_else(|| path.clone());
                 let same_path = dest == path;
-                let result = if same_path && !dirty {
+                let clean = history.current_state_id() == saved_state_id;
+                let result = if same_path && clean {
                     Ok(SaveOutcome {
                         path: dest.to_string_lossy().into_owned(),
                         bytes_written: 0,
@@ -2342,10 +2341,15 @@ fn run_worker(
                     // same-path save that reaches here is, by the branch
                     // above, necessarily dirty.
                     let outcome = save_document(&doc, &dest, same_path, password.as_deref());
-                    if outcome.is_ok() && same_path {
-                        dirty = false;
-                        // SPEC: P2.A2 — a clean same-path save supersedes
-                        // any recovery copy for this document.
+                    if outcome.is_ok() {
+                        // Any successful save — same-path *or* save-as — makes
+                        // the in-memory document clean: record the state we
+                        // just persisted and drop any recovery copy, since
+                        // there are no unsaved changes left to recover. Doing
+                        // this for save-as too is what fixes the false
+                        // "unsaved changes" claim. SPEC: P2-SAVE-001 / P2.A2;
+                        // FABLE_REVIEW §3.11 (P4.HF12).
+                        saved_state_id = history.current_state_id();
                         if let Some(dir) = autosave_dir.as_deref() {
                             let _ = autosave::discard_autosave(dir, &id_str);
                         }
@@ -2355,22 +2359,15 @@ fn run_worker(
                 let _ = reply.send(result);
             }
             Message::Undo { reply } => {
-                // Only a real undo (work actually done) dirties the doc;
-                // an empty-stack undo is a harmless no-op. In P2.A3 the
-                // stack is always empty, so `had` is always false.
-                let had = history.state().can_undo;
+                // Dirtiness is derived from the history's live state id, so
+                // undo/redo need no bookkeeping here: undoing back to the
+                // saved state reports clean, an empty-stack undo is a
+                // harmless no-op that leaves the id unchanged.
                 let result = history.undo(&mut doc);
-                if had && result.is_ok() {
-                    dirty = true;
-                }
                 let _ = reply.send(result);
             }
             Message::Redo { reply } => {
-                let had = history.state().can_redo;
                 let result = history.redo(&mut doc);
-                if had && result.is_ok() {
-                    dirty = true;
-                }
                 let _ = reply.send(result);
             }
             Message::GetHistoryState { reply } => {
@@ -2400,7 +2397,6 @@ fn run_worker(
                 {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2412,7 +2408,6 @@ fn run_worker(
                 let result = match Box::new(DeleteEdit { pages }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2424,7 +2419,6 @@ fn run_worker(
                 let result = match Box::new(InsertBlankEdit { index, size }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2436,7 +2430,6 @@ fn run_worker(
                 let result = match Box::new(CropEdit { page, rect }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2450,7 +2443,6 @@ fn run_worker(
                 let result = match Box::new(ReorderEdit { order }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2475,7 +2467,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2502,7 +2493,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2514,7 +2504,6 @@ fn run_worker(
                 let result = match Box::new(ClearMarkupEdit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2527,7 +2516,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2540,7 +2528,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2552,7 +2539,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2564,7 +2550,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2604,7 +2589,6 @@ fn run_worker(
                 let result = match Box::new(ImportXfdfEdit { xfdf }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2617,7 +2601,6 @@ fn run_worker(
                 let result = match Box::new(FlattenEdit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2654,7 +2637,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2687,7 +2669,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2722,7 +2703,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2741,7 +2721,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2763,7 +2742,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2784,7 +2762,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2803,7 +2780,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2840,7 +2816,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2861,7 +2836,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2873,7 +2847,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2885,7 +2858,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2897,7 +2869,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2909,7 +2880,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2921,7 +2891,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2954,7 +2923,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2978,7 +2946,6 @@ fn run_worker(
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
-                        dirty = true;
                         Ok(history.state())
                     }
                     Err(e) => Err(e),
@@ -2996,10 +2963,10 @@ fn run_worker(
                 let _ = reply.send(split_document(&doc, &mode, &dest_dir, &stem));
             }
             Message::Autosave => {
-                // SPEC: P2.A2 — write a recovery copy only when dirty.
-                // Best-effort: failures are logged, never fatal. Always a
-                // no-op in P2.A2 (nothing sets `dirty` yet).
-                if dirty {
+                // SPEC: P2.A2 — write a recovery copy only when dirty, i.e.
+                // the live history state differs from the last save.
+                // Best-effort: failures are logged, never fatal.
+                if history.current_state_id() != saved_state_id {
                     if let Some(dir) = autosave_dir.as_deref() {
                         match autosave::write_autosave(
                             &doc,
