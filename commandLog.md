@@ -3187,6 +3187,31 @@ npm run test:rust            # full suite — every 'test result' 0 failed
 
 ---
 
+### P4.HF18 — CID-path unification phase 1 (header/footer)
+
+No `cargo add` / `npm install`; no new dependency (`build_cid_font` already
+subsets via the existing `subsetter`/`ttf-parser`). Rust-only.
+
+Verification gates:
+
+```
+cargo build --lib                                   # clean
+node scripts/cargo-test.mjs --lib header_footer     # 2 passed (render+extract; HF2 tag + hex Tj + cm)
+node scripts/cargo-test.mjs --test header_footer    # 12 passed (unchanged behaviour)
+cargo clippy --fix --lib --tests --allow-dirty --allow-staged   # if-let-else (1); items_after_statements fixed by hand
+npm run check                                       # tsc + eslint + clippy -D warnings — green
+npm run test:rust                                   # full suite — every 'test result' 0 failed
+```
+
+Verification artifact (embedded Greek/Cyrillic footer, now CID-emitted):
+
+```
+node scripts/cargo-test.mjs --test header_footer hf_embedded_unicode_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-hf-unicode.pdf (git-ignored)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

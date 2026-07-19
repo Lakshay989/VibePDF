@@ -6922,6 +6922,60 @@ utilities misfiled under a specific tool, and an out-of-order module list.
 
 ---
 
+## P4.HF18 — CID-path unification, phase 1 (header/footer)
+
+#### Problem
+
+Embedded (non-WinAnsi) text had **two** backends: page-content writers
+(header/footer, watermark, text box) went through PDFium text *objects*
+(`font_embed::embed_runs`), while annotation `/AP` writers used a hand-built
+Type0/CIDFontType2 in lopdf (`build_cid_font`). The PDFium page path was worse:
+it estimated width with a flat average (§3.10 drift), carried no HF2
+marked-content tag (so an embedded footer wasn't splice-removable), and paid a
+PDFium round-trip. This phase retires the first writer (header/footer) onto the
+CID path.
+
+#### Concepts learned
+
+- **Two mechanisms doing the same job is the smell; converge them.** The `/AP`
+  CID path already subsets, exposes exact advances (`cid.width`), and is pure
+  lopdf. The page writers already had all the page machinery (`cm` matrices,
+  ExtGState opacity, prepend-for-behind, underline paths, `wrap_decoration`).
+  The PDFium path was a *parallel* mechanism bypassing all of it. Unifying =
+  emit `<hex> Tj` CID content through the page machinery the base-14 path uses.
+- **A shared primitive with a data-carrier struct.** `place_cid_run(doc, page,
+  font_name, cid, &CidRun{…})` emits one marked-content-wrapped run
+  (opacity/matrix/behind/underline). `CidRun` is the page-content analogue of
+  the retired `EmbedRun` — phases 2–3 reuse it unchanged.
+- **The ordering subtlety of exact metrics.** Alignment used to precompute the
+  placement matrix with a font-average *before* the font existed. Exact metrics
+  need `cid.width`, which needs the font — so the writer reorders to **build the
+  CID font, then compute L/C/R offsets, then place**. A two-pass loop (collect
+  segments + all text → build subset → place) falls out of that.
+- **Register the shared font once per page.** `build_cid_font` adds one font
+  object graph; each page's `/Resources /Font` references it. A
+  `HashMap<page, name>` avoids re-registering per segment.
+- **Reuse existing proofs.** The HF9 spike already proved CID page content
+  renders + extracts; HF2 already proved marked-content splice-removal
+  (font-agnostic). So no new make-or-break spike — the migration's own test
+  asserts the composition (BDC `/VibePDF` tag + hex `Tj` + `cm`), and the
+  existing render+extract test (whose stale `base` arg this caught and fixed)
+  covers rendering.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/font_embed_cid.rs` | New `CidRun` + `place_cid_run` (CID page-content emitter). |
+| `src-tauri/src/pdf/header_footer.rs` | Embedded path now builds a CID font + `place_cid_run` per segment (exact width, HF2 tag); dropped the `embed_runs`/`font_avg_em` estimate + the `base` arg. New inline tag test; fixed the render test's signature. |
+
+#### Further reading
+
+- PDF 32000-1:2008 §14.6 (marked content) and §9.7 (composite/Type0 fonts).
+- Command/strategy convergence (removing a redundant second implementation).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

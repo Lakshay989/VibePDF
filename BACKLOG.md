@@ -777,19 +777,22 @@ C4a/b, B3b). Four issues found + fixed this session:
   writer surface complete: all 7 rendered-text entries embed Unicode.** The `ensure_winansi`
   char-naming test graduated to a direct unit test (no writer rejects unconditionally now).
 - **⏭️ TODO — 3.2 stage-2 residual polish (each its own small ship):**
-  1. **CID-path unification** — the hand-built-CID `/AP` path is strictly more capable than the
-     PDFium page-object path (real metrics, marked-content tags, no PDFium round-trip). Consider
-     retiring HF5–HF8's PDFium path onto `build_cid_font`, which would also fix their HF2-tag gap
-     and 3.10 metrics in one move. Larger refactor; design first.
+  1. **CID-path unification** — retire HF5–HF8's PDFium page-object embed path onto the hand-built
+     `build_cid_font` (real metrics, HF2 marked-content tag, no PDFium round-trip). Phased:
+     - **✅ Phase 1 (P4.HF18):** `font_embed_cid::place_cid_run` (marked-content-wrapped CID page
+       content: opacity/`cm`/behind/underline) + **header/footer** migrated. It now carries the
+       HF2 `/VibePDF` splice tag and uses exact `cid.width` (item 5 below, for header/footer).
+     - **⏭️ Phase 2:** watermark (opacity + rotation + behind). **Phase 3:** text box (wrap +
+       underline). **Phase 4:** delete `font_embed.rs` (the PDFium path) once it has no users.
   3. ~~**`/FontFile2` compression** (FlateDecode)~~ **DONE FOR FREE** — investigated P4.HF11:
      lopdf's `save_to` already FlateDecode-compresses every stream on save (a 332 KB subset stores
      as 20 KB). No helper needed; see FABLE_REVIEW §3.12.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
      verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.
-  4. **HF2 marked-content tag on embedded runs** — PDFium objects aren't wrapped in `/VibePDF`
-     BDC/EMC, so an embedded decoration isn't splice-removable (blocks "remove watermark/footer").
-  5. **Exact embedded-font metrics** for centre/right alignment (shared with 3.10; today uses the
-     base-14 `font_avg_em` estimate).
+  4. **HF2 marked-content tag on embedded runs** — ✅ done for **header/footer** via the CID
+     unification (phase 1); watermark + text box get it as they migrate (phases 2–3).
+  5. **Exact embedded-font metrics** for centre/right alignment (shared with 3.10) — ✅ done for
+     **header/footer** (`cid.width`); watermark + text box follow with their migration.
 - **Note (3.2):** `/WinAnsiEncoding` renders `'`/`` ` `` straight instead of curly — pre-HF3
   free-text/stamps with apostrophes change appearance slightly (arguably more correct).
 - **Note (3.5):** toasts cover *user-action write* failures; passive read/sync failures still

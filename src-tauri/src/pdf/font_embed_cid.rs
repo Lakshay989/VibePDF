@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use lopdf::{Dictionary, Document, Object, Stream};
+use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
 
@@ -169,6 +169,86 @@ pub(crate) fn build_cid_font(
     type0.set("ToUnicode", Object::Reference(to_unicode));
 
     Ok(CidFont { font_dict: type0, gid_by_char, advance_by_gid })
+}
+
+/// One embedded-Unicode run to place in a **page** content stream: the CID text
+/// plus its style + placement. The page-content analogue of the retired
+/// `font_embed::EmbedRun` — the CID-path unification routes the page-content
+/// writers (header/footer, watermark, text box) through the same hand-built CID
+/// font the `/AP` writers use, so they gain exact metrics *and* the HF2
+/// marked-content tag, and lose the `PDFium` round-trip.
+pub(crate) struct CidRun<'a> {
+    pub text: &'a str,
+    pub size: f32,
+    pub color: (f32, f32, f32),
+    /// Text-space → page-space matrix (position + rotation), applied as a `cm`.
+    pub matrix: [f32; 6],
+    /// Fill opacity `0.0..=1.0`, forwarded via an `ExtGState` `/ca`+`/CA`.
+    /// `1.0` emits no graphics-state change.
+    pub opacity: f32,
+    /// Draw *under* existing content (prepend) rather than on top (append) —
+    /// a "behind" watermark.
+    pub behind: bool,
+    /// When `Some(width)`, draw an underline rule `width` points long beneath the
+    /// text (rides the same `matrix`). `None` leaves it un-ruled.
+    pub underline: Option<f32>,
+    /// Marked-content `/Kind`, so the fragment is splice-removable (HF2).
+    pub kind: &'a str,
+}
+
+/// Place one [`CidRun`] into `page_id`'s content stream, wrapped in the HF2
+/// `/VibePDF … BDC … EMC` marked-content tag. `font_name` is a `/Font` resource
+/// (registered once per page by the caller) that references `cid`'s dict. Any
+/// `ExtGState` needed for opacity is registered here. lopdf only — no `PDFium`.
+pub(crate) fn place_cid_run(
+    doc: &mut Document,
+    page_id: ObjectId,
+    font_name: &str,
+    cid: &CidFont,
+    run: &CidRun,
+) -> Result<(), CommandError> {
+    use crate::pdf::cos::{
+        append_page_content, prepend_page_content, register_page_resource, visual_cm_line,
+        wrap_decoration,
+    };
+
+    let (r, g, b) = run.color;
+    let mut inner = String::new();
+    let _ = writeln!(inner, "q");
+    if run.opacity < 1.0 {
+        let mut gs = Dictionary::new();
+        gs.set("Type", Object::Name(b"ExtGState".to_vec()));
+        gs.set("ca", Object::Real(run.opacity));
+        gs.set("CA", Object::Real(run.opacity));
+        let gs_name =
+            register_page_resource(doc, page_id, b"ExtGState", "GSvibe", Object::Dictionary(gs))?;
+        let _ = writeln!(inner, "/{gs_name} gs");
+    }
+    let _ = writeln!(inner, "{}", visual_cm_line(run.matrix));
+    let _ = writeln!(inner, "{r:.4} {g:.4} {b:.4} rg");
+    let _ = writeln!(
+        inner,
+        "BT\n/{font_name} {size:.2} Tf\n0 0 Td\n<{hex}> Tj\nET",
+        size = run.size,
+        hex = cid.encode_hex(run.text),
+    );
+    if let Some(width) = run.underline {
+        // A thin rule just below the baseline, riding the same matrix.
+        let y = -0.12 * run.size;
+        let thick = (run.size * 0.06).max(0.5);
+        let _ = writeln!(
+            inner,
+            "{r:.4} {g:.4} {b:.4} RG\n{thick:.2} w\n0 {y:.2} m\n{width:.2} {y:.2} l\nS",
+        );
+    }
+    let _ = writeln!(inner, "Q");
+
+    let content = wrap_decoration(run.kind, inner);
+    if run.behind {
+        prepend_page_content(doc, page_id, content)
+    } else {
+        append_page_content(doc, page_id, content)
+    }
 }
 
 /// A 6-uppercase-letter subset tag (PDF convention: `ABCDEF+FontName`), unique

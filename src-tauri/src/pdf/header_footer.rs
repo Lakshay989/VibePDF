@@ -10,16 +10,18 @@
 //! actor wraps it in the snapshot → reload chassis ([`header_footer_apply`]),
 //! inverse `RestoreDocEdit`.
 
+use std::collections::HashMap;
+
 use lopdf::{Document, Object, ObjectId};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, escape_pdf_string, font_avg_em, page_effective_box,
-    page_rotation, parse_hex_color, visual_cm_line, visual_transform, wrap_decoration,
+    append_page_content, base_font, escape_pdf_string, page_effective_box, page_rotation,
+    parse_hex_color, register_page_resource, visual_cm_line, visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
-use crate::pdf::font_embed::{embed_runs, EmbedRun};
+use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -83,7 +85,7 @@ pub fn add_header_footer(
             ));
         };
         return add_header_footer_embedded(
-            bytes, pages, header, left, center, right, base, rgb, sz, margin, date, &font_bytes,
+            bytes, pages, header, left, center, right, rgb, sz, margin, date, &font_bytes,
         );
     }
 
@@ -135,17 +137,14 @@ pub fn add_header_footer(
     Ok(buf)
 }
 
-/// The non-WinAnsi header/footer path (`FABLE_REVIEW` 3.2 stage-2): place each
-/// position as a `PDFium` text object drawn with an embedded covering font. Page
-/// geometry (rotation, effective box, count) is read from an lopdf pass; the
-/// placement matrix is the *same* visual-space transform the base-14 path uses,
-/// so rotated/cropped pages still land upright. Alignment width reuses the base-14
-/// `font_avg_em` estimate — slightly off for the embedded face (centre/right may
-/// drift a little); exact metrics are a follow-up shared with `FABLE_REVIEW` 3.10.
-///
-/// Known gap vs. the base-14 path: these runs are **not** wrapped in the HF2
-/// `/VibePDF` marked-content tag (`PDFium` builds the objects), so an embedded
-/// header/footer isn't yet removable by operator splice — also a follow-up.
+/// The non-WinAnsi header/footer path (`FABLE_REVIEW` 3.2 stage-2 / CID-path
+/// unification): embed a hand-built CID font (`build_cid_font`) and place each
+/// L/C/R segment as marked-content-wrapped CID page content via [`place_cid_run`].
+/// This shares the `/AP` writers' backend, so the embedded path gains **exact
+/// metrics** (`cid.width` — the `FABLE_REVIEW` §3.10 embed-path fix) and the **HF2
+/// `/VibePDF` splice tag** (an embedded header/footer is now operator-removable),
+/// with no `PDFium` round-trip. Placement uses the same visual-space transform as
+/// the base-14 path, so rotated/cropped pages still land upright.
 #[allow(clippy::too_many_arguments)]
 fn add_header_footer_embedded(
     bytes: &[u8],
@@ -154,18 +153,30 @@ fn add_header_footer_embedded(
     left: &str,
     center: &str,
     right: &str,
-    base: &str,
     rgb: (f32, f32, f32),
     sz: f32,
     margin: f32,
     date: &str,
     font_bytes: &[u8],
 ) -> Result<Vec<u8>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    // One resolved L/C/R segment awaiting placement (pass 1 → pass 2).
+    struct Seg {
+        page_id: ObjectId,
+        vt: [f32; 6],
+        vw: f32,
+        vy: f32,
+        align: Align,
+        shown: String,
+    }
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let total = doc.get_pages().len();
     let page_map = doc.get_pages();
 
-    let mut runs: Vec<EmbedRun> = Vec::new();
+    // Pass 1: resolve each page's geometry + its substituted L/C/R segments,
+    // accumulating every character so the CID subset covers them all.
+    let mut segs: Vec<Seg> = Vec::new();
+    let mut all_text = String::new();
     for &p in pages {
         let page_no = u32::try_from(p)
             .ok()
@@ -184,30 +195,53 @@ fn add_header_footer_embedded(
                 continue;
             }
             let shown = substitute(template, p + 1, total, date);
-            let vx = aligned_x(align, vw, margin, embed_text_width(&shown, base, sz));
-            runs.push(EmbedRun {
-                page: p,
-                text: shown,
-                size: sz,
-                color: rgb,
-                opacity: 1.0,
-                // Compose the run's origin `(vx, vy)` through the visual transform
-                // `vt = [a b c d e f]` so the object's matrix carries both the
-                // rotation (a,b,c,d) and the page-space baseline.
-                matrix: place_in_visual_space(vt, vx, vy),
-                behind: false,
-                underline: None,
-            });
+            all_text.push_str(&shown);
+            segs.push(Seg { page_id, vt, vw, vy, align, shown });
         }
     }
-    embed_runs(bytes, font_bytes, &runs)
-}
 
-/// Estimated rendered width of `text` at `size`, using base-14 average-em metrics
-/// (the embedded face's real metrics aren't known here — see 3.10).
-#[allow(clippy::cast_precision_loss)]
-fn embed_text_width(text: &str, base: &str, size: f32) -> f32 {
-    size * font_avg_em(base) * text.chars().count() as f32
+    // Pass 2: build the CID font once, then place each segment at its exact
+    // width. The font is registered once per page (its dict is shared).
+    if !segs.is_empty() {
+        let cid = build_cid_font(&mut doc, font_bytes, &all_text)?;
+        let mut font_by_page: HashMap<ObjectId, String> = HashMap::new();
+        for seg in &segs {
+            let font_name = if let Some(name) = font_by_page.get(&seg.page_id) { name.clone() } else {
+                let name = register_page_resource(
+                    &mut doc,
+                    seg.page_id,
+                    b"Font",
+                    "Fcid",
+                    Object::Dictionary(cid.font_dict.clone()),
+                )?;
+                font_by_page.insert(seg.page_id, name.clone());
+                name
+            };
+            let vx = aligned_x(seg.align, seg.vw, margin, cid.width(&seg.shown, sz));
+            place_cid_run(
+                &mut doc,
+                seg.page_id,
+                &font_name,
+                &cid,
+                &CidRun {
+                    text: &seg.shown,
+                    size: sz,
+                    color: rgb,
+                    // Bake the aligned origin (vx, vy) through the visual transform,
+                    // so the run's matrix carries both page rotation and baseline.
+                    matrix: place_in_visual_space(seg.vt, vx, seg.vy),
+                    opacity: 1.0,
+                    behind: false,
+                    underline: None,
+                    kind: "header-footer",
+                },
+            )?;
+        }
+    }
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
 }
 
 /// The left edge for `align` within a `[0, vw]` visual box, `margin` inset.
@@ -394,9 +428,10 @@ mod tests {
         out
     }
 
-    /// P4.HF5: a non-WinAnsi footer takes the `PDFium`-embed path and the Unicode
-    /// survives reopen, alongside the page's own (base-14) text. Deterministic —
-    /// drives the private embedded path with the committed Coptic fixture font.
+    /// P4.HF5 / CID-path unification: a non-WinAnsi footer takes the embedded
+    /// path and the Unicode survives reopen, alongside the page's own (base-14)
+    /// text. Deterministic — drives the private embedded path with the committed
+    /// Coptic fixture font.
     #[test]
     fn embedded_footer_renders_and_extracts_unicode() {
         let coptic = "\u{2C81}\u{2C83}\u{2C85}"; // Ⲁ Ⲃ Ⲅ
@@ -407,7 +442,6 @@ mod tests {
             "",
             coptic,
             "",
-            "Helvetica",
             (0.0, 0.0, 0.0),
             24.0,
             36.0,
@@ -418,5 +452,49 @@ mod tests {
         let text = page0_text(&out);
         assert!(text.contains(coptic), "embedded Coptic footer round-trips; got {text:?}");
         assert!(text.contains("VibePDF"), "the page's own base-14 text is intact");
+    }
+
+    /// CID-path unification (phase 1): the embedded footer is now hand-built CID
+    /// page content — a hex `Tj`, not a `PDFium` object — wrapped in the HF2
+    /// `/VibePDF` marked-content tag, so it is operator-splice-removable.
+    #[test]
+    fn embedded_footer_is_cid_and_tagged() {
+        use lopdf::{Document, Object, StringFormat};
+        let out = add_header_footer_embedded(
+            &hello(),
+            &[0],
+            false,
+            "",
+            "\u{2C81}\u{2C83}", // Ⲁ Ⲃ
+            "",
+            (0.0, 0.0, 0.0),
+            12.0,
+            36.0,
+            "d",
+            &coptic_font(),
+        )
+        .expect("embed footer");
+
+        let doc = Document::load_mem(&out).expect("reopen");
+        let page_id = *doc.get_pages().get(&1).expect("page 1");
+        let content = doc.get_and_decode_page_content(page_id).expect("decode content");
+
+        assert!(
+            content.operations.iter().any(|op| op.operator == "BDC"
+                && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")),
+            "embedded footer must carry the /VibePDF marked-content tag (HF2)"
+        );
+        assert!(
+            content.operations.iter().any(|op| op.operator == "Tj"
+                && matches!(
+                    op.operands.first(),
+                    Some(Object::String(_, StringFormat::Hexadecimal))
+                )),
+            "must draw text as a CID (hex) Tj, not a PDFium text object"
+        );
+        assert!(
+            content.operations.iter().any(|op| op.operator == "cm"),
+            "the run is placed through a cm matrix"
+        );
     }
 }
