@@ -9,6 +9,7 @@ import {
   type PageVirtualizerHandle,
 } from "@/view/PageVirtualizer";
 import { isInputFocused, keyToIntent } from "@/view/keyboard-nav";
+import { basename } from "@/app/paths";
 import { reportError } from "@/app/report-error";
 import { ZoomToolbar } from "@/app/ZoomToolbar";
 import { MarkupToolbar } from "@/app/MarkupToolbar";
@@ -109,7 +110,7 @@ export function PdfViewer({ documentId, path }: Props) {
       try {
         const destDir = await openDialog({ directory: true, multiple: false });
         if (typeof destDir !== "string") return; // user cancelled the dialog
-        const base = path.split(/[\\/]/).pop() ?? "";
+        const base = basename(path);
         const stem = base.replace(/\.pdf$/i, "") || "split";
         await splitDocument(documentId, mode, destDir, stem);
       } catch (err) {

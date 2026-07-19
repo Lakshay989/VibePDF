@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 
 import { peekPageCount } from "@/ipc/peek";
 import { parsePageRange } from "@/tools/extract/page-range";
+import { basename } from "@/app/paths";
 
 type Position = "start" | "end" | "after";
 
@@ -20,10 +21,6 @@ export interface InsertFromDialogProps {
   /** Called with the source path, 0-based source pages, and 0-based insert index. */
   onInsert: (args: { sourcePath: string; pages: number[]; index: number }) => void;
   onClose: () => void;
-}
-
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
 }
 
 export function InsertFromDialog({
@@ -123,7 +120,7 @@ export function InsertFromDialog({
               <span className="flex-1 truncate text-sm text-neutral-600 dark:text-neutral-400">
                 {sourcePath ? (
                   <span title={sourcePath}>
-                    {baseName(sourcePath)}
+                    {basename(sourcePath)}
                     {sourceCount !== null ? ` — ${sourceCount} page${sourceCount === 1 ? "" : "s"}` : ""}
                   </span>
                 ) : (

@@ -336,6 +336,23 @@ confirm no `dangerouslySetInnerHTML` anywhere; none found in this audit).
 
 ### 3.9 MEDIUM — No Windows CI leg (a declared target platform is never built or tested)
 
+> **✅ FIXED 2026-07-19 (P4.HF15).** Two parts:
+> - **Path bug:** the 3 buggy `split("/")` filename displays (`WatermarkDialog`,
+>   `BackgroundDialog` ×2) now route through the existing canonical
+>   `basename` (`src/app/paths.ts`, which already splits on `/[\\/]/`);
+>   `MergeDialog`/`InsertFromDialog`/`PdfViewer` were de-duplicated onto it too.
+>   (`tools/stamp/stamps.ts` keeps its own correct inline split — `src/tools/`
+>   deliberately doesn't import `@/app`.) Regression-guarded by
+>   `src/app/__tests__/paths.test.ts` (Windows/UNC/mixed-separator cases).
+> - **CI:** a `check-windows` job (`windows-latest`) runs `npm run check` +
+>   `npm run test`, gated by the same throttle as macOS. This compiles **all
+>   Rust on Windows** (`cargo clippy --all-targets`) and runs the frontend suite
+>   incl. the new path guard. It intentionally skips `npm run test:rust`:
+>   `fetch-pdfium.sh` has no Windows branch and the `render_compare` golden is
+>   macOS-arm64-specific — wiring the Windows Rust PDF suite (fetch-pdfium
+>   Windows branch + per-platform golden skip) is a noted follow-up. The
+>   Windows leg's real proof is the first GitHub run.
+
 **Where:** `.github/workflows/ci.yml` — check on `ubuntu-latest`, tests on `macos-latest`.
 
 **What:** the vision doc promises Windows/macOS/Linux. Windows is the platform with the spiciest
@@ -645,7 +662,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.6 | Medium | ~~Undo = up to 100 full-doc snapshots in RAM~~ **FIXED (P4.HF13)**: 256 MiB byte budget | M |
 | 3.7 | Medium | ~~`/Contents` ref-to-array corrupts (latent)~~ **FIXED (P4.HF)** | S |
 | 3.8 | Medium | ~~CSP disabled~~ **FIXED (P4.HF14)**: strict `csp` + dev-relaxed `devCsp` | S |
-| 3.9 | Medium | No Windows CI; `split("/")` path-display bug | S |
+| 3.9 | Medium | ~~No Windows CI; `split("/")` path-display bug~~ **FIXED (P4.HF15)**: path bug + `check-windows` job (Rust PDF suite on Windows deferred) | S |
 | 3.10 | Low | Average-width alignment drift | S |
 | 3.11 | Low | ~~Dirty-flag edge cases (undo-to-saved, save-as)~~ **FIXED (P4.HF12)**: dirty derived from undo state-id | S |
 | 3.12 | Low | ~~New streams uncompressed~~ **NON-ISSUE (P4.HF11)**: lopdf auto-compresses on save | — |

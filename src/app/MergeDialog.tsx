@@ -9,6 +9,7 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 
 import { moveDown, moveUp, removeAt } from "@/tools/merge/reorder";
+import { basename } from "@/app/paths";
 
 export interface MergeDialogProps {
   open: boolean;
@@ -17,10 +18,6 @@ export interface MergeDialogProps {
   /** Called with the ordered paths when the user confirms. */
   onMerge: (paths: string[]) => void;
   onClose: () => void;
-}
-
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
 }
 
 export function MergeDialog({ open, initialPaths, onMerge, onClose }: MergeDialogProps) {
@@ -73,13 +70,13 @@ export function MergeDialog({ open, initialPaths, onMerge, onClose }: MergeDialo
                   <li key={`${p}:${i}`} className="flex items-center gap-2 px-2 py-1.5 text-sm">
                     <span className="w-5 text-right tabular-nums text-neutral-400">{i + 1}</span>
                     <span className="flex-1 truncate" title={p}>
-                      {baseName(p)}
+                      {basename(p)}
                     </span>
                     <button
                       type="button"
                       onClick={() => setPaths((prev) => moveUp(prev, i))}
                       disabled={i === 0}
-                      aria-label={`Move ${baseName(p)} up`}
+                      aria-label={`Move ${basename(p)} up`}
                       className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-30 dark:hover:bg-neutral-800"
                     >
                       ↑
@@ -88,7 +85,7 @@ export function MergeDialog({ open, initialPaths, onMerge, onClose }: MergeDialo
                       type="button"
                       onClick={() => setPaths((prev) => moveDown(prev, i))}
                       disabled={i === paths.length - 1}
-                      aria-label={`Move ${baseName(p)} down`}
+                      aria-label={`Move ${basename(p)} down`}
                       className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-30 dark:hover:bg-neutral-800"
                     >
                       ↓
@@ -96,7 +93,7 @@ export function MergeDialog({ open, initialPaths, onMerge, onClose }: MergeDialo
                     <button
                       type="button"
                       onClick={() => setPaths((prev) => removeAt(prev, i))}
-                      aria-label={`Remove ${baseName(p)}`}
+                      aria-label={`Remove ${basename(p)}`}
                       className="rounded px-1.5 py-0.5 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
                     >
                       ✕

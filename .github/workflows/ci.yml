@@ -95,3 +95,48 @@ jobs:
 
       - name: Rust tests (cargo)
         run: npm run test:rust
+
+  # Windows is a shipped target (docs/01_VISION) but was never built or tested
+  # — FABLE_REVIEW §3.9. This leg compiles ALL Rust on Windows via
+  # `cargo clippy --all-targets` (the deepest class of Windows-specific issues:
+  # path types, `#[cfg]`, rename semantics at the type level) and runs the
+  # frontend suite (which includes the `basename` Windows-path guard from
+  # §3.9). It deliberately does NOT run `npm run test:rust`:
+  #   - `scripts/fetch-pdfium.sh` has no Windows branch (Darwin/Linux only), and
+  #   - the E2 `render_compare` golden is macOS-arm64-specific and would diverge.
+  # `check` + the frontend tests need no PDFium binary (pdfium-render binds at
+  # runtime, not link time), so no fetch step here. Wiring the Windows Rust PDF
+  # suite (fetch-pdfium Windows branch + a per-platform golden skip) is a
+  # separate follow-up. Gated by the same throttle as the macOS job.
+  check-windows:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Check (tsc + eslint + clippy)
+        run: npm run check
+
+      - name: Frontend tests (vitest)
+        run: npm run test

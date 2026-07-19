@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { addImageWatermark, addTextWatermark } from "@/ipc/watermark";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { basename } from "@/app/paths";
 import { DEFAULT_WATERMARK, parsePageRange } from "@/tools/watermark/watermark";
 
 export interface WatermarkDialogProps {
@@ -192,7 +193,7 @@ export function WatermarkDialog({ open, documentId, pageCount, onClose }: Waterm
                   Choose image…
                 </button>
                 <span className="truncate text-neutral-600 dark:text-neutral-400">
-                  {imagePath ? imagePath.split("/").pop() : "PNG or JPEG"}
+                  {imagePath ? basename(imagePath) : "PNG or JPEG"}
                 </span>
               </div>
             )}

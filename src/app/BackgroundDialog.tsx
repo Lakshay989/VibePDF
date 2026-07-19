@@ -11,6 +11,7 @@ import { addColorBackground, addImageBackground, addPdfBackground } from "@/ipc/
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { parsePageRange } from "@/tools/page-range";
+import { basename } from "@/app/paths";
 
 export interface BackgroundDialogProps {
   open: boolean;
@@ -174,7 +175,7 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
                   Choose image…
                 </button>
                 <span className="truncate text-neutral-600 dark:text-neutral-400">
-                  {imagePath ? imagePath.split("/").pop() : "PNG or JPEG, cover-fit"}
+                  {imagePath ? basename(imagePath) : "PNG or JPEG, cover-fit"}
                 </span>
               </div>
             ) : (
@@ -187,7 +188,7 @@ export function BackgroundDialog({ open, documentId, pageCount, onClose }: Backg
                   Choose PDF…
                 </button>
                 <span className="flex-1 truncate text-neutral-600 dark:text-neutral-400">
-                  {sourcePath ? sourcePath.split("/").pop() : "source PDF"}
+                  {sourcePath ? basename(sourcePath) : "source PDF"}
                 </span>
                 <label className="flex items-center gap-1">
                   <span className="text-neutral-600 dark:text-neutral-400">Page</span>

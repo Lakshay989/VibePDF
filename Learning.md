@@ -6766,6 +6766,60 @@ metadata is shown) had an unfenced, IPC-capable page.
 
 ---
 
+## P4.HF15 — Windows path display + a Windows CI leg (FABLE_REVIEW §3.9)
+
+#### Problem
+
+Filename-for-display used `sourcePath.split("/")`, which on Windows (`C:\…\file.pdf`,
+no `/`) returns the *whole path*. And CI only ran on macOS + a Linux throttle
+gate, so Windows — a shipped target — was never built or tested, meaning bugs
+like this couldn't be caught.
+
+#### Concepts learned
+
+- **`split("/")` is a portability trap.** Path separators are platform-specific
+  (`/` POSIX, `\` Windows, both in UNC/mixed). A display base name must split on
+  `/[\\/]/` or scan for the rightmost of either separator. The codebase already
+  had a correct `basename` in `src/app/paths.ts` — the bug was **copy-paste
+  drift**: dialogs re-implemented it inline and one branch got it wrong.
+- **Look for the existing helper before writing a new one.** The plan assumed no
+  shared util existed and proposed a new `src/tools/path.ts`; mid-implementation
+  the canonical `@/app/paths.basename` turned up. Adding a second util would have
+  *deepened* the duplication the fix was meant to remove — so I stopped, flagged
+  the plan error, and consolidated onto the existing one instead.
+- **Consolidation is bounded by layering.** `src/tools/` never imports `@/app`
+  (tools is a lower layer than the app shell). So the one `tools` consumer
+  (`stamps.ts`) keeps its own correct inline split rather than reach *up* into
+  `@/app` — de-duplication stops at the layer boundary, it doesn't justify
+  breaking it.
+- **Test the platform you can't run.** A `basename` unit test with Windows/UNC
+  inputs proves the fix deterministically on any OS. Then a `windows-latest` CI
+  job actually runs that test (and compiles all Rust) on the real platform —
+  `cargo clippy --all-targets` on Windows is the cheapest way to surface
+  Windows-specific compile/`#[cfg]` issues.
+- **Scope a CI leg to what's portable.** The full Rust PDF suite couldn't run on
+  Windows yet (`fetch-pdfium.sh` has no Windows branch; the render golden is
+  macOS-arm64-specific). `check` + frontend tests need neither — and
+  `pdfium-render` binds at *runtime*, so clippy compiles without the binary.
+  Ship the high-value portable slice now; defer the rest with the blockers named.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src/app/WatermarkDialog.tsx`, `BackgroundDialog.tsx` | The 3 buggy `split("/")` → the shared `basename`. |
+| `src/app/MergeDialog.tsx`, `InsertFromDialog.tsx`, `src/view/PdfViewer.tsx` | De-duplicated their local `basename` onto `@/app/paths`. |
+| `src/app/paths.ts` | Canonical `basename` (unchanged logic; comment updated for the wider consumer set). |
+| `src/app/__tests__/paths.test.ts` | New: Windows/UNC/mixed-separator regression guard. |
+| `.github/workflows/ci.yml` | New `check-windows` job (`check` + frontend tests; Rust PDF suite deferred). |
+
+#### Further reading
+
+- Node `path.win32` / `path.posix` (why separators are platform-scoped).
+- GitHub Actions runner images (`windows-latest`).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

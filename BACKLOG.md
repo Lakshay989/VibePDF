@@ -800,10 +800,15 @@ C4a/b, B3b). Four issues found + fixed this session:
   `pending` ids + `inline` stack), so a crafted deep container chain can't overflow the actor
   thread's stack. Pinned by `background::tests` (100k-link chain + a reference cycle). Discovered:
   lopdf `get_object` collapses bare `M 0 R` chains, so the overflow shape is *container* links.
-- **Still open from FABLE_REVIEW** (each its own ship): **3.9** Windows CI + `split("/")` path
-  display, **3.10** AFM glyph metrics, **3.15** assorted. (**3.6** undo memory → byte-budgeted
-  P4.HF13; **3.8** CSP → strict policy P4.HF14; **3.11** dirty-flag → fixed P4.HF12; **3.12**
-  stream compression → non-issue, P4.HF11.)
+- **Still open from FABLE_REVIEW** (each its own ship): **3.10** AFM glyph metrics, **3.15**
+  assorted. (**3.6** undo memory → byte-budgeted P4.HF13; **3.8** CSP → strict policy P4.HF14;
+  **3.9** Windows path + CI leg → P4.HF15; **3.11** dirty-flag → fixed P4.HF12; **3.12** stream
+  compression → non-issue, P4.HF11.)
+  - **Note (P4.HF15):** the Windows CI leg runs `check` + frontend tests only. The Windows **Rust
+    PDF suite** is deferred — needs a `fetch-pdfium.sh` Windows branch (`pdfium-win-x64` → `pdfium.dll`)
+    and a per-platform skip of the macOS-arm64 `render_compare` golden. That's also where the
+    review's other Windows risks (`std::fs::rename`-onto-existing semantics, PDFium load) would
+    finally get exercised.
   - **Note (P4.HF14):** the CSP includes `'wasm-unsafe-eval'` for PDF.js v5's WASM decoders, but
     they aren't wired up (`wasmUrl` unset; `.wasm` files not in `public/pdfjs/`). Wiring
     OpenJPEG/JBIG2/QuickJS so scanned-PDF images decode is a separate follow-up; the CSP already

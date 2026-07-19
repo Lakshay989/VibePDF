@@ -3124,6 +3124,26 @@ working render/thumbnails/text-selection. Deferred to the batch.
 
 ---
 
+### P4.HF15 — Windows path fix + CI leg (FABLE_REVIEW §3.9)
+
+No `cargo add` / `npm install`; no new dependency. Frontend TS + a CI workflow
+job (+ docs). No Rust source change → no verification artifact.
+
+Verification gates:
+
+```
+npx vitest run src/app/__tests__/paths.test.ts   # 6 passed (basename Windows/UNC guard)
+npm run check                                    # tsc + eslint + clippy -D warnings — green
+npm run test                                     # 376 passed (90 files), was 370
+node -e "require('yaml').parse(...ci.yml)"        # workflow parses; 3 jobs incl. check-windows
+```
+
+**NOT verifiable here:** the `check-windows` job runs only on GitHub's
+`windows-latest`; its first run is the real proof (and may surface latent
+Windows-specific clippy/compile issues — that's the point of the leg).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

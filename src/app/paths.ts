@@ -1,6 +1,8 @@
-// Small path helpers shared across the app shell. Kept in `src/app/`
-// (next to its only consumers) rather than a new top-level dir, per
-// docs/04_ARCHITECTURE.md's "don't add top-level modules lightly" rule.
+// Small path helpers shared across the app shell (and the viewer, which
+// already imports `@/app`). Kept in `src/app/` rather than a new top-level
+// dir, per docs/04_ARCHITECTURE.md's "don't add top-level modules lightly"
+// rule. `src/tools/` deliberately does not import `@/app`, so the one stamp
+// helper that also needs a base name keeps its own inline split.
 
 /**
  * The final path segment of an absolute or relative path. Handles both
