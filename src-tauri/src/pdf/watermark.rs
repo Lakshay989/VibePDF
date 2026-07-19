@@ -129,7 +129,9 @@ pub fn add_watermark(
                 let rgb = parse_hex_color(color)?;
                 let sz = size.max(1.0);
                 #[allow(clippy::cast_precision_loss)]
-                let width = sz * font_avg_em(base) * text.chars().count() as f32;
+                // Exact base-14 advance so the mark centres on the page centre
+                // (FABLE_REVIEW §3.10 / P4.HF16).
+                let width = crate::pdf::font_metrics::text_width(base, text, sz);
                 text_content(&gs_name, &font_name, rgb, sz, text, width, (cos, sin), (cx, cy), vt)
             }
             WatermarkKind::Image(_) => {

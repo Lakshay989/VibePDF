@@ -6820,6 +6820,60 @@ like this couldn't be caught.
 
 ---
 
+## P4.HF16 — Exact base-14 glyph metrics for alignment (FABLE_REVIEW §3.10)
+
+#### Problem
+
+Centre/right alignment of header/footer and watermark text estimated string
+width as `size × avg_em × char_count` with a flat `avg_em ≈ 0.6`. For a
+*proportional* font that's wrong per-string ("WWW" vs "iii"), so right-aligned
+dates drifted several points and centred titles sat slightly off.
+
+#### Concepts learned
+
+- **A base-14 font is laid out by the viewer's own metrics.** We never embed
+  Helvetica/Times/Courier — we just reference `/Helvetica`. The viewer supplies
+  the glyphs *and their advance widths*, which for a spec-compliant font are the
+  Adobe **AFM** widths. So to place text where the viewer will, we must use those
+  exact advances, not an average.
+- **Proportional vs monospaced.** Courier advances every glyph 600/1000 em (a
+  constant, no table). Helvetica/Times need a real 256-entry width table per
+  face, indexed by the encoding byte (WinAnsi here).
+- **Source data from a tool you already ship.** The AFM widths weren't available
+  offline and we won't fabricate 2,048 integers. But **PDFium is already bundled**
+  and lays base-14 text out using AFM-compatible metrics (its Foxit substitutes).
+  A throwaway spike measured a few glyphs (`'A'`→667, `'W'`→944) and they matched
+  Adobe AFM exactly — so a small `#[ignore]`d generator measures every glyph and
+  writes `font_metrics/tables.rs`. Zero network, zero new deps.
+- **Measure advance, not ink.** A glyph's *advance* (how far the pen moves) isn't
+  its *ink* bounding box. `glyphs().width()` was a dead end (a non-embedded
+  standard font reports 0 enumerable glyph outlines). The trick:
+  `advance(c) = width("A" + c + "A") − width("AA")` — bracketing `c` between two
+  fixed glyphs makes the bbox grow by exactly one advance, which also works for
+  zero-ink glyphs like space.
+- **Scope by risk, not by plan-completeness.** The plan also covered free-text
+  *wrapping*, but that flows through a `wrap_lines` shared with the embedded-CID
+  path — a riskier, isolated change for the lowest-visibility symptom (the box
+  clips). Shipped the high-value alignment fix exactly; deferred the wrap with the
+  infra (`text_width`) already in place.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `tests/gen_font_metrics.rs` | `#[ignore]`d generator: measures bundled PDFium, writes the tables. |
+| `src/pdf/font_metrics/tables.rs` | GENERATED per-glyph AFM width tables (8 proportional faces). |
+| `src/pdf/font_metrics.rs` | `text_width(base, text, size)` + Courier-600 handling + unit tests. |
+| `src/pdf/cos.rs` | `winansi_byte` promoted to `pub(crate)` for the width lookup. |
+| `src/pdf/header_footer.rs`, `watermark.rs` | Centre/right/centring now use `text_width`. |
+
+#### Further reading
+
+- Adobe Font Metrics (AFM) format + the Core-14 standard fonts.
+- PDF 32000-1:2008 §9.2.4 (glyph positioning / advance widths).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

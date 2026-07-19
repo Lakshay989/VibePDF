@@ -3144,6 +3144,33 @@ Windows-specific clippy/compile issues — that's the point of the leg).
 
 ---
 
+### P4.HF16 — Exact base-14 glyph metrics (FABLE_REVIEW §3.10)
+
+No `cargo add` / `npm install`; **no new dependency** (widths measured from the
+already-bundled PDFium). One generated data file.
+
+Generate the metrics tables (offline, from bundled PDFium):
+
+```
+node scripts/cargo-test.mjs --test gen_font_metrics -- --ignored --nocapture
+#   → writes src/pdf/font_metrics/tables.rs (verified Helvetica 'A'=667, space=278, '@'=1015)
+```
+
+Verification gates:
+
+```
+cargo test --lib font_metrics              # 5 passed (AFM sums, WWW≫iii, Courier=600)
+node scripts/cargo-test.mjs --test header_footer --test watermark   # 12 + 13 passed (alignment)
+npm run check                              # tsc + eslint + clippy -D warnings — green
+cargo clippy --fix --lib --tests --allow-dirty --allow-staged        # doc_markdown (4)
+npm run test:rust                          # full suite — every 'test result' 0 failed
+```
+
+Verification artifacts regenerated (git-ignored `Sample PDFs/`) for the manual
+alignment check: `vibepdf-verify-header-footer.pdf`, `vibepdf-verify-watermark.pdf`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

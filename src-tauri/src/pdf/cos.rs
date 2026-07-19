@@ -1488,7 +1488,7 @@ pub(crate) fn prepend_page_content(
 /// base-14 fonts cannot render it. ASCII and the Latin-1 supplement map to
 /// their own byte; the CP1252 0x80–0x9F block covers € „ … † ‡ ‰ Š ‹ Œ Ž
 /// curly quotes, bullets, en/em dashes, ™ š › œ ž Ÿ.
-fn winansi_byte(ch: char) -> Option<u8> {
+pub(crate) fn winansi_byte(ch: char) -> Option<u8> {
     match ch {
         // In-range by the match arm, so the truncation is exact.
         #[allow(clippy::cast_possible_truncation)]

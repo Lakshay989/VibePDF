@@ -368,6 +368,23 @@ macos+windows only if Linux PDFium fetch is the blocker.
 
 ### 3.10 LOW — Right/centre text alignment uses an average-glyph-width estimate
 
+> **✅ FIXED for alignment 2026-07-19 (P4.HF16)** — exact Core-14 AFM advance
+> widths now drive **header/footer centre & right alignment** and **watermark
+> centring** (the review's cited "dates drift / titles off-centre" symptoms).
+> `pdf::font_metrics::text_width(base, text, size)` sums per-glyph widths from
+> `font_metrics/tables.rs`, which is **generated offline** by
+> `tests/gen_font_metrics.rs` measuring bundled PDFium (its Foxit Core-14
+> substitutes == Adobe AFM — verified: Helvetica space=278, 'A'=667, 'W'=944).
+> No network, no new deps; Courier is a `600` constant. Proven by
+> `font_metrics::tests` (WWW≫iii; Courier monospaced; exact AFM sums).
+>
+> **Deferred (same infra, fast-follow):** the **free-text / text-box wrap**
+> estimate still uses `font_avg_em`. It flows through the shared `wrap_lines`
+> (also used by the embedded-CID path), so switching it to width-based is an
+> isolated change best done on its own; it's lower-visibility (the `/AP` box
+> clips, so over-estimate is already safe). Tracked in BACKLOG.
+
+
 **Where:** `cos::font_avg_em` consumed by watermark centring and header/footer centre/right
 alignment (documented in BACKLOG).
 
@@ -663,7 +680,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.7 | Medium | ~~`/Contents` ref-to-array corrupts (latent)~~ **FIXED (P4.HF)** | S |
 | 3.8 | Medium | ~~CSP disabled~~ **FIXED (P4.HF14)**: strict `csp` + dev-relaxed `devCsp` | S |
 | 3.9 | Medium | ~~No Windows CI; `split("/")` path-display bug~~ **FIXED (P4.HF15)**: path bug + `check-windows` job (Rust PDF suite on Windows deferred) | S |
-| 3.10 | Low | Average-width alignment drift | S |
+| 3.10 | Low | ~~Average-width alignment drift~~ **FIXED for alignment (P4.HF16)**: exact AFM widths; free-text wrap deferred | S |
 | 3.11 | Low | ~~Dirty-flag edge cases (undo-to-saved, save-as)~~ **FIXED (P4.HF12)**: dirty derived from undo state-id | S |
 | 3.12 | Low | ~~New streams uncompressed~~ **NON-ISSUE (P4.HF11)**: lopdf auto-compresses on save | — |
 | 3.13 | Low | ~~Decorations untagged~~ **FIXED (P4.HF2)**: `/VibePDF` BDC/EMC + splice-proof test | S |

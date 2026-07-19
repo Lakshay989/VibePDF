@@ -270,7 +270,9 @@ fn header_footer_content(
             continue;
         }
         let shown = substitute(template, page_no, total, date);
-        let w = size * font_avg_em(base) * shown.chars().count() as f32;
+        // Exact base-14 advance width so centre/right land where the viewer
+        // renders them (FABLE_REVIEW §3.10 / P4.HF16).
+        let w = crate::pdf::font_metrics::text_width(base, &shown, size);
         let x = match align {
             Align::Left => x0 + margin,
             Align::Center => x0 + (x1 - x0 - w) / 2.0,
