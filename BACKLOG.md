@@ -800,10 +800,15 @@ C4a/b, B3b). Four issues found + fixed this session:
   `pending` ids + `inline` stack), so a crafted deep container chain can't overflow the actor
   thread's stack. Pinned by `background::tests` (100k-link chain + a reference cycle). Discovered:
   lopdf `get_object` collapses bare `M 0 R` chains, so the overflow shape is *container* links.
-- **Still open from FABLE_REVIEW** (each its own ship): **3.8** CSP, **3.9** Windows CI +
-  `split("/")` path display, **3.10** AFM glyph metrics, **3.15** assorted. (**3.6** undo memory
-  → byte-budgeted P4.HF13; **3.11** dirty-flag → fixed P4.HF12; **3.12** stream compression →
-  non-issue, P4.HF11.)
+- **Still open from FABLE_REVIEW** (each its own ship): **3.9** Windows CI + `split("/")` path
+  display, **3.10** AFM glyph metrics, **3.15** assorted. (**3.6** undo memory → byte-budgeted
+  P4.HF13; **3.8** CSP → strict policy P4.HF14; **3.11** dirty-flag → fixed P4.HF12; **3.12**
+  stream compression → non-issue, P4.HF11.)
+  - **Note (P4.HF14):** the CSP includes `'wasm-unsafe-eval'` for PDF.js v5's WASM decoders, but
+    they aren't wired up (`wasmUrl` unset; `.wasm` files not in `public/pdfjs/`). Wiring
+    OpenJPEG/JBIG2/QuickJS so scanned-PDF images decode is a separate follow-up; the CSP already
+    permits it. The CSP also still needs a **manual in-app smoke test** per webview platform
+    (ties into the §3.9 Windows/Linux CI leg).
 - **Note:** annotation `/AP` writers (shapes, notes, free-text) still place in page space —
   viewers rotate annotations themselves, so they were *not* part of the 3.1 bug; re-check only
   if a reader renders them oddly on rotated pages.

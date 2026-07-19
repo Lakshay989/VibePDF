@@ -3103,6 +3103,27 @@ npm run test:rust                       # full suite — every 'test result' 0 f
 
 ---
 
+### P4.HF14 — Strict webview CSP (FABLE_REVIEW §3.8)
+
+No `cargo add` / `npm install`; no new dependency. Config + one guard test (+ docs).
+
+Verification gates:
+
+```
+npx vitest run src/__tests__/csp.test.ts   # 2 passed (config-shape guard)
+npm run check                              # tsc + eslint + clippy -D warnings — green
+npm run build                              # vite prod bundle builds
+npm run test                               # 370 passed (89 files) incl. csp.test.ts
+python3 -m json.tool src-tauri/tauri.conf.json >/dev/null   # JSON still valid
+```
+
+**NOT verifiable here** (no display to drive WKWebView): the CSP is enforced at
+runtime, so it needs a manual in-app smoke test — `npm run dev` + a bundled
+build, load a normal and a scanned PDF, confirm zero DevTools CSP violations and
+working render/thumbnails/text-selection. Deferred to the batch.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

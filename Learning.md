@@ -6715,6 +6715,57 @@ NFR-PERF-003 (open 500 MB without exhausting memory).
 
 ---
 
+## P4.HF14 — A strict webview CSP (FABLE_REVIEW §3.8)
+
+#### Problem
+
+The Tauri webview ran with `app.security.csp: null` — **no** Content-Security-
+Policy. That webview renders arbitrary PDFs (via PDF.js) *and* can call our Rust
+IPC, so a PDF.js escape or an XSS in any rendered string (document title/author
+metadata is shown) had an unfenced, IPC-capable page.
+
+#### Concepts learned
+
+- **CSP is an allowlist for where content may come from.** `default-src 'self'`
+  means "only load from my own origin," then each directive (`script-src`,
+  `img-src`, `connect-src`, `worker-src`, `style-src`, …) narrows or widens a
+  class of loads. The skill is granting the *fewest* extra sources that still let
+  the app work — every relaxation is attack surface.
+- **Earn each relaxation from a real resource.** We mapped every load the
+  frontend makes to exactly one directive: same-origin PDF.js worker →
+  `worker-src 'self'`; blob thumbnail `<img>` → `img-src blob:`; Tauri IPC →
+  `connect-src ipc: http://ipc.localhost`; Tailwind/React inline styles →
+  `style-src 'unsafe-inline'`. Nothing speculative.
+- **`'wasm-unsafe-eval'` ≠ `'unsafe-eval'`.** PDF.js v5 stopped using JS `eval`
+  for PDF functions and moved to QuickJS-in-WASM, and it decodes JBIG2/JPEG2000
+  images via WASM. Instantiating WASM needs `'wasm-unsafe-eval'` — a *narrow*
+  token that permits WASM compilation only, not arbitrary JS `eval`. Reaching for
+  the narrower capability is the whole game in a CSP.
+- **Dev tooling fights strict CSP.** Vite's HMR uses a websocket and injects an
+  inline preamble script — both blocked by a strict policy. Tauri v2's answer is
+  a separate `devCsp` (used only in dev) so production stays locked down while
+  `npm run dev` still hot-reloads. If `devCsp` is omitted, the prod `csp` also
+  applies in dev and HMR silently breaks.
+- **Some correctness is only observable at runtime.** CSP is enforced by the
+  webview, not the compiler or the test runner — a wrong policy blanks the app and
+  *no* unit test sees it. The honest response: a cheap config-regression guard
+  (`csp.test.ts` asserts the policy shape) **plus** an explicit manual in-app
+  smoke test. Don't pretend a green suite verifies a runtime control.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/tauri.conf.json` | `csp: null` → strict `csp` + a dev-relaxed `devCsp`. |
+| `src/__tests__/csp.test.ts` | Parses the config and asserts the CSP shape (prod strict, dev adds only HMR sources) — a regression guard, not a runtime check. |
+
+#### Further reading
+
+- MDN: Content-Security-Policy (directives + source keywords).
+- Tauri v2 security config (`csp` / `devCsp`).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

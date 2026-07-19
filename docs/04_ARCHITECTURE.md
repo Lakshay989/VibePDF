@@ -785,6 +785,34 @@ webview is **WKWebView**.
   `/pdfjs/`, copied by `scripts/copy-pdfjs-worker.mjs`) so non-embedded standard
   fonts extract correctly.
 
+## Content-Security-Policy
+
+The webview renders **hostile input** (arbitrary PDFs via PDF.js) while holding
+IPC access, so it runs under a strict CSP set in `src-tauri/tauri.conf.json`
+(`app.security.csp`) — not the Tauri default of `null`. The policy is
+`default-src 'self'` with the minimum relaxations the frontend actually needs,
+each earned by a specific resource:
+
+- `script-src 'self' 'wasm-unsafe-eval'` — our bundle, plus PDF.js v5's WASM
+  decoders (OpenJPEG/JBIG2 images, QuickJS PDF-function eval). `'wasm-unsafe-eval'`
+  is strictly narrower than `'unsafe-eval'` (WASM compile only, no JS `eval`).
+- `worker-src 'self'` — the PDF.js worker is a same-origin static asset
+  (`/pdfjs/pdf.worker.min.mjs`), not a blob worker.
+- `connect-src 'self' ipc: http://ipc.localhost` — same-origin cmap/font fetches
+  plus Tauri IPC.
+- `img-src 'self' blob: data:` — thumbnail `<img>`s use `blob:` object URLs.
+- `style-src 'self' 'unsafe-inline'` — Tailwind + React inline `style={}` attrs.
+- `object-src 'none'; base-uri 'self'; frame-src 'none'` — hardening.
+
+A separate `devCsp` adds only what Vite's dev server needs (`'unsafe-inline'`
+for the HMR preamble, `ws://localhost:*` / `http://localhost:*` for the HMR
+socket); production stays locked down. CSP is enforced by the webview at
+**runtime**, so a wrong policy blanks the app and no unit test catches it — the
+config is regression-guarded by `src/__tests__/csp.test.ts`, but any change must
+be re-smoke-tested in the running app (dev **and** a bundled build). No
+`dangerouslySetInnerHTML` exists in the frontend (React escapes rendered
+metadata by default). See FABLE_REVIEW §3.8 (P4.HF14).
+
 ## The render pipeline
 
 PDF.js handles rendering in the WebView for the interactive canvas. PDFium handles rendering on the Rust side for: thumbnails, export-to-image, OCR input, visual diff. We accept rendering them twice. Performance benchmarking has shown this is fine; the two engines are both fast.

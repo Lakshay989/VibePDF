@@ -304,6 +304,22 @@ test constructing that shape in lopdf directly.
 
 ### 3.8 MEDIUM — Tauri CSP is `null`
 
+> **✅ FIXED 2026-07-18 (P4.HF14)** — `app.security.csp` set to a strict
+> `default-src 'self'` policy, with only the relaxations the frontend earns:
+> `script-src 'self' 'wasm-unsafe-eval'` (PDF.js v5 WASM decoders — narrower
+> than `'unsafe-eval'`), `worker-src 'self'` (same-origin PDF.js worker),
+> `connect-src 'self' ipc: http://ipc.localhost`, `img-src 'self' blob: data:`
+> (blob thumbnails), `style-src 'self' 'unsafe-inline'` (Tailwind + React inline
+> styles), `object-src 'none'`/`base-uri 'self'`/`frame-src 'none'`. A separate
+> `devCsp` adds only Vite HMR sources so production stays locked down.
+> Confirmed no `dangerouslySetInnerHTML` (React escapes metadata). CSP is a
+> **runtime** webview control, so it is regression-guarded by
+> `src/__tests__/csp.test.ts` but still needs an in-app smoke test (load a
+> normal + a scanned PDF, zero console violations) on each webview platform —
+> tracked with §3.9 (Windows/Linux CI). **`'wasm-unsafe-eval'` is
+> forward-looking**: PDF.js's WASM decoders aren't wired up yet (`wasmUrl`
+> unset), so it isn't exercised today but won't need a CSP change when they are.
+
 **Where:** `src-tauri/tauri.conf.json` → `app.security.csp: null`.
 
 **What:** the webview runs with no Content-Security-Policy. Today's attack surface is small
@@ -628,7 +644,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 | 3.5 | Medium | Canvas tools swallow errors (`console.warn`) | S |
 | 3.6 | Medium | ~~Undo = up to 100 full-doc snapshots in RAM~~ **FIXED (P4.HF13)**: 256 MiB byte budget | M |
 | 3.7 | Medium | ~~`/Contents` ref-to-array corrupts (latent)~~ **FIXED (P4.HF)** | S |
-| 3.8 | Medium | CSP disabled | S |
+| 3.8 | Medium | ~~CSP disabled~~ **FIXED (P4.HF14)**: strict `csp` + dev-relaxed `devCsp` | S |
 | 3.9 | Medium | No Windows CI; `split("/")` path-display bug | S |
 | 3.10 | Low | Average-width alignment drift | S |
 | 3.11 | Low | ~~Dirty-flag edge cases (undo-to-saved, save-as)~~ **FIXED (P4.HF12)**: dirty derived from undo state-id | S |
