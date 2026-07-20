@@ -530,32 +530,30 @@ bare `M 0 R` indirection, so the genuine overflow shape is a chain of *container
 text-writing backend, chosen at the last moment: `cos::ensure_winansi` (the HF3 hard gate) split
 into a predicate `cos::winansi_fits`, and each rendered-text writer can now branch. WinAnsi-safe
 text keeps the existing base-14 lopdf path — small, unchanged, byte-for-byte identical — while text
-outside WinAnsi routes to the new `pdf/font_embed.rs`. Rather than take the font-parsing dependency
-`docs/03` deliberately avoids, embedding rides the **PDFium engine already in the binary**:
-`font_embed::embed_runs` loads a system TrueType face (`load_true_type_from_bytes`) and places
-PDFium *text objects* (not hand-built `BT…ET`), so PDFium writes the `/Type0` + `/CIDFontType2` +
-`/ToUnicode` + `/FontFile2` itself. The write chassis is reflow.rs's — load under `PDFIUM_LOCK`,
-mutate under Manual regeneration, `regenerate_content`, `save_to_bytes` — so this is a genuine
-"PDFium mutates" path, not the usual lopdf byte-splice. `embed_runs` is a dumb primitive: it draws
-each run at a caller-supplied `[a b c d e f]` matrix, so the *same* `visual_transform` the lopdf
-writers use for rotation/CropBox carries straight over (header/footer computes it in
-`place_in_visual_space`). Font bytes come from `font_resolver::covering_font_bytes` (best-effort
-broad system face; per-glyph coverage checking is deferred). Subsequent ships extended this to the
-other page-content writers (HF6 added `subsetter`-based subsetting so files stay small; HF7
-watermark added opacity + behind; HF8 text box added wrapping + underline).
+outside WinAnsi routes to the **hand-built CID** backend (`pdf/font_embed_cid.rs`). Font bytes come
+from `font_resolver::covering_font_bytes` (best-effort broad system face; per-glyph coverage
+checking is deferred).
 
-**Two embedding backends, by necessity (P4.HF9).** The PDFium page-object path above can't reach an
-**annotation's `/AP` appearance stream** (PDFium creates text objects on a *page*, not inside a Form
-`XObject`). So free-text / stamps use a second backend: `pdf/font_embed_cid.rs::build_cid_font`
-builds a `Type0` / `CIDFontType2` font **by hand in lopdf** — subset via `subsetter` (glyph-ids
-preserved), real advances + descriptor metrics via `ttf-parser`, emitting `/FontFile2` +
-`/FontDescriptor` + `/W` + a `/ToUnicode` CMap, with Identity-H encoding. The `/AP` content then
-shows text as `<gid…> Tj` hex strings. `cos::free_text_appearance` (shared by `add_free_text` and
-`update_free_text`) branches on `winansi_fits`; the plain Unicode stays in the annotation's
-`/Contents` so re-edit reads it, not the appearance. This hand-built-CID path is strictly more
-capable than the PDFium one (works for `/AP` *and* page content, gives real metrics, can carry a
-marked-content tag) — a future unification could retire the PDFium page-object path onto it. For
-now they coexist: PDFium for page-content writers, lopdf-CID for `/AP` writers.
+**One embedding backend — hand-built CID (P4.HF9 for `/AP`; unified P4.HF18–20).** Rather than take
+the font-parsing dependency `docs/03` deliberately avoids, `build_cid_font` builds a `Type0` /
+`CIDFontType2` font **by hand in lopdf** — subset via `subsetter` (glyph-ids preserved), real
+advances + descriptor metrics via `ttf-parser`, emitting `/FontFile2` + `/FontDescriptor` + `/W` +
+a `/ToUnicode` CMap, with Identity-H encoding; text is shown as `<gid…> Tj` hex strings. The same
+backend serves both surfaces:
+
+- **Annotation `/AP`** (free-text, stamps): the `Type0` dict goes in the appearance's `/Resources`.
+  `cos::free_text_appearance` branches on `winansi_fits`; the plain Unicode stays in the
+  annotation's `/Contents` so re-edit reads it, not the appearance.
+- **Page content** (header/footer, watermark, text box): `font_embed_cid::place_cid_run` registers
+  the font on the page and emits a marked-content-wrapped run — `/VibePDF … BDC … EMC` (HF2 tag, so
+  it is operator-removable), a `cm` matrix (the same `visual_transform` the base-14 path uses for
+  rotation/CropBox), optional `/ExtGState` opacity, prepend-for-`behind`, and an underline path.
+  Widths come from `cid.width` (exact — the §3.10 embed-path fix).
+
+*History:* the page writers originally embedded through a **PDFium** round-trip (`font_embed.rs`,
+`load_true_type_from_bytes` → PDFium text objects). It couldn't reach an `/AP` stream, drifted on
+alignment (flat-average widths), and carried no HF2 tag — so the CID-path unification (HF18–20)
+retired it and **deleted `font_embed.rs`**. There is now a single Unicode backend.
 
 **Click-to-edit (P4.B1)** is the consumer that finally surfaces the whole text engine.
 The `ReplaceTextRun` actor message applies A3's `ReplaceTextRunEdit` (record inverse,

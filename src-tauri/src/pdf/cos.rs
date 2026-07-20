@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
-use crate::pdf::font_embed::{embed_runs, EmbedRun};
+use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
 use crate::pdf::image_xobject::{embed_image, embed_png};
 
 /// Map an `lopdf` error onto our typed error. Takes the error by value so it
@@ -1330,16 +1330,19 @@ pub fn add_text_box(
     Ok(buf)
 }
 
-/// The non-WinAnsi text-box path (`FABLE_REVIEW` 3.2 stage-2): place the wrapped
-/// text as `PDFium` text objects drawn with an embedded, subsetted covering font,
-/// one run per line. Reuses the base-14 layout exactly — [`wrap_lines`] on
-/// [`free_text_inner_width`], first baseline `y1 - size`, `x0 + 2` inset,
+/// The non-WinAnsi text-box path (`FABLE_REVIEW` 3.2 stage-2 / CID-path
+/// unification): embed a hand-built CID font (`build_cid_font`) and place each
+/// wrapped line as marked-content-wrapped CID page content via [`place_cid_run`],
+/// gaining the HF2 `/VibePDF` splice tag, an **exact-`cid.width` underline rule**,
+/// and no `PDFium` round-trip. Reuses the base-14 layout exactly — [`wrap_lines`]
+/// on [`free_text_inner_width`], first baseline `y1 - size`, `x0 + 2` inset,
 /// `size*1.2` leading — so a page falls back and forth between the two paths with
-/// the same geometry. Underline rides each run (drawn as a `PDFium` path rule).
+/// the same geometry. Placement is page-space (matching the base-14 text box,
+/// which is not rotation-compensated).
 ///
-/// Placement is page-space (matching the base-14 text box, which is not rotation-
-/// compensated). Known gaps vs. base-14 (shared with the other embed writers): no
-/// HF2 marked-content tag, and wrap points use the base-14 width estimate (3.10).
+/// The *wrap* points still use the base-14 width estimate (the `/AP` box clips,
+/// so an over-wide estimate is safe): `wrap_lines` is shared with the base-14 and
+/// `/AP` CID paths, so making it width-exact is a separate follow-up (§3.10).
 #[allow(clippy::too_many_arguments)]
 fn add_text_box_embedded(
     bytes: &[u8],
@@ -1359,27 +1362,48 @@ fn add_text_box_embedded(
     let y_top = y1 - size; // first baseline a little below the top edge
     let lines = wrap_lines(text, size, em, free_text_inner_width(rect));
 
-    let mut runs: Vec<EmbedRun> = Vec::new();
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let cid = build_cid_font(&mut doc, font_bytes, text)?;
+    let font_name =
+        register_page_resource(&mut doc, page_id, b"Font", "Fcid", Object::Dictionary(cid.font_dict.clone()))?;
+
     for (i, line) in lines.iter().enumerate() {
         if line.trim().is_empty() {
             continue; // blank line: no run, but its index still consumes a slot
         }
         #[allow(clippy::cast_precision_loss)]
         let baseline = y_top - i as f32 * leading;
-        #[allow(clippy::cast_precision_loss)]
-        let width = size * em * line.chars().count() as f32;
-        runs.push(EmbedRun {
-            page,
-            text: line.clone(),
-            size,
-            color: rgb,
-            opacity: 1.0,
-            behind: false,
-            underline: (underline && width > 0.0).then_some(width),
-            matrix: [1.0, 0.0, 0.0, 1.0, tx, baseline],
-        });
+        let width = cid.width(line, size); // exact — for the underline rule length
+        place_cid_run(
+            &mut doc,
+            page_id,
+            &font_name,
+            &cid,
+            &CidRun {
+                text: line,
+                size,
+                color: rgb,
+                matrix: [1.0, 0.0, 0.0, 1.0, tx, baseline],
+                opacity: 1.0,
+                behind: false,
+                underline: (underline && width > 0.0).then_some(width),
+                kind: "text-box",
+            },
+        )?;
     }
-    embed_runs(bytes, font_bytes, &runs)
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
 }
 
 /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (not an
@@ -1526,7 +1550,7 @@ pub(crate) fn winansi_byte(ch: char) -> Option<u8> {
 
 /// Whether every character in `text` maps to a `WinAnsiEncoding` byte — i.e. the
 /// built-in base-14 fonts can render it directly. When false, a writer can route
-/// to `PDFium` font embedding (`FABLE_REVIEW` 3.2 stage-2, [`crate::pdf::font_embed`])
+/// to hand-built CID font embedding (`FABLE_REVIEW` 3.2 stage-2, [`crate::pdf::font_embed_cid`])
 /// instead of rejecting via [`ensure_winansi`]. The two are exact opposites on
 /// the "any unmappable char?" question.
 #[must_use]
@@ -4395,6 +4419,42 @@ mod text_box_embed_tests {
         let (_text, texts, paths) = page0_stats(&out);
         let lines = texts - 1; // minus hello's own text object
         assert!(paths >= 1 && paths == lines, "one rule per line (lines={lines}, paths={paths})");
+    }
+
+    /// CID-path unification (phase 3): the embedded text box is now hand-built CID
+    /// page content — hex `Tj`s wrapped in the HF2 `/VibePDF` marked-content tag —
+    /// not `PDFium` objects, so it is operator-splice-removable.
+    #[test]
+    fn embedded_text_box_is_cid_and_tagged() {
+        use lopdf::{Document, Object, StringFormat};
+        let out = add_text_box_embedded(
+            &hello(),
+            0,
+            [72.0, 600.0, 300.0, 700.0],
+            "\u{2C81}\u{2C83}",
+            "Helvetica",
+            18.0,
+            (0.0, 0.0, 0.0),
+            false,
+            &coptic_font(),
+        )
+        .expect("embed text box");
+        let doc = Document::load_mem(&out).expect("reopen");
+        let page_id = *doc.get_pages().get(&1).expect("page 1");
+        let content = doc.get_and_decode_page_content(page_id).expect("decode content");
+        assert!(
+            content.operations.iter().any(|op| op.operator == "BDC"
+                && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")),
+            "text box must carry the /VibePDF marked-content tag (HF2)"
+        );
+        assert!(
+            content.operations.iter().any(|op| op.operator == "Tj"
+                && matches!(
+                    op.operands.first(),
+                    Some(Object::String(_, StringFormat::Hexadecimal))
+                )),
+            "must draw CID (hex) Tj lines, not PDFium text objects"
+        );
     }
 
     /// The `WinAnsi` path is untouched — an ASCII text box still produces a base-14

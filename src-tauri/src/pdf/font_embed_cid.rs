@@ -1,17 +1,22 @@
-//! Hand-built CID font embedding (P4.HF9 / `FABLE_REVIEW` 3.2 stage-2, `/AP` class).
+//! Hand-built CID font embedding — **the** Unicode embedding backend
+//! (`FABLE_REVIEW` 3.2 stage-2; CID-path unification P4.HF18–20).
 //!
-//! The page-content writers (HF5–HF8) embed Unicode via `PDFium` text *objects*, but
-//! an annotation draws its text inside its `/AP` appearance stream — a Form
-//! `XObject` with its own `/Resources` — where `PDFium`'s page-object API can't
-//! reach. So for free-text / stamps we build a `Type0` / `CIDFontType2` font **by
-//! hand in lopdf** (the approach printpdf / typst / pdf-writer all take) and write
-//! the appearance content with Identity-H, GID-indexed hex strings.
+//! Non-WinAnsi text can't be drawn with the base-14 fonts, so we embed a covering
+//! face. Rather than round-trip through `PDFium` (the retired `font_embed.rs`
+//! approach — it couldn't reach an annotation's `/AP` stream anyway), we build a
+//! `Type0` / `CIDFontType2` font **by hand in lopdf** (the approach printpdf /
+//! typst / pdf-writer all take) and show Identity-H, GID-indexed hex strings. One
+//! backend now serves **both**:
+//! - **annotation `/AP`** (free-text, stamps) — the `Type0` dict goes in the
+//!   appearance's `/Resources`; and
+//! - **page content** (header/footer, watermark, text box) — via [`place_cid_run`],
+//!   which registers the font on the page and emits a marked-content-wrapped run.
 //!
 //! [`build_cid_font`] subsets the face (HF6's `subsetter`, which preserves original
 //! glyph-ids), reads real advances + metrics from `ttf-parser`, and emits the
 //! `/FontFile2` + `/FontDescriptor` + `CIDFontType2` + `Type0` + `/ToUnicode`
-//! object graph, returning the `Type0` dict to drop into the `/AP`'s `/Resources`
-//! plus an encoder ([`CidFont::encode_hex`]) and real widths ([`CidFont::width`]).
+//! object graph, returning the `Type0` dict plus an encoder
+//! ([`CidFont::encode_hex`]) and real widths ([`CidFont::width`]).
 
 // Font-metric conversions scale i16/u16 font units into PDF's 1000-unit text
 // space; the lossy numeric casts are intrinsic and bounded (glyph metrics).

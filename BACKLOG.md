@@ -779,13 +779,15 @@ C4a/b, B3b). Four issues found + fixed this session:
 - **⏭️ TODO — 3.2 stage-2 residual polish (each its own small ship):**
   1. **CID-path unification** — retire HF5–HF8's PDFium page-object embed path onto the hand-built
      `build_cid_font` (real metrics, HF2 marked-content tag, no PDFium round-trip). Phased:
-     - **✅ Phase 1 (P4.HF18):** `font_embed_cid::place_cid_run` (marked-content-wrapped CID page
-       content: opacity/`cm`/behind/underline) + **header/footer** migrated.
-     - **✅ Phase 2 (P4.HF19):** **watermark** migrated (opacity via ExtGState + rotation +
-       behind, exact `cid.width` centring, HF2 tag). `font_embed`'s only remaining user is the
-       text box.
-     - **⏭️ Phase 3:** text box (wrap + underline). **Phase 4:** delete `font_embed.rs` (the
-       PDFium path) once it has no users; update docs/04 (one backend).
+     - **✅ Phase 1 (P4.HF18):** `font_embed_cid::place_cid_run` + **header/footer**.
+     - **✅ Phase 2 (P4.HF19):** **watermark** (opacity/rotation/behind).
+     - **✅ Phase 3+4 (P4.HF20):** **text box** migrated (wrap + exact-`cid.width` underline), and
+       **`font_embed.rs` deleted** — the PDFium page-object embed path (`EmbedRun`/`embed_runs`/
+       `place_run`/`subset_font`) is gone. **One embedding backend** now: hand-built CID for both
+       page content and `/AP`. **✅ CID-path unification complete.**
+     - *Remaining (small, shared):* the text-box **wrap** still estimates line breaks with
+       `font_avg_em` (the `/AP` box clips, so over-wide is safe); making `cos::wrap_lines`
+       width-exact is the deferred §3.10 shared-wrap item (base-14 + `/AP` CID paths share it).
   3. ~~**`/FontFile2` compression** (FlateDecode)~~ **DONE FOR FREE** — investigated P4.HF11:
      lopdf's `save_to` already FlateDecode-compresses every stream on save (a 332 KB subset stores
      as 20 KB). No helper needed; see FABLE_REVIEW §3.12.

@@ -3235,6 +3235,33 @@ node scripts/cargo-test.mjs --test watermark watermark_embedded_unicode_verifica
 
 ---
 
+### P4.HF20 — CID-path unification phases 3+4 (text box + delete font_embed)
+
+No `cargo add` / `npm install`. **Removed** dead code: `git rm src-tauri/src/pdf/font_embed.rs`
+(the retired PDFium embed path); no dependency change (`subsetter`/`ttf-parser` still used by
+`font_embed_cid`).
+
+Verification gates:
+
+```
+cargo build --lib                                  # after migrate: font_embed dead; after delete: clean
+node scripts/cargo-test.mjs --lib text_box_embed   # 4 passed (wrap+extract; underline rules; CID+tag)
+npm run check                                      # tsc + eslint + clippy -D warnings — green
+npm run test:rust                                  # full suite — every 'test result' 0 failed
+```
+
+Verification artifact (embedded Unicode text box, now CID-emitted):
+
+```
+node scripts/cargo-test.mjs --test text_box text_box_embedded_unicode_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-text-box-unicode.pdf (git-ignored)
+```
+
+Docs: font_embed_cid module doc + docs/04 rewritten for the single backend; two stale
+`[crate::pdf::font_embed]` intra-doc links repointed to `font_embed_cid`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

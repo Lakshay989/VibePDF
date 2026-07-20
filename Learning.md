@@ -7014,6 +7014,51 @@ round-trip). Migrate it onto `place_cid_run`.
 
 ---
 
+## P4.HF20 — CID-path unification, phases 3 + 4 (text box + delete the PDFium path)
+
+#### Problem
+
+The text box was the last page-content writer on the PDFium embed path. Migrating
+it (phase 3) leaves `font_embed.rs` with no users at all — so phase 4, deleting
+it, is the *direct consequence* rather than a separate effort.
+
+#### Concepts learned
+
+- **When a migration makes a module dead, delete it in the same breath.** After
+  the text-box swap, `cargo build` reported `embed_runs`/`EmbedRun`/`subset_font`
+  as unused. Leaving them behind an `#[allow(dead_code)]` to defer deletion to a
+  "phase 4 ship" would be worse than just removing the file — a dead module
+  suppressed is debt, not tidiness. Fold the deletion in.
+- **Exact where it's cheap, estimate where it's safe.** The text box's *underline
+  rule length* now uses exact `cid.width` (visible if wrong), but the *wrap point*
+  still uses the `font_avg_em` estimate — because the `/AP` box clips an over-wide
+  line, and `wrap_lines` is shared with the base-14 and `/AP` CID paths (making it
+  width-exact is a separate, wider change). Pick your precision battles.
+- **A retired abstraction leaves dangling doc-links.** Deleting `font_embed.rs`
+  turned two `[crate::pdf::font_embed]` intra-doc links stale; repoint them to the
+  survivor. And a module doc that framed "two backends by necessity" is now a lie
+  — rewrite it (and docs/04) to describe the single backend, or the next reader
+  inherits the wrong mental model.
+- **The payoff of convergence.** One backend (`font_embed_cid`) now serves both
+  page content (`place_cid_run`) and annotation `/AP`. Every embedded surface gets
+  exact metrics, the HF2 splice tag, and no PDFium round-trip — and there's one
+  place to fix a font bug, not two.
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | Text-box embedded path → `build_cid_font` + `place_cid_run` per wrapped line (exact-`cid.width` underline, HF2 tag); dropped the `font_embed` import + a new CID+tag test. |
+| `src-tauri/src/pdf/font_embed.rs` | **Deleted** — the retired PDFium page-object embed path. |
+| `src-tauri/src/pdf/mod.rs` | Dropped `pub mod font_embed;`. |
+| `font_embed_cid.rs`, `cos.rs`, `font_resolver.rs`, `docs/04` | Doc updates for the single backend; repointed stale intra-doc links. |
+
+#### Further reading
+
+- (Same CID / marked-content references as P4.HF18–19.)
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

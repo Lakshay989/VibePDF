@@ -228,7 +228,7 @@ pub fn load_system_fonts() -> &'static SystemFontIndex {
 }
 
 /// Best-effort: locate a system TrueType font likely to cover `text`'s scripts
-/// and return its bytes, for embedding via [`crate::pdf::font_embed`]
+/// and return its bytes, for embedding via [`crate::pdf::font_embed_cid`]
 /// (`FABLE_REVIEW` 3.2 stage-2). Tracer-grade — it tries a short ordered list of
 /// known broad-coverage faces by path per OS and returns the first present.
 ///
