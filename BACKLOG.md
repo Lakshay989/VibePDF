@@ -780,19 +780,21 @@ C4a/b, B3b). Four issues found + fixed this session:
   1. **CID-path unification** — retire HF5–HF8's PDFium page-object embed path onto the hand-built
      `build_cid_font` (real metrics, HF2 marked-content tag, no PDFium round-trip). Phased:
      - **✅ Phase 1 (P4.HF18):** `font_embed_cid::place_cid_run` (marked-content-wrapped CID page
-       content: opacity/`cm`/behind/underline) + **header/footer** migrated. It now carries the
-       HF2 `/VibePDF` splice tag and uses exact `cid.width` (item 5 below, for header/footer).
-     - **⏭️ Phase 2:** watermark (opacity + rotation + behind). **Phase 3:** text box (wrap +
-       underline). **Phase 4:** delete `font_embed.rs` (the PDFium path) once it has no users.
+       content: opacity/`cm`/behind/underline) + **header/footer** migrated.
+     - **✅ Phase 2 (P4.HF19):** **watermark** migrated (opacity via ExtGState + rotation +
+       behind, exact `cid.width` centring, HF2 tag). `font_embed`'s only remaining user is the
+       text box.
+     - **⏭️ Phase 3:** text box (wrap + underline). **Phase 4:** delete `font_embed.rs` (the
+       PDFium path) once it has no users; update docs/04 (one backend).
   3. ~~**`/FontFile2` compression** (FlateDecode)~~ **DONE FOR FREE** — investigated P4.HF11:
      lopdf's `save_to` already FlateDecode-compresses every stream on save (a 332 KB subset stores
      as 20 KB). No helper needed; see FABLE_REVIEW §3.12.
   3. **Per-glyph coverage in `covering_font_bytes`** — today it returns a broad face without
      verifying the glyphs exist; an exotic script shows `.notdef`. Needs a coverage probe.
-  4. **HF2 marked-content tag on embedded runs** — ✅ done for **header/footer** via the CID
-     unification (phase 1); watermark + text box get it as they migrate (phases 2–3).
+  4. **HF2 marked-content tag on embedded runs** — ✅ done for **header/footer + watermark** via
+     the CID unification (phases 1–2); text box gets it when it migrates (phase 3).
   5. **Exact embedded-font metrics** for centre/right alignment (shared with 3.10) — ✅ done for
-     **header/footer** (`cid.width`); watermark + text box follow with their migration.
+     **header/footer + watermark** (`cid.width`); text box follows with its migration.
 - **Note (3.2):** `/WinAnsiEncoding` renders `'`/`` ` `` straight instead of curly — pre-HF3
   free-text/stamps with apostrophes change appearance slightly (arguably more correct).
 - **Note (3.5):** toasts cover *user-action write* failures; passive read/sync failures still

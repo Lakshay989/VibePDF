@@ -6976,6 +6976,44 @@ CID path.
 
 ---
 
+## P4.HF19 — CID-path unification, phase 2 (watermark)
+
+#### Problem
+
+Same as phase 1, for the second page-content writer: the non-WinAnsi watermark
+went through PDFium text objects (flat-average centring, no HF2 tag, PDFium
+round-trip). Migrate it onto `place_cid_run`.
+
+#### Concepts learned
+
+- **A well-shaped primitive makes the second migration mechanical.** Phase 1's
+  `place_cid_run`/`CidRun` already carried opacity, matrix, behind, and the
+  marked-content tag — exactly the watermark's feature set. So phase 2 was
+  almost entirely *deleting* the PDFium-specific code: build one shared CID
+  subset, centre with exact `cid.width`, and hand each page's baked
+  `compose(compose(t, r), vt)` matrix to `place_cid_run`.
+- **Delete inputs that a rewrite makes irrelevant.** The old path took `base`
+  (a base-14 font name) to estimate width with `font_avg_em`. The CID path uses
+  the covering font's real advances, so `base` — and the `bold`/`italic`/
+  `font_family` it needed — became dead. Destructure `{ text, size, color, .. }`
+  and drop the `base_font` call; the compiler's unused-variable warning is the
+  cue that a parameter has outlived its purpose.
+- **One subset, many pages.** `build_cid_font` runs once on the mark's text; each
+  page's `/Resources /Font` references the shared dict (one run per page, so no
+  per-page dedup map needed unlike header/footer's three segments).
+
+#### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/watermark.rs` | Embedded path now builds a CID font + `place_cid_run` per page (exact centring, HF2 tag, opacity via ExtGState, behind); dropped `embed_runs`/`font_avg_em`/`base`. New CID+tag+opacity test. |
+
+#### Further reading
+
+- (Same CID/marked-content references as P4.HF18.)
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

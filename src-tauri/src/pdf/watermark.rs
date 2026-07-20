@@ -17,12 +17,12 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, compose, escape_pdf_string, font_avg_em, page_effective_box,
-    page_rotation, parse_hex_color, prepend_page_content, register_page_resource, visual_cm_line,
+    append_page_content, base_font, compose, escape_pdf_string, page_effective_box, page_rotation,
+    parse_hex_color, prepend_page_content, register_page_resource, visual_cm_line,
     visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
-use crate::pdf::font_embed::{embed_runs, EmbedRun};
+use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -163,17 +163,15 @@ pub fn add_watermark(
     Ok(buf)
 }
 
-/// The non-WinAnsi text-watermark path (`FABLE_REVIEW` 3.2 stage-2): place the
-/// mark as a `PDFium` text object drawn with an embedded, subsetted covering font.
-/// Geometry (rotation, effective box) comes from an lopdf pass; the placement
-/// matrix bakes the *same* `vt · R@centre · Td(-w/2,-size/3)` transform the base-14
-/// `text_content` applies, so rotated/cropped pages still land centred and upright.
-/// `opacity` becomes the object's fill alpha and `behind` inserts it under the
-/// page content — the two watermark features the base-14 path did with an
-/// `/ExtGState` + `prepend`.
-///
-/// Known gaps vs. the base-14 path (shared with header/footer): no HF2 marked-
-/// content tag on the run, and centring uses the base-14 width estimate (3.10).
+/// The non-WinAnsi text-watermark path (`FABLE_REVIEW` 3.2 stage-2 / CID-path
+/// unification): embed a hand-built CID font (`build_cid_font`) and place the
+/// mark as marked-content-wrapped CID page content via [`place_cid_run`]. The
+/// placement matrix bakes the *same* `vt · R@centre · Td(-w/2, -size/3)` transform
+/// the base-14 `text_content` applies, so rotated/cropped pages still land centred
+/// and upright; `opacity` and `behind` are handled by `place_cid_run` (an
+/// `/ExtGState` + prepend). Sharing the `/AP` backend gains **exact centring**
+/// (`cid.width` — the §3.10 embed-path fix) and the **HF2 `/VibePDF` splice tag**,
+/// with no `PDFium` round-trip.
 #[allow(clippy::too_many_arguments, clippy::many_single_char_names)]
 fn add_watermark_embedded(
     bytes: &[u8],
@@ -184,48 +182,67 @@ fn add_watermark_embedded(
     behind: bool,
     font_bytes: &[u8],
 ) -> Result<Vec<u8>, CommandError> {
-    let WatermarkKind::Text { text, font_family, size, color, bold, italic } = kind else {
+    // The base-14 family is irrelevant here — the embedded covering font
+    // supplies the glyphs — so only text/size/colour are needed.
+    let WatermarkKind::Text { text, size, color, .. } = kind else {
         return Err(CommandError::Internal("embedded watermark path requires text".into()));
     };
-    let base = base_font(font_family, *bold, *italic)?;
     let rgb = parse_hex_color(color)?;
     let sz = size.max(1.0);
     let opacity = opacity.clamp(0.0, 1.0);
     let theta = rotation_deg.to_radians();
     let (cos, sin) = (theta.cos(), theta.sin());
-    #[allow(clippy::cast_precision_loss)]
-    let width = sz * font_avg_em(base) * text.chars().count() as f32;
+
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    // One shared CID subset; exact width centres the mark on the page centre.
+    let cid = build_cid_font(&mut doc, font_bytes, text)?;
+    let width = cid.width(text, sz);
     let (tx, ty) = (-width / 2.0, -sz / 3.0);
 
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_map = doc.get_pages();
-    let mut runs: Vec<EmbedRun> = Vec::with_capacity(pages.len());
+    let mut targets: Vec<ObjectId> = Vec::with_capacity(pages.len());
     for &p in pages {
         let page_no = u32::try_from(p)
             .ok()
             .map(|n| n + 1)
             .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {p}")))?;
-        let page_id = *page_map
-            .get(&page_no)
-            .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {p}")))?;
+        targets.push(
+            *page_map
+                .get(&page_no)
+                .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {p}")))?,
+        );
+    }
+
+    for page_id in targets {
         let rotate = page_rotation(&doc, page_id);
         let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
         let (cx, cy) = (vw / 2.0, vh / 2.0);
         // Glyph maps as p · T · R · vt (Td, then rotate-about-centre, then visual).
         let r_mat = [cos, sin, -sin, cos, cx, cy];
         let t_mat = [1.0, 0.0, 0.0, 1.0, tx, ty];
-        runs.push(EmbedRun {
-            page: p,
-            text: text.clone(),
-            size: sz,
-            color: rgb,
-            opacity,
-            matrix: compose(compose(t_mat, r_mat), vt),
-            behind,
-            underline: None,
-        });
+        let font_name =
+            register_page_resource(&mut doc, page_id, b"Font", "Fcid", Object::Dictionary(cid.font_dict.clone()))?;
+        place_cid_run(
+            &mut doc,
+            page_id,
+            &font_name,
+            &cid,
+            &CidRun {
+                text,
+                size: sz,
+                color: rgb,
+                matrix: compose(compose(t_mat, r_mat), vt),
+                opacity,
+                behind,
+                underline: None,
+                kind: "watermark",
+            },
+        )?;
     }
-    embed_runs(bytes, font_bytes, &runs)
+
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -453,6 +470,44 @@ mod tests {
         assert!(
             text.find(coptic) < text.find("VibePDF"),
             "behind watermark precedes page content in draw order; got {text:?}",
+        );
+    }
+
+    /// CID-path unification (phase 2): the embedded watermark is now hand-built
+    /// CID page content — a hex `Tj` wrapped in the HF2 `/VibePDF` marked-content
+    /// tag, with an `ExtGState` for opacity — not a `PDFium` object.
+    #[test]
+    fn embedded_watermark_is_cid_tagged_and_has_opacity() {
+        use lopdf::{Document, Object, StringFormat};
+        let out = add_watermark_embedded(
+            &hello(),
+            &[0],
+            &text_kind("\u{2C81}\u{2C83}"), // Ⲁ Ⲃ
+            0.5,                            // opacity < 1 → ExtGState
+            45.0,
+            false,
+            &coptic_font(),
+        )
+        .expect("embedded watermark");
+        let doc = Document::load_mem(&out).expect("reopen");
+        let page_id = *doc.get_pages().get(&1).expect("page 1");
+        let content = doc.get_and_decode_page_content(page_id).expect("decode content");
+        assert!(
+            content.operations.iter().any(|op| op.operator == "BDC"
+                && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")),
+            "watermark must carry the /VibePDF marked-content tag (HF2)"
+        );
+        assert!(
+            content.operations.iter().any(|op| op.operator == "Tj"
+                && matches!(
+                    op.operands.first(),
+                    Some(Object::String(_, StringFormat::Hexadecimal))
+                )),
+            "must draw a CID (hex) Tj, not a PDFium text object"
+        );
+        assert!(
+            content.operations.iter().any(|op| op.operator == "gs"),
+            "opacity < 1 must emit an ExtGState /gs"
         );
     }
 

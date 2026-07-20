@@ -3212,6 +3212,29 @@ node scripts/cargo-test.mjs --test header_footer hf_embedded_unicode_verificatio
 
 ---
 
+### P4.HF19 — CID-path unification phase 2 (watermark)
+
+No `cargo add` / `npm install`; no new dependency. Rust-only.
+
+Verification gates:
+
+```
+cargo build --lib                                # clean (after dropping the now-dead `base`)
+node scripts/cargo-test.mjs --lib watermark      # 5 passed (render+extract; behind; CID+tag+opacity)
+node scripts/cargo-test.mjs --test watermark     # 7 passed (unchanged behaviour)
+npm run check                                    # tsc + eslint + clippy -D warnings — green
+npm run test:rust                                # full suite — every 'test result' 0 failed
+```
+
+Verification artifact (embedded Unicode watermark, now CID-emitted):
+
+```
+node scripts/cargo-test.mjs --test watermark watermark_embedded_unicode_verification_artifact -- --ignored
+#   → Sample PDFs/vibepdf-verify-watermark-unicode.pdf (git-ignored)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
