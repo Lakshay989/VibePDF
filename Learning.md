@@ -7059,6 +7059,55 @@ it, is the *direct consequence* rather than a separate effort.
 
 ---
 
+## P4.HF21 — Text-tool disambiguation (Phase 0 of "re-editable Add Text")
+
+### Problem
+
+An in-app test (2026-07-22) surfaced three complaints about adding text: a large
+block is hard to edit, editing works one line at a time, and added text never
+appears in the Annotations panel. Diagnosis traced all three to a single UX trap:
+there are **two** text tools whose buttons read almost identically — **"Text"**
+(the `free-text` tool, which writes a re-editable `/FreeText` *annotation* listed
+in the panel) and **"Add Text"** (the `add-text` tool, which bakes text into the
+**page content stream**, per spec P4-EDIT-003). A user reaching for "add text"
+naturally clicks the second and then hits every sharp edge of page content:
+no re-edit handle (only per-run **Edit Text**), and — correctly, by spec — no
+panel entry.
+
+This step ships only the cheap, spec-legal half: make the two tools tell
+themselves apart. The real fix (edit an Add-Text box *as a unit*) is planned but
+blocked on a new spec line, so it isn't in this commit.
+
+### Concepts learned
+
+- **A UI label is part of the contract.** Two features that behave in opposite
+  ways (overlay annotation vs. baked-in content) must not share a near-identical
+  name; the disambiguation is as real a fix as any code path. Here: `free-text` →
+  **"Text Box"**, `add-text` stays **"Add Text"**, with tooltips that state the
+  behavioural difference (re-editable + in the panel vs. permanent page content).
+- **Spec-mandated ≠ bug.** "Added text isn't in Annotations" felt like a defect
+  but P4-EDIT-003 *requires* page-content text to be a non-annotation. The right
+  response is to explain and design *within* the constraint (make the page content
+  re-editable), not to violate it by turning it into an annotation.
+- **A run is one line.** PDF text is one show-text operator ≈ one line, so
+  "edit one line at a time" is the *editing model*, not a missing feature —
+  widening the single-run editor to a `<textarea>` would corrupt the run, not
+  produce two lines. Multi-line editing only makes sense as *edit-the-whole-box*.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/app/MarkupToolbar.tsx` | Relabel + retooltip the two text buttons ("Text" → "Text Box"; clarify "Add Text"). UI-only. |
+| `BACKLOG.md` | Record the report, the shipped relabel, and the blocked Phase 1–3 design (incl. the `P4-EDIT-007` ID collision). |
+
+### Further reading
+
+- PDF 32000-1:2008 §9.4 (text objects / show operators — why a run is a line).
+- (Marked-content tag design that Phase 1–3 will build on: see P4.HF2 / HF18–20.)
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

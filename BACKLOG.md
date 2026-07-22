@@ -685,6 +685,26 @@ C4a/b, B3b). Four issues found + fixed this session:
   detecting per-glyph coverage is deferred.
 - **Rotated/skewed runs** — `set_text` preserves the matrix (good), so rotation is fine
   for *edit*; only the (deferred) recreate path would need to re-apply a matrix.
+- **2026-07-22 user report → plan (re-editable Add Text).** In-app testing surfaced that
+  Add-Text (page-content) text is (a) hard to edit when large, (b) only editable one *run*
+  (≈ line) at a time via **Edit Text**, and (c) absent from the Annotations panel. (c) is
+  **spec-mandated** (P4-EDIT-003: page content, *not* an annotation) — not a bug. (a)/(b) are
+  the "No edit-as-a-unit" gap above.
+  - ✅ **Phase 0 / C shipped (relabel)** — the two near-identical buttons were disambiguated:
+    `free-text` → **"Text Box"** (annotation; re-editable, in the panel), `add-text` stays
+    **"Add Text"** (page content; permanent), with tooltips spelling out the difference.
+    UI-only (`MarkupToolbar.tsx`), no spec change.
+  - ⏳ **Phase 1–3 / B BLOCKED on a spec line.** Design: stash the box's source
+    `Text`/`Font`/`Size`/`Color`/`Rect`/style in the existing `/VibePDF … BDC` marked-content
+    property dict (one `/Id` per whole box, not per line), add `read_text_boxes` +
+    `remove_text_box` (splice-by-Id via `get_and_decode_page_content`), and an
+    `update_text_box` = remove+re-add, with a double-click re-edit layer mirroring
+    `free-text-layer`. Needs a new EARS line — **the proposed `P4-EDIT-007` ID is already
+    taken (Hyperlinks); use the next free ID (`P4-EDIT-008`).** Foreign (untagged) text stays
+    per-run (P4-EDIT-001).
+- **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
+  a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
+  meaningful via edit-as-a-unit (B), not by widening the single-run editor.
 
 ## From P4.C2 (edit existing image)
 

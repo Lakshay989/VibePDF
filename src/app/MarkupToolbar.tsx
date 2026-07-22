@@ -184,15 +184,15 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       <button
         type="button"
         onClick={() => setActiveTool(textActive ? null : "free-text")}
-        title="Add a text box (drag on the page)"
-        aria-label="Free-text tool"
+        title="Add a text box annotation — re-editable, and listed in the Annotations panel"
+        aria-label="Text box annotation tool"
         aria-pressed={textActive}
         className={
           "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
           (textActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
         }
       >
-        Text
+        Text Box
       </button>
       {textActive || addTextActive ? (
         <div className="flex items-center gap-1">
@@ -377,8 +377,8 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       <button
         type="button"
         onClick={() => setActiveTool(addTextActive ? null : "add-text")}
-        title="Add text to the page (drag a box; the text becomes part of the page, not an annotation)"
-        aria-label="Add text tool"
+        title="Add text into the page content — permanent (not an annotation); re-edit later with the Edit Text tool"
+        aria-label="Add text into the page tool"
         aria-pressed={addTextActive}
         className={
           "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +

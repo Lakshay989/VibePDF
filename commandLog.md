@@ -3262,6 +3262,24 @@ Docs: font_embed_cid module doc + docs/04 rewritten for the single backend; two 
 
 ---
 
+## P4.HF21 — Text-tool disambiguation (Phase 0 of re-editable Add Text)
+
+UI-only relabel of the two text tools in `MarkupToolbar.tsx` ("Text" → "Text Box";
+clarify "Add Text" tooltips). No Rust, no PDF write path, no new command/dep.
+
+Verification gates (frontend only — cargo untouched, so clippy N/A):
+
+```
+npx tsc --noEmit                                   # OK
+npx eslint src --max-warnings=0                    # OK
+npx vitest run                                     # 90 files / 376 tests, 0 failed
+```
+
+No verification-PDF artifact (no write path changed). Phase 1–3 (the actual
+re-edit feature) is blocked on a new spec line and is not in this commit.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
