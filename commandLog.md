@@ -3280,6 +3280,30 @@ re-edit feature) is blocked on a new spec line and is not in this commit.
 
 ---
 
+## P4.HF22 — Re-editable Add Text, Phase 1 (emit metadata + read)
+
+Rust-only (cos.rs emit + read, font_embed_cid.rs fragment split, spec line,
+artifact test). No new deps, no new command yet (Phases 2–3).
+
+Verification gates:
+
+```
+cd src-tauri && cargo clippy --all-targets -- -D warnings   # clean (after doc_markdown + &str + too_many_args fixes)
+node scripts/cargo-test.mjs --lib text_box                  # 8 passed (4 new round-trip tests)
+npm run test:rust                                           # full suite, every 'test result' 0 failed
+npm run check                                               # tsc + eslint + clippy all clean
+```
+
+Verification artifacts (both regenerated / added, git-ignored):
+
+```
+node scripts/cargo-test.mjs --test text_box -- --ignored
+#   → Sample PDFs/vibepdf-verify-text-box-unicode.pdf   (CID box, now one tag)
+#   → Sample PDFs/vibepdf-verify-text-box-ascii.pdf      (NEW: WinAnsi box, now BDC-wrapped)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

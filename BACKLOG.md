@@ -694,14 +694,20 @@ C4a/b, B3b). Four issues found + fixed this session:
     `free-text` → **"Text Box"** (annotation; re-editable, in the panel), `add-text` stays
     **"Add Text"** (page content; permanent), with tooltips spelling out the difference.
     UI-only (`MarkupToolbar.tsx`), no spec change.
-  - ⏳ **Phase 1–3 / B BLOCKED on a spec line.** Design: stash the box's source
-    `Text`/`Font`/`Size`/`Color`/`Rect`/style in the existing `/VibePDF … BDC` marked-content
-    property dict (one `/Id` per whole box, not per line), add `read_text_boxes` +
-    `remove_text_box` (splice-by-Id via `get_and_decode_page_content`), and an
-    `update_text_box` = remove+re-add, with a double-click re-edit layer mirroring
-    `free-text-layer`. Needs a new EARS line — **the proposed `P4-EDIT-007` ID is already
-    taken (Hyperlinks); use the next free ID (`P4-EDIT-008`).** Foreign (untagged) text stays
-    per-run (P4-EDIT-001).
+  - ✅ **Spec line added** — `P4-EDIT-003b` (re-edit an added text box). Both `-007` and `-008`
+    were taken; it sits after `P4-EDIT-003` as a `b`-suffix, like `007b`.
+  - ✅ **Phase 1 / B shipped (Rust emit + read).** The whole box is now wrapped in ONE
+    `/VibePDF << /Kind (text-box) /Id … /Text <utf8-hex> /Font /Size /Color /Bold /Italic
+    /Underline /Rect … >> BDC … EMC` tag (both the WinAnsi base-14 and CID paths, via
+    `text_box_tag_body` + `wrap_text_box`; `place_cid_run` split into `cid_run_fragment` so
+    many lines share one tag). `read_text_boxes(bytes, page)` reads them back from the property
+    dict — no glyph decode. `/Text` is hex UTF-8 so Unicode + newlines round-trip. Foreign /
+    pre-metadata content (no `/Text`) is skipped → per-run fallback (P4-EDIT-001).
+  - ⏳ **Phase 2 / B remaining (splice + update + IPC).** `remove_text_box(bytes, page, id)`
+    (drop the matching `/Id`'s BDC…EMC), `update_text_box` = remove+re-add, `UpdateTextBoxEdit`
+    + `Message::UpdateTextBox` + `pdf_read_text_boxes`/`pdf_update_text_box` commands.
+  - ⏳ **Phase 3 / B remaining (frontend).** `readTextBoxes`/`updateTextBox` IPC + a double-click
+    re-edit layer in `text-box-layer.tsx` mirroring `free-text-layer`.
 - **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
   a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
   meaningful via edit-as-a-unit (B), not by widening the single-run editor.

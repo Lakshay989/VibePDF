@@ -201,21 +201,22 @@ pub(crate) struct CidRun<'a> {
     pub kind: &'a str,
 }
 
-/// Place one [`CidRun`] into `page_id`'s content stream, wrapped in the HF2
-/// `/VibePDF … BDC … EMC` marked-content tag. `font_name` is a `/Font` resource
-/// (registered once per page by the caller) that references `cid`'s dict. Any
-/// `ExtGState` needed for opacity is registered here. lopdf only — no `PDFium`.
-pub(crate) fn place_cid_run(
+/// Build the balanced `q … Q` content fragment for one [`CidRun`] — the drawing
+/// ops (opacity `/gs`, `cm`, `rg`, `BT … Tj … ET`, optional underline rule) —
+/// **without** the marked-content tag or appending it to the page. `font_name` is
+/// a `/Font` resource (registered once per page by the caller) referencing `cid`'s
+/// dict; any `ExtGState` for opacity is registered here. Callers decide how to tag
+/// and place the result: [`place_cid_run`] wraps one fragment per call (header/
+/// footer, watermark), while the text box concatenates many lines under a single
+/// tag (P4-EDIT-003b re-edit needs the whole box behind one `/Id`).
+pub(crate) fn cid_run_fragment(
     doc: &mut Document,
     page_id: ObjectId,
     font_name: &str,
     cid: &CidFont,
     run: &CidRun,
-) -> Result<(), CommandError> {
-    use crate::pdf::cos::{
-        append_page_content, prepend_page_content, register_page_resource, visual_cm_line,
-        wrap_decoration,
-    };
+) -> Result<String, CommandError> {
+    use crate::pdf::cos::{register_page_resource, visual_cm_line};
 
     let (r, g, b) = run.color;
     let mut inner = String::new();
@@ -247,7 +248,23 @@ pub(crate) fn place_cid_run(
         );
     }
     let _ = writeln!(inner, "Q");
+    Ok(inner)
+}
 
+/// Place one [`CidRun`] into `page_id`'s content stream, wrapped in the HF2
+/// `/VibePDF … BDC … EMC` marked-content tag. Thin wrapper over
+/// [`cid_run_fragment`] for the single-fragment writers (header/footer, watermark).
+/// lopdf only — no `PDFium`.
+pub(crate) fn place_cid_run(
+    doc: &mut Document,
+    page_id: ObjectId,
+    font_name: &str,
+    cid: &CidFont,
+    run: &CidRun,
+) -> Result<(), CommandError> {
+    use crate::pdf::cos::{append_page_content, prepend_page_content, wrap_decoration};
+
+    let inner = cid_run_fragment(doc, page_id, font_name, cid, run)?;
     let content = wrap_decoration(run.kind, inner);
     if run.behind {
         prepend_page_content(doc, page_id, content)

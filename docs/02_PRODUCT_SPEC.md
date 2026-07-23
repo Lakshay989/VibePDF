@@ -144,6 +144,9 @@ IF the original font is not embedded and not installed on the system, THEN THE s
 ### P4-EDIT-003 — Add text
 WHEN the user adds a new text box, THE system SHALL allow font, size, color, and style selection. New text SHALL be added as part of the page content stream, not as an annotation.
 
+### P4-EDIT-003b — Re-edit an added text box
+WHEN the user double-clicks a text box previously added with the Add Text tool, THE system SHALL reopen it pre-filled with its full text and style, and on commit SHALL replace it in the page content stream preserving its position. WHERE the text was not added by this application (it carries no VibePDF marked-content tag), THE system SHALL fall back to per-run editing (P4-EDIT-001).
+
 ### P4-EDIT-004 — Delete text
 WHEN the user deletes a text run, THE system SHALL remove it from the content stream and reflow surrounding content where possible.
 

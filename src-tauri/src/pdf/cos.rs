@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
-use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
+use crate::pdf::font_embed_cid::{build_cid_font, cid_run_fragment, CidRun};
 use crate::pdf::image_xobject::{embed_image, embed_png};
 
 /// Map an `lopdf` error onto our typed error. Takes the error by value so it
@@ -1264,10 +1264,64 @@ pub fn add_free_text(
     Ok(buf)
 }
 
+/// The marked-content `/Kind` of an "Add Text" box. The whole box is wrapped in
+/// ONE `/VibePDF` tag whose property dict also carries the source text + style, so
+/// re-edit (P4-EDIT-003b) reads it straight back — no glyph decoding — and delete
+/// is a single splice by `/Id`.
+pub(crate) const TEXT_BOX_KIND: &str = "text-box";
+
+/// Build the `/VibePDF` marked-content property-dict *body* for an Add-Text box:
+/// `/Kind (text-box) /Id (uuid) /Text <utf8-hex> /Font (family) /Size n
+///  /Color (#rrggbb) /Bold b /Italic i /Underline u /Rect [x0 y0 x1 y1]`.
+///
+/// `/Text` is hex-encoded UTF-8 so it round-trips *any* Unicode + newlines exactly
+/// (a literal string would suffer [`escape_pdf_string`]'s `WinAnsi` transcoding,
+/// which turns non-WinAnsi glyphs into `?`). `/Font` stores the UI family +
+/// separate `/Bold`/`/Italic` (not the resolved base-14 name) so the re-edit UI
+/// can repopulate its family dropdown and B/I toggles.
+#[allow(clippy::too_many_arguments)]
+fn text_box_tag_body(
+    rect: [f32; 4],
+    text: &str,
+    font_family: &str,
+    size: f32,
+    color: &str,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+) -> String {
+    use std::fmt::Write as _;
+    let mut hex = String::with_capacity(text.len() * 2);
+    for byte in text.as_bytes() {
+        let _ = write!(hex, "{byte:02X}");
+    }
+    let [x0, y0, x1, y1] = rect;
+    format!(
+        "/Kind ({TEXT_BOX_KIND}) /Id ({id}) /Text <{hex}> /Font ({font}) \
+         /Size {size:.2} /Color ({color}) /Bold {bold} /Italic {italic} \
+         /Underline {underline} /Rect [{x0:.2} {y0:.2} {x1:.2} {y1:.2}]",
+        id = uuid::Uuid::new_v4(),
+        font = escape_pdf_string(font_family),
+        color = escape_pdf_string(color),
+    )
+}
+
+/// Wrap an Add-Text box's content fragment in its `/VibePDF … BDC … EMC` tag,
+/// carrying `tag_body` (from [`text_box_tag_body`]) as the marked-content property
+/// dict. The content-stream analogue of an annotation's `/NM` — makes the whole
+/// box splice-removable *and* re-readable (P4-EDIT-003b).
+fn wrap_text_box(tag_body: &str, content: &str) -> String {
+    format!("/VibePDF << {tag_body} >> BDC\n{content}EMC\n")
+}
+
 /// SPEC: P4-EDIT-003 (P4.B2) — add a text box as **page content** (not an
 /// annotation): register a base-14 font on the page and append a `q BT … Tj … ET … Q`
 /// fragment to the page's content stream. The result is ordinary content-stream
 /// text — selectable, and editable/deletable by P4.B1/B3. Wraps within `rect`.
+///
+/// SPEC: P4-EDIT-003b — the whole box is wrapped in one `/VibePDF` marked-content
+/// tag ([`wrap_text_box`]) carrying its source text + style, so it can be re-opened
+/// and edited as a unit later ([`read_text_boxes`]).
 #[allow(clippy::too_many_arguments)]
 pub fn add_text_box(
     bytes: &[u8],
@@ -1291,6 +1345,12 @@ pub fn add_text_box(
     if text.trim().is_empty() {
         return Err(CommandError::InvalidInput("text-box text is empty".into()));
     }
+
+    // The whole box's re-edit metadata (P4-EDIT-003b), shared by both emit paths so
+    // an ASCII box and a Unicode box read back identically. Stores the *family* +
+    // B/I flags the user picked, not the resolved base name.
+    let tag_body = text_box_tag_body(rect, text, font_family, size, color, bold, italic, underline);
+
     // FABLE_REVIEW 3.2 stage-2 (P4.HF8): non-WinAnsi text embeds a covering system
     // font via PDFium; WinAnsi text keeps the base-14 page-content path below.
     if !winansi_fits(text) {
@@ -1301,7 +1361,9 @@ pub fn add_text_box(
                 "non-WinAnsi text-box text unexpectedly passed the WinAnsi check".into(),
             ));
         };
-        return add_text_box_embedded(bytes, page, rect, text, base, size, (r, g, b), underline, &font_bytes);
+        return add_text_box_embedded(
+            bytes, page, rect, text, base, size, (r, g, b), underline, &font_bytes, &tag_body,
+        );
     }
 
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
@@ -1322,8 +1384,9 @@ pub fn add_text_box(
     // straight into page space — it's `q … Q` balanced, so it can't leak state.
     let content =
         free_text_appearance_content(rect, text, size, (r, g, b), font_avg_em(base), underline, &font_res);
-    // Append after existing content so the text draws on top.
-    append_page_content(&mut doc, page_id, content)?;
+    // Append after existing content so the text draws on top, wrapped in the
+    // re-edit tag (P4-EDIT-003b) so the box is one addressable unit.
+    append_page_content(&mut doc, page_id, wrap_text_box(&tag_body, &content))?;
 
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
@@ -1354,6 +1417,7 @@ fn add_text_box_embedded(
     rgb: (f32, f32, f32),
     underline: bool,
     font_bytes: &[u8],
+    tag_body: &str,
 ) -> Result<Vec<u8>, CommandError> {
     let em = font_avg_em(base);
     let [x0, _y0, _x1, y1] = rect;
@@ -1376,6 +1440,9 @@ fn add_text_box_embedded(
     let font_name =
         register_page_resource(&mut doc, page_id, b"Font", "Fcid", Object::Dictionary(cid.font_dict.clone()))?;
 
+    // Build one content fragment for the whole box (all lines), then wrap it in a
+    // single re-edit tag (P4-EDIT-003b) — one `/Id` per box, not per line.
+    let mut inner = String::new();
     for (i, line) in lines.iter().enumerate() {
         if line.trim().is_empty() {
             continue; // blank line: no run, but its index still consumes a slot
@@ -1383,7 +1450,7 @@ fn add_text_box_embedded(
         #[allow(clippy::cast_precision_loss)]
         let baseline = y_top - i as f32 * leading;
         let width = cid.width(line, size); // exact — for the underline rule length
-        place_cid_run(
+        let fragment = cid_run_fragment(
             &mut doc,
             page_id,
             &font_name,
@@ -1396,14 +1463,136 @@ fn add_text_box_embedded(
                 opacity: 1.0,
                 behind: false,
                 underline: (underline && width > 0.0).then_some(width),
-                kind: "text-box",
+                kind: TEXT_BOX_KIND,
             },
         )?;
+        inner.push_str(&fragment);
     }
+    append_page_content(&mut doc, page_id, wrap_text_box(tag_body, &inner))?;
 
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;
     Ok(buf)
+}
+
+/// One Add-Text box read back from a page's content stream — the whole box as a
+/// single re-editable unit (P4-EDIT-003b). Geometry is in PDF points (origin
+/// bottom-left), the same space [`crate::pdf::text_extract::TextRun`] and
+/// annotations use. Fields mirror the [`add_text_box`] parameters so the frontend
+/// can reopen the editor pre-filled.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextBoxInfo {
+    /// The box's `/Id` — its marked-content handle, the re-edit / delete key.
+    pub id: String,
+    /// The rectangle `[x0, y0, x1, y1]` the box was drawn into.
+    pub rect: [f32; 4],
+    /// The original source text (with the user's own newlines), UTF-8.
+    pub text: String,
+    /// The UI font family (`Helvetica` / `Times` / `Courier`).
+    pub font_family: String,
+    /// Font size in points.
+    pub font_size: f32,
+    /// Fill colour `#rrggbb`.
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+/// SPEC: P4-EDIT-003b — list every Add-Text box on `page` (0-based) that *this app*
+/// wrote, reading each box's source text + style straight from its `/VibePDF`
+/// marked-content property dict. Read-only, lopdf-only (no `PDFium`): a box is a
+/// `/VibePDF << /Kind (text-box) /Id … /Text … >> BDC … EMC` block. Foreign or
+/// pre-metadata content (no `/Text`) is skipped — it falls back to per-run editing
+/// (P4-EDIT-001).
+pub fn read_text_boxes(bytes: &[u8], page: usize) -> Result<Vec<TextBoxInfo>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let Some(&page_id) = doc.get_pages().get(&page_no) else {
+        return Ok(Vec::new()); // no such page → no boxes
+    };
+    let content = doc.get_and_decode_page_content(page_id).map_err(cos_err)?;
+
+    let mut out = Vec::new();
+    for op in &content.operations {
+        if op.operator != "BDC" {
+            continue;
+        }
+        let (Some(Object::Name(tag)), Some(Object::Dictionary(d))) =
+            (op.operands.first(), op.operands.get(1))
+        else {
+            continue;
+        };
+        if tag != b"VibePDF" || dict_string(d, b"Kind").as_deref() != Some(TEXT_BOX_KIND) {
+            continue;
+        }
+        // Require the re-edit metadata; a tag without it is old/foreign → skip so
+        // the caller falls back to per-run editing.
+        let (Some(text), Some(rect)) = (dict_string(d, b"Text"), dict_rect(d, b"Rect")) else {
+            continue;
+        };
+        out.push(TextBoxInfo {
+            id: dict_string(d, b"Id").unwrap_or_default(),
+            rect,
+            text,
+            font_family: dict_string(d, b"Font").unwrap_or_default(),
+            font_size: dict_number(d, b"Size").unwrap_or(0.0),
+            color: dict_string(d, b"Color").unwrap_or_else(|| "#000000".into()),
+            bold: dict_bool(d, b"Bold"),
+            italic: dict_bool(d, b"Italic"),
+            underline: dict_bool(d, b"Underline"),
+        });
+    }
+    Ok(out)
+}
+
+/// A marked-content property-dict string value → owned `String` (lossy UTF-8). The
+/// stored bytes are the raw string content (lopdf has already un-hex/un-escaped).
+fn dict_string(d: &Dictionary, key: &[u8]) -> Option<String> {
+    match d.get(key) {
+        Ok(Object::String(bytes, _)) => Some(String::from_utf8_lossy(bytes).into_owned()),
+        _ => None,
+    }
+}
+
+/// A property-dict numeric value → `f32` (accepts real or integer).
+#[allow(clippy::cast_precision_loss)]
+fn dict_number(d: &Dictionary, key: &[u8]) -> Option<f32> {
+    match d.get(key) {
+        Ok(Object::Real(v)) => Some(*v),
+        Ok(Object::Integer(v)) => Some(*v as f32),
+        _ => None,
+    }
+}
+
+/// A property-dict boolean value → `bool` (absent / non-bool ⇒ `false`).
+fn dict_bool(d: &Dictionary, key: &[u8]) -> bool {
+    matches!(d.get(key), Ok(Object::Boolean(true)))
+}
+
+/// A property-dict `[x0 y0 x1 y1]` array → `[f32; 4]` (accepts real or integer
+/// members). Any other shape ⇒ `None`.
+#[allow(clippy::cast_precision_loss)]
+fn dict_rect(d: &Dictionary, key: &[u8]) -> Option<[f32; 4]> {
+    let Ok(Object::Array(a)) = d.get(key) else {
+        return None;
+    };
+    if a.len() != 4 {
+        return None;
+    }
+    let mut out = [0.0f32; 4];
+    for (slot, obj) in out.iter_mut().zip(a) {
+        *slot = match obj {
+            Object::Real(v) => *v,
+            Object::Integer(v) => *v as f32,
+            _ => return None,
+        };
+    }
+    Some(out)
 }
 
 /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (not an
@@ -4340,7 +4529,7 @@ mod hex_color_tests {
 mod text_box_embed_tests {
     use pdfium_render::prelude::*;
 
-    use super::{add_text_box, add_text_box_embedded};
+    use super::{add_text_box, add_text_box_embedded, read_text_boxes, text_box_tag_body};
     use crate::pdf::document::{pdfium, pdfium_lock};
 
     fn hello() -> Vec<u8> {
@@ -4350,6 +4539,12 @@ mod text_box_embed_tests {
     fn coptic_font() -> Vec<u8> {
         std::fs::read("../tests/fixtures/fonts/NotoSansCoptic-Regular.ttf")
             .expect("committed Coptic fixture font")
+    }
+
+    /// The re-edit tag body an embedded-path call would get from [`add_text_box`],
+    /// so these direct `add_text_box_embedded` tests exercise the real wrapping.
+    fn tag(rect: [f32; 4], text: &str, underline: bool) -> String {
+        text_box_tag_body(rect, text, "Helvetica", 18.0, "#000000", false, false, underline)
     }
 
     /// (concatenated page-0 text, count of text objects, count of path objects).
@@ -4390,6 +4585,7 @@ mod text_box_embed_tests {
             (0.0, 0.0, 0.0),
             false,
             &coptic_font(),
+            &tag([72.0, 600.0, 122.0, 740.0], coptic, false),
         )
         .expect("embed text box");
         let (text, texts, _paths) = page0_stats(&out);
@@ -4414,6 +4610,7 @@ mod text_box_embed_tests {
             (0.0, 0.0, 0.0),
             true, // underline
             &coptic_font(),
+            &tag([72.0, 600.0, 122.0, 740.0], coptic, true),
         )
         .expect("embed underlined text box");
         let (_text, texts, paths) = page0_stats(&out);
@@ -4437,6 +4634,7 @@ mod text_box_embed_tests {
             (0.0, 0.0, 0.0),
             false,
             &coptic_font(),
+            &tag([72.0, 600.0, 300.0, 700.0], "\u{2C81}\u{2C83}", false),
         )
         .expect("embed text box");
         let doc = Document::load_mem(&out).expect("reopen");
@@ -4479,6 +4677,67 @@ mod text_box_embed_tests {
         let content =
             String::from_utf8_lossy(&doc.get_page_content(page_id).expect("content")).into_owned();
         assert!(content.contains("(ZZWORD) Tj"), "base-14 literal text show present");
+    }
+
+    /// SPEC: P4-EDIT-003b — a `WinAnsi` (base-14) box round-trips its full text +
+    /// style through the marked-content tag: add → `read_text_boxes` → same fields.
+    #[test]
+    fn read_text_boxes_roundtrips_ascii() {
+        let rect = [50.0, 500.0, 300.0, 560.0];
+        let out = add_text_box(
+            &hello(), 0, rect, "Hello world", "Times", 20.0, "#3b82f6", true, false, true,
+        )
+        .expect("add text box");
+        let boxes = read_text_boxes(&out, 0).expect("read text boxes");
+        assert_eq!(boxes.len(), 1, "one box read back");
+        let b = &boxes[0];
+        assert_eq!(b.text, "Hello world");
+        assert_eq!(b.font_family, "Times");
+        assert!((b.font_size - 20.0).abs() < 0.01);
+        assert_eq!(b.color, "#3b82f6");
+        assert!(b.bold && !b.italic && b.underline, "style flags round-trip");
+        for (got, want) in b.rect.iter().zip(rect.iter()) {
+            assert!((got - want).abs() < 0.01, "rect {:?} vs {rect:?}", b.rect);
+        }
+        assert!(!b.id.is_empty(), "box carries an /Id");
+    }
+
+    /// SPEC: P4-EDIT-003b — the CID (embedded-Unicode) path stores its `/Text` as
+    /// hex UTF-8, so non-WinAnsi text survives the read exactly (no `?` transcode).
+    #[test]
+    fn read_text_boxes_roundtrips_unicode() {
+        let rect = [72.0, 600.0, 300.0, 700.0];
+        let coptic = "\u{2C81}\u{2C83}\u{2C85}";
+        let out = add_text_box_embedded(
+            &hello(), 0, rect, coptic, "Helvetica", 18.0, (0.0, 0.0, 0.0), false, &coptic_font(),
+            &tag(rect, coptic, false),
+        )
+        .expect("embed text box");
+        let boxes = read_text_boxes(&out, 0).expect("read text boxes");
+        assert_eq!(boxes.len(), 1, "one box read back");
+        assert_eq!(boxes[0].text, coptic, "Unicode text preserved through the tag");
+    }
+
+    /// SPEC: P4-EDIT-003b — a multi-line box is ONE re-editable unit: its source
+    /// newlines survive and it reads back as a single box, not one per line.
+    #[test]
+    fn read_text_boxes_is_one_unit_with_newlines() {
+        let src = "alpha\nbeta\ngamma";
+        let out = add_text_box(
+            &hello(), 0, [40.0, 400.0, 500.0, 520.0], src, "Helvetica", 12.0, "#000000", false,
+            false, false,
+        )
+        .expect("add text box");
+        let boxes = read_text_boxes(&out, 0).expect("read text boxes");
+        assert_eq!(boxes.len(), 1, "the whole box is a single unit");
+        assert_eq!(boxes[0].text, src, "the user's newlines round-trip");
+    }
+
+    /// A page with no `VibePDF` text box reads back empty — foreign/native content is
+    /// never mistaken for a re-editable box.
+    #[test]
+    fn read_text_boxes_empty_when_none() {
+        assert!(read_text_boxes(&hello(), 0).expect("read").is_empty());
     }
 }
 

@@ -45,3 +45,36 @@ async fn text_box_embedded_unicode_artifact() {
 
     drop(handle);
 }
+
+/// SPEC: P4-EDIT-003b — a multi-line ASCII (base-14) box, now wrapped in the
+/// `/VibePDF` re-edit tag. Confirms the WinAnsi path — newly BDC-wrapped this
+/// phase — still renders across readers. Ignored; run on demand:
+///   cargo test --test text_box text_box_ascii_reedit_artifact -- --ignored
+#[tokio::test]
+#[ignore = "produces a verification artifact; run on demand"]
+async fn text_box_ascii_reedit_artifact() {
+    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-text-box-ascii.pdf");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
+    }
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+    handle
+        .add_text_box(
+            0,
+            [72.0, 500.0, 360.0, 680.0],
+            "The quick brown fox\njumps over the lazy dog\nand then re-reads this box.".into(),
+            "Times".into(),
+            15.0,
+            "#183028".into(),
+            true,  // bold
+            false, // italic
+            true,  // underline
+        )
+        .await
+        .expect("ascii text box");
+    handle.save(Some(out.clone())).await.expect("save");
+    eprintln!("wrote ASCII re-edit text-box artifact to {}", out.display());
+
+    drop(handle);
+}

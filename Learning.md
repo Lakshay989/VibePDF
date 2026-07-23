@@ -7108,6 +7108,61 @@ blocked on a new spec line, so it isn't in this commit.
 
 ---
 
+## P4.HF22 — Re-editable Add Text, Phase 1 (emit metadata + read)
+
+### Problem
+
+Phase 0 renamed the buttons; this phase lays the Rust groundwork so an "Add Text"
+box can later be re-opened and edited *as one unit* (SPEC P4-EDIT-003b, newly
+added). The box is baked into the page content stream (not an annotation — that's
+spec-mandated), so there's no annotation dict to read style out of. Two problems:
+(1) the text is drawn as glyph codes (Identity-H hex for Unicode), so you can't
+cheaply recover the *source* text + style from the drawing ops; and (2) a
+multi-line box was emitted as one marked-content tag **per line**, each with its
+own `/Id`, so there was no single handle for "the box".
+
+### Concepts learned
+
+- **Marked content as a metadata side-channel.** PDF marked content
+  (`/Tag << …props… >> BDC … EMC`, §14.6) is inert to renderers but carries an
+  arbitrary property dict. We already used it (HF2) as an identity rail; now the
+  dict also **stores the box's source** — `/Text /Font /Size /Color /Bold /Italic
+  /Underline /Rect`. Re-reading a box becomes plain dict lookup (no glyph decode).
+  This is the content-stream analogue of an annotation's `/NM` + fields.
+- **Hex strings dodge text-encoding pain.** A PDF *literal* string `(…)` is a
+  byte string; our `escape_pdf_string` transcodes to WinAnsi and turns anything
+  outside it into `?` — fine for drawing WinAnsi, fatal for *storing* Coptic. A
+  **hex string** `<48656C6C6F>` needs no escaping and round-trips arbitrary bytes,
+  so `/Text` holds hex-encoded **UTF-8** and any Unicode + newlines survive intact.
+- **One tag per box, not per line.** Wrapping *all* the line fragments in a single
+  `BDC…EMC` gives the box one `/Id` — the future delete/re-edit key. This drove a
+  small refactor: `place_cid_run` (one tag per call, for header/footer + watermark)
+  now delegates to `cid_run_fragment` (just the `q…Q` drawing), and the text box
+  concatenates many fragments under one tag.
+- **lopdf `Content` is a real parser.** `get_and_decode_page_content` returns typed
+  operators with typed operands — a `BDC` op's second operand is a parsed
+  `Object::Dictionary`. So the reader is a straight walk: find `BDC` with
+  `/VibePDF` + `/Kind (text-box)`, pull the metadata. No hand-rolled tokenizer.
+- **Skip-don't-fail on foreign content.** A box lacking `/Text` (older per-line
+  tags, or non-VibePDF content) is silently skipped by `read_text_boxes`, so it
+  falls back to per-run editing (P4-EDIT-001) rather than crashing or lying.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `docs/02_PRODUCT_SPEC.md` | New spec line **P4-EDIT-003b** (re-edit an added text box). |
+| `src-tauri/src/pdf/cos.rs` | `text_box_tag_body` + `wrap_text_box`; both add-text paths now wrap the whole box in one metadata tag; new `TextBoxInfo` + `read_text_boxes` + dict extractors; round-trip tests. |
+| `src-tauri/src/pdf/font_embed_cid.rs` | Split `place_cid_run` → `cid_run_fragment` (untagged drawing) + thin wrapper, so many lines share one tag. |
+| `src-tauri/tests/text_box.rs` | Added an ASCII multi-line re-edit verification artifact alongside the Unicode one. |
+
+### Further reading
+
+- PDF 32000-1:2008 §14.6 (marked content), §7.3.4 (string objects: literal vs hex).
+- `lopdf::content::Content` — decoded content-stream operators.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
