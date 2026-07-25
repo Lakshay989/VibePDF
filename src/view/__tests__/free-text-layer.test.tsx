@@ -57,7 +57,8 @@ beforeEach(() => {
   useToolStore.setState({
     activeTool: "free-text",
     options: {
-      color: "#112233",
+      color: "#ffd400",
+      textColor: "#112233",
       opacity: 1,
       strokeWidth: 2,
       fillColor: null,
@@ -152,7 +153,7 @@ describe("FreeTextLayer", () => {
     expect(textarea.value).toBe("Helo");
     // The toolbar options were set to the box's style for a faithful preview.
     expect(useToolStore.getState().options.fontFamily).toBe("Times");
-    expect(useToolStore.getState().options.color).toBe("#cc1133");
+    expect(useToolStore.getState().options.textColor).toBe("#cc1133");
 
     fireEvent.change(textarea, { target: { value: "Hello" } });
     fireEvent.click(container.querySelector('button[aria-label="Add free text"]') as Element);

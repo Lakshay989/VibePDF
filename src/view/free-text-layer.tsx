@@ -75,6 +75,8 @@ export function FreeTextLayer({
   const [boxes, setBoxes] = useState<{ nm: string; rect: FreeTextRect }[]>([]);
 
   const placing = activeTool === "free-text";
+  // Text has its own colour (black default), separate from the markup colour.
+  const textColor = options.textColor ?? "#000000";
 
   // `coords` wants the UNROTATED PDF dimensions; swap back for 90°/270°.
   const swapped = (((rotation % 180) + 180) % 180) === 90;
@@ -144,7 +146,7 @@ export function FreeTextLayer({
     setOptions({
       fontFamily: data.fontFamily,
       fontSize: data.fontSize,
-      color: data.color,
+      textColor: data.color,
       bold: data.bold,
       italic: data.italic,
       underline: data.underline,
@@ -214,7 +216,7 @@ export function FreeTextLayer({
           text,
           options.fontFamily,
           options.fontSize,
-          options.color,
+          textColor,
           options.bold,
           options.italic,
           options.underline,
@@ -226,7 +228,7 @@ export function FreeTextLayer({
           text,
           options.fontFamily,
           options.fontSize,
-          options.color,
+          textColor,
           options.bold,
           options.italic,
           options.underline,
@@ -313,7 +315,7 @@ export function FreeTextLayer({
               border: "1px solid #2563eb",
               outline: "none",
               padding: "1px 2px",
-              color: options.color,
+              color: textColor,
               fontFamily: cssFontFamily(options.fontFamily),
               fontSize: `${options.fontSize * scale}px`,
               fontWeight: options.bold ? 700 : 400,

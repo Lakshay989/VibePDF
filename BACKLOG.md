@@ -732,7 +732,12 @@ C4a/b, B3b). Four issues found + fixed this session:
       under the **Edit Text** tool: single-click a box (its zone sits above Edit Text's per-run
       zones, this layer mounts last) → whole-box editor; clearing + Save → `deleteTextBox`;
       foreign text stays per-run. The idle double-click is gone. Layer tests cover both.
-    - ⏳ Steps 3–4: separate text colour (black default); the Text-boxes list.
+    - ✅ **Step 3 shipped (item 3):** text has its own `textColor` (optional `ToolOptions`
+      field, black default) so it no longer inherits the highlighter yellow. Both text layers
+      (free-text + add-text) use it; the Text-tool section of `MarkupToolbar` gets its own
+      colour palette; re-edit / edit-request prefills `textColor` from the box's stored colour.
+      Markup keeps `color`/yellow.
+    - ⏳ Step 4: the Text-boxes sidebar list (find / jump / delete).
 - **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
   a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
   meaningful via edit-as-a-unit (B), not by widening the single-run editor.

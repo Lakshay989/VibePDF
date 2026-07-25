@@ -53,6 +53,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const bold = useToolStore((s) => s.options.bold);
   const italic = useToolStore((s) => s.options.italic);
   const underline = useToolStore((s) => s.options.underline);
+  const textColor = useToolStore((s) => s.options.textColor) ?? "#000000";
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const fillColor = useToolStore((s) => s.options.fillColor);
@@ -253,6 +254,24 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
           >
             U
           </button>
+          {/* SPEC: P4-EDIT-003 — text has its own colour (black by default), kept
+              separate from the markup colour above (P4.HF25). */}
+          <span className="ml-1 text-xs text-neutral-400">Colour</span>
+          {COLORS.map((c) => (
+            <button
+              key={`text-${c}`}
+              type="button"
+              onClick={() => setOptions({ textColor: c })}
+              aria-label={`Text colour ${c}`}
+              aria-pressed={textColor === c}
+              title={c}
+              style={{ backgroundColor: c }}
+              className={
+                "h-4 w-4 rounded-full border border-neutral-300 dark:border-neutral-600 " +
+                (textColor === c ? "ring-2 ring-blue-500 ring-offset-1" : "")
+              }
+            />
+          ))}
         </div>
       ) : null}
       <button

@@ -49,8 +49,14 @@ export type FontFamily = "Helvetica" | "Times" | "Courier";
 
 /** Shared, user-configurable style for the active tool. */
 export interface ToolOptions {
-  /** Stroke / markup / text colour, hex (`#rrggbb`). */
+  /** Stroke / markup colour, hex (`#rrggbb`). */
   color: string;
+  /**
+   * Text colour for the Text Box (free-text) + Add Text tools, hex (`#rrggbb`).
+   * Kept separate from `color` so text defaults to black without turning the
+   * highlighter black (P4.HF25). Absent ⇒ `#000000`.
+   */
+  textColor?: string;
   /** 0..1. */
   opacity: number;
   /** Stroke width in points. */

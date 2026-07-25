@@ -74,6 +74,8 @@ export function TextBoxLayer({
   const [boxes, setBoxes] = useState<TextBoxInfo[]>([]);
 
   const placing = activeTool === "add-text";
+  // Text has its own colour (black default), separate from the markup colour.
+  const textColor = options.textColor ?? "#000000";
 
   // `coords` wants the UNROTATED PDF dimensions; swap back for 90°/270°.
   const swapped = ((rotation % 180) + 180) % 180 === 90;
@@ -156,7 +158,7 @@ export function TextBoxLayer({
     setOptions({
       fontFamily,
       fontSize: box.fontSize,
-      color: box.color,
+      textColor: box.color,
       bold: box.bold,
       italic: box.italic,
       underline: box.underline,
@@ -191,7 +193,7 @@ export function TextBoxLayer({
             body,
             options.fontFamily,
             options.fontSize,
-            options.color,
+            textColor,
             options.bold,
             options.italic,
             options.underline,
@@ -213,7 +215,7 @@ export function TextBoxLayer({
       body,
       options.fontFamily,
       options.fontSize,
-      options.color,
+      textColor,
       options.bold,
       options.italic,
       options.underline,
@@ -300,7 +302,7 @@ export function TextBoxLayer({
               border: "1px solid #2563eb",
               outline: "none",
               padding: "1px 2px",
-              color: options.color,
+              color: textColor,
               fontFamily: cssFontFamily(options.fontFamily),
               fontSize: `${options.fontSize * scale}px`,
               fontWeight: options.bold ? 700 : 400,

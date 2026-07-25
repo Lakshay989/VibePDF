@@ -7335,6 +7335,42 @@ double-click "did nothing" while single-clicks opened the per-run editor.
 
 ---
 
+## P4.HF25 Step 3 — Text gets its own colour (black default)
+
+### Problem
+
+New text inherited the shared tool colour, which defaults to highlighter yellow
+(`#ffd400`), so added text came out yellow. The user wants text black by default —
+but the colour field is shared with markup, so just defaulting it to black would
+turn the highlighter black too.
+
+### Concepts learned
+
+- **Split shared state when two consumers want different defaults.** The one
+  `options.color` served markup *and* text. The fix is a second field, `textColor`,
+  that the two text layers use while markup keeps `color`. Now each has its own
+  sensible default (yellow highlighter, black text) with no cross-talk.
+- **Make the new field optional to avoid a churn cascade.** Adding a *required*
+  `ToolOptions` field would force every full-options literal (several test files) to
+  add it. Marking it `textColor?: string` and reading it as `options.textColor ??
+  "#000000"` at the (few) use sites keeps the default in two obvious places and
+  leaves existing literals valid — the store seeds it; absence just means black.
+- **Prefill the right field on re-edit.** The box/annotation stores *its* colour;
+  re-edit and the free-text edit-request now `setOptions({ textColor: stored })` (not
+  `color`) so the editor preview and the re-commit both use the box's colour, not
+  the markup colour.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/tools/_framework/types.ts` + `src/state/tool-store.ts` | Optional `textColor` field, default `#000000`. |
+| `src/view/text-box-layer.tsx` + `src/view/free-text-layer.tsx` | Use `textColor` for new text; prefill it from the box on re-edit. |
+| `src/app/MarkupToolbar.tsx` | A dedicated text-colour palette in the Text-tool controls. |
+| `src/view/__tests__/free-text-layer.test.tsx` | Assert on `textColor` (was `color`). |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

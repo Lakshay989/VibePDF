@@ -10,6 +10,8 @@ import type { ToolId, ToolOptions } from "@/tools/_framework/types";
 const DEFAULT_OPTIONS: ToolOptions = {
   // A typical highlighter yellow; tools that don't use colour ignore it.
   color: "#ffd400",
+  // Text (Text Box + Add Text) defaults to black, independent of the markup colour.
+  textColor: "#000000",
   opacity: 1,
   strokeWidth: 2,
   // Shapes start unfilled (P3.C1).

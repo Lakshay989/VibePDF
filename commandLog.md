@@ -3373,6 +3373,21 @@ npx vitest run src/view/__tests__/text-{box,edit}-layer.test.tsx     # 11 passed
 
 ---
 
+## P4.HF25 Step 3 — Text gets its own colour (black default)
+
+Frontend-only (types + store + 2 layers + toolbar + free-text test). No Rust delta,
+no new dep. `textColor` is optional (default `#000000`).
+
+Verification gates:
+
+```
+npx tsc --noEmit                        # OK
+npx eslint src --max-warnings=0         # OK
+npx vitest run                          # 90 files / 379 tests, 0 failed
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
