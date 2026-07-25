@@ -109,6 +109,8 @@ pub fn run() {
             commands::pdf::pdf_flatten_annotations,
             commands::pdf::pdf_add_free_text,
             commands::pdf::pdf_add_text_box,
+            commands::pdf::pdf_update_text_box,
+            commands::pdf::pdf_read_text_boxes,
             commands::pdf::pdf_add_image,
             commands::pdf::pdf_add_link,
             commands::pdf::pdf_add_text_watermark,

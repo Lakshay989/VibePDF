@@ -25,6 +25,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
@@ -1593,6 +1594,97 @@ fn dict_rect(d: &Dictionary, key: &[u8]) -> Option<[f32; 4]> {
         };
     }
     Some(out)
+}
+
+/// SPEC: P4-EDIT-003b — remove the Add-Text box whose `/Id` is `id` from `page`,
+/// splicing its whole `/VibePDF … BDC … EMC` block (inclusive) out of the content
+/// stream. Errors if the page has no box with that id. lopdf-only (no `PDFium`):
+/// the page content is decoded to operators, the block dropped, and re-encoded
+/// into one stream — the same consolidation [`crate::pdf::reflow::delete_text_run`]
+/// does. Never mutates the input.
+pub fn remove_text_box(bytes: &[u8], page: usize, id: &str) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let page_no = u32::try_from(page)
+        .ok()
+        .map(|n| n + 1)
+        .ok_or_else(|| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("page index out of range: {page}")))?;
+
+    let mut operations = doc.get_and_decode_page_content(page_id).map_err(cos_err)?.operations;
+
+    // The `BDC` that opens our box: `/VibePDF << … /Id (id) … >> BDC`.
+    let start = operations
+        .iter()
+        .position(|op| {
+            op.operator == "BDC"
+                && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")
+                && matches!(op.operands.get(1), Some(Object::Dictionary(d))
+                    if dict_string(d, b"Id").as_deref() == Some(id))
+        })
+        .ok_or_else(|| {
+            CommandError::InvalidInput(format!("no text box with id {id} on page {page}"))
+        })?;
+
+    // Its matching `EMC`, tracking marked-content nesting from the opening `BDC`.
+    let mut depth = 0usize;
+    let mut end = None;
+    for (i, op) in operations.iter().enumerate().skip(start) {
+        match op.operator.as_str() {
+            "BDC" | "BMC" => depth += 1,
+            "EMC" => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end
+        .ok_or_else(|| CommandError::PdfError(format!("text box {id} has no matching EMC")))?;
+
+    operations.drain(start..=end);
+    let new_content = Content { operations }.encode().map_err(cos_err)?;
+    doc.change_page_content(page_id, new_content).map_err(cos_err)?;
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out)?;
+    Ok(out)
+}
+
+/// SPEC: P4-EDIT-003b — re-edit the Add-Text box `id` on `page`: replace it with
+/// new text + style **preserving its rectangle**. Reads the box's rect, splices
+/// the old block out ([`remove_text_box`]), and re-adds at that rect
+/// ([`add_text_box`]) — so the result gets a fresh `/Id`. Errors if the box isn't
+/// found. Never mutates the input.
+#[allow(clippy::too_many_arguments)]
+pub fn update_text_box(
+    bytes: &[u8],
+    page: usize,
+    id: &str,
+    text: &str,
+    font_family: &str,
+    font_size: f32,
+    color: &str,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+) -> Result<Vec<u8>, CommandError> {
+    let rect = read_text_boxes(bytes, page)?
+        .into_iter()
+        .find(|b| b.id == id)
+        .ok_or_else(|| {
+            CommandError::InvalidInput(format!("no text box with id {id} on page {page}"))
+        })?
+        .rect;
+    let removed = remove_text_box(bytes, page, id)?;
+    add_text_box(
+        &removed, page, rect, text, font_family, font_size, color, bold, italic, underline,
+    )
 }
 
 /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (not an
@@ -4529,7 +4621,10 @@ mod hex_color_tests {
 mod text_box_embed_tests {
     use pdfium_render::prelude::*;
 
-    use super::{add_text_box, add_text_box_embedded, read_text_boxes, text_box_tag_body};
+    use super::{
+        add_text_box, add_text_box_embedded, read_text_boxes, remove_text_box, text_box_tag_body,
+        update_text_box,
+    };
     use crate::pdf::document::{pdfium, pdfium_lock};
 
     fn hello() -> Vec<u8> {
@@ -4738,6 +4833,71 @@ mod text_box_embed_tests {
     #[test]
     fn read_text_boxes_empty_when_none() {
         assert!(read_text_boxes(&hello(), 0).expect("read").is_empty());
+    }
+
+    /// SPEC: P4-EDIT-003b — `remove_text_box` splices exactly the targeted box out:
+    /// the other box survives, and the page still opens.
+    #[test]
+    fn remove_text_box_splices_only_target() {
+        let a = add_text_box(
+            &hello(), 0, [40.0, 600.0, 300.0, 640.0], "AAA box", "Helvetica", 12.0, "#000000",
+            false, false, false,
+        )
+        .expect("add A");
+        let ab = add_text_box(
+            &a, 0, [40.0, 500.0, 300.0, 540.0], "BBB box", "Helvetica", 12.0, "#000000", false,
+            false, false,
+        )
+        .expect("add B");
+        let boxes = read_text_boxes(&ab, 0).expect("read two");
+        assert_eq!(boxes.len(), 2);
+        let a_id = boxes.iter().find(|b| b.text == "AAA box").expect("A present").id.clone();
+
+        let out = remove_text_box(&ab, 0, &a_id).expect("remove A");
+        let after = read_text_boxes(&out, 0).expect("read after");
+        assert_eq!(after.len(), 1, "one box left");
+        assert_eq!(after[0].text, "BBB box", "the survivor is B");
+        // The page still parses.
+        assert!(lopdf::Document::load_mem(&out).is_ok());
+    }
+
+    /// An unknown id is a clean error, not a silent no-op.
+    #[test]
+    fn remove_text_box_errors_on_unknown_id() {
+        let out = add_text_box(
+            &hello(), 0, [40.0, 600.0, 300.0, 640.0], "hi", "Helvetica", 12.0, "#000000", false,
+            false, false,
+        )
+        .expect("add");
+        assert!(remove_text_box(&out, 0, "not-a-real-id").is_err());
+    }
+
+    /// SPEC: P4-EDIT-003b — `update_text_box` replaces the text/style but keeps the
+    /// box's rectangle, and it stays a single box.
+    #[test]
+    fn update_text_box_replaces_preserving_rect() {
+        let rect = [60.0, 480.0, 360.0, 560.0];
+        let out = add_text_box(
+            &hello(), 0, rect, "before", "Helvetica", 12.0, "#000000", false, false, false,
+        )
+        .expect("add");
+        let id = read_text_boxes(&out, 0).expect("read")[0].id.clone();
+
+        let updated = update_text_box(
+            &out, 0, &id, "after — longer\nand two lines", "Times", 20.0, "#c02040", true, false,
+            true,
+        )
+        .expect("update");
+        let boxes = read_text_boxes(&updated, 0).expect("read updated");
+        assert_eq!(boxes.len(), 1, "still one box");
+        let b = &boxes[0];
+        assert_eq!(b.text, "after — longer\nand two lines");
+        assert_eq!(b.font_family, "Times");
+        assert!((b.font_size - 20.0).abs() < 0.01);
+        assert!(b.bold && b.underline);
+        for (got, want) in b.rect.iter().zip(rect.iter()) {
+            assert!((got - want).abs() < 0.01, "rect preserved: {:?} vs {rect:?}", b.rect);
+        }
     }
 }
 

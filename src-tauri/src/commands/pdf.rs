@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
-use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData};
+use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
@@ -656,6 +656,70 @@ pub async fn pdf_add_text_box(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.add_text_box_request(page, rect, text, font_family, font_size, color, bold, italic, underline)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-003b — re-edit the Add-Text box `box_id` on `page` (0-based) in
+/// place: replace its text + style, keeping its rectangle. Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_update_text_box(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    box_id: String,
+    text: String,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.update_text_box_request(page, box_id, text, font_family, font_size, color, bold, italic, underline)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P4-EDIT-003b — read every re-editable Add-Text box on `page` (0-based)
+/// for double-click re-edit hit-testing. Read-only; runs on the actor.
+#[tauri::command]
+pub async fn pdf_read_text_boxes(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+) -> Result<Vec<TextBoxInfo>, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_text_boxes_request(page)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

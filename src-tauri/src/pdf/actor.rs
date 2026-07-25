@@ -41,14 +41,15 @@ use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddImageEdit, AddLinkEdit, AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit,
     FreeTextEdit, ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit,
-    ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit, UpdateNoteEdit,
+    ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit,
+    UpdateNoteEdit, UpdateTextBoxEdit,
 };
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::watermark::{WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
-    read_annotations, read_free_text, read_measure_calibration, read_text_notes, AnnotationInfo,
-    FreeTextData, MeasureCalibration, NoteData,
+    read_annotations, read_free_text, read_measure_calibration, read_text_boxes, read_text_notes,
+    AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -343,6 +344,26 @@ pub enum Message {
         italic: bool,
         underline: bool,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-003b — re-edit the Add-Text box `id` on `page` (new text +
+    /// style, same rect). Undoable; marks dirty.
+    UpdateTextBox {
+        page: i32,
+        id: String,
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-003b — read every re-editable Add-Text box on `page`
+    /// (read-only). Powers the double-click re-edit hit-testing.
+    ReadTextBoxes {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<TextBoxInfo>, CommandError>>,
     },
     /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (an Image
     /// `XObject`), aspect-fit into `rect` on `page`. Undoable; marks dirty.
@@ -1237,6 +1258,76 @@ impl DocumentActorHandle {
                 underline,
                 reply,
             })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-003b — re-edit an Add-Text box in place. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_text_box(
+        &self,
+        page: i32,
+        id: String,
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.update_text_box_request(
+            page, id, text, font_family, font_size, color, bold, italic, underline,
+        )?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_text_box_request(
+        &self,
+        page: i32,
+        id: String,
+        text: String,
+        font_family: String,
+        font_size: f32,
+        color: String,
+        bold: bool,
+        italic: bool,
+        underline: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::UpdateTextBox {
+                page,
+                id,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                underline,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-003b — read this page's re-editable Add-Text boxes. Read-only.
+    pub async fn read_text_boxes(&self, page: usize) -> Result<Vec<TextBoxInfo>, CommandError> {
+        let rx = self.read_text_boxes_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_text_boxes_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<TextBoxInfo>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadTextBoxes { page, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -2707,6 +2798,48 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::UpdateTextBox {
+                page,
+                id,
+                text,
+                font_family,
+                font_size,
+                color,
+                bold,
+                italic,
+                underline,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-003b — re-edit a text box in place; the inverse is a
+                // pre-write byte snapshot (RestoreDocEdit).
+                let edit = UpdateTextBoxEdit {
+                    page,
+                    id,
+                    text,
+                    font_family,
+                    font_size,
+                    color,
+                    bold,
+                    italic,
+                    underline,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReadTextBoxes { page, reply } => {
+                // SPEC: P4-EDIT-003b — read-only: serialize under the PDFium lock
+                // (same path as ReadAnnotations), then parse the boxes with lopdf.
+                let result = pdfium_lock()
+                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
+                    .and_then(|bytes| read_text_boxes(&bytes, page));
                 let _ = reply.send(result);
             }
             Message::AddImage {

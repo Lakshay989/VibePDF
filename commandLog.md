@@ -3304,6 +3304,26 @@ node scripts/cargo-test.mjs --test text_box -- --ignored
 
 ---
 
+## P4.HF23 — Re-editable Add Text, Phase 2 (splice + update + actor + IPC)
+
+Rust-only (cos remove/update, annotation Edit, actor messages, 2 commands +
+register, actor round-trip test). No new deps, no frontend yet (Phase 3).
+
+Verification gates:
+
+```
+cd src-tauri && cargo clippy --all-targets -- -D warnings   # clean
+node scripts/cargo-test.mjs --lib text_box                  # 11 passed (3 new: remove/update)
+node scripts/cargo-test.mjs --test text_box                 # actor round-trip passes (2 artifacts still ignored)
+npm run test:rust                                           # full suite, 0 FAILED / 0 panicked
+npx tsc --noEmit && npx eslint src --max-warnings=0          # clean (frontend untouched)
+```
+
+No new verification artifact: `update_text_box` = remove + `add_text_box`, whose
+rendered output is already covered by the Phase-1 `text-box-{ascii,unicode}` artifacts.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

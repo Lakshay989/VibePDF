@@ -78,3 +78,63 @@ async fn text_box_ascii_reedit_artifact() {
 
     drop(handle);
 }
+
+/// SPEC: P4-EDIT-003b — the full actor round-trip: add a box, read it back, re-edit
+/// it in place (preserving its rect), then undo back to the original text. Exercises
+/// UpdateTextBoxEdit + the read path + the undo snapshot.
+#[tokio::test]
+async fn text_box_reedit_roundtrip_through_actor() {
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    let rect = [80.0, 500.0, 380.0, 560.0];
+    handle
+        .add_text_box(
+            0,
+            rect,
+            "before".into(),
+            "Helvetica".into(),
+            14.0,
+            "#000000".into(),
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("add");
+
+    let boxes = handle.read_text_boxes(0).await.expect("read");
+    assert_eq!(boxes.len(), 1, "one box after add");
+    assert_eq!(boxes[0].text, "before");
+    let box_id = boxes[0].id.clone();
+
+    handle
+        .update_text_box(
+            0,
+            box_id,
+            "after the edit".into(),
+            "Times".into(),
+            18.0,
+            "#204080".into(),
+            true,
+            false,
+            true,
+        )
+        .await
+        .expect("update");
+
+    let edited = handle.read_text_boxes(0).await.expect("read edited");
+    assert_eq!(edited.len(), 1, "still one box after update");
+    assert_eq!(edited[0].text, "after the edit");
+    assert_eq!(edited[0].font_family, "Times");
+    for (got, want) in edited[0].rect.iter().zip(rect.iter()) {
+        assert!((got - want).abs() < 0.01, "rect preserved through re-edit");
+    }
+
+    handle.undo().await.expect("undo");
+    let reverted = handle.read_text_boxes(0).await.expect("read reverted");
+    assert_eq!(reverted.len(), 1, "one box after undo");
+    assert_eq!(reverted[0].text, "before", "undo restores the original text");
+
+    drop(handle);
+}

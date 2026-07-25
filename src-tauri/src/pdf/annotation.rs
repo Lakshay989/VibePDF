@@ -14,7 +14,7 @@ use crate::error::CommandError;
 use crate::pdf::cos::{
     add_free_text, add_image, add_image_stamp, add_ink, add_line, add_link, add_measure,
     add_polygon, add_shape, add_stamp, add_reply, add_text_box, add_text_markup, add_text_note,
-    clear_text_markup, delete_annotation, update_free_text, update_text_note,
+    clear_text_markup, delete_annotation, update_free_text, update_text_box, update_text_note,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::flatten::flatten_annotations;
@@ -291,6 +291,50 @@ impl<'a> Edit<PdfDocument<'a>> for TextBoxEdit {
 
     fn label(&self) -> &'static str {
         "add-text-box"
+    }
+}
+
+/// SPEC: P4-EDIT-003b — re-edit an existing Add-Text box (by its `/Id`) in place:
+/// replace its text + style, preserving its rectangle. Same swap-and-snapshot
+/// shape as `TextBoxEdit`; the inverse is a pre-write byte snapshot
+/// (`RestoreDocEdit`).
+pub struct UpdateTextBoxEdit {
+    pub page: i32,
+    pub id: String,
+    pub text: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for UpdateTextBoxEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let page = usize::try_from(self.page)
+            .map_err(|_| CommandError::InvalidInput(format!("negative page index: {}", self.page)))?;
+        cos_edit(doc, |bytes| {
+            update_text_box(
+                bytes,
+                page,
+                &self.id,
+                &self.text,
+                &self.font_family,
+                self.font_size,
+                &self.color,
+                self.bold,
+                self.italic,
+                self.underline,
+            )
+        })
+    }
+
+    fn label(&self) -> &'static str {
+        "update-text-box"
     }
 }
 

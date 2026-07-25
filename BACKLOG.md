@@ -703,11 +703,17 @@ C4a/b, B3b). Four issues found + fixed this session:
     many lines share one tag). `read_text_boxes(bytes, page)` reads them back from the property
     dict — no glyph decode. `/Text` is hex UTF-8 so Unicode + newlines round-trip. Foreign /
     pre-metadata content (no `/Text`) is skipped → per-run fallback (P4-EDIT-001).
-  - ⏳ **Phase 2 / B remaining (splice + update + IPC).** `remove_text_box(bytes, page, id)`
-    (drop the matching `/Id`'s BDC…EMC), `update_text_box` = remove+re-add, `UpdateTextBoxEdit`
-    + `Message::UpdateTextBox` + `pdf_read_text_boxes`/`pdf_update_text_box` commands.
-  - ⏳ **Phase 3 / B remaining (frontend).** `readTextBoxes`/`updateTextBox` IPC + a double-click
-    re-edit layer in `text-box-layer.tsx` mirroring `free-text-layer`.
+  - ✅ **Phase 2 / B shipped (splice + update + actor + IPC).** `remove_text_box(bytes, page, id)`
+    decodes the page content, drops the matching `/Id`'s `BDC…EMC` range (marked-content
+    nesting-aware), re-encodes via `Content::encode` + `change_page_content` (same machinery as
+    `delete_text_run`). `update_text_box` = read the box's rect → remove → re-add at that rect
+    (fresh `/Id`), so position is preserved. `UpdateTextBoxEdit` (snapshot-undo) +
+    `Message::UpdateTextBox`/`ReadTextBoxes` + `pdf_update_text_box`/`pdf_read_text_boxes`
+    commands (registered). Actor round-trip test (add→read→update→undo) green.
+  - ⏳ **Phase 3 / B remaining (frontend).** `readTextBoxes`/`updateTextBox` IPC wrappers in
+    `src/ipc/text-box.ts` + a double-click re-edit layer in `text-box-layer.tsx` mirroring
+    `free-text-layer` (read boxes on the edit epoch, open the editor pre-filled, commit via
+    `updateTextBox`).
 - **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
   a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
   meaningful via edit-as-a-unit (B), not by widening the single-run editor.

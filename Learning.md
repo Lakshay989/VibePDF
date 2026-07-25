@@ -7163,6 +7163,58 @@ own `/Id`, so there was no single handle for "the box".
 
 ---
 
+## P4.HF23 — Re-editable Add Text, Phase 2 (splice + update + actor + IPC)
+
+### Problem
+
+Phase 1 gave every Add-Text box a metadata tag and a reader. Phase 2 makes the box
+actually *changeable*: delete the whole box by its `/Id`, and re-edit it in place
+(new text/style, same rectangle) as one undoable operation, exposed to the
+frontend through the document actor.
+
+### Concepts learned
+
+- **Splice a marked-content block by walking nesting depth.** To remove one box we
+  find its opening `BDC` (the operand dict whose `/Id` matches), then scan forward
+  counting `BDC`/`BMC` as +1 and `EMC` as −1; the `EMC` that brings depth back to 0
+  is the block's close. Drop `start..=end`, re-encode with `Content::encode`, and
+  `change_page_content` — the exact machinery `delete_text_run` uses. Depth-tracking
+  (not "the next EMC") is what makes it correct if content is ever nested.
+- **Update = read-rect + remove + re-add.** Rather than mutate operators in place,
+  `update_text_box` reads the box's stored `/Rect`, splices the old block out, and
+  calls `add_text_box` at that same rect. This reuses the whole emit path (so style
+  changes, font switches, WinAnsi↔CID crossover all just work) and guarantees
+  "position preserved" (P4-EDIT-003b) at the primitive level. The box gets a fresh
+  `/Id`; the frontend re-reads on the edit epoch.
+- **One Edit = one undo step, even when it's remove+add underneath.** `UpdateTextBoxEdit`
+  is a single `cos_edit` closure, so its inverse is one pre-write byte snapshot
+  (`RestoreDocEdit`) — undo restores the original box in one step, proven by the
+  actor round-trip test (add→read→update→undo).
+- **The actor's two shapes, reused.** A *write* (`Message::UpdateTextBox`) applies an
+  `Edit` and records the inverse in history; a page-scoped *read*
+  (`Message::ReadTextBoxes`) serializes the live doc under the PDFium lock, then runs
+  the lopdf reader on the bytes — identical to how `ReadAnnotations` works. Each gets
+  a thin `_request` (non-blocking) + `await`-holding handle method, and a
+  `#[tauri::command]` wrapper registered in `lib.rs`. `box_id` (not `id`, which is the
+  document id) names the box in the command signature.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `remove_text_box` (splice by `/Id`) + `update_text_box` (read-rect → remove → re-add); 3 tests. |
+| `src-tauri/src/pdf/annotation.rs` | `UpdateTextBoxEdit` (snapshot-undo Edit). |
+| `src-tauri/src/pdf/actor.rs` | `Message::UpdateTextBox` + `ReadTextBoxes`; handle methods; handlers. |
+| `src-tauri/src/commands/pdf.rs` + `src-tauri/src/lib.rs` | `pdf_update_text_box` + `pdf_read_text_boxes` commands, registered. |
+| `src-tauri/tests/text_box.rs` | Actor round-trip integration test (add→read→update→undo). |
+
+### Further reading
+
+- PDF 32000-1:2008 §14.6 (marked-content nesting: BMC/BDC/EMC).
+- `lopdf` `Content::encode` / `Document::change_page_content`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
