@@ -3388,6 +3388,20 @@ npx vitest run                          # 90 files / 379 tests, 0 failed
 
 ---
 
+## P4.HF26 (item 1) — Edit-Image drag/resize origin fix
+
+Frontend-only (one layer). No Rust delta, no new dep.
+
+```
+npx tsc --noEmit                                              # OK
+npx eslint src/view/image-edit-layer.tsx --max-warnings=0    # OK
+npx vitest run src/view/__tests__/image-edit-layer.test.tsx  # 5 passed
+```
+
+Coordinate/layout fix — jsdom returns zero rects, so in-app is the real check.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

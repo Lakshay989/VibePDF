@@ -58,6 +58,11 @@ export function ImageEditLayer({
   const [selected, setSelected] = useState<number | null>(null);
   const [preview, setPreview] = useState<[number, number, number, number] | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  // The overlay element, so pointer coords always resolve against the *same*
+  // origin. `startDrag` fires on the handle/body (their own bounding rects), while
+  // `onPointerMove` fires on this layer — measuring both against `e.currentTarget`
+  // offset every delta by the handle's position and threw drags/resizes way off.
+  const layerRef = useRef<HTMLDivElement>(null);
 
   const active = activeTool === "edit-image";
 
@@ -102,7 +107,8 @@ export function ImageEditLayer({
   }, [active, documentId, page, epoch]);
 
   const layerPoint = (e: ReactPointerEvent<Element>): ScreenPoint => {
-    const r = e.currentTarget.getBoundingClientRect();
+    const r = layerRef.current?.getBoundingClientRect();
+    if (!r) return { x: 0, y: 0 };
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
@@ -197,6 +203,7 @@ export function ImageEditLayer({
 
   return (
     <div
+      ref={layerRef}
       className="absolute left-0 top-0"
       style={{ width: cssWidth, height: cssHeight, pointerEvents: "none" }}
       onPointerMove={onPointerMove}

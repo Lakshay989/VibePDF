@@ -7371,6 +7371,35 @@ turn the highlighter black too.
 
 ---
 
+## P4.HF26 (item 1) — Edit-Image drag/resize measured from a stable origin
+
+### Problem
+
+Dragging or corner-resizing a selected image was wildly off — a resize could
+balloon past the page. Cause: the layer computed pointer coordinates from
+`e.currentTarget.getBoundingClientRect()`. But drag-*start* fires on the handle /
+box body (their own rects) while drag-*move* fires on the full-page overlay — so
+the captured start point and the live move point were measured from **different
+origins**, and every delta was off by the handle's position within the page.
+
+### Concepts learned
+
+- **A pointer delta is only meaningful if both ends share one coordinate origin.**
+  `e.currentTarget` is whatever element the handler is bound to, so it silently
+  varies across handlers. Anchoring `layerPoint` to a single `ref` on the overlay
+  makes down/move/up all resolve against the same box — the delta is then correct.
+- **jsdom can't model this class of bug** (it returns zero rects for every
+  element), so unit tests pass either way; this is a coordinate/layout fix whose
+  real check is in-app.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/image-edit-layer.tsx` | `layerPoint` now measures against a `layerRef` on the overlay, not `e.currentTarget`. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
