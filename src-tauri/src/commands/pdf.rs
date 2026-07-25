@@ -891,6 +891,29 @@ async fn run_watermark(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-009 — remove every watermark this app added, from all pages.
+/// Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_remove_watermarks(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.remove_watermarks_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P4-EDIT-008 (P4.D1) — fill `pages` (0-based) behind their content with a
 /// solid `color` (`#rrggbb`) at `opacity` (0..1). Undoable.
 #[tauri::command]

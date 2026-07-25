@@ -7400,6 +7400,43 @@ origins**, and every delta was off by the handle's position within the page.
 
 ---
 
+## P4.HF26 (item 2) — Remove watermarks
+
+### Problem
+
+Watermarks could be added but never removed — a real dead-end. The `/VibePDF …
+BDC` tag we've stamped on every decoration since HF2 was designed exactly to make
+this a mechanical splice, but nothing had used it for a *clear* yet.
+
+### Concepts learned
+
+- **The identity tag finally pays off as a clear-all.** `clear_decorations(bytes,
+  kind)` walks each page's operators, collects the `[BDC..=EMC]` range of every
+  `/VibePDF` block whose `/Kind` matches (depth-tracked, marked-content-nesting
+  aware), and drains them back-to-front so indices stay valid. Generic over the
+  kind — `"watermark"` today, reusable for any future decoration clear.
+- **Collect-then-drain-in-reverse** is the safe way to delete multiple ranges from
+  a `Vec` in one pass: forward mutation invalidates later indices, so gather all
+  ranges first, then `drain` from the highest start downward.
+- **Reuse the whole write chassis.** Removal is just another bytes→bytes edit, so
+  `RemoveWatermarksEdit` slots into watermark's existing `watermark_apply`
+  snapshot chassis — one undoable step, inverse = pre-delete bytes, proven by the
+  actor add→remove→undo round-trip.
+- **Foreign watermarks are left alone** — only VibePDF-tagged blocks match, so a
+  watermark baked in by another tool is untouched (honest scoping).
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | `clear_decorations(bytes, kind)` — splice every matching `/VibePDF` block on all pages. |
+| `src-tauri/src/pdf/watermark.rs` | `RemoveWatermarksEdit` (calls `clear_decorations(…, "watermark")`) + clear tests. |
+| `src-tauri/src/pdf/actor.rs` + `commands/pdf.rs` + `lib.rs` | `Message::RemoveWatermarks` + `pdf_remove_watermarks`, registered. |
+| `src/ipc/watermark.ts` + `src/app/WatermarkDialog.tsx` | `removeWatermarks` IPC + a "Remove all watermarks" button in the dialog. |
+| `src-tauri/tests/watermark.rs` | Actor add→remove→undo round-trip. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

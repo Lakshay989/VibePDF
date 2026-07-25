@@ -17,9 +17,9 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    append_page_content, base_font, compose, escape_pdf_string, page_effective_box, page_rotation,
-    parse_hex_color, prepend_page_content, register_page_resource, visual_cm_line,
-    visual_transform, wrap_decoration,
+    append_page_content, base_font, clear_decorations, compose, escape_pdf_string,
+    page_effective_box, page_rotation, parse_hex_color, prepend_page_content, register_page_resource,
+    visual_cm_line, visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
@@ -349,6 +349,25 @@ impl<'a> Edit<PdfDocument<'a>> for WatermarkEdit {
     }
 }
 
+/// SPEC: P4-EDIT-009 — remove **all** watermarks this app added, from every page,
+/// as one undoable edit (splice out every `/VibePDF /Kind (watermark)` block). The
+/// inverse is a pre-write snapshot (`RestoreDocEdit`). Foreign watermarks (no
+/// `VibePDF` tag) are left alone.
+pub struct RemoveWatermarksEdit;
+
+impl<'a> Edit<PdfDocument<'a>> for RemoveWatermarksEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        watermark_apply(doc, |bytes| clear_decorations(bytes, "watermark"))
+    }
+
+    fn label(&self) -> &'static str {
+        "remove-watermarks"
+    }
+}
+
 /// Snapshot the live document, run a bytes → bytes edit, reload/replace it; the
 /// inverse is the pre-edit snapshot. (Same shape as `image_edit`'s chassis.)
 fn watermark_apply<'a>(
@@ -413,6 +432,28 @@ mod tests {
         }
         drop(doc);
         out
+    }
+
+    /// SPEC: P4-EDIT-009 — a text watermark carries the `/VibePDF (watermark)` tag;
+    /// `clear_decorations` splices every such block out, leaving the page's own
+    /// text intact.
+    #[test]
+    fn clear_decorations_removes_every_watermark() {
+        use crate::pdf::cos::clear_decorations;
+        let with = add_watermark(&hello(), &[0], &text_kind("DRAFT"), 0.4, 45.0, true).expect("wm");
+        assert!(page0_text(&with).contains("DRAFT"), "watermark present after add");
+
+        let cleared = clear_decorations(&with, "watermark").expect("clear");
+        assert!(!page0_text(&cleared).contains("DRAFT"), "watermark gone after clear");
+        assert_eq!(page0_text(&cleared), page0_text(&hello()), "page's own text intact");
+    }
+
+    /// Clearing with no matching decorations is a clean no-op (page unchanged).
+    #[test]
+    fn clear_decorations_noop_when_none() {
+        use crate::pdf::cos::clear_decorations;
+        let out = clear_decorations(&hello(), "watermark").expect("clear");
+        assert_eq!(page0_text(&out), page0_text(&hello()));
     }
 
     /// `compose` bakes stacked `cm`s into one matrix: composing with identity is a

@@ -3402,6 +3402,22 @@ Coordinate/layout fix — jsdom returns zero rects, so in-app is the real check.
 
 ---
 
+## P4.HF26 (item 2) — Remove watermarks
+
+Rust: `clear_decorations` (cos) + `RemoveWatermarksEdit` (watermark) + actor msg +
+command + register. Frontend: `removeWatermarks` IPC + dialog button. No new dep.
+
+Verification gates:
+
+```
+cd src-tauri && cargo clippy --all-targets -- -D warnings   # clean (after VibePDF backtick fix)
+node scripts/cargo-test.mjs --lib watermark                 # 7 passed (2 new clear_decorations)
+node scripts/cargo-test.mjs --test watermark                # 14 passed (1 new actor remove/undo)
+npm run check                                               # tsc + eslint + clippy clean
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

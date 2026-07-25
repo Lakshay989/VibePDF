@@ -914,6 +914,23 @@ C4a/b, B3b). Four issues found + fixed this session:
   behind content, with opacity (`/ExtGState`) + rotation (`cm` about the page centre). New
   `watermark.rs` module + `WatermarkDialog`. 50 pages in ~0.12 s (budget 2 s). Pending the in-app
   eyeball (`[~]`).
+- ✅ **P4.HF26 item 2 — remove watermarks (2026-07-25).** `cos::clear_decorations(bytes, kind)`
+  splices out every `/VibePDF` block of a kind on all pages (depth-aware, collect-then-reverse-drain);
+  `RemoveWatermarksEdit` + `pdf_remove_watermarks` + a "Remove all watermarks" button in the dialog.
+  Undoable; foreign watermarks untouched. (`clear_decorations` is generic — reusable for future
+  decoration clears.)
+
+## From P4.HF26 (testing-feedback batch, 2026-07-25)
+
+From an in-app pass: (1) Edit-Image drag/resize was way off — `layerPoint` measured against
+`e.currentTarget` (handle vs overlay) → fixed with a stable `layerRef` (shipped). (2) watermark
+removal built (above). (3) **background→image "not working": still open — needs repro.** The Rust
+path is verifiably correct end-to-end (reads file → `embed_image` → cover-fit + clip → prepend, same
+shape as the color path). Most likely the image lands **behind opaque page content** (a background
+draws under everything; if the page paints a solid fill it's hidden), or an image-specific runtime
+issue. **Tell:** on the same page, does a *color* background show? color-works+image-doesn't ⇒ real
+image bug; neither shows ⇒ hidden-behind-content. (4) **deferred by user** — header/footer text is
+shared across the header⇄footer toggle (left/center/right *are* separate); acceptable once understood.
 - **Single centred mark, not tiled.** No repeating/grid watermark across the page — one centred
   instance. A tiled mode (cover the page) is a follow-up.
 - **No live preview.** The watermark is apply-then-render (epoch bump), like the other

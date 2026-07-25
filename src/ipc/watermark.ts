@@ -53,3 +53,12 @@ export async function addImageWatermark(
     behind,
   });
 }
+
+/**
+ * SPEC: P4-EDIT-009 — remove every watermark this app added, from all pages, as
+ * one undoable edit. Foreign watermarks (no VibePDF tag) are left alone. Returns
+ * the new undo/redo availability.
+ */
+export async function removeWatermarks(id: DocumentId): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_remove_watermarks", { id });
+}

@@ -116,6 +116,7 @@ pub fn run() {
             commands::pdf::pdf_add_link,
             commands::pdf::pdf_add_text_watermark,
             commands::pdf::pdf_add_image_watermark,
+            commands::pdf::pdf_remove_watermarks,
             commands::pdf::pdf_add_color_background,
             commands::pdf::pdf_add_image_background,
             commands::pdf::pdf_add_pdf_background,

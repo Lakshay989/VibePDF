@@ -46,7 +46,7 @@ use crate::pdf::annotation::{
 };
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::header_footer::HeaderFooterEdit;
-use crate::pdf::watermark::{WatermarkEdit, WatermarkKind};
+use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
     read_annotations, read_free_text, read_measure_calibration, read_text_boxes, read_text_notes,
     AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
@@ -401,6 +401,11 @@ pub enum Message {
         opacity: f32,
         rotation: f32,
         behind: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-009 — remove every watermark this app added, from all pages.
+    /// Undoable; marks dirty.
+    RemoveWatermarks {
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-008 — fill `pages` (0-based) behind their content with a
@@ -1461,6 +1466,23 @@ impl DocumentActorHandle {
                 behind,
                 reply,
             })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-009 — remove all watermarks. Await-holding for tests.
+    pub async fn remove_watermarks(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.remove_watermarks_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn remove_watermarks_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RemoveWatermarks { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -2932,6 +2954,18 @@ fn run_worker(
                 // is a pre-write byte snapshot (RestoreDocEdit).
                 let edit = WatermarkEdit { pages, kind, opacity, rotation, behind };
                 let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::RemoveWatermarks { reply } => {
+                // SPEC: P4-EDIT-009 — strip all VibePDF watermarks; the inverse is a
+                // pre-write byte snapshot (RestoreDocEdit).
+                let result = match Box::new(RemoveWatermarksEdit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         Ok(history.state())

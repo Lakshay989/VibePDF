@@ -185,6 +185,41 @@ async fn actor_watermark_then_undo() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// SPEC: P4-EDIT-009 — remove all watermarks through the actor, then undo restores
+/// them. Exercises RemoveWatermarksEdit + the delete command path.
+#[tokio::test]
+async fn actor_remove_watermarks_then_undo() {
+    let dir = std::env::temp_dir().join(format!("vibepdf-wmrm-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let out = dir.join("wm.pdf");
+
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    handle
+        .add_watermark(vec![0], text_kind("DRAFT"), 0.3, 45.0, true)
+        .await
+        .expect("watermark");
+
+    let state = handle.remove_watermarks().await.expect("remove");
+    assert!(state.can_undo, "removal must be undoable");
+    handle.save(Some(out.clone())).await.expect("save");
+    assert!(
+        !page_content(&std::fs::read(&out).unwrap(), 1).contains("(DRAFT) Tj"),
+        "watermark gone after remove",
+    );
+
+    handle.undo().await.expect("undo");
+    handle.save(Some(out.clone())).await.expect("save after undo");
+    assert!(
+        page_content(&std::fs::read(&out).unwrap(), 1).contains("(DRAFT) Tj"),
+        "undo brings the watermark back",
+    );
+
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // --- P4.HF: rotation + CropBox compensation ------------------------------------
 
 /// SPEC: P4-EDIT-009 — the mark reads upright on a rotated page: content carries

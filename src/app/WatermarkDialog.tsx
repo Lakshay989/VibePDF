@@ -8,7 +8,7 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 
 import type { HistoryState } from "@/ipc/history";
-import { addImageWatermark, addTextWatermark } from "@/ipc/watermark";
+import { addImageWatermark, addTextWatermark, removeWatermarks } from "@/ipc/watermark";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { basename } from "@/app/paths";
@@ -111,6 +111,23 @@ export function WatermarkDialog({ open, documentId, pageCount, onClose }: Waterm
         .then(done)
         .catch(fail);
     }
+  };
+
+  // SPEC: P4-EDIT-009 — strip every watermark this app added (all pages), one
+  // undoable edit. Independent of the add-form fields above.
+  const remove = () => {
+    setBusy(true);
+    setError(null);
+    removeWatermarks(documentId)
+      .then((h) => {
+        bumpEpoch(documentId);
+        setHistory(documentId, h);
+        onClose();
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+        setBusy(false);
+      });
   };
 
   const inputCls =
@@ -254,6 +271,15 @@ export function WatermarkDialog({ open, documentId, pageCount, onClose }: Waterm
             ) : null}
 
             <div className="mt-1 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={remove}
+                disabled={busy}
+                title="Remove every watermark added by this app, on all pages"
+                className="mr-auto rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/40"
+              >
+                Remove all watermarks
+              </button>
               <button
                 type="button"
                 onClick={onClose}
