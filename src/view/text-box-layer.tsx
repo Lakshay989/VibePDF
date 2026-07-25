@@ -1,21 +1,23 @@
-// SPEC: P4-EDIT-003 (P4.B2) — the per-page "add text box" overlay.
+// SPEC: P4-EDIT-003 / P4-EDIT-003b (P4.B2) — the per-page "add text box" overlay.
 //
 // Unlike free-text (which writes a /FreeText annotation), this commits the text
-// to the page **content stream** via `addTextBox`. So there's no re-edit path
-// here — once committed, the text is ordinary content, edited/deleted with the
-// Edit Text tool (B1/B3). Drag to size a box, type, commit. Pointer events, not
-// HTML5 DnD (WKWebView; docs/04).
+// to the page **content stream** via `addTextBox`. The committed text carries a
+// `/VibePDF` marked-content tag holding its source text + style, so — unlike
+// ordinary page text — it can be re-opened and edited *as a unit*: double-click a
+// box to reload it pre-filled and re-commit via `updateTextBox` (P4-EDIT-003b).
+// Drag to size a new box, type, commit. Pointer events, not HTML5 DnD (WKWebView).
 
 import { reportError } from "@/app/report-error";
-import { type PointerEvent as ReactPointerEvent, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
-import { addTextBox, type TextBoxRect } from "@/ipc/text-box";
-import { useEditEpochStore } from "@/state/edit-epoch-store";
+import { addTextBox, readTextBoxes, type TextBoxInfo, type TextBoxRect, updateTextBox } from "@/ipc/text-box";
+import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
-import { type PageGeometry, type ScreenPoint, screenToPdf } from "@/tools/_framework";
+import type { FontFamily } from "@/tools/_framework";
+import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
 import { normalizeScreenRect, type ScreenRect, withDefaultSize } from "@/tools/_framework";
-import { cssFontFamily } from "@/tools/free-text/free-text";
+import { cssFontFamily, FONT_FAMILIES } from "@/tools/free-text/free-text";
 
 export interface TextBoxLayerProps {
   documentId: string;
@@ -33,6 +35,8 @@ export interface TextBoxLayerProps {
 interface Editor {
   rect: ScreenRect;
   pdfRect: TextBoxRect;
+  /** Set when re-editing an existing box (its `/Id`); null for a new box. */
+  editId: string | null;
 }
 
 export function TextBoxLayer({
@@ -46,13 +50,18 @@ export function TextBoxLayer({
   const activeTool = useToolStore((s) => s.activeTool);
   const options = useToolStore((s) => s.options);
   const setActiveTool = useToolStore((s) => s.setActiveTool);
+  const setOptions = useToolStore((s) => s.setOptions);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  const epoch = useDocEpoch(documentId);
 
   const [start, setStart] = useState<ScreenPoint | null>(null);
   const [current, setCurrent] = useState<ScreenPoint | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [text, setText] = useState("");
+  // SPEC: P4-EDIT-003b — this page's re-editable text boxes, for double-click
+  // hit-testing. Re-read on every edit epoch so it tracks add/update/delete/undo.
+  const [boxes, setBoxes] = useState<TextBoxInfo[]>([]);
 
   const placing = activeTool === "add-text";
 
@@ -100,7 +109,50 @@ export function TextBoxLayer({
     setStart(null);
     setCurrent(null);
     setText("");
-    setEditor({ rect, pdfRect });
+    setEditor({ rect, pdfRect, editId: null });
+  };
+
+  // SPEC: P4-EDIT-003b — track this page's re-editable boxes for double-click.
+  useEffect(() => {
+    let cancelled = false;
+    readTextBoxes(documentId, page)
+      .then((rows) => {
+        if (!cancelled) setBoxes(rows);
+      })
+      .catch((err: unknown) => console.warn("read text boxes failed", documentId, err));
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, page, epoch]);
+
+  const screenRectFor = (r: TextBoxRect): ScreenRect => {
+    const tl = pdfToScreen({ page, x: r[0], y: r[3] }, geo);
+    const br = pdfToScreen({ page, x: r[2], y: r[1] }, geo);
+    return {
+      left: Math.min(tl.x, br.x),
+      top: Math.min(tl.y, br.y),
+      width: Math.abs(br.x - tl.x),
+      height: Math.abs(br.y - tl.y),
+    };
+  };
+
+  // SPEC: P4-EDIT-003b — double-click a committed box → arm the Add Text tool
+  // (so its style controls show, pre-filled) and open the editor over the box.
+  const reEdit = (box: TextBoxInfo) => {
+    const fontFamily: FontFamily = FONT_FAMILIES.includes(box.fontFamily as FontFamily)
+      ? (box.fontFamily as FontFamily)
+      : "Helvetica";
+    setActiveTool("add-text");
+    setOptions({
+      fontFamily,
+      fontSize: box.fontSize,
+      color: box.color,
+      bold: box.bold,
+      italic: box.italic,
+      underline: box.underline,
+    });
+    setText(box.text);
+    setEditor({ rect: screenRectFor(box.rect), pdfRect: box.rect, editId: box.id });
   };
 
   const cancel = () => {
@@ -114,27 +166,40 @@ export function TextBoxLayer({
     const ed = editor;
     cancel();
     if (!ed || !body) return;
-    addTextBox(
-      documentId,
-      page,
-      ed.pdfRect,
-      body,
-      options.fontFamily,
-      options.fontSize,
-      options.color,
-      options.bold,
-      options.italic,
-      options.underline,
-    )
-      .then((h) => {
-        // The PDF changed; reload so the canvas renders the new content text.
-        bumpEpoch(documentId);
-        setHistory(documentId, h);
-      })
-      .catch((err: unknown) => reportError("Couldn't add text", err));
+    const done = (h: Parameters<typeof setHistory>[1]) => {
+      // The PDF changed; reload so the canvas renders the new content text.
+      bumpEpoch(documentId);
+      setHistory(documentId, h);
+    };
+    const fail = (err: unknown) =>
+      reportError(ed.editId ? "Couldn't update the text" : "Couldn't add text", err);
+    const promise = ed.editId
+      ? updateTextBox(
+          documentId,
+          page,
+          ed.editId,
+          body,
+          options.fontFamily,
+          options.fontSize,
+          options.color,
+          options.bold,
+          options.italic,
+          options.underline,
+        )
+      : addTextBox(
+          documentId,
+          page,
+          ed.pdfRect,
+          body,
+          options.fontFamily,
+          options.fontSize,
+          options.color,
+          options.bold,
+          options.italic,
+          options.underline,
+        );
+    promise.then(done).catch(fail);
   };
-
-  if (!placing && !editor) return null;
 
   const preview = start && current ? normalizeScreenRect(start, current) : null;
 
@@ -157,6 +222,31 @@ export function TextBoxLayer({
           style={{ left: preview.left, top: preview.top, width: preview.width, height: preview.height }}
         />
       ) : null}
+
+      {/* SPEC: P4-EDIT-003b — double-click a committed box to re-edit. Only when
+          idle (no tool, no open editor); each zone opts back into pointer events
+          under the otherwise pass-through layer. */}
+      {!placing && !editor
+        ? boxes.map((b) => {
+            const r = screenRectFor(b.rect);
+            return (
+              <div
+                key={b.id}
+                className="absolute"
+                title="Double-click to edit this text"
+                onDoubleClick={() => reEdit(b)}
+                style={{
+                  left: r.left,
+                  top: r.top,
+                  width: r.width,
+                  height: r.height,
+                  pointerEvents: "auto",
+                  cursor: "text",
+                }}
+              />
+            );
+          })
+        : null}
 
       {editor ? (
         <div
@@ -208,10 +298,10 @@ export function TextBoxLayer({
             <button
               type="button"
               onClick={commit}
-              aria-label="Add text to page"
+              aria-label={editor.editId ? "Save text edit" : "Add text to page"}
               className="rounded bg-blue-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-blue-700"
             >
-              Add
+              {editor.editId ? "Save" : "Add"}
             </button>
           </div>
         </div>

@@ -3324,6 +3324,26 @@ rendered output is already covered by the Phase-1 `text-box-{ascii,unicode}` art
 
 ---
 
+## P4.HF24 — Re-editable Add Text, Phase 3 (frontend re-edit layer)
+
+Frontend-only (IPC wrappers + text-box-layer re-edit + tests). No Rust delta, no
+new dep. Completes P4-EDIT-003b end-to-end.
+
+Verification gates:
+
+```
+npx tsc --noEmit                                                    # OK
+npx eslint src --max-warnings=0                                     # OK
+npx vitest run src/view/__tests__/text-box-layer.test.tsx          # 4 passed (2 new: pass-through + re-edit)
+npx vitest run                                                      # 90 files / 377 tests, 0 failed
+```
+
+`cargo clippy` unchanged (no Rust touched this phase; last green in P4.HF23).
+In-app verification (double-click an added box → edit → Save) deferred to the
+user — the browser tools can't drive the native Tauri window.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

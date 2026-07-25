@@ -3,19 +3,23 @@
 // stream — not an annotation). IPC mocked; this asserts the overlay's wiring.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 vi.mock("@/ipc/text-box", () => ({
   addTextBox: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  updateTextBox: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  readTextBoxes: vi.fn().mockResolvedValue([]),
 }));
 
-import { addTextBox } from "@/ipc/text-box";
+import { addTextBox, readTextBoxes, updateTextBox } from "@/ipc/text-box";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useToolStore } from "@/state/tool-store";
 import { TextBoxLayer } from "@/view/text-box-layer";
 
 const DOC = "doc-1";
 const mockAdd = vi.mocked(addTextBox);
+const mockUpdate = vi.mocked(updateTextBox);
+const mockRead = vi.mocked(readTextBoxes);
 
 // Letter (612×792), 1× scale, no rotation → PDF (x,y) maps to screen (x, 792−y).
 const layer = () => (
@@ -81,9 +85,55 @@ describe("TextBoxLayer", () => {
     expect(mockAdd).not.toHaveBeenCalled();
   });
 
-  it("renders nothing when the add-text tool is inactive", () => {
+  it("is a pass-through layer (no editor) when inactive with no boxes", () => {
     useToolStore.setState({ activeTool: null });
     const { container } = render(layer());
-    expect(container.firstChild).toBeNull();
+    // SPEC: P4-EDIT-003b — idle now renders a pass-through overlay (for re-edit
+    // hit-zones), but with no boxes it shows no editor and no hit-zones.
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.querySelector('[title="Double-click to edit this text"]')).toBeNull();
+  });
+
+  it("re-edits an existing box via double-click → updateTextBox (rect preserved server-side)", async () => {
+    useToolStore.setState({ activeTool: null });
+    mockRead.mockResolvedValueOnce([
+      {
+        id: "box-7",
+        rect: [100, 642, 300, 692],
+        text: "old text",
+        fontFamily: "Times",
+        fontSize: 18,
+        color: "#112233",
+        bold: true,
+        italic: false,
+        underline: false,
+      },
+    ]);
+    const { container } = render(layer());
+
+    const zone = await waitFor(() => {
+      const z = container.querySelector('[title="Double-click to edit this text"]');
+      expect(z).not.toBeNull();
+      return z as Element;
+    });
+    fireEvent.doubleClick(zone);
+
+    const textarea = container.querySelector(
+      'textarea[aria-label="Add text to the page"]',
+    ) as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    expect(textarea.value).toBe("old text"); // pre-filled from the box
+
+    fireEvent.change(textarea, { target: { value: "new text" } });
+    fireEvent.click(container.querySelector('button[aria-label="Save text edit"]') as Element);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const [doc, page, boxId, newText] = mockUpdate.mock.calls[0];
+    expect(doc).toBe(DOC);
+    expect(page).toBe(0);
+    expect(boxId).toBe("box-7");
+    expect(newText).toBe("new text");
+    // A re-edit must never fall through to the "add a new box" path.
+    expect(mockAdd).not.toHaveBeenCalled();
   });
 });

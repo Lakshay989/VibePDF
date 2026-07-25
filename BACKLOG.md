@@ -710,10 +710,16 @@ C4a/b, B3b). Four issues found + fixed this session:
     (fresh `/Id`), so position is preserved. `UpdateTextBoxEdit` (snapshot-undo) +
     `Message::UpdateTextBox`/`ReadTextBoxes` + `pdf_update_text_box`/`pdf_read_text_boxes`
     commands (registered). Actor round-trip test (add→read→update→undo) green.
-  - ⏳ **Phase 3 / B remaining (frontend).** `readTextBoxes`/`updateTextBox` IPC wrappers in
-    `src/ipc/text-box.ts` + a double-click re-edit layer in `text-box-layer.tsx` mirroring
-    `free-text-layer` (read boxes on the edit epoch, open the editor pre-filled, commit via
-    `updateTextBox`).
+  - ✅ **Phase 3 / B shipped (frontend).** `readTextBoxes`/`updateTextBox` IPC wrappers +
+    `TextBoxInfo` in `src/ipc/text-box.ts`. `text-box-layer.tsx` now reads its page's boxes on
+    the edit epoch and, when idle, lays double-click hit-zones over them; a double-click arms the
+    Add Text tool (so the style controls show, pre-filled) and opens the editor over the box;
+    commit routes to `updateTextBox` (vs `addTextBox` for a new box). Layer tests cover the
+    re-edit path. **Re-editable Add Text is now end-to-end.**
+  - **Follow-ups (not blocking):** no in-page **delete** affordance for a text box yet
+    (`remove_text_box` exists in Rust + splits cleanly; a Delete button in the re-edit editor is
+    a small add). Re-edit reuses the original rect — no drag-to-move/resize. Foreign page text
+    still edits per-run via Edit Text (by design).
 - **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
   a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
   meaningful via edit-as-a-unit (B), not by widening the single-run editor.

@@ -7215,6 +7215,56 @@ frontend through the document actor.
 
 ---
 
+## P4.HF24 — Re-editable Add Text, Phase 3 (frontend re-edit layer)
+
+### Problem
+
+Phases 1–2 made the backend able to read + re-edit an added text box. Phase 3 is
+the part the user sees: double-click a box on the page, edit the whole block
+pre-filled, save. This completes P4-EDIT-003b end-to-end.
+
+### Concepts learned
+
+- **An overlay that's both a creator and an editor.** `text-box-layer.tsx` already
+  handled *drawing* a new box (drag → editor → `addTextBox`). Re-edit reuses the
+  same transient editor, distinguished by an `editId` on the `Editor` state: `null`
+  ⇒ new box (commit → `addTextBox`), a string ⇒ existing box (commit →
+  `updateTextBox`). One editor component, two commit paths — no duplicate UI.
+- **Read-on-epoch keeps overlays in step with the document.** The layer reads its
+  page's boxes with `readTextBoxes` keyed on the edit epoch (`useDocEpoch`), the
+  same pattern the annotation panel + free-text layer use: any add/update/delete/
+  undo bumps the epoch → the boxes re-read → the double-click hit-zones track
+  reality. The layer used to render nothing when idle; now it renders a
+  pointer-events-`none` pass-through div whose per-box hit-zones opt back in, so
+  scrolling between boxes still works but double-click lands.
+- **Arm the tool on re-edit to surface its controls.** The font/size/B-I-U controls
+  live in the toolbar and only show while the Add Text tool is active. So a
+  double-click both opens the editor *and* `setActiveTool("add-text")` +
+  `setOptions(box's style)` — the controls appear pre-filled, giving re-edit full
+  parity with creation. `cancel()` clears the tool again.
+- **Changing a component's idle contract means updating its test.** The old test
+  asserted "renders nothing when inactive"; that's now intentionally false (idle
+  renders the re-edit layer). Rewriting it to assert the *new* contract (idle + no
+  boxes ⇒ a pass-through layer with no editor/hit-zones) is a correctness update,
+  not weakening — the new re-edit test covers idle + boxes.
+- **`box_id` vs `id` across the boundary.** The document id is `id`; the box's
+  marked-content id is `boxId` in the JS call (Tauri maps it to the Rust `box_id`
+  param, the same camelCase→snake_case mapping `fontFamily`→`font_family` uses).
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/ipc/text-box.ts` | `TextBoxInfo` + `readTextBoxes` + `updateTextBox` typed IPC wrappers. |
+| `src/view/text-box-layer.tsx` | Read boxes on epoch; idle double-click hit-zones; re-edit opens the editor pre-filled + armed; commit branches add vs update. |
+| `src/view/__tests__/text-box-layer.test.tsx` | Updated idle-contract test + a re-edit test (double-click → pre-filled → `updateTextBox`). |
+
+### Further reading
+
+- Tauri v2 command args (camelCase JS keys ↔ snake_case Rust params).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
