@@ -725,6 +725,34 @@ pub async fn pdf_read_text_boxes(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `box_id` on `page`
+/// (0-based). Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_delete_text_box(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    box_id: String,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.delete_text_box_request(page, box_id)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P4-EDIT-005 (P4.C1) — add an image (PNG or JPEG) as **page content** at
 /// `rect` on `page` (0-based), aspect-fit. Reads the file, then runs on the actor.
 #[tauri::command]

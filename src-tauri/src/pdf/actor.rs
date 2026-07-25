@@ -41,8 +41,8 @@ use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
     AddImageEdit, AddLinkEdit, AddNoteEdit, ClearMarkupEdit, DeleteAnnotationEdit, FlattenEdit,
     FreeTextEdit, ImageStampEdit, ImportXfdfEdit, InkEdit, LineEdit, MeasureEdit, PolygonEdit,
-    ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit, UpdateFreeTextEdit,
-    UpdateNoteEdit, UpdateTextBoxEdit,
+    RemoveTextBoxEdit, ReplyEdit, StampEdit, ShapeEdit, TextBoxEdit, TextMarkupEdit,
+    UpdateFreeTextEdit, UpdateNoteEdit, UpdateTextBoxEdit,
 };
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::header_footer::HeaderFooterEdit;
@@ -364,6 +364,13 @@ pub enum Message {
     ReadTextBoxes {
         page: usize,
         reply: oneshot::Sender<Result<Vec<TextBoxInfo>, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
+    /// Undoable; marks dirty.
+    RemoveTextBox {
+        page: i32,
+        id: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-005 (P4.C1) — add an image as **page content** (an Image
     /// `XObject`), aspect-fit into `rect` on `page`. Undoable; marks dirty.
@@ -1328,6 +1335,25 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadTextBoxes { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-003b — delete an Add-Text box by its `/Id`. Await-holding for tests.
+    pub async fn delete_text_box(&self, page: i32, id: String) -> Result<HistoryState, CommandError> {
+        let rx = self.delete_text_box_request(page, id)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn delete_text_box_request(
+        &self,
+        page: i32,
+        id: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RemoveTextBox { page, id, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -2840,6 +2866,19 @@ fn run_worker(
                 let result = pdfium_lock()
                     .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
                     .and_then(|bytes| read_text_boxes(&bytes, page));
+                let _ = reply.send(result);
+            }
+            Message::RemoveTextBox { page, id, reply } => {
+                // SPEC: P4-EDIT-003b / P4-EDIT-004 — delete a text box; the inverse is
+                // a pre-write byte snapshot (RestoreDocEdit).
+                let edit = RemoveTextBoxEdit { page, id };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::AddImage {

@@ -7265,6 +7265,38 @@ pre-filled, save. This completes P4-EDIT-003b end-to-end.
 
 ---
 
+## P4.HF25 Step 1 — Delete-a-text-box primitive + command
+
+### Problem
+
+Testing surfaced two needs that both require *deleting* an added text box: clearing
+its text + Save should remove it (item 1), and a text-box list wants a delete
+action (item 4). The `remove_text_box` splice already existed (P4.HF23) but was
+only reachable *inside* `update_text_box`; nothing exposed a standalone delete.
+
+### Concepts learned
+
+- **Expose an existing primitive as its own undoable edit.** No new PDF logic —
+  `RemoveTextBoxEdit` is a three-line `Edit` that wraps `remove_text_box` in the
+  same `cos_edit` snapshot pattern the other text-box edits use, so delete is one
+  undo step and its inverse restores the pre-delete bytes. The actor message +
+  Tauri command + IPC wrapper are pure plumbing mirrored from `pdf_update_text_box`.
+- **Build shared infrastructure once.** Both item 1 (empty→delete) and item 4
+  (list→delete) consume the same `deleteTextBox` path, so it's Step 1 of the batch
+  rather than duplicated later.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/annotation.rs` | `RemoveTextBoxEdit` (snapshot-undo wrapper over `remove_text_box`). |
+| `src-tauri/src/pdf/actor.rs` | `Message::RemoveTextBox` + `delete_text_box` handle method + handler. |
+| `src-tauri/src/commands/pdf.rs` + `src-tauri/src/lib.rs` | `pdf_delete_text_box` command, registered. |
+| `src/ipc/text-box.ts` | `deleteTextBox` typed wrapper. |
+| `src-tauri/tests/text_box.rs` | Actor delete round-trip (add→delete→undo). |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

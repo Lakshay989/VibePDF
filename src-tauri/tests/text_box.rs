@@ -138,3 +138,40 @@ async fn text_box_reedit_roundtrip_through_actor() {
 
     drop(handle);
 }
+
+/// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete an added text box through the actor,
+/// and undo brings it back. Exercises RemoveTextBoxEdit + the delete command path.
+#[tokio::test]
+async fn text_box_delete_roundtrip_through_actor() {
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    handle
+        .add_text_box(
+            0,
+            [80.0, 500.0, 380.0, 560.0],
+            "delete me".into(),
+            "Helvetica".into(),
+            14.0,
+            "#000000".into(),
+            false,
+            false,
+            false,
+        )
+        .await
+        .expect("add");
+    let box_id = handle.read_text_boxes(0).await.expect("read")[0].id.clone();
+
+    handle.delete_text_box(0, box_id).await.expect("delete");
+    assert!(
+        handle.read_text_boxes(0).await.expect("read after delete").is_empty(),
+        "box gone after delete",
+    );
+
+    handle.undo().await.expect("undo");
+    let restored = handle.read_text_boxes(0).await.expect("read after undo");
+    assert_eq!(restored.len(), 1, "undo restores the deleted box");
+    assert_eq!(restored[0].text, "delete me");
+
+    drop(handle);
+}

@@ -92,3 +92,16 @@ export async function updateTextBox(
     underline,
   });
 }
+
+/**
+ * SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `boxId` on `page`.
+ * Goes through the document actor as one undoable edit; returns the new
+ * undo/redo availability.
+ */
+export async function deleteTextBox(
+  id: DocumentId,
+  page: number,
+  boxId: string,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_delete_text_box", { id, page, boxId });
+}

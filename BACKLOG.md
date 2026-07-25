@@ -716,10 +716,18 @@ C4a/b, B3b). Four issues found + fixed this session:
     Add Text tool (so the style controls show, pre-filled) and opens the editor over the box;
     commit routes to `updateTextBox` (vs `addTextBox` for a new box). Layer tests cover the
     re-edit path. **Re-editable Add Text is now end-to-end.**
-  - **Follow-ups (not blocking):** no in-page **delete** affordance for a text box yet
-    (`remove_text_box` exists in Rust + splits cleanly; a Delete button in the re-edit editor is
-    a small add). Re-edit reuses the original rect — no drag-to-move/resize. Foreign page text
-    still edits per-run via Edit Text (by design).
+  - **Follow-ups (not blocking):** Re-edit reuses the original rect — no drag-to-move/resize.
+    Foreign page text still edits per-run via Edit Text (by design).
+  - **P4.HF25 — testing-feedback batch (in progress).** From an in-app pass: (1) clearing text +
+    Save should *delete*, not revert (Edit Text `replaceTextRun("")` + Add-Text re-edit `!body`
+    no-op); (2) re-edit unified under the **Edit Text** tool (single-click a box → whole-box
+    editor; drop the double-click, which fought Edit Text's per-run zones); (3) text gets its own
+    colour (black default) so it doesn't inherit the highlighter yellow; (4) a **Text boxes**
+    sidebar list to find/jump/delete them (they're page content, not annotations — spec P4-EDIT-003).
+    - ✅ **Step 1 shipped (Rust delete):** `RemoveTextBoxEdit` + `Message::RemoveTextBox` +
+      `pdf_delete_text_box` command + `deleteTextBox` IPC (shared by items 1 & 4). Actor
+      delete round-trip (add→delete→undo) green.
+    - ⏳ Steps 2–4: empty→delete + re-edit-via-Edit-Text; separate text colour; the list.
 - **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
   a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
   meaningful via edit-as-a-unit (B), not by widening the single-run editor.

@@ -3344,6 +3344,21 @@ user — the browser tools can't drive the native Tauri window.
 
 ---
 
+## P4.HF25 Step 1 — Delete-a-text-box primitive + command
+
+Rust delete edit + actor message + command + register; `deleteTextBox` IPC. No new
+dep, no new PDF logic (wraps the existing `remove_text_box`).
+
+Verification gates:
+
+```
+cd src-tauri && cargo clippy --all-targets -- -D warnings              # clean
+node scripts/cargo-test.mjs --test text_box text_box_delete_roundtrip_through_actor  # ok
+npx tsc --noEmit && npx eslint src --max-warnings=0                     # clean
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

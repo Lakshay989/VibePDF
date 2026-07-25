@@ -111,6 +111,7 @@ pub fn run() {
             commands::pdf::pdf_add_text_box,
             commands::pdf::pdf_update_text_box,
             commands::pdf::pdf_read_text_boxes,
+            commands::pdf::pdf_delete_text_box,
             commands::pdf::pdf_add_image,
             commands::pdf::pdf_add_link,
             commands::pdf::pdf_add_text_watermark,
