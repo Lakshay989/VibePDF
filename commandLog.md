@@ -3359,6 +3359,20 @@ npx tsc --noEmit && npx eslint src --max-warnings=0                     # clean
 
 ---
 
+## P4.HF25 Step 2 — Empty-edit deletes + re-edit via Edit Text
+
+Frontend-only (two layers + their tests). No Rust delta, no new dep.
+
+Verification gates:
+
+```
+npx tsc --noEmit                                                     # OK
+npx eslint src --max-warnings=0                                      # OK
+npx vitest run src/view/__tests__/text-{box,edit}-layer.test.tsx     # 11 passed
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

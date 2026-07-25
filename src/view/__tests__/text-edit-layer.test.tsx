@@ -89,6 +89,15 @@ describe("TextEditLayer", () => {
     expect(mockReplace).not.toHaveBeenCalled();
   });
 
+  it("clearing the text + Save deletes the run (not replace-with-empty)", async () => {
+    render(layer());
+    fireEvent.click(await screen.findByTitle("Click to edit this text"));
+    fireEvent.change(screen.getByLabelText("Edit text run"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save text edit" }));
+    expect(mockDelete).toHaveBeenCalledWith(DOC, 0, 0);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
   it("renders nothing when the edit-text tool is inactive", () => {
     useToolStore.setState({ activeTool: null });
     const { container } = render(layer());

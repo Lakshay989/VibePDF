@@ -127,13 +127,23 @@ export function TextEditLayer({
     const ed = editor;
     const body = text;
     cancel();
-    if (!ed || body === ed.run.text) return; // no-op edits don't touch the file
+    if (!ed) return;
+    const done = (h: Parameters<typeof setHistory>[1]) => {
+      // The PDF changed; reload so the canvas re-renders the run.
+      bumpEpoch(documentId);
+      setHistory(documentId, h);
+    };
+    // SPEC: P4-EDIT-004 — clearing all the text deletes the run (PDFium's
+    // set_text("") would silently revert to the original), matching the Delete button.
+    if (body.trim() === "") {
+      deleteTextRun(documentId, page, ed.runIndex)
+        .then(done)
+        .catch((err: unknown) => reportError("Couldn't delete text", err));
+      return;
+    }
+    if (body === ed.run.text) return; // no-op edits don't touch the file
     replaceTextRun(documentId, page, ed.runIndex, body)
-      .then((h) => {
-        // The PDF changed; reload so the canvas renders the rewritten run.
-        bumpEpoch(documentId);
-        setHistory(documentId, h);
-      })
+      .then(done)
       .catch((err: unknown) => reportError("Couldn't edit text", err));
   };
 

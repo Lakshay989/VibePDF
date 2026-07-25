@@ -727,7 +727,12 @@ C4a/b, B3b). Four issues found + fixed this session:
     - ✅ **Step 1 shipped (Rust delete):** `RemoveTextBoxEdit` + `Message::RemoveTextBox` +
       `pdf_delete_text_box` command + `deleteTextBox` IPC (shared by items 1 & 4). Actor
       delete round-trip (add→delete→undo) green.
-    - ⏳ Steps 2–4: empty→delete + re-edit-via-Edit-Text; separate text colour; the list.
+    - ✅ **Step 2 shipped (items 1 + 2):** Edit Text — clearing the text + Save now *deletes*
+      the run (`deleteTextRun`) instead of `replaceTextRun("")`. Add-Text re-edit is unified
+      under the **Edit Text** tool: single-click a box (its zone sits above Edit Text's per-run
+      zones, this layer mounts last) → whole-box editor; clearing + Save → `deleteTextBox`;
+      foreign text stays per-run. The idle double-click is gone. Layer tests cover both.
+    - ⏳ Steps 3–4: separate text colour (black default); the Text-boxes list.
 - **Dropped idea — `<textarea>` in the Edit Text tool.** A run is one show-text op ≈ one line;
   a newline in a single `Tj` corrupts the run rather than making two lines. Multi-line is only
   meaningful via edit-as-a-unit (B), not by widening the single-run editor.

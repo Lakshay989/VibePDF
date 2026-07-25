@@ -3,14 +3,24 @@
 // Unlike free-text (which writes a /FreeText annotation), this commits the text
 // to the page **content stream** via `addTextBox`. The committed text carries a
 // `/VibePDF` marked-content tag holding its source text + style, so — unlike
-// ordinary page text — it can be re-opened and edited *as a unit*: double-click a
-// box to reload it pre-filled and re-commit via `updateTextBox` (P4-EDIT-003b).
-// Drag to size a new box, type, commit. Pointer events, not HTML5 DnD (WKWebView).
+// ordinary page text — it can be re-opened and edited *as a unit*. Re-edit is
+// unified under the **Edit Text** tool: click a box to reload it pre-filled and
+// re-commit via `updateTextBox` (clearing it deletes via `deleteTextBox`). These
+// box zones sit above Edit Text's per-run zones, so foreign text still edits
+// per-run (P4-EDIT-003b). Drag to size a new box, type, commit. Pointer events,
+// not HTML5 DnD (WKWebView).
 
 import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
-import { addTextBox, readTextBoxes, type TextBoxInfo, type TextBoxRect, updateTextBox } from "@/ipc/text-box";
+import {
+  addTextBox,
+  deleteTextBox,
+  readTextBoxes,
+  type TextBoxInfo,
+  type TextBoxRect,
+  updateTextBox,
+} from "@/ipc/text-box";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { useToolStore } from "@/state/tool-store";
@@ -136,8 +146,8 @@ export function TextBoxLayer({
     };
   };
 
-  // SPEC: P4-EDIT-003b — double-click a committed box → arm the Add Text tool
-  // (so its style controls show, pre-filled) and open the editor over the box.
+  // SPEC: P4-EDIT-003b — click a committed box (in Edit Text mode) → arm the Add
+  // Text tool (so its style controls show, pre-filled) and open the editor over it.
   const reEdit = (box: TextBoxInfo) => {
     const fontFamily: FontFamily = FONT_FAMILIES.includes(box.fontFamily as FontFamily)
       ? (box.fontFamily as FontFamily)
@@ -165,40 +175,51 @@ export function TextBoxLayer({
     const body = text.trim();
     const ed = editor;
     cancel();
-    if (!ed || !body) return;
+    if (!ed) return;
     const done = (h: Parameters<typeof setHistory>[1]) => {
       // The PDF changed; reload so the canvas renders the new content text.
       bumpEpoch(documentId);
       setHistory(documentId, h);
     };
-    const fail = (err: unknown) =>
-      reportError(ed.editId ? "Couldn't update the text" : "Couldn't add text", err);
-    const promise = ed.editId
-      ? updateTextBox(
-          documentId,
-          page,
-          ed.editId,
-          body,
-          options.fontFamily,
-          options.fontSize,
-          options.color,
-          options.bold,
-          options.italic,
-          options.underline,
-        )
-      : addTextBox(
-          documentId,
-          page,
-          ed.pdfRect,
-          body,
-          options.fontFamily,
-          options.fontSize,
-          options.color,
-          options.bold,
-          options.italic,
-          options.underline,
+    if (ed.editId) {
+      // Re-editing an existing box: empty text deletes it (SPEC: P4-EDIT-004).
+      const promise = body
+        ? updateTextBox(
+            documentId,
+            page,
+            ed.editId,
+            body,
+            options.fontFamily,
+            options.fontSize,
+            options.color,
+            options.bold,
+            options.italic,
+            options.underline,
+          )
+        : deleteTextBox(documentId, page, ed.editId);
+      promise
+        .then(done)
+        .catch((err: unknown) =>
+          reportError(body ? "Couldn't update the text" : "Couldn't delete the text", err),
         );
-    promise.then(done).catch(fail);
+      return;
+    }
+    // A new box with no text is a no-op.
+    if (!body) return;
+    addTextBox(
+      documentId,
+      page,
+      ed.pdfRect,
+      body,
+      options.fontFamily,
+      options.fontSize,
+      options.color,
+      options.bold,
+      options.italic,
+      options.underline,
+    )
+      .then(done)
+      .catch((err: unknown) => reportError("Couldn't add text", err));
   };
 
   const preview = start && current ? normalizeScreenRect(start, current) : null;
@@ -223,18 +244,20 @@ export function TextBoxLayer({
         />
       ) : null}
 
-      {/* SPEC: P4-EDIT-003b — double-click a committed box to re-edit. Only when
-          idle (no tool, no open editor); each zone opts back into pointer events
-          under the otherwise pass-through layer. */}
-      {!placing && !editor
+      {/* SPEC: P4-EDIT-003b — with the Edit Text tool active, click a committed box
+          to re-edit it as a unit. These zones sit above Edit Text's per-run zones
+          (this layer mounts last), so added text edits whole-box and foreign text
+          stays per-run. Each zone opts back into pointer events under the
+          otherwise pass-through layer. */}
+      {activeTool === "edit-text" && !editor
         ? boxes.map((b) => {
             const r = screenRectFor(b.rect);
             return (
               <div
                 key={b.id}
                 className="absolute"
-                title="Double-click to edit this text"
-                onDoubleClick={() => reEdit(b)}
+                title="Click to edit this text box"
+                onClick={() => reEdit(b)}
                 style={{
                   left: r.left,
                   top: r.top,

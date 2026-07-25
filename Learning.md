@@ -7297,6 +7297,44 @@ only reachable *inside* `update_text_box`; nothing exposed a standalone delete.
 
 ---
 
+## P4.HF25 Step 2 — Empty-edit deletes + re-edit unified under Edit Text
+
+### Problem
+
+Two testing bugs: (1) clearing a text run's text and hitting Save *reverted* to the
+original instead of removing it; (2) the Add-Text re-edit (a double-click gesture)
+fought the Edit Text tool's per-run click zones over the same page-content text, so
+double-click "did nothing" while single-clicks opened the per-run editor.
+
+### Concepts learned
+
+- **`set_text("")` is not a delete.** Replacing a run's text with an empty string
+  doesn't remove the run — PDFium keeps the object and the reload re-renders the
+  original. The right move when the field is emptied is to route to the *delete*
+  path (`deleteTextRun` / `deleteTextBox`), which is what the explicit Delete button
+  already does. Empty commit ⇒ delete, in both editors.
+- **Overlapping hit-layers need one owner per gesture.** Added boxes are page
+  content, so both the Edit Text tool (per-run zones) and the box re-edit (whole-box
+  zones) targeted them. Two mechanisms over the same pixels is inherently confusing.
+  The fix is to pick one: re-edit now lives *inside* the Edit Text tool — a
+  single-click box zone that, because `TextBoxLayer` mounts after `TextEditLayer`,
+  sits **above** the per-run zones. So a click on added text opens the whole-box
+  editor and a click on foreign text falls through to per-run. One tool, one rule.
+- **Stacking order is API.** "This layer mounts last, so its zones win" is a real
+  contract — worth stating in a comment, because reordering the JSX would silently
+  break which tool handles a click.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/view/text-edit-layer.tsx` | Empty commit → `deleteTextRun` instead of `replaceTextRun("")`. |
+| `src/view/text-box-layer.tsx` | Re-edit triggers on an Edit-Text single-click (was idle double-click); empty re-edit → `deleteTextBox`. |
+| `src/view/__tests__/text-edit-layer.test.tsx` | + clear→delete test. |
+| `src/view/__tests__/text-box-layer.test.tsx` | Re-edit test → Edit-Text click; + clear→delete test; idle-contract test updated. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
