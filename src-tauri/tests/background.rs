@@ -31,6 +31,34 @@ fn page_content(bytes: &[u8], page_no: u32) -> String {
     String::from_utf8_lossy(&doc.get_page_content(page_id).expect("content")).into_owned()
 }
 
+/// SPEC: P4-EDIT-008 — an image background must actually *render*, not just emit
+/// operators: it changes hello's (otherwise white) top-left corner pixel. A
+/// content-string assertion can't catch an image that paints nothing.
+#[tokio::test]
+async fn image_background_actually_renders() {
+    use vibepdf_lib::pdf::render::ImageFormat;
+
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    let base = handle.render_page(0, 36.0, ImageFormat::Rgba8).await.expect("render base");
+    let base_tl = [base.bytes[0], base.bytes[1], base.bytes[2]];
+
+    handle
+        .add_background(vec![0], BackgroundKind::Image(bytes("sample.jpg")), 1.0)
+        .await
+        .expect("image bg");
+
+    let withimg = handle.render_page(0, 36.0, ImageFormat::Rgba8).await.expect("render bg");
+    let img_tl = [withimg.bytes[0], withimg.bytes[1], withimg.bytes[2]];
+
+    assert_ne!(
+        base_tl, img_tl,
+        "image background must change the white corner pixel (base {base_tl:?}, with-image {img_tl:?})",
+    );
+    drop(handle);
+}
+
 #[test]
 fn color_background_fills_behind_content() {
     // hello.pdf draws "(Hello, VibePDF.)"; the fill must precede it (prepended)

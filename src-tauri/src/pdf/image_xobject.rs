@@ -107,8 +107,61 @@ pub fn embed_jpeg(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, Com
     let mut dict = image_dict(width, height, color_space, None);
     // The stream *is* the DCTDecode-encoded data — keep lopdf from re-compressing it.
     dict.set("Filter", Object::Name(b"DCTDecode".to_vec()));
+    // SPEC: P4-EDIT-005 — Adobe CMYK JPEGs (Photoshop's default; marked by an APP14
+    // "Adobe" segment) store *inverted* samples. Without an inverting `/Decode` they
+    // render as a dark negative — the "image background does nothing" bug. Add it so
+    // CMYK images paint with correct colours; RGB/gray JPEGs are untouched.
+    if components == 4 && jpeg_has_adobe_app14(bytes) {
+        dict.set(
+            "Decode",
+            Object::Array(vec![
+                Object::Integer(1),
+                Object::Integer(0),
+                Object::Integer(1),
+                Object::Integer(0),
+                Object::Integer(1),
+                Object::Integer(0),
+                Object::Integer(1),
+                Object::Integer(0),
+            ]),
+        );
+    }
     let id = doc.add_object(Stream::new(dict, bytes.to_vec()).with_compression(false));
     Ok(EmbeddedImage { id, width, height })
+}
+
+/// True if the JPEG carries an **Adobe APP14** marker (`FF EE … "Adobe"`). Adobe
+/// CMYK JPEGs store inverted samples, so a 4-component one needs a `/Decode`
+/// inversion to render correctly. Walks the marker segments up to the scan (`SOS`).
+fn jpeg_has_adobe_app14(bytes: &[u8]) -> bool {
+    let mut i = 2; // skip the SOI (FF D8)
+    while i + 4 <= bytes.len() {
+        if bytes[i] != 0xFF {
+            return false; // not aligned on a marker → give up
+        }
+        let marker = bytes[i + 1];
+        // Standalone markers (no length payload): RSTn (D0..D7), SOI/EOI, TEM.
+        if (0xD0..=0xD9).contains(&marker) || marker == 0x01 {
+            i += 2;
+            continue;
+        }
+        if marker == 0xDA {
+            return false; // start of scan — image data begins; no APP14 before it
+        }
+        let len = ((bytes[i + 2] as usize) << 8) | bytes[i + 3] as usize;
+        if len < 2 {
+            return false; // malformed segment length
+        }
+        if marker == 0xEE {
+            let start = i + 4;
+            let end = (i + 2 + len).min(bytes.len());
+            if end > start && bytes[start..end].starts_with(b"Adobe") {
+                return true;
+            }
+        }
+        i += 2 + len;
+    }
+    false
 }
 
 /// SPEC: P4-EDIT-005 — embed `bytes` as an Image `XObject`, dispatching on the
@@ -332,5 +385,52 @@ mod tests {
         let (color, alpha) = deinterleave(&[1, 2, 3, 4, 5, 6, 7, 8], 3);
         assert_eq!(color, vec![1, 2, 3, 5, 6, 7]);
         assert_eq!(alpha, vec![4, 8]);
+    }
+
+    /// `make_jpeg_header` plus an APP14 "Adobe" segment (marks CMYK data inverted).
+    fn make_adobe_jpeg(width: u16, height: u16, components: u8) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xD8]; // SOI
+        // APP14 (Adobe): len 14 = 2 + "Adobe"(5) + version/flags/transform(7).
+        out.extend_from_slice(&[0xFF, 0xEE, 0x00, 0x0E]);
+        out.extend_from_slice(b"Adobe");
+        out.extend_from_slice(&[0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x02]);
+        out.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00]); // APP0
+        out.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x0B, 0x08]); // SOF0
+        out.extend_from_slice(&height.to_be_bytes());
+        out.extend_from_slice(&width.to_be_bytes());
+        out.push(components);
+        out.extend_from_slice(&[0x01, 0x11, 0x00]);
+        out.extend_from_slice(&[0xFF, 0xD9]); // EOI
+        out
+    }
+
+    #[test]
+    fn detects_adobe_app14_marker() {
+        use super::jpeg_has_adobe_app14;
+        assert!(jpeg_has_adobe_app14(&make_adobe_jpeg(2, 2, 4)), "APP14 Adobe present");
+        assert!(!jpeg_has_adobe_app14(&make_jpeg_header(2, 2, 4)), "no APP14 → false");
+    }
+
+    /// SPEC: P4-EDIT-005 — an Adobe CMYK JPEG gets the inverting `/Decode`; RGB and
+    /// non-Adobe CMYK do not (so we don't double-invert).
+    #[test]
+    fn cmyk_adobe_jpeg_gets_inverting_decode() {
+        use super::embed_jpeg;
+        let mut doc = Document::with_version("1.5");
+
+        let img = embed_jpeg(&mut doc, &make_adobe_jpeg(8, 8, 4)).expect("embed cmyk");
+        let stream = doc.get_object(img.id).and_then(Object::as_stream).unwrap();
+        assert_eq!(stream.dict.get(b"ColorSpace").unwrap().as_name().unwrap(), b"DeviceCMYK");
+        let decode = stream.dict.get(b"Decode").and_then(Object::as_array).expect("/Decode");
+        let vals: Vec<i64> = decode.iter().map(|o| o.as_i64().unwrap()).collect();
+        assert_eq!(vals, vec![1, 0, 1, 0, 1, 0, 1, 0]);
+
+        let rgb = embed_jpeg(&mut doc, &make_adobe_jpeg(8, 8, 3)).expect("embed rgb");
+        let rgb_s = doc.get_object(rgb.id).and_then(Object::as_stream).unwrap();
+        assert!(rgb_s.dict.get(b"Decode").is_err(), "RGB Adobe JPEG needs no /Decode");
+
+        let plain = embed_jpeg(&mut doc, &make_jpeg_header(8, 8, 4)).expect("embed plain cmyk");
+        let plain_s = doc.get_object(plain.id).and_then(Object::as_stream).unwrap();
+        assert!(plain_s.dict.get(b"Decode").is_err(), "non-Adobe CMYK: no forced inversion");
     }
 }

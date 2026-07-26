@@ -3418,6 +3418,23 @@ npm run check                                               # tsc + eslint + cli
 
 ---
 
+## P4.HF26 (item 3) — Image background: Adobe CMYK JPEG /Decode fix
+
+Rust only (image_xobject.rs encoder fix + a background render regression test).
+No new dep. Fix lands across every image feature (add/stamp/watermark/background).
+
+Verification gates:
+
+```
+node scripts/cargo-test.mjs --test background image_background_actually_renders  # proves the path renders
+node scripts/cargo-test.mjs --lib image_xobject     # 10 passed (2 new: Adobe-marker + CMYK Decode)
+node scripts/cargo-test.mjs --test background        # 18 passed
+cd src-tauri && cargo clippy --all-targets -- -D warnings   # clean
+npx tsc --noEmit                                     # OK (no frontend change)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

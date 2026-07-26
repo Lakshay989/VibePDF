@@ -924,13 +924,17 @@ C4a/b, B3b). Four issues found + fixed this session:
 
 From an in-app pass: (1) Edit-Image drag/resize was way off — `layerPoint` measured against
 `e.currentTarget` (handle vs overlay) → fixed with a stable `layerRef` (shipped). (2) watermark
-removal built (above). (3) **background→image "not working": still open — needs repro.** The Rust
-path is verifiably correct end-to-end (reads file → `embed_image` → cover-fit + clip → prepend, same
-shape as the color path). Most likely the image lands **behind opaque page content** (a background
-draws under everything; if the page paints a solid fill it's hidden), or an image-specific runtime
-issue. **Tell:** on the same page, does a *color* background show? color-works+image-doesn't ⇒ real
-image bug; neither shows ⇒ hidden-behind-content. (4) **deferred by user** — header/footer text is
-shared across the header⇄footer toggle (left/center/right *are* separate); acceptable once understood.
+removal built (above). (3) ✅ **background→image FIXED — it was a CMYK-JPEG bug, not a background bug.** A differential
+render test proved the background path renders fine (color-works/image-doesn't confirmed by the
+user). Root cause: `embed_jpeg` embedded 4-component (CMYK) JPEGs as `/DCTDecode /DeviceCMYK` with
+no `/Decode`; Adobe CMYK JPEGs (Photoshop default; APP14 "Adobe" marker) are stored inverted, so
+they rendered as a dark negative. Fix: add `/Decode [1 0 1 0 1 0 1 0]` for Adobe CMYK JPEGs only.
+Shared encoder ⇒ fixes add-image / stamp / watermark / background at once. (4) **deferred by user**
+— header/footer text is shared across the header⇄footer toggle (left/center/right *are* separate);
+acceptable once understood.
+  - *Follow-up (not blocking):* other "image doesn't render" formats stay possible — progressive/
+    unusual JPEGs, exotic PNGs. The new differential render test is the harness to add cases to if
+    another one surfaces.
 - **Single centred mark, not tiled.** No repeating/grid watermark across the page — one centred
   instance. A tiled mode (cover the page) is a follow-up.
 - **No live preview.** The watermark is apply-then-render (epoch bump), like the other

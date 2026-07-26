@@ -7437,6 +7437,44 @@ this a mechanical splice, but nothing had used it for a *clear* yet.
 
 ---
 
+## P4.HF26 (item 3) — Image background: it was a CMYK-JPEG bug, not a background bug
+
+### Problem
+
+"Background → image does nothing" while colour backgrounds worked. Suspicion fell
+on `background.rs`, but a **differential render test** (render hello's white corner
+with vs without an image background) *passed* — the image renders fine. So the
+background code was innocent; the fault was in **`embed_jpeg`** for one image class.
+
+### Concepts learned
+
+- **Reproduce before fixing — the render test relocated the bug.** The existing
+  image-background test only asserted the content *string* (`W n`, `Do`); it could
+  never catch "emits operators but paints nothing." Actually rendering to pixels and
+  comparing a corner proved the path works, which flipped the whole investigation
+  from `background.rs` to the image encoder.
+- **Adobe CMYK JPEGs are stored inverted.** A 4-component (CMYK) JPEG from Photoshop
+  carries an **APP14 "Adobe"** marker and inverted samples. Embedded verbatim as
+  `/DCTDecode /DeviceCMYK` *without* a `/Decode`, it renders as a dark photo-negative
+  — which reads as "the image didn't show." The fix is `/Decode [1 0 1 0 1 0 1 0]`,
+  added **only** when the JPEG is 4-component *and* has the Adobe marker (so RGB and
+  genuine non-Adobe CMYK aren't double-inverted).
+- **Detect the marker by walking JPEG segments.** `jpeg_has_adobe_app14` steps
+  marker-to-marker (`FF xx` + 2-byte length), skipping standalone markers (RSTn, EOI)
+  and stopping at `SOS`, looking for `FF EE` whose payload starts with `Adobe`.
+- **One encoder, every image feature.** `embed_jpeg` is shared by add-image, image
+  stamps, the image watermark, and the image background — so the CMYK fix lands
+  across all of them at once.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/image_xobject.rs` | `jpeg_has_adobe_app14` + the inverting `/Decode` for Adobe CMYK JPEGs; marker + Decode tests. |
+| `src-tauri/tests/background.rs` | Differential render test (image background changes the white corner pixel) — closes the "emits ops but paints nothing" gap. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
