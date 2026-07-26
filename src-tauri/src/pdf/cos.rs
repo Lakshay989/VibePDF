@@ -1687,65 +1687,76 @@ pub fn update_text_box(
     )
 }
 
+/// Remove every `/VibePDF` marked-content block whose `/Kind` is `kind` from a
+/// single `page_id`, returning how many were removed. Marked-content-nesting
+/// aware; re-encodes the page content only when something matched. The per-page
+/// core of [`clear_decorations`] — also lets a writer **replace** rather than
+/// stack a decoration (e.g. a new background evicting the old one on that page).
+pub(crate) fn remove_decorations_on_page(
+    doc: &mut Document,
+    page_id: ObjectId,
+    kind: &str,
+) -> Result<usize, CommandError> {
+    let Ok(content) = doc.get_and_decode_page_content(page_id) else {
+        return Ok(0); // a page with no decodable content stream has no decorations
+    };
+    let mut operations = content.operations;
+
+    // Collect the [start..=end] range of each matching block, then drain them
+    // back-to-front so earlier indices stay valid.
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < operations.len() {
+        let op = &operations[i];
+        let matches = op.operator == "BDC"
+            && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")
+            && matches!(op.operands.get(1), Some(Object::Dictionary(d))
+                if dict_string(d, b"Kind").as_deref() == Some(kind));
+        if !matches {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut depth = 0usize;
+        let mut end = start;
+        for (j, o) in operations.iter().enumerate().skip(start) {
+            match o.operator.as_str() {
+                "BDC" | "BMC" => depth += 1,
+                "EMC" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = j;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        ranges.push((start, end));
+        i = end + 1;
+    }
+
+    if ranges.is_empty() {
+        return Ok(0);
+    }
+    for &(s, e) in ranges.iter().rev() {
+        operations.drain(s..=e);
+    }
+    let new_content = Content { operations }.encode().map_err(cos_err)?;
+    doc.change_page_content(page_id, new_content).map_err(cos_err)?;
+    Ok(ranges.len())
+}
+
 /// Remove **every** `/VibePDF` marked-content block whose `/Kind` is `kind`, on
 /// every page. Generic over the decoration kind (e.g. `"watermark"` to strip all
-/// watermarks). lopdf-only; each touched page's content is re-encoded (same
-/// consolidation [`remove_text_box`] does). A page with no matching block is left
-/// untouched; a document with none round-trips unchanged. Never mutates the input.
+/// watermarks). lopdf-only; a document with none round-trips unchanged. Never
+/// mutates the input.
 pub fn clear_decorations(bytes: &[u8], kind: &str) -> Result<Vec<u8>, CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
-
     for page_id in page_ids {
-        let Ok(content) = doc.get_and_decode_page_content(page_id) else {
-            continue; // a page with no decodable content stream has no decorations
-        };
-        let mut operations = content.operations;
-
-        // Collect the [start..=end] range of each matching block, then drain them
-        // back-to-front so earlier indices stay valid.
-        let mut ranges: Vec<(usize, usize)> = Vec::new();
-        let mut i = 0;
-        while i < operations.len() {
-            let op = &operations[i];
-            let matches = op.operator == "BDC"
-                && matches!(op.operands.first(), Some(Object::Name(n)) if n == b"VibePDF")
-                && matches!(op.operands.get(1), Some(Object::Dictionary(d))
-                    if dict_string(d, b"Kind").as_deref() == Some(kind));
-            if !matches {
-                i += 1;
-                continue;
-            }
-            let start = i;
-            let mut depth = 0usize;
-            let mut end = start;
-            for (j, o) in operations.iter().enumerate().skip(start) {
-                match o.operator.as_str() {
-                    "BDC" | "BMC" => depth += 1,
-                    "EMC" => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = j;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            ranges.push((start, end));
-            i = end + 1;
-        }
-
-        if ranges.is_empty() {
-            continue;
-        }
-        for &(s, e) in ranges.iter().rev() {
-            operations.drain(s..=e);
-        }
-        let new_content = Content { operations }.encode().map_err(cos_err)?;
-        doc.change_page_content(page_id, new_content).map_err(cos_err)?;
+        remove_decorations_on_page(&mut doc, page_id, kind)?;
     }
-
     let mut out = Vec::new();
     doc.save_to(&mut out)?;
     Ok(out)

@@ -59,6 +59,35 @@ async fn image_background_actually_renders() {
     drop(handle);
 }
 
+/// SPEC: P4-EDIT-008 — applying a background REPLACES any existing one (a page has
+/// one background). After colour-then-image, the corner shows the image, not the
+/// colour — the new background must not be prepended *behind* the old opaque one.
+#[tokio::test]
+async fn background_replaces_previous_not_stacks() {
+    use vibepdf_lib::pdf::render::ImageFormat;
+
+    let id = uuid::Uuid::new_v4();
+    let handle = DocumentActorHandle::spawn(None, id, fixture("hello.pdf"), None).expect("spawn");
+
+    handle.add_background(vec![0], color("#ff0000"), 1.0).await.expect("colour bg");
+    let after_color = handle.render_page(0, 36.0, ImageFormat::Rgba8).await.expect("render colour");
+    let color_tl = [after_color.bytes[0], after_color.bytes[1], after_color.bytes[2]];
+    assert!(color_tl[0] > 200 && color_tl[1] < 60 && color_tl[2] < 60, "corner is red ({color_tl:?})");
+
+    handle
+        .add_background(vec![0], BackgroundKind::Image(bytes("sample.jpg")), 1.0)
+        .await
+        .expect("image bg");
+    let after_image = handle.render_page(0, 36.0, ImageFormat::Rgba8).await.expect("render image");
+    let img_tl = [after_image.bytes[0], after_image.bytes[1], after_image.bytes[2]];
+
+    assert_ne!(
+        color_tl, img_tl,
+        "the image background must replace the colour (still red {color_tl:?} ⇒ it stacked behind)",
+    );
+    drop(handle);
+}
+
 #[test]
 fn color_background_fills_behind_content() {
     // hello.pdf draws "(Hello, VibePDF.)"; the fill must precede it (prepended)

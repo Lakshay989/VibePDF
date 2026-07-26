@@ -20,7 +20,8 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::{
     page_effective_box, page_media_box, page_rotation, parse_hex_color, prepend_page_content,
-    register_page_resource, visual_cm_line, visual_transform, wrap_decoration,
+    register_page_resource, remove_decorations_on_page, visual_cm_line, visual_transform,
+    wrap_decoration,
 };
 use crate::pdf::document::{pdfium, pdfium_lock};
 use crate::pdf::image_xobject::embed_image;
@@ -85,6 +86,12 @@ pub fn add_background(
     };
 
     for page_id in targets {
+        // Replace, don't stack: a page has *one* background. Evict any existing
+        // VibePDF background on this page first — otherwise the new (prepended,
+        // drawn-behind) background lands *under* the old opaque one and is hidden,
+        // so "apply another background" appears to do nothing.
+        remove_decorations_on_page(&mut doc, page_id, "background")?;
+
         // A colour fill covers the full MediaBox (bleed-safe); image / PDF-page
         // placement targets the VISUAL box (displayed CropBox, after /Rotate)
         // so it reads upright and covers what the user actually sees.

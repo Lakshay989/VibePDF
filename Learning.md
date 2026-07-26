@@ -7475,6 +7475,42 @@ background code was innocent; the fault was in **`embed_jpeg`** for one image cl
 
 ---
 
+## P4.HF27 — A background replaces, not stacks
+
+### Problem
+
+After applying one background you couldn't apply another (colour or image): the
+new one appeared to do nothing. Backgrounds are **prepended** (drawn behind the
+page), so a second one lands *even further back* — under the first, opaque one —
+and is hidden.
+
+### Concepts learned
+
+- **"Behind everything" + "opaque" ⇒ only the oldest wins.** Stacking a
+  draw-behind, opaque layer means each new one is occluded by the previous. A page
+  has *one* background, so "apply" must **replace**: evict the old before adding.
+- **Reuse the splice, per page.** The `clear_decorations` splice (built for
+  watermark removal) factored cleanly into `remove_decorations_on_page(doc,
+  page_id, kind)`. `add_background` now calls it per target page before prepending —
+  so replace is precise (only the pages you re-target lose their old background,
+  not the whole document).
+- **Render tests catch occlusion; string tests can't.** A content-string check
+  ("has a `re f`") passes even when the fill is buried. The differential render
+  test (corner is red after colour ⇒ *not* red after image) is what proves the new
+  background is actually *on top of the page* rather than hidden behind the old one.
+- **Replace is still one undo step.** The whole `add_background` is one snapshot
+  edit, so undoing a replace restores the previous background.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/cos.rs` | Extract `remove_decorations_on_page` (per-page splice); `clear_decorations` now loops it. |
+| `src-tauri/src/pdf/background.rs` | `add_background` evicts the existing background on each target page before adding. |
+| `src-tauri/tests/background.rs` | Differential render test: colour then image → corner shows the image, not the colour. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

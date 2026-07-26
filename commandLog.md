@@ -3435,6 +3435,22 @@ npx tsc --noEmit                                     # OK (no frontend change)
 
 ---
 
+## P4.HF27 — Background replaces instead of stacking behind
+
+Rust only (cos: extract `remove_decorations_on_page`; background: evict-before-add;
+render regression test). No new dep, no frontend change.
+
+Verification gates:
+
+```
+node scripts/cargo-test.mjs --test background background_replaces_previous_not_stacks  # ok
+node scripts/cargo-test.mjs --test background        # 19 passed
+node scripts/cargo-test.mjs --lib watermark          # 7 passed (clear_decorations refactor safe)
+cd src-tauri && cargo clippy --all-targets -- -D warnings   # clean
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

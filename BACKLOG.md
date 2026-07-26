@@ -920,6 +920,18 @@ C4a/b, B3b). Four issues found + fixed this session:
   Undoable; foreign watermarks untouched. (`clear_decorations` is generic — reusable for future
   decoration clears.)
 
+## From P4.HF27 (background replace, 2026-07-25)
+
+- ✅ **A background now REPLACES the existing one** (was: stacked behind → hidden). Since a
+  background is prepended (drawn behind) and opaque, a second one landed *under* the first and did
+  nothing. `add_background` now evicts the target pages' existing `/VibePDF (background)` block
+  (`remove_decorations_on_page`, extracted from `clear_decorations`) before adding. Per-page, so
+  re-targeting one page doesn't wipe another's background. Undo restores the prior background.
+  Proven by a differential render test (colour→image: corner shows the image, not the colour).
+  - *Note:* watermarks still **stack** (they're on-top/append, so a second is visible over the
+    first) — different from backgrounds; not changed. If "one watermark per apply" is wanted later,
+    the same `remove_decorations_on_page(…, "watermark")` evict-before-add applies.
+
 ## From P4.HF26 (testing-feedback batch, 2026-07-25)
 
 From an in-app pass: (1) Edit-Image drag/resize was way off — `layerPoint` measured against
