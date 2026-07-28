@@ -256,9 +256,15 @@ the current roadmap phase. When one is picked up, move it into the relevant
   **ink, add-text box, free-text ("Text Box" tool), line, arrow, rectangle,
   ellipse, polygon, measure, image add, and stamps (text + image).** Images render
   a real `data:`-URL <img> preview (`file-data-url.ts`; CSP allows `img-src data:`).
-  **TODO — same pattern for the last few:** sticky notes, and the text / free-text /
-  shape **update/delete** re-edits (add/create-only for now). Each is: hold on
-  commit → render held via the layer's own draw → tie in `.then` / remove in `.catch`.
+  **Sticky notes** already had this — they render from the annotation store as
+  overlay pins (no bake/reload), rolled back on write failure — so every *add/create*
+  path plus notes is covered. **Deliberately NOT done — update/delete re-edits**
+  (change/delete an existing text box, free-text, or shape): the old content is
+  *baked* into the page and merely goes stale for ~3 s (a lag, not a vanish). An
+  optimistic preview would have to **mask** the old content with a page-colour
+  rectangle — clean on a white page, but a white patch on a coloured/patterned page,
+  which can look worse than the stale text. Left as-is on purpose; revisit only with
+  a real page-region mask (re-render the region, not a flat fill) if it's worth it.
   *Note:* the image-stamp preview centres on the click using the picked image's
   aspect ratio; if the backend's placement ever diverges, the swap will jump slightly.
 - **`/QuadPoints` corner order is verified visually, not by spec.** We emit
