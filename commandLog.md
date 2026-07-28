@@ -3468,6 +3468,21 @@ npx vitest run src/ipc                                   # 68 passed (30 files)
 
 ---
 
+## P4.HF29 — Optimistic edit preview (ink + text box)
+
+Frontend only. New `optimistic-edit-store` + wiring in `ink-layer`,
+`text-box-layer`, `PdfViewer`. No new dep, no Rust change.
+
+Verification gates:
+
+```
+npx vitest run src/state/__tests__/optimistic-edit-store.test.ts   # 8 passed
+npm run check                                                       # tsc + eslint + clippy clean
+npx vitest run src/state src/ipc src/view                          # 196 passed (56 files)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -7554,6 +7554,53 @@ worked fine. The tool interaction and the backend edit were both fine; the
 
 ---
 
+## P4.HF29 — Optimistic edit preview (ink + text box)
+
+### Problem
+
+Even with HF28's fast reload, each annotation edit's backend `apply` is ~3 s on
+a 13 MB PDF (full lopdf round-trip), and every tool clears its live preview the
+instant the gesture ends. So a committed stroke/box **visibly disappears** for a
+few seconds until the reload bakes it — the edit looks lost. Fix: keep the
+committed shape drawn on an overlay until its bake lands ("optimistic preview").
+
+### Concepts learned
+
+- **Optimistic UI, bridged by epoch.** The store holds each committed shape with
+  `epoch: null` (show now, don't prune) at commit; the write's `.then` ties it to
+  the *post-`bumpEpoch`* reload epoch; `PdfViewer` calls `markRendered(doc, epoch)`
+  when that reload paints, which prunes it. Tying to the edit's **own** reload
+  epoch (not a counter snapshotted at commit) keeps rapid strokes independent —
+  each clears only when *its* bake is on the canvas.
+- **Clear late, never early.** `markRendered` fires inside a `requestAnimationFrame`
+  after `setDoc`, so PDF.js paints the baked delta before the overlay copy is
+  removed. A brief double-draw (overlay + baked) is invisible; a one-frame *gap*
+  (neither) is the bug we're killing — so bias to clearing a touch late.
+- **Reuse each tool's own draw, don't centralize rendering.** The store holds an
+  opaque, PDF-space payload per `kind`; each layer renders its held shapes with
+  the *same* code as its live preview (ink → polyline, text box → styled div). No
+  shape logic is duplicated in a central overlay, and the payload is PDF-space so
+  it survives zoom/scroll.
+- **zustand v5 selector churn.** A selector returning a fresh `.filter().map()`
+  array each call makes React 18 loop ("getSnapshot should be cached"). Select the
+  *stable* per-doc list reference and derive the page/kind slice in `useMemo`.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/state/optimistic-edit-store.ts` | The held-edit store: `add`/`tie`/`remove`/`markRendered` + `usePendingEdits`. |
+| `src/state/__tests__/optimistic-edit-store.test.ts` | Lifecycle tests (tie/prune by epoch, rapid-edit independence, tie-after-render race). |
+| `src/view/PdfViewer.tsx` | Calls `markRendered(doc, epoch)` on the rAF after a reload paints. |
+| `src/view/ink-layer.tsx` | Holds the smoothed stroke on commit; renders held strokes as polylines. |
+| `src/view/text-box-layer.tsx` | Holds a new box on commit; renders held boxes as styled divs. |
+
+**Scope:** ink + text box wired first (the reported tools) to validate the
+mechanism in-app before replicating the identical pattern to shapes, free-text,
+measure, image, and stamp.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

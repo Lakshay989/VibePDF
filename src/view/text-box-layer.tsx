@@ -23,6 +23,7 @@ import {
 } from "@/ipc/text-box";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit-store";
 import { useToolStore } from "@/state/tool-store";
 import type { FontFamily } from "@/tools/_framework";
 import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
@@ -47,6 +48,18 @@ interface Editor {
   pdfRect: TextBoxRect;
   /** Set when re-editing an existing box (its `/Id`); null for a new box. */
   editId: string | null;
+}
+
+/** Optimistic-preview payload: a committed new text box awaiting bake. */
+interface TextBoxHeld {
+  rect: TextBoxRect;
+  text: string;
+  fontFamily: FontFamily;
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
 }
 
 export function TextBoxLayer({
@@ -208,6 +221,19 @@ export function TextBoxLayer({
     }
     // A new box with no text is a no-op.
     if (!body) return;
+    // Show the typed box immediately; the ~3 s backend apply + reload on a large
+    // PDF would otherwise leave it blank until the bake lands.
+    const oe = useOptimisticEditStore.getState();
+    const key = oe.add(documentId, page, "text-box", {
+      rect: ed.pdfRect,
+      text: body,
+      fontFamily: options.fontFamily,
+      fontSize: options.fontSize,
+      color: textColor,
+      bold: options.bold,
+      italic: options.italic,
+      underline: options.underline,
+    } satisfies TextBoxHeld);
     addTextBox(
       documentId,
       page,
@@ -220,9 +246,17 @@ export function TextBoxLayer({
       options.italic,
       options.underline,
     )
-      .then(done)
-      .catch((err: unknown) => reportError("Couldn't add text", err));
+      .then((h) => {
+        done(h);
+        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+      })
+      .catch((err: unknown) => {
+        oe.remove(documentId, key);
+        reportError("Couldn't add text", err);
+      });
   };
+
+  const pendingBoxes = usePendingEdits<TextBoxHeld>(documentId, page, "text-box");
 
   const preview = start && current ? normalizeScreenRect(start, current) : null;
 
@@ -245,6 +279,33 @@ export function TextBoxLayer({
           style={{ left: preview.left, top: preview.top, width: preview.width, height: preview.height }}
         />
       ) : null}
+
+      {/* Optimistic preview: committed boxes not yet baked into the page (P4.HF29). */}
+      {pendingBoxes.map(({ key, data }) => {
+        const r = screenRectFor(data.rect);
+        return (
+          <div
+            key={key}
+            className="absolute whitespace-pre-wrap break-words"
+            style={{
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              color: data.color,
+              fontFamily: cssFontFamily(data.fontFamily),
+              fontSize: `${data.fontSize * scale}px`,
+              fontWeight: data.bold ? 700 : 400,
+              fontStyle: data.italic ? "italic" : "normal",
+              textDecoration: data.underline ? "underline" : "none",
+              lineHeight: 1.2,
+              padding: "1px 2px",
+              pointerEvents: "none",
+            }}
+          >
+            {data.text}
+          </div>
+        );
+      })}
 
       {/* SPEC: P4-EDIT-003b — with the Edit Text tool active, click a committed box
           to re-edit it as a unit. These zones sit above Edit Text's per-run zones

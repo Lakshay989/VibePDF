@@ -41,6 +41,7 @@ import {
   saveViewSettings,
 } from "@/state/view-persistence";
 import { isDocEdited, useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
+import { useOptimisticEditStore } from "@/state/optimistic-edit-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
 
@@ -237,6 +238,13 @@ export function PdfViewer({ documentId, path }: Props) {
         }
         setDoc(localDoc);
         setError(null);
+        // This reload's bytes bake every edit up to `epoch`; once its pages
+        // paint, drop the optimistic overlays that were bridging the gap. One
+        // rAF lets PDF.js render the delta first, so there's never a blank frame
+        // between overlay-off and baked-on (a brief double-draw is invisible).
+        requestAnimationFrame(() => {
+          if (!cancelled) useOptimisticEditStore.getState().markRendered(documentId, epoch);
+        });
       } catch (e) {
         const msg =
           e instanceof Error ? e.message : "Failed to open this file as a PDF.";

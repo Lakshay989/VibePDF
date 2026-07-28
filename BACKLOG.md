@@ -249,11 +249,17 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From P3.B1b (persist text markup)
 
-- **No optimistic preview.** Apply → IPC write → epoch reload → the canvas shows
-  the highlight; there's a brief delay (the lopdf+PDFium round-trip). For instant
-  feedback, optimistically add the markup to the store (overlay draws it) and
-  clear it once the reload lands. The overlay's `MarkupShape` rendering is kept
-  (inert in prod) precisely for this.
+- **Optimistic preview — ⏳ PARTIAL (P4.HF29, 2026-07-28).** Apply → IPC write →
+  epoch reload → the canvas shows the shape; on a large PDF that's a ~3 s delay,
+  during which the committed shape *disappeared*. Now bridged for **ink + text
+  box** via `optimistic-edit-store` (hold on commit → tie to the bake epoch →
+  prune when that reload paints). **TODO — replicate the same pattern to the
+  remaining committing layers:** framework shapes (rect/line/arrow/ellipse in
+  `annotation-layer` — reuse `Shape`/`LineShape` for the held draft), `free-text`,
+  `measure`, image add, stamp, and text-box **update/delete** (add-box only for
+  now). Each is: hold on commit → render held via the layer's own draw → tie in
+  `.then` / remove in `.catch`. The `MarkupShape` overlay (kept inert) is the hook
+  for the markup tools.
 - **`/QuadPoints` corner order is verified visually, not by spec.** We emit
   `UL,UR,LL,LR`; since we own the `/AP`, rendering is correct regardless, but a
   reader that *regenerates* appearance from `/QuadPoints` (Acrobat with `/AP`
