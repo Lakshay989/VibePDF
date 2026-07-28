@@ -18,8 +18,17 @@ const CLOSE_PX = 12;
 import { addPolygon } from "@/ipc/polygons";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
+
+/** Optimistic-preview payload: a committed polygon awaiting bake (P4.HF29). */
+interface PolygonHeld {
+  vertices: { x: number; y: number }[];
+  color: string;
+  opacity: number;
+  strokeWidth: number;
+}
 
 /** A click within this many CSS px of the last vertex is a duplicate (e.g. the
  *  second pointerdown of a double-click) and is ignored. */
@@ -81,6 +90,15 @@ export function PolygonLayer({
       return;
     }
     setActiveTool(null);
+    // Show the finished polygon immediately (P4.HF29) so the ~3 s apply + reload
+    // on a large PDF doesn't blank it until the bake lands.
+    const oe = useOptimisticEditStore.getState();
+    const key = oe.add(documentId, page, "polygon", {
+      vertices: pts,
+      color: options.color,
+      opacity: options.opacity,
+      strokeWidth: options.strokeWidth,
+    } satisfies PolygonHeld);
     addPolygon(
       documentId,
       page,
@@ -93,9 +111,13 @@ export function PolygonLayer({
     )
       .then((h) => {
         bumpEpoch(documentId);
+        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => reportError("Couldn't add shape", err));
+      .catch((err: unknown) => {
+        oe.remove(documentId, key);
+        reportError("Couldn't add shape", err);
+      });
   };
 
   // Leaving the polygon tool (picking another tool, or a finished shape)
@@ -169,6 +191,7 @@ export function PolygonLayer({
   const solid = screenPts.map((p) => `${p.x},${p.y}`).join(" ");
   const v0 = screenPts[0];
   const lastPt = screenPts[screenPts.length - 1];
+  const pendingPolys = usePendingEdits<PolygonHeld>(documentId, page, "polygon");
 
   return (
     <svg
@@ -180,6 +203,21 @@ export function PolygonLayer({
       onPointerMove={onPointerMove}
       onDoubleClick={onDoubleClick}
     >
+      {/* Optimistic preview: committed polygons not yet baked (P4.HF29). Closed
+          outline, matching the live stroke — "solid, then swap" to the baked shape. */}
+      {pendingPolys.map(({ key, data }) => (
+        <polygon
+          key={key}
+          points={data.vertices.map((v) => {
+            const s = pdfToScreen({ page, x: v.x, y: v.y }, geo);
+            return `${s.x},${s.y}`;
+          }).join(" ")}
+          fill="none"
+          stroke={data.color}
+          strokeWidth={Math.max(1, data.strokeWidth * scale)}
+          opacity={data.opacity}
+        />
+      ))}
       {screenPts.length > 0 ? (
         <>
           {screenPts.length > 1 ? (

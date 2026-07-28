@@ -249,17 +249,16 @@ the current roadmap phase. When one is picked up, move it into the relevant
 
 ## From P3.B1b (persist text markup)
 
-- **Optimistic preview — ⏳ PARTIAL (P4.HF29, 2026-07-28).** Apply → IPC write →
+- **Optimistic preview — ⏳ MOSTLY DONE (P4.HF29, 2026-07-28).** Apply → IPC write →
   epoch reload → the canvas shows the shape; on a large PDF that's a ~3 s delay,
-  during which the committed shape *disappeared*. Now bridged for **ink + text
-  box** via `optimistic-edit-store` (hold on commit → tie to the bake epoch →
-  prune when that reload paints). **TODO — replicate the same pattern to the
-  remaining committing layers:** framework shapes (rect/line/arrow/ellipse in
-  `annotation-layer` — reuse `Shape`/`LineShape` for the held draft), `free-text`,
-  `measure`, image add, stamp, and text-box **update/delete** (add-box only for
-  now). Each is: hold on commit → render held via the layer's own draw → tie in
-  `.then` / remove in `.catch`. The `MarkupShape` overlay (kept inert) is the hook
-  for the markup tools.
+  during which the committed shape *disappeared*. Bridged via `optimistic-edit-store`
+  (hold on commit → tie to the bake epoch → prune when that reload paints) for:
+  **ink, add-text box, free-text ("Text Box" tool), line, arrow, rectangle,
+  ellipse, polygon.** **TODO — same pattern for the stragglers:** `measure`
+  (measure-layer), image add (image-add-layer), stamps (stamp path), notes, and
+  the text/free-text **update/delete** re-edits (add-only for now). Each is: hold
+  on commit → render held via the layer's own draw → tie in `.then` / remove in
+  `.catch`. The `MarkupShape` overlay (kept inert) is the hook for the markup tools.
 - **`/QuadPoints` corner order is verified visually, not by spec.** We emit
   `UL,UR,LL,LR`; since we own the `/AP`, rendering is correct regardless, but a
   reader that *regenerates* appearance from `/QuadPoints` (Acrobat with `/AP`

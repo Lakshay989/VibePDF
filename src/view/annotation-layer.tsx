@@ -20,6 +20,7 @@ import { addShape } from "@/ipc/shapes";
 import { useAnnotationStore, useDocAnnotations } from "@/state/annotation-store";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit-store";
 import { useToolStore } from "@/state/tool-store";
 import {
   type AnnotationDraft,
@@ -43,6 +44,26 @@ import { shapeTools } from "@/tools/shapes/shape-tools";
 // Register the shape + line tools once, when this module loads. The overlay is
 // their host: it drives the gesture and persists the committed draft (below).
 for (const tool of [...shapeTools, ...lineTools]) registerTool(tool);
+
+/** Optimistic-preview payload for a committed shape awaiting bake (P4.HF29). */
+type ShapeHeld =
+  | {
+      variant: "line";
+      start: { x: number; y: number };
+      end: { x: number; y: number };
+      arrow: boolean;
+      color: string;
+      opacity: number;
+      strokeWidth: number;
+    }
+  | {
+      variant: "shape";
+      type: "rectangle" | "ellipse";
+      rect: PdfRect;
+      color: string;
+      opacity: number;
+      strokeWidth: number;
+    };
 
 export interface AnnotationLayerProps {
   documentId: string;
@@ -159,9 +180,21 @@ export function AnnotationLayer({
       bumpEpoch(documentId);
       setHistory(documentId, h);
     };
+    const oe = useOptimisticEditStore.getState();
     if (committed.type === "line") {
       const { start, end, arrow } = committed;
       setDraft(null);
+      // Show the committed line/arrow immediately (P4.HF29) — the ~3 s apply +
+      // reload on a large PDF would otherwise blank it until the bake lands.
+      const key = oe.add(documentId, committed.page, "shape", {
+        variant: "line",
+        start,
+        end,
+        arrow,
+        color: options.color,
+        opacity: options.opacity,
+        strokeWidth: options.strokeWidth,
+      } satisfies ShapeHeld);
       addLine(
         documentId,
         committed.page,
@@ -174,8 +207,14 @@ export function AnnotationLayer({
         options.opacity,
         options.strokeWidth,
       )
-        .then(persisted)
-        .catch((err: unknown) => reportError("Couldn't add line", err));
+        .then((h) => {
+          persisted(h);
+          oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+        })
+        .catch((err: unknown) => {
+          oe.remove(documentId, key);
+          reportError("Couldn't add line", err);
+        });
       return;
     }
     if (committed.type !== "rectangle" && committed.type !== "ellipse") {
@@ -184,6 +223,14 @@ export function AnnotationLayer({
     }
     const { rect } = committed;
     setDraft(null);
+    const key = oe.add(documentId, committed.page, "shape", {
+      variant: "shape",
+      type: committed.type,
+      rect,
+      color: options.color,
+      opacity: options.opacity,
+      strokeWidth: options.strokeWidth,
+    } satisfies ShapeHeld);
     addShape(
       documentId,
       committed.page,
@@ -194,8 +241,14 @@ export function AnnotationLayer({
       options.opacity,
       options.strokeWidth,
     )
-      .then(persisted)
-      .catch((err: unknown) => reportError("Couldn't add shape", err));
+      .then((h) => {
+        persisted(h);
+        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+      })
+      .catch((err: unknown) => {
+        oe.remove(documentId, key);
+        reportError("Couldn't add shape", err);
+      });
   };
 
   // Notes carry no `/AP` and are drawn by the HTML `NoteLayer` overlay, not as
@@ -205,6 +258,7 @@ export function AnnotationLayer({
   );
   const draftHere =
     draft && draft.page === page && draft.type !== "note" ? draft : null;
+  const pendingShapes = usePendingEdits<ShapeHeld>(documentId, page, "shape");
 
   return (
     <svg
@@ -242,6 +296,16 @@ export function AnnotationLayer({
         <Shape id="__draft__" shape={draftHere} geo={geo} selected={false} selectable={false} preview />
       ) : null}
       {draftHere && draftHere.type === "line" ? <LineShape line={draftHere} geo={geo} /> : null}
+
+      {/* Optimistic preview: committed shapes not yet baked into the page (P4.HF29).
+          Drawn solid (not the dashed draft) so they read as done — "solid, then swap". */}
+      {pendingShapes.map(({ key, data }) =>
+        data.variant === "line" ? (
+          <LineShape key={key} line={data} geo={geo} />
+        ) : (
+          <Shape key={key} id={key} shape={data} geo={geo} selected={false} selectable={false} />
+        ),
+      )}
     </svg>
   );
 }

@@ -15,8 +15,10 @@ import { addFreeText, type FreeTextRect, readFreeText, updateFreeText } from "@/
 import { useAnnotationEditStore } from "@/state/annotation-edit-store";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit-store";
 import { useToolStore } from "@/state/tool-store";
 import {
+  type FontFamily,
   normalizeScreenRect,
   type PageGeometry,
   pdfToScreen,
@@ -26,6 +28,18 @@ import {
   withDefaultSize,
 } from "@/tools/_framework";
 import { cssFontFamily } from "@/tools/free-text/free-text";
+
+/** Optimistic-preview payload: a committed new free-text box awaiting bake. */
+interface FreeTextHeld {
+  rect: FreeTextRect;
+  text: string;
+  fontFamily: FontFamily;
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+}
 
 export interface FreeTextLayerProps {
   documentId: string;
@@ -209,32 +223,58 @@ export function FreeTextLayer({
       setHistory(documentId, h);
     };
     const fail = (err: unknown) => reportError("Couldn't save the text", err);
-    const promise = ed.editNm
-      ? updateFreeText(
-          documentId,
-          ed.editNm,
-          text,
-          options.fontFamily,
-          options.fontSize,
-          textColor,
-          options.bold,
-          options.italic,
-          options.underline,
-        )
-      : addFreeText(
-          documentId,
-          page,
-          ed.pdfRect,
-          text,
-          options.fontFamily,
-          options.fontSize,
-          textColor,
-          options.bold,
-          options.italic,
-          options.underline,
-        );
-    promise.then(done).catch(fail);
+    if (ed.editNm) {
+      updateFreeText(
+        documentId,
+        ed.editNm,
+        text,
+        options.fontFamily,
+        options.fontSize,
+        textColor,
+        options.bold,
+        options.italic,
+        options.underline,
+      )
+        .then(done)
+        .catch(fail);
+      return;
+    }
+    // New box: show it immediately, so the ~3 s apply + reload on a large PDF
+    // doesn't leave it blank until the bake lands (P4.HF29).
+    const oe = useOptimisticEditStore.getState();
+    const key = oe.add(documentId, page, "free-text", {
+      rect: ed.pdfRect,
+      text,
+      fontFamily: options.fontFamily,
+      fontSize: options.fontSize,
+      color: textColor,
+      bold: options.bold,
+      italic: options.italic,
+      underline: options.underline,
+    } satisfies FreeTextHeld);
+    addFreeText(
+      documentId,
+      page,
+      ed.pdfRect,
+      text,
+      options.fontFamily,
+      options.fontSize,
+      textColor,
+      options.bold,
+      options.italic,
+      options.underline,
+    )
+      .then((h) => {
+        done(h);
+        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+      })
+      .catch((err: unknown) => {
+        oe.remove(documentId, key);
+        fail(err);
+      });
   };
+
+  const pendingBoxes = usePendingEdits<FreeTextHeld>(documentId, page, "free-text");
 
   const preview = start && current ? normalizeScreenRect(start, current) : null;
 
@@ -257,6 +297,34 @@ export function FreeTextLayer({
           style={{ left: preview.left, top: preview.top, width: preview.width, height: preview.height }}
         />
       ) : null}
+
+      {/* Optimistic preview: committed boxes not yet baked into the page (P4.HF29). */}
+      {pendingBoxes.map(({ key, data }) => {
+        const tl = pdfToScreen({ page, x: data.rect[0], y: data.rect[3] }, geo);
+        const br = pdfToScreen({ page, x: data.rect[2], y: data.rect[1] }, geo);
+        return (
+          <div
+            key={key}
+            className="absolute whitespace-pre-wrap break-words"
+            style={{
+              left: Math.min(tl.x, br.x),
+              top: Math.min(tl.y, br.y),
+              width: Math.abs(br.x - tl.x),
+              color: data.color,
+              fontFamily: cssFontFamily(data.fontFamily),
+              fontSize: `${data.fontSize * scale}px`,
+              fontWeight: data.bold ? 700 : 400,
+              fontStyle: data.italic ? "italic" : "normal",
+              textDecoration: data.underline ? "underline" : "none",
+              lineHeight: 1.2,
+              padding: "1px 2px",
+              pointerEvents: "none",
+            }}
+          >
+            {data.text}
+          </div>
+        );
+      })}
 
       {/* SPEC: P3-ANN-013 (P3.B3b) — double-click a committed box to re-edit. Only
           when idle (no tool, no open editor); each zone opts back into pointer
