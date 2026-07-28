@@ -99,11 +99,17 @@ export async function pdfiumVersion(): Promise<string> {
 
 /**
  * Edit-preview pipeline: the actor's *live* in-memory document serialized
- * to bytes. The Rust side returns `Vec<u8>` (a JSON `number[]` over IPC);
- * wrap it as a `Uint8Array` for PDF.js `getDocument({ data })`. Reflects
- * unsaved edits (rotate, …) so the main view can update without a reopen.
+ * to bytes. The Rust side returns raw bytes via `tauri::ipc::Response`, so
+ * `invoke` resolves to an `ArrayBuffer` (not a JSON `number[]`) — essential
+ * for large documents, where the old array-of-numbers encoding ballooned a
+ * 13 MB file to ~50 MB of JSON per edit and stalled the reload (P4.HF28).
+ * Wrapped as a `Uint8Array` for PDF.js `getDocument({ data })`. Reflects
+ * unsaved edits (rotate, ink, text box, …) so the view updates without a reopen.
+ *
+ * `new Uint8Array(buf)` accepts an `ArrayBuffer` (the Response path), and also
+ * a `number[]` or typed array, so it stays correct if the transport ever changes.
  */
 export async function getPdfBytes(id: DocumentId): Promise<Uint8Array> {
-  const bytes = await invoke<number[]>("pdf_get_bytes", { id });
-  return Uint8Array.from(bytes);
+  const buf = await invoke<ArrayBuffer>("pdf_get_bytes", { id });
+  return new Uint8Array(buf);
 }

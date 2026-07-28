@@ -137,8 +137,29 @@ the current roadmap phase. When one is picked up, move it into the relevant
   unreliable). On a large doc (1300-page book) those blank + re-parse.
   Remaining optimizations: re-render only the affected page(s) on delete;
   reuse measured page dimensions across reloads; make undo/redo of a rotate
-  also cosmetic (they currently reload); and the `tauri::ipc::Response`
-  raw-bytes upgrade (also above). Do when a large PDF feels slow.
+  also cosmetic (they currently reload).
+  - ✅ **DONE 2026-07-28 (P4.HF28) — the `tauri::ipc::Response` raw-bytes
+    upgrade for `pdf_get_bytes`.** The reload fetched the whole live doc as a
+    JSON `number[]`; on a 13 MB PDF that was ~50 MB of JSON per edit and stalled
+    the reload so ink/text-box edits appeared to vanish. Now raw bytes
+    (`ArrayBuffer`) → reload serialize/transfer is ~5 ms. This fixed the
+    *transport*; the per-edit *apply* latency below is the remaining half.
+- **🐛 KNOWN — annotation edits take ~3 s each on a large (13 MB) PDF.**
+  Every `cos_edit` (ink, text box, text markup, note, …) does a full-document
+  round-trip in `apply`: `pdfium save_to_bytes → lopdf parse whole doc → edit →
+  lopdf re-serialize → pdfium re-parse` (the reload is also the round-trip
+  *verify*). That's ~3 s on a 13 MB doc and runs **serially** on the one actor
+  thread, so rapid strokes queue and the newest looks like it "disappears" until
+  its turn finishes (confirmed 2026-07-28 via actor tracing: `AddInk apply` ~3 s,
+  `get_bytes` only ~5 ms). `save_to_bytes` is cheap (~5 ms); the cost is the
+  **lopdf parse+re-serialize of the entire document per edit**. Fix directions
+  (pick when large-PDF editing is prioritized): (a) **optimistic preview** — keep
+  the just-committed shape on the overlay until the reload lands, so nothing
+  visibly vanishes regardless of backend latency (see "No optimistic preview"
+  below); (b) avoid the per-edit full lopdf round-trip (incremental content-stream
+  append / skip the reload-verify on the hot path); (c) drop the per-edit undo
+  full-byte snapshot on large docs. Same root cost as the `RestoreDocEdit`
+  full-doc snapshot memory note above — this is *the* edit-perf item.
 - **External-edit reload / file watching.** If the user edits an open PDF in
   another app (Preview, etc.), VibePDF doesn't notice — the preview is stale
   and re-opening just focuses the existing tab. Watch the file's mtime (or a

@@ -3451,6 +3451,23 @@ cd src-tauri && cargo clippy --all-targets -- -D warnings   # clean
 
 ---
 
+## P4.HF28 — Edit-preview reload returns raw bytes (big-PDF fix)
+
+`pdf_get_bytes` → `tauri::ipc::Response` (raw ArrayBuffer) instead of `Vec<u8>`
+(JSON `number[]`); `getPdfBytes` decodes the buffer. No new dep. Root-caused via
+temporary actor/command tracing (reverted before commit).
+
+Verification gates:
+
+```
+npm run check                                            # tsc + eslint + clippy clean
+npx vitest run src/ipc/__tests__/pdf-get-bytes.test.ts   # 3 passed
+node scripts/cargo-test.mjs --test get_bytes             # 2 passed (actor path unchanged)
+npx vitest run src/ipc                                   # 68 passed (30 files)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

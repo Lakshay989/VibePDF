@@ -1668,15 +1668,20 @@ pub async fn pdf_extract_pages(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
-/// Serialize the live in-memory document to bytes (returned as a
-/// `number[]` over IPC). The edit-preview pipeline reloads PDF.js from
-/// these so the main view reflects in-memory edits (rotate, …) without a
-/// save/reopen. Read-only — no mutation, no dirty change.
+/// Serialize the live in-memory document to bytes, returned as **raw bytes**
+/// via [`tauri::ipc::Response`] (an `ArrayBuffer` on the JS side), *not* a JSON
+/// `number[]`. The edit-preview pipeline calls this after every edit to reload
+/// PDF.js so the main view reflects in-memory edits (rotate, ink, text box, …)
+/// without a save/reopen. `serde`'s default `Vec<u8>` serializer emits an
+/// array-of-numbers, so a 13 MB document ballooned to ~50 MB of JSON text on
+/// every edit — slow enough on large files that the reload never landed and
+/// edits silently failed to appear (P4.HF28). Raw bytes are ~1× overhead.
+/// Read-only — no mutation, no dirty change.
 #[tauri::command]
 pub async fn pdf_get_bytes(
     state: State<'_, AppState>,
     id: String,
-) -> Result<Vec<u8>, CommandError> {
+) -> Result<tauri::ipc::Response, CommandError> {
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
 
@@ -1691,8 +1696,10 @@ pub async fn pdf_get_bytes(
         handle.get_bytes_request()?
     };
 
-    rx.await
-        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// SPEC: P2-PAGE-007 — split the document into multiple PDFs under

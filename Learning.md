@@ -7511,6 +7511,49 @@ and is hidden.
 
 ---
 
+## P4.HF28 — Edits on a big PDF didn't show up (raw-bytes IPC)
+
+### Problem
+
+On a 13 MB / 18-page PDF, editing looked broken: you could draw a pen stroke or
+type in a text box, but on release/commit it **vanished** — while small PDFs
+worked fine. The tool interaction and the backend edit were both fine; the
+**view never reloaded** to show the baked result.
+
+### Concepts learned
+
+- **`Vec<u8>` over Tauri IPC serializes as a JSON `number[]`.** The edit-preview
+  reload (`getPdfBytes`) fetched the whole live document back after every edit;
+  the Rust command returned `Vec<u8>`, which `serde`/Tauri encode as an
+  array-of-numbers. A 13 MB doc → a ~13-million-element JSON array (~50 MB of
+  text) to marshal, transfer, and `JSON.parse` **per edit**. Fine at a few KB,
+  unusable at 13 MB — so the reload stalled and the edit never appeared.
+- **`tauri::ipc::Response` returns raw bytes (an `ArrayBuffer`), ~1× overhead.**
+  Switching the command to `Ok(tauri::ipc::Response::new(bytes))` and the JS
+  wrapper to `new Uint8Array(await invoke<ArrayBuffer>(...))` dropped the reload
+  serialize/transfer to **~5 ms**. `new Uint8Array(buf)` also accepts a
+  `number[]`/typed array, so the wrapper stays correct if transport changes.
+- **Diagnosis method — trace the boundary, don't guess.** The file, PDFium, and
+  PDF.js all handled the doc perfectly in isolation (add-box + save + reparse all
+  passed). The bug only showed in the live app's *concurrent* context, so the fix
+  came from instrumenting the actual actor message flow (command entry/result,
+  render/getbytes/apply START/END) rather than from static reading.
+- **Known follow-up (not fixed here): the ~3 s per-edit apply.** Every annotation
+  edit (`cos_edit`) does a full-document round-trip — `pdfium save → lopdf parse
+  → edit → lopdf re-serialize → pdfium re-parse` — which is ~3 s on a 13 MB doc
+  and runs **serially** on the one actor thread. HF28 fixes the *transport*;
+  large-doc edit *latency* is a separate architectural item (see BACKLOG).
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/commands/pdf.rs` | `pdf_get_bytes` returns `tauri::ipc::Response` (raw bytes) instead of `Vec<u8>`. |
+| `src/ipc/pdf.ts` | `getPdfBytes` decodes the `ArrayBuffer` via `new Uint8Array(buf)`. |
+| `src/ipc/__tests__/pdf-get-bytes.test.ts` | Regression test for the ArrayBuffer decode contract. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
