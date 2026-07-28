@@ -254,11 +254,13 @@ the current roadmap phase. When one is picked up, move it into the relevant
   during which the committed shape *disappeared*. Bridged via `optimistic-edit-store`
   (hold on commit → tie to the bake epoch → prune when that reload paints) for:
   **ink, add-text box, free-text ("Text Box" tool), line, arrow, rectangle,
-  ellipse, polygon.** **TODO — same pattern for the stragglers:** `measure`
-  (measure-layer), image add (image-add-layer), stamps (stamp path), notes, and
-  the text/free-text **update/delete** re-edits (add-only for now). Each is: hold
-  on commit → render held via the layer's own draw → tie in `.then` / remove in
-  `.catch`. The `MarkupShape` overlay (kept inert) is the hook for the markup tools.
+  ellipse, polygon, measure, image add, and stamps (text + image).** Images render
+  a real `data:`-URL <img> preview (`file-data-url.ts`; CSP allows `img-src data:`).
+  **TODO — same pattern for the last few:** sticky notes, and the text / free-text /
+  shape **update/delete** re-edits (add/create-only for now). Each is: hold on
+  commit → render held via the layer's own draw → tie in `.then` / remove in `.catch`.
+  *Note:* the image-stamp preview centres on the click using the picked image's
+  aspect ratio; if the backend's placement ever diverges, the swap will jump slightly.
 - **`/QuadPoints` corner order is verified visually, not by spec.** We emit
   `UL,UR,LL,LR`; since we own the `/AP`, rendering is correct regardless, but a
   reader that *regenerates* appearance from `/QuadPoints` (Acrobat with `/AP`

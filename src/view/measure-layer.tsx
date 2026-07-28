@@ -16,6 +16,7 @@ import { addMeasure } from "@/ipc/measure";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
 import { calibrationFor, useMeasureStore } from "@/state/measure-store";
+import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, pdfToScreen, type ScreenPoint, screenToPdf } from "@/tools/_framework";
 import {
@@ -24,6 +25,14 @@ import {
   minPoints,
   straightDistance,
 } from "@/tools/measure/measure";
+
+/** Optimistic-preview payload: a committed measurement line awaiting bake (P4.HF29). */
+interface MeasureHeld {
+  vertices: { x: number; y: number }[];
+  color: string;
+  opacity: number;
+  strokeWidth: number;
+}
 
 /** A click within this many CSS px of the previous vertex is a duplicate. */
 const DEDUP_PX = 6;
@@ -92,6 +101,14 @@ export function MeasureLayer({
     const cal = calibrationFor(calibration, documentId);
     const value = measureValue(effectiveKind, pts, cal);
     const label = formatMeasurement(effectiveKind, value, cal.unit);
+    // Show the finished measurement line immediately (P4.HF29).
+    const oe = useOptimisticEditStore.getState();
+    const key = oe.add(documentId, page, "measure", {
+      vertices: pts,
+      color: options.color,
+      opacity: options.opacity,
+      strokeWidth: options.strokeWidth,
+    } satisfies MeasureHeld);
     addMeasure(
       documentId,
       page,
@@ -106,9 +123,13 @@ export function MeasureLayer({
     )
       .then((h) => {
         bumpEpoch(documentId);
+        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => reportError("Couldn't add measurement", err));
+      .catch((err: unknown) => {
+        oe.remove(documentId, key);
+        reportError("Couldn't add measurement", err);
+      });
   };
 
   // Leaving the tool abandons an in-progress measurement (no lingering rubber-band).
@@ -178,6 +199,7 @@ export function MeasureLayer({
   const v0 = screenPts[0];
   const lastPt = screenPts[screenPts.length - 1];
   const strokePx = Math.max(1, options.strokeWidth * scale);
+  const pendingMeasures = usePendingEdits<MeasureHeld>(documentId, page, "measure");
 
   return (
     <svg
@@ -189,6 +211,20 @@ export function MeasureLayer({
       onPointerMove={onPointerMove}
       onDoubleClick={onDoubleClick}
     >
+      {/* Optimistic preview: committed measurement lines not yet baked (P4.HF29). */}
+      {pendingMeasures.map(({ key, data }) => (
+        <polyline
+          key={key}
+          points={data.vertices.map((v) => {
+            const s = pdfToScreen({ page, x: v.x, y: v.y }, geo);
+            return `${s.x},${s.y}`;
+          }).join(" ")}
+          fill="none"
+          stroke={data.color}
+          strokeWidth={Math.max(1, data.strokeWidth * scale)}
+          opacity={data.opacity}
+        />
+      ))}
       {screenPts.length > 0 ? (
         <>
           {screenPts.length > 1 ? (

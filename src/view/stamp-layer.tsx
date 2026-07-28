@@ -12,10 +12,17 @@ import { type PointerEvent as ReactPointerEvent } from "react";
 import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
+import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit-store";
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
-import { type PageGeometry, screenToPdf } from "@/tools/_framework";
+import { type PageGeometry, pdfToScreen, screenToPdf } from "@/tools/_framework";
 import { IMAGE_STAMP_HEIGHT, stampRectAt } from "@/tools/stamp/stamps";
+import { fileToDataUrl, imageAspect } from "@/view/file-data-url";
+
+/** Optimistic-preview payload: a committed stamp awaiting bake (P4.HF29). */
+type StampHeld =
+  | { variant: "text"; rect: [number, number, number, number]; label: string; color: string }
+  | { variant: "image"; rect: [number, number, number, number]; src: string };
 
 export interface StampLayerProps {
   documentId: string;
@@ -61,35 +68,84 @@ export function StampLayer({
     if (!active || !armed || e.button !== 0) return;
     const r = e.currentTarget.getBoundingClientRect();
     const pdf = screenToPdf({ x: e.clientX - r.left, y: e.clientY - r.top }, geo);
+    const oe = useOptimisticEditStore.getState();
+    const tie = (key: string) =>
+      oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+
     // Image stamps place aspect-correct around the click (the backend derives the
-    // rect from the image's ratio); text stamps drop a fixed-size box.
-    const commit =
-      armed.kind === "image"
-        ? addImageStamp(
+    // rect from the image's ratio); we mirror that centring for the preview.
+    if (armed.kind === "image") {
+      const { imagePath } = armed;
+      const label = armed.label ?? null;
+      void (async () => {
+        let key: string | null = null;
+        try {
+          const src = await fileToDataUrl(imagePath);
+          const aspect = await imageAspect(src);
+          const h = IMAGE_STAMP_HEIGHT;
+          const w = h * aspect;
+          const rect: [number, number, number, number] = [
+            pdf.x - w / 2,
+            pdf.y - h / 2,
+            pdf.x + w / 2,
+            pdf.y + h / 2,
+          ];
+          key = oe.add(documentId, page, "stamp", { variant: "image", rect, src });
+        } catch {
+          // No preview available; still place the stamp below.
+        }
+        try {
+          const done = await addImageStamp(
             documentId,
             page,
             pdf.x,
             pdf.y,
             IMAGE_STAMP_HEIGHT,
-            armed.imagePath,
-            armed.label ?? null,
-            options.opacity,
-          )
-        : addStamp(
-            documentId,
-            page,
-            stampRectAt(pdf.x, pdf.y, geo.width, geo.height),
-            armed.label,
-            armed.name,
-            armed.color,
+            imagePath,
+            label,
             options.opacity,
           );
-    commit
+          bumpEpoch(documentId);
+          if (key) tie(key);
+          setHistory(documentId, done);
+        } catch (err) {
+          if (key) oe.remove(documentId, key);
+          reportError("Couldn't add stamp", err);
+        }
+      })();
+      return;
+    }
+
+    // Text stamp: fixed-size box with a bold uppercase label.
+    const rect = stampRectAt(pdf.x, pdf.y, geo.width, geo.height);
+    const key = oe.add(documentId, page, "stamp", {
+      variant: "text",
+      rect: [rect[0], rect[1], rect[2], rect[3]],
+      label: armed.label,
+      color: armed.color,
+    });
+    addStamp(documentId, page, rect, armed.label, armed.name, armed.color, options.opacity)
       .then((h) => {
         bumpEpoch(documentId);
+        tie(key);
         setHistory(documentId, h);
       })
-      .catch((err: unknown) => reportError("Couldn't add stamp", err));
+      .catch((err: unknown) => {
+        oe.remove(documentId, key);
+        reportError("Couldn't add stamp", err);
+      });
+  };
+
+  const pendingStamps = usePendingEdits<StampHeld>(documentId, page, "stamp");
+  const stampScreenRect = (rect: [number, number, number, number]) => {
+    const tl = pdfToScreen({ page, x: rect[0], y: rect[3] }, geo);
+    const br = pdfToScreen({ page, x: rect[2], y: rect[1] }, geo);
+    return {
+      left: Math.min(tl.x, br.x),
+      top: Math.min(tl.y, br.y),
+      width: Math.abs(br.x - tl.x),
+      height: Math.abs(br.y - tl.y),
+    };
   };
 
   return (
@@ -102,6 +158,49 @@ export function StampLayer({
         cursor: active ? "copy" : undefined,
       }}
       onPointerDown={onPointerDown}
-    />
+    >
+      {/* Optimistic preview: committed stamps not yet baked into the page (P4.HF29). */}
+      {pendingStamps.map(({ key, data }) => {
+        const r = stampScreenRect(data.rect);
+        if (data.variant === "image") {
+          return (
+            <img
+              key={key}
+              src={data.src}
+              alt=""
+              draggable={false}
+              style={{
+                position: "absolute",
+                left: r.left,
+                top: r.top,
+                width: r.width,
+                height: r.height,
+                objectFit: "fill",
+                pointerEvents: "none",
+              }}
+            />
+          );
+        }
+        return (
+          <div
+            key={key}
+            className="absolute flex items-center justify-center rounded font-bold uppercase"
+            style={{
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              height: r.height,
+              border: `2px solid ${data.color}`,
+              color: data.color,
+              fontSize: `${Math.max(8, r.height * 0.4)}px`,
+              letterSpacing: "0.05em",
+              pointerEvents: "none",
+            }}
+          >
+            {data.label}
+          </div>
+        );
+      })}
+    </div>
   );
 }

@@ -10,6 +10,13 @@ vi.mock("@/ipc/stamps", () => ({
   addImageStamp: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
+// Image stamps read the picked file for an optimistic <img> preview (P4.HF29);
+// stub it so the async path is deterministic.
+vi.mock("@/view/file-data-url", () => ({
+  fileToDataUrl: vi.fn().mockResolvedValue("data:image/png;base64,AAAA"),
+  imageAspect: vi.fn().mockResolvedValue(1),
+}));
+
 import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useStampStore } from "@/state/stamp-store";
@@ -70,7 +77,7 @@ describe("StampLayer", () => {
 
   // SPEC: P3-ANN-006 (P3.C3b) — an armed image stamp routes to addImageStamp with
   // the click point (the backend derives the aspect-correct rect).
-  it("drops an armed image stamp at the click point", () => {
+  it("drops an armed image stamp at the click point", async () => {
     useStampStore.setState({
       armed: { kind: "image", name: "sig.png", imagePath: "/tmp/sig.png" },
     });
@@ -81,8 +88,11 @@ describe("StampLayer", () => {
       pointerId: 1,
       button: 0,
     });
-    // screen (300,400) → PDF (300, 392); height 64, no label.
-    expect(mockAddImageStamp).toHaveBeenCalledWith(DOC, 0, 300, 392, 64, "/tmp/sig.png", null, 1);
+    // The embed is awaited behind the preview read; screen (300,400) → PDF
+    // (300, 392); height 64, no label.
+    await vi.waitFor(() =>
+      expect(mockAddImageStamp).toHaveBeenCalledWith(DOC, 0, 300, 392, 64, "/tmp/sig.png", null, 1),
+    );
     expect(mockAddStamp).not.toHaveBeenCalled();
   });
 

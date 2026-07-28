@@ -21,6 +21,8 @@ export default [
         console: "readonly",
         URL: "readonly",
         Blob: "readonly",
+        FileReader: "readonly",
+        Image: "readonly",
         fetch: "readonly",
         localStorage: "readonly",
         Element: "readonly",
