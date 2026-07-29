@@ -3483,6 +3483,24 @@ npx vitest run src/state src/ipc src/view                          # 196 passed 
 
 ---
 
+## P4.PERF1 — Read cache (stop re-parsing the whole PDF per query)
+
+Rust only (`doc_cache.rs` + cos read-fn split + actor wiring). No new dep, no
+frontend change, no write-path change (byte-identical output).
+
+Verification gates:
+
+```
+npm run check                                                    # tsc + eslint + clippy pedantic clean
+node scripts/cargo-test.mjs --lib doc_cache                      # 1 passed (cache unit test)
+node scripts/cargo-test.mjs --test doc_cache                     # 1 passed (actor invalidate on edit + undo)
+node scripts/cargo-test.mjs --lib                                # 91 passed
+node scripts/cargo-test.mjs --test text_box --test free_text --test measure \
+  --test read_annotations --test text_note                       # all green (reads via cache)
+```
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

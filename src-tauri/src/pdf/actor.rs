@@ -48,9 +48,10 @@ use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
-    read_annotations, read_free_text, read_measure_calibration, read_text_boxes, read_text_notes,
-    AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
+    read_annotations_doc, read_free_text_doc, read_measure_calibration_doc, read_text_boxes_doc,
+    read_text_notes_doc, AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
 };
+use crate::pdf::doc_cache::CachedDoc;
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
 use crate::pdf::image_extract::{extract_images, ImageInfo};
@@ -2321,6 +2322,12 @@ fn run_worker(
     // pins the target type to `doc`'s on first `undo`/`redo` call.
     let mut history = UndoStack::new();
 
+    // SPEC: NFR-PERF-005 — cache the parsed `lopdf::Document` so a post-edit
+    // burst of reads (annotations panel, text boxes, free-text, notes, measure,
+    // across every visible page) shares one parse instead of re-parsing the whole
+    // document per query. Invalidated below whenever an edit changes the doc.
+    let mut doc_cache = CachedDoc::new();
+
     // SPEC: P2.A2 — where this document's autosave/recovery copy lives.
     // Derived from the AppHandle, so it is `None` under `cargo test`
     // (app = None) → autosave and its cleanup are no-ops there.
@@ -2328,6 +2335,10 @@ fn run_worker(
     let autosave_dir = app.as_ref().and_then(|a| autosave::autosave_dir(a).ok());
 
     while let Ok(msg) = rx.recv() {
+        // Any mutation records an undo inverse, so a changed state id after the
+        // match means the document changed → drop the read cache (next read
+        // re-parses). Reads leave history untouched, so the cache stays warm.
+        let state_before = history.current_state_id();
         match msg {
             Message::GetPageCount { reply } => {
                 let _ = reply.send(metadata.page_count);
@@ -2696,17 +2707,25 @@ fn run_worker(
                 let _ = reply.send(result);
             }
             Message::ReadNotes { reply } => {
-                // Read-only: serialize under the shared PDFium lock (same path as
-                // GetBytes), then parse the notes out of the bytes with lopdf.
-                let result = pdfium_lock()
-                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
-                    .and_then(|bytes| read_text_notes(&bytes));
+                // Read-only. SPEC: NFR-PERF-005 — serve from the shared parse
+                // cache; only a cold cache serializes (under the PDFium lock, the
+                // GetBytes path) + parses, so a post-edit read burst parses once.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(read_text_notes_doc);
                 let _ = reply.send(result);
             }
             Message::ReadAnnotations { reply } => {
-                let result = pdfium_lock()
-                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
-                    .and_then(|bytes| read_annotations(&bytes));
+                // Read-only. SPEC: NFR-PERF-005 — served from the shared parse cache.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(read_annotations_doc);
                 let _ = reply.send(result);
             }
             Message::ExportAnnotations { dest, reply } => {
@@ -2747,9 +2766,13 @@ fn run_worker(
                 let _ = reply.send(result);
             }
             Message::ReadFreeText { nm, reply } => {
-                let result = pdfium_lock()
-                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
-                    .and_then(|bytes| read_free_text(&bytes, &nm));
+                // Read-only. SPEC: NFR-PERF-005 — served from the shared parse cache.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(|d| read_free_text_doc(d, &nm));
                 let _ = reply.send(result);
             }
             Message::UpdateFreeText {
@@ -2883,11 +2906,14 @@ fn run_worker(
                 let _ = reply.send(result);
             }
             Message::ReadTextBoxes { page, reply } => {
-                // SPEC: P4-EDIT-003b — read-only: serialize under the PDFium lock
-                // (same path as ReadAnnotations), then parse the boxes with lopdf.
-                let result = pdfium_lock()
-                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
-                    .and_then(|bytes| read_text_boxes(&bytes, page));
+                // SPEC: P4-EDIT-003b — read-only. NFR-PERF-005: served from the
+                // shared parse cache (cold cache serializes under the PDFium lock).
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(|d| read_text_boxes_doc(d, page));
                 let _ = reply.send(result);
             }
             Message::RemoveTextBox { page, id, reply } => {
@@ -3136,12 +3162,14 @@ fn run_worker(
                 let _ = reply.send(result);
             }
             Message::ReadMeasureCalibration { reply } => {
-                // SPEC: P3-ANN-007 (P3.C4b) — read-only: serialize, then read the
-                // calibration out of the first /Measure dict (same path as the
-                // other read queries).
-                let result = pdfium_lock()
-                    .and_then(|_guard| doc.save_to_bytes().map_err(CommandError::from))
-                    .and_then(|bytes| read_measure_calibration(&bytes));
+                // SPEC: P3-ANN-007 (P3.C4b) — read-only. NFR-PERF-005: served from
+                // the shared parse cache (cold cache serializes under the lock).
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(read_measure_calibration_doc);
                 let _ = reply.send(result);
             }
             Message::InsertFromPdf { source_path, pages, index, reply } => {
@@ -3192,6 +3220,14 @@ fn run_worker(
                 tracing::info!("doc-actor closing (Close received)");
                 break;
             }
+        }
+
+        // SPEC: NFR-PERF-005 — a mutation records undo history, so a changed
+        // state id after handling the message means the document changed → drop
+        // the read cache (next read re-parses the edited bytes). Reads leave
+        // history untouched, so the cache survives the post-edit read burst.
+        if history.current_state_id() != state_before {
+            doc_cache.invalidate();
         }
     }
 

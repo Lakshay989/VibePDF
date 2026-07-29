@@ -144,6 +144,18 @@ the current roadmap phase. When one is picked up, move it into the relevant
     the reload so ink/text-box edits appeared to vanish. Now raw bytes
     (`ArrayBuffer`) → reload serialize/transfer is ~5 ms. This fixed the
     *transport*; the per-edit *apply* latency below is the remaining half.
+- **⏳ IN PROGRESS — the per-op full-document re-parse (NFR-PERF-005).**
+  - ✅ **DONE 2026-07-29 (P4.PERF1) — read cache.** Every actor read
+    (`read_annotations`/`read_text_boxes`/`read_free_text`/`read_text_notes`/
+    `read_measure_calibration`) used to re-parse the whole doc with lopdf; a
+    post-edit burst of reads (annotations panel + thumbnails, per page) re-parsed
+    many times. Now a per-actor `CachedDoc` parses once and the burst reuses it;
+    invalidated whenever an edit changes the undo state id (see `pdf::doc_cache`).
+    Fixes the *annotation panel / thumbnail loading* slowness on large files.
+  - 🔲 **TODO — write path.** `cos_edit` still re-parses the whole doc per edit
+    (the ~3 s apply below). Next increment: mutate the cached `Document` in place →
+    serialize once → reload PDFium, instead of `save_to_bytes → load_mem → edit →
+    reload`. Needs the cache-drift audit (Risk #1 of the plan) before it can write.
 - **🐛 KNOWN — annotation edits take ~3 s each on a large (13 MB) PDF.**
   Every `cos_edit` (ink, text box, text markup, note, …) does a full-document
   round-trip in `apply`: `pdfium save_to_bytes → lopdf parse whole doc → edit →

@@ -5,6 +5,7 @@ pub mod background;
 pub mod cos;
 pub mod crop;
 pub mod delete_page;
+pub mod doc_cache;
 pub mod document;
 pub mod extract;
 pub mod flatten;

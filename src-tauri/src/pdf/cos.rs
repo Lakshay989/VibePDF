@@ -1509,6 +1509,13 @@ pub struct TextBoxInfo {
 /// (P4-EDIT-001).
 pub fn read_text_boxes(bytes: &[u8], page: usize) -> Result<Vec<TextBoxInfo>, CommandError> {
     let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    read_text_boxes_doc(&doc, page)
+}
+
+/// SPEC: NFR-PERF-005 — read from an already-parsed `Document` so the actor can
+/// share one parse across a burst of reads instead of re-parsing per query
+/// (see `pdf::doc_cache`).
+pub fn read_text_boxes_doc(doc: &Document, page: usize) -> Result<Vec<TextBoxInfo>, CommandError> {
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -2230,7 +2237,12 @@ pub struct FreeTextData {
 /// defaults.
 pub fn read_free_text(bytes: &[u8], nm: &str) -> Result<Option<FreeTextData>, CommandError> {
     let doc = Document::load_mem(bytes).map_err(cos_err)?;
-    let Some(id) = find_annotation_by_nm(&doc, nm) else { return Ok(None) };
+    read_free_text_doc(&doc, nm)
+}
+
+/// SPEC: NFR-PERF-005 — read from an already-parsed `Document` (see `pdf::doc_cache`).
+pub fn read_free_text_doc(doc: &Document, nm: &str) -> Result<Option<FreeTextData>, CommandError> {
+    let Some(id) = find_annotation_by_nm(doc, nm) else { return Ok(None) };
     let Ok(dict) = doc.get_dictionary(id) else { return Ok(None) };
     if dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(&b"FreeText"[..]) {
         return Ok(None);
@@ -2241,7 +2253,7 @@ pub fn read_free_text(bytes: &[u8], nm: &str) -> Result<Option<FreeTextData>, Co
         .ok()
         .map_or_else(String::new, |s| String::from_utf8_lossy(s).into_owned());
     let (font_size, color) = parse_da(&da);
-    let (font_family, bold, italic) = font_from_base(read_ap_base_font(&doc, dict).as_deref());
+    let (font_family, bold, italic) = font_from_base(read_ap_base_font(doc, dict).as_deref());
     let underline = matches!(dict.get(b"Underline"), Ok(Object::Boolean(true)));
     Ok(Some(FreeTextData {
         rect: rect_bounds(dict),
@@ -3471,6 +3483,13 @@ fn measure_dict(units_per_point: f32, unit: &str) -> Dictionary {
 /// `/X` `/C` conversion + `/U` label), or `None` if no annotation carries one.
 pub fn read_measure_calibration(bytes: &[u8]) -> Result<Option<MeasureCalibration>, CommandError> {
     let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    read_measure_calibration_doc(&doc)
+}
+
+/// SPEC: NFR-PERF-005 — read from an already-parsed `Document` (see `pdf::doc_cache`).
+pub fn read_measure_calibration_doc(
+    doc: &Document,
+) -> Result<Option<MeasureCalibration>, CommandError> {
     for page_id in doc.get_pages().values() {
         let arr = match doc.get_dictionary(*page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned()) {
             Some(Object::Array(a)) => a,
@@ -4440,6 +4459,11 @@ pub struct NoteData {
 /// wrote).
 pub fn read_text_notes(bytes: &[u8]) -> Result<Vec<NoteData>, CommandError> {
     let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    read_text_notes_doc(&doc)
+}
+
+/// SPEC: NFR-PERF-005 — read from an already-parsed `Document` (see `pdf::doc_cache`).
+pub fn read_text_notes_doc(doc: &Document) -> Result<Vec<NoteData>, CommandError> {
     let mut notes = Vec::new();
 
     // `get_pages` is a BTreeMap keyed by 1-based page number, so iteration is
@@ -4588,6 +4612,11 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
 /// subtypes (`/Link`, `/Widget`, `/Popup`, …) are skipped.
 pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandError> {
     let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    read_annotations_doc(&doc)
+}
+
+/// SPEC: NFR-PERF-005 — read from an already-parsed `Document` (see `pdf::doc_cache`).
+pub fn read_annotations_doc(doc: &Document) -> Result<Vec<AnnotationInfo>, CommandError> {
     let mut out = Vec::new();
 
     for (page_no, page_id) in doc.get_pages() {
@@ -4619,7 +4648,7 @@ pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandErro
                 contents: str_field(dict, b"Contents"),
                 author: str_field(dict, b"T"),
                 modified: dict.get(b"M").and_then(Object::as_str).ok().and_then(parse_pdf_date),
-                in_reply_to: irt_handle(&doc, dict),
+                in_reply_to: irt_handle(doc, dict),
             });
         }
     }

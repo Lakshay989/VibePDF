@@ -7601,6 +7601,50 @@ measure, image, and stamp.
 
 ---
 
+## P4.PERF1 — Read cache: stop re-parsing the whole PDF per query
+
+### Problem (SPEC: NFR-PERF-005, proposed)
+
+On a 13 MB PDF, editing lagged and the annotations panel + thumbnails loaded
+slowly. Root cause: every actor **read** (`read_annotations`, `read_text_boxes`,
+`read_free_text`, `read_text_notes`, `read_measure_calibration`) serialized the
+PDFium document and **re-parsed the whole thing with lopdf** (`Document::load_mem`,
+seconds). A post-edit epoch bump fires a *burst* of these across every visible
+page, so the single actor thread re-parsed the document many times per edit.
+
+### Concepts learned
+
+- **Parse once, reuse across the burst.** A per-actor `CachedDoc` holds the
+  parsed `lopdf::Document`. The first read after an edit parses; the rest of the
+  burst reuse it. Lazy + closure-driven, so a warm cache does *no* work — no
+  serialize, no PDFium lock.
+- **Invalidate by a signal you already have.** Every mutation records an undo
+  inverse, so the undo stack's `current_state_id()` changes on writes/undo/redo
+  but not on reads. Comparing it before/after each actor message is a
+  one-line, always-correct invalidation trigger — no per-write-arm bookkeeping,
+  no drift (the cache is never mutated in place at this stage; it's re-parsed).
+- **Split, don't rewrite.** Each read fn got a `*_doc(&Document, …)` core; the
+  `bytes` version is now a thin wrapper (`load_mem` → `_doc`). Tests that call the
+  byte fns are unchanged; the actor calls the `_doc` variants against the cache.
+- **`&doc` churn.** Once the body takes `&Document`, inner `helper(&doc, …)` calls
+  become `helper(doc, …)` (clippy `needless_borrow`); `//!`/`///` doc comments are
+  `doc_markdown`-checked (backtick ``PDFium``), unlike plain `//` comments.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/doc_cache.rs` | `CachedDoc` — lazy, invalidate-on-write parse cache + unit test. |
+| `src-tauri/src/pdf/cos.rs` | Split 5 read fns into `*_doc(&Document, …)` cores + byte wrappers. |
+| `src-tauri/src/pdf/actor.rs` | Worker holds a `CachedDoc`; reads serve from it; state-id change invalidates. |
+| `src-tauri/tests/doc_cache.rs` | Actor-level: read reflects edit, reverts after undo (cache invalidation). |
+
+**Scope:** this increment speeds *reads* only (the symptom you hit). The per-edit
+*write* still re-parses inside `cos_edit`; in-place write mutation is the next
+increment (see BACKLOG edit-perf item).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
