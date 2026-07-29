@@ -32,6 +32,8 @@ interface MeasureHeld {
   color: string;
   opacity: number;
   strokeWidth: number;
+  /** The computed measurement text, shown immediately (before the baked reload). */
+  label: string;
 }
 
 /** A click within this many CSS px of the previous vertex is a duplicate. */
@@ -108,6 +110,7 @@ export function MeasureLayer({
       color: options.color,
       opacity: options.opacity,
       strokeWidth: options.strokeWidth,
+      label,
     } satisfies MeasureHeld);
     addMeasure(
       documentId,
@@ -211,20 +214,41 @@ export function MeasureLayer({
       onPointerMove={onPointerMove}
       onDoubleClick={onDoubleClick}
     >
-      {/* Optimistic preview: committed measurement lines not yet baked (P4.HF29). */}
-      {pendingMeasures.map(({ key, data }) => (
-        <polyline
-          key={key}
-          points={data.vertices.map((v) => {
-            const s = pdfToScreen({ page, x: v.x, y: v.y }, geo);
-            return `${s.x},${s.y}`;
-          }).join(" ")}
-          fill="none"
-          stroke={data.color}
-          strokeWidth={Math.max(1, data.strokeWidth * scale)}
-          opacity={data.opacity}
-        />
-      ))}
+      {/* Optimistic preview: committed measurement line + value, shown immediately
+          so the reading appears without waiting for the baked reload (P4.HF29). */}
+      {pendingMeasures.map(({ key, data }) => {
+        const sp = data.vertices.map((v) => pdfToScreen({ page, x: v.x, y: v.y }, geo));
+        if (sp.length === 0) return null;
+        const last = sp[sp.length - 1];
+        return (
+          <g key={key}>
+            {sp.length > 1 ? (
+              <polyline
+                points={sp.map((p) => `${p.x},${p.y}`).join(" ")}
+                fill="none"
+                stroke={data.color}
+                strokeWidth={Math.max(1, data.strokeWidth * scale)}
+                opacity={data.opacity}
+              />
+            ) : null}
+            {data.label ? (
+              <text
+                x={last.x + 6}
+                y={last.y - 6}
+                fill={data.color}
+                fontSize={12}
+                fontWeight={600}
+                stroke="#fff"
+                strokeWidth={3}
+                paintOrder="stroke"
+                style={{ pointerEvents: "none" }}
+              >
+                {data.label}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
       {screenPts.length > 0 ? (
         <>
           {screenPts.length > 1 ? (
