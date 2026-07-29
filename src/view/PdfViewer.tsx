@@ -40,7 +40,7 @@ import {
   pathHash,
   saveViewSettings,
 } from "@/state/view-persistence";
-import { isDocEdited, useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
+import { isDocEdited, useDebouncedDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useOptimisticEditStore } from "@/state/optimistic-edit-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
@@ -49,6 +49,11 @@ interface Props {
   documentId: DocumentId;
   path: string;
 }
+
+// SPEC: NFR-PERF-005 — how long editing must pause before the main view reloads
+// the baked document. Rapid strokes keep resetting this, so the (blanking) full
+// reload runs at most once per pause; the optimistic overlay shows edits meanwhile.
+const RELOAD_DEBOUNCE_MS = 900;
 
 // SPEC: P1-VIEW-001, P1-VIEW-005, P1-VIEW-006, NFR-PERF-003.
 //
@@ -73,9 +78,11 @@ export function PdfViewer({ documentId, path }: Props) {
   const showAnnotations = useViewStore((s) => s.showAnnotations);
   const darkMode = useDarkMode();
 
-  // SPEC: edit-preview pipeline — bumped on every edit/undo/redo; drives
-  // the reload-from-actor-bytes effect below.
-  const epoch = useDocEpoch(documentId);
+  // SPEC: edit-preview pipeline — bumped on every edit/undo/redo; drives the
+  // reload-from-actor-bytes effect below. Debounced so rapid editing doesn't
+  // reload (and blank) the whole document per stroke — the optimistic overlay
+  // (P4.HF29) shows edits live, so the baked reload runs once editing pauses.
+  const epoch = useDebouncedDocEpoch(documentId, RELOAD_DEBOUNCE_MS);
 
   // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
   // embedded or installed, so the user knows editing it will substitute.

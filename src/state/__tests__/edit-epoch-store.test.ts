@@ -2,9 +2,14 @@
 // The main view and thumbnails subscribe and reload when a doc's epoch
 // changes. Tested at the store-action level.
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isDocEdited, useEditEpochStore } from "@/state/edit-epoch-store";
+import {
+  isDocEdited,
+  useDebouncedDocEpoch,
+  useEditEpochStore,
+} from "@/state/edit-epoch-store";
 
 beforeEach(() => {
   useEditEpochStore.setState({ byDoc: {}, edited: {} });
@@ -41,5 +46,35 @@ describe("edit-epoch-store", () => {
     useEditEpochStore.getState().bumpEpoch("d2");
     expect(isDocEdited("d2")).toBe(true);
     expect(isDocEdited("d1")).toBe(false); // independent
+  });
+});
+
+// SPEC: NFR-PERF-005 — the debounced epoch holds steady during rapid edits so
+// the main view reloads (and blanks) at most once per pause.
+describe("useDebouncedDocEpoch", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("holds steady while edits keep coming, then settles after the delay", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useDebouncedDocEpoch("d1", 900));
+    expect(result.current).toBe(0);
+
+    // Three quick edits within the window: the debounced value stays at 0.
+    act(() => {
+      useEditEpochStore.getState().bumpEpoch("d1");
+      useEditEpochStore.getState().bumpEpoch("d1");
+    });
+    act(() => vi.advanceTimersByTime(500));
+    act(() => {
+      useEditEpochStore.getState().bumpEpoch("d1"); // resets the timer
+    });
+    act(() => vi.advanceTimersByTime(500));
+    expect(result.current).toBe(0);
+
+    // Editing pauses past the delay → the debounced value catches up to 3.
+    act(() => vi.advanceTimersByTime(900));
+    expect(result.current).toBe(3);
   });
 });

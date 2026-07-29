@@ -35,6 +35,8 @@ export default [
         HTMLTextAreaElement: "readonly",
         RegExpExecArray: "readonly",
         requestAnimationFrame: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
         WheelEvent: "readonly",
         IntersectionObserver: "readonly",
         IntersectionObserverCallback: "readonly",

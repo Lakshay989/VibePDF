@@ -605,10 +605,17 @@ a deeper look someday, especially:
   `initialScrollTop`, which the virtualizer restores after re-measure (page
   heights + scale are unchanged across an annotation edit, so the px offset maps
   back exactly) — replacing the old jump-to-page-*top* restore. The remaining
-  **blank/flash** (the page briefly disappears during the reload) still wants the
-  doc-level double-buffer (keep the old doc mounted, swap a freshly-loaded one in
-  when ready); a first attempt at that skewed page-geometry timing (shapes
-  off-spot, ovals→circles) and was reverted — redo it with the dev app open.
+  **blank/flash** (the page briefly disappears during the reload) —
+  **reduced 2026-07-29 (P4.PERF2):** the reload is now **debounced**
+  (`useDebouncedDocEpoch`, ~900 ms), so on a large file the whole-doc reload +
+  blank runs *once per editing pause* instead of per stroke; the optimistic
+  overlay (P4.HF29) carries edits live in between. The remaining single
+  pause-blank still wants the doc-level **double-buffer** (keep the old doc
+  mounted, swap a freshly-loaded one in when ready); a first attempt at that
+  skewed page-geometry timing (shapes off-spot, ovals→circles) and was reverted —
+  redo it with the dev app open. Also open: thumbnails re-render (`pdf_render_page`)
+  per page on a reload — ~a minute for a heavy 18-page doc; wants only-changed-page
+  thumbnail refresh.
 
 ## From the 2026-06-25 verification sweep (Phase-3 in-app pass)
 

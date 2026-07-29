@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 
 import type { DocumentId } from "@/ipc/pdf";
@@ -35,6 +36,27 @@ export const useEditEpochStore = create<EditEpochState>((set) => ({
 /** Reactive selector: a document's edit epoch (0 before any reload-edit). */
 export function useDocEpoch(id: DocumentId | undefined): number {
   return useEditEpochStore((s) => (id ? (s.byDoc[id] ?? 0) : 0));
+}
+
+/**
+ * The document's edit epoch, but held steady until edits pause for `delayMs`.
+ *
+ * The main view reloads (and briefly blanks) the *whole* PDF.js document on every
+ * epoch change; on a large file each reload takes seconds, so per-stroke reloads
+ * blank the page almost continuously. The optimistic overlay (P4.HF29) carries
+ * committed edits live, so the expensive baked reload only needs to run once the
+ * user stops editing — this debounce makes the view reload at most once per pause.
+ * `documentId`/`path` changes still reload immediately (they aren't debounced).
+ */
+export function useDebouncedDocEpoch(id: DocumentId | undefined, delayMs: number): number {
+  const epoch = useDocEpoch(id);
+  const [debounced, setDebounced] = useState(epoch);
+  useEffect(() => {
+    if (epoch === debounced) return undefined;
+    const timer = setTimeout(() => setDebounced(epoch), delayMs);
+    return () => clearTimeout(timer);
+  }, [epoch, debounced, delayMs]);
+  return debounced;
 }
 
 /**
