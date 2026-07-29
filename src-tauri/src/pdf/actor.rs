@@ -45,6 +45,7 @@ use crate::pdf::annotation::{
     UpdateFreeTextEdit, UpdateNoteEdit, UpdateTextBoxEdit,
 };
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
+use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::page_numbers::PageNumbersEdit;
 use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
@@ -441,6 +442,21 @@ pub enum Message {
         position: String,
         align: String,
         format: String,
+        start: i32,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-012 — stamp a Bates id (`{prefix}{padded seq}{suffix}`, from
+    /// `start`) in the `position`/`align` margin of every page. Undoable.
+    AddBates {
+        position: String,
+        align: String,
+        prefix: String,
+        suffix: String,
+        padding: u32,
         start: i32,
         font_family: String,
         size: f32,
@@ -1575,6 +1591,62 @@ impl DocumentActorHandle {
         )?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P4-EDIT-012 (P4.D5) — stamp Bates numbers. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_bates(
+        &self,
+        position: String,
+        align: String,
+        prefix: String,
+        suffix: String,
+        padding: u32,
+        start: i32,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_bates_request(
+            position, align, prefix, suffix, padding, start, font_family, size, color, margin,
+        )?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P4-EDIT-012 — stamp Bates numbers. Non-blocking; the command awaits.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_bates_request(
+        &self,
+        position: String,
+        align: String,
+        prefix: String,
+        suffix: String,
+        padding: u32,
+        start: i32,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddBates {
+                position,
+                align,
+                prefix,
+                suffix,
+                padding,
+                start,
+                font_family,
+                size,
+                color,
+                margin,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3142,6 +3214,42 @@ fn run_worker(
                     position,
                     align,
                     format,
+                    start,
+                    font_family,
+                    size,
+                    color,
+                    margin,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddBates {
+                position,
+                align,
+                prefix,
+                suffix,
+                padding,
+                start,
+                font_family,
+                size,
+                color,
+                margin,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-012 (P4.D5) — Bates numbers appended as page content;
+                // the inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = BatesEdit {
+                    position,
+                    align,
+                    prefix,
+                    suffix,
+                    padding,
                     start,
                     font_family,
                     size,

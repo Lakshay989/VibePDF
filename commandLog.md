@@ -3524,6 +3524,31 @@ Two clippy fixes on my own additions: `const` moved above the guard in
 
 ---
 
+## P4.D5 — Bates numbering (SPEC P4-EDIT-012)
+
+New `pdf/bates.rs` + actor message/command/register; frontend ipc wrapper +
+`BatesDialog` + toolbar button. New dep: none. `docs/02` unchanged. Single-doc;
+cross-document batch deferred (merge-then-Bates covers it).
+
+Verification gates + tests:
+
+```
+npm run check                                                   # tsc + eslint + clippy pedantic clean
+cargo test --test bates                                         # 10 passed, 1 ignored (artifact)
+cargo test --lib bates                                          # 4 passed (bates_label: pad/overflow/prefix-suffix)
+npx vitest run src/app/__tests__/BatesDialog.test.tsx           # 5 passed
+npx vitest run src/app                                          # 47 passed (incl. ZoomToolbar + PageNumbers)
+cargo test --lib --test page_numbers --test header_footer --test watermark  # 100 lib + siblings green (no regression)
+cargo test --test bates bates_writes_verification_artifact -- --ignored     # wrote Sample PDFs/vibepdf-verify-bates.pdf
+```
+
+One clippy fix on my own code: `uninlined_format_args` in `bates_label`
+(`{value:0>padding$}` instead of `width = padding`). One test-design fix:
+`BatesDialog` empty-field validation now checks `trim() === ""` (empty → 0 is a
+*valid* Bates start, so the guard had to key off the cleared string to fire).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

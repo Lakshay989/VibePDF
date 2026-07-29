@@ -44,6 +44,9 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-011 — open the page-numbers dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onPageNumbers?: (() => void) | undefined;
+  /** SPEC: P4-EDIT-012 — open the Bates-numbering dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onBates?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -55,6 +58,7 @@ export function ZoomToolbar({
   onBackground,
   onHeaderFooter,
   onPageNumbers,
+  onBates,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -254,6 +258,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Page numbers…
+        </button>
+      ) : null}
+
+      {onBates ? (
+        <button
+          type="button"
+          onClick={onBates}
+          title="Add Bates numbering (prefix, padding, starting number)"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Bates…
         </button>
       ) : null}
 

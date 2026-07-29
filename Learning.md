@@ -7705,6 +7705,72 @@ per-page computed value.
 
 ---
 
+## P4.D5 — Bates numbering (the sibling feature, and knowing when *not* to refactor)
+
+### Problem
+
+SPEC P4-EDIT-012: stamp a **Bates number** — a unique, consecutive id used in
+legal discovery so every page of a production has an unambiguous reference — with
+a configurable **prefix, suffix, zero-padding, and starting number** (e.g.
+`ABC000001`). It's the twin of page numbers (P4.D4): same "draw text in the
+margin" job, different label rule.
+
+### Concepts learned
+
+- **What Bates numbering *is* (domain vocabulary).** Named after the Bates
+  self-advancing hand-stamp, it's a per-page monotonic counter, conventionally
+  bottom-right, with a fixed-width zero-padded number between an optional prefix
+  and suffix. The defining property is **gap-free uniqueness** — every page gets
+  the next id, no skips — because the id is a *citation target*. That single
+  requirement is why this tool deliberately has **no exclusion option** (unlike
+  page numbers, where skipping a cover page is normal).
+- **Padding is a *minimum* width, never a truncation.** `bates_label` uses Rust's
+  `format!("{value:0>padding$}")` — pad-left with `0` to at least `padding`
+  columns. A value wider than the pad prints in full (`…6,1_000_000` → `1000000`),
+  never clipped. Unit-tested precisely because "what happens at overflow" is the
+  kind of thing that silently corrupts a legal sequence.
+- **When *not* to reuse by refactoring.** Bates and page numbers share ~35 lines
+  of draw glue (visual-space placement, base-14 metrics, the `/VibePDF` tag, the
+  snapshot→reload chassis). The tempting move is to extract a shared
+  `stamp_page_labels` helper. I deliberately *didn't*: P4.D4's own in-app
+  verification is still pending, and refactoring its just-shipped internals would
+  muddy that eyeball for a small DRY win. `bates.rs` instead reuses the same
+  `cos` **primitives** (as page_numbers does) and mirrors its structure; the
+  helper-extraction is logged in BACKLOG for once *both* are verified. Reuse the
+  stable substrate, not the code that's still being watched.
+- **Honest failure over silent mis-draw.** Bates digits are ASCII, but a
+  caller-supplied prefix/suffix could contain glyphs the base-14 fonts lack. Like
+  header/footer, we run `winansi_fits` and reject with the offending characters
+  named (`ensure_winansi`) rather than drawing tofu. No CID/embedded-font path —
+  the numbers themselves never need it.
+- **A validation guard is only meaningful if it can fire.** The dialog's number
+  inputs have `min={0}`, so the browser blocks negatives and empty→`Number("")`
+  is `0` — *valid* for Bates (start ≥ 0). A test that typed `0` or left the field
+  empty never reached the JS guard. To make the guard real (and prevent a
+  silent-zero surprise on a *cleared* field), the check now treats
+  `field.trim() === ""` as invalid — a reachable, testable path native validation
+  doesn't cover.
+- **Spec coverage can be partial-by-design.** The spec says "across one *or more*
+  PDFs." This ships single-document; true cross-document batch belongs to the
+  Phase 8 batch panel. The step's own acceptance ("across three *merged* PDFs")
+  is already reachable via **merge-then-Bates**, so the clause is deferred, not
+  dropped — the feature lands `[~]` with that noted.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/bates.rs` | Pure `bates_label` + `add_bates` (single-pass WinAnsi draw, mirrors page_numbers) + `BatesEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `AddBates` message + request/awaiter + handler arm. |
+| `src-tauri/src/commands/pdf.rs`, `src-tauri/src/lib.rs` | `pdf_add_bates` command + register. |
+| `src/ipc/bates.ts` | Typed `addBates` wrapper. |
+| `src/app/BatesDialog.tsx` | Prefix/suffix/padding/start + position/align, with a live `ABC000001 … ABC000010` preview. |
+| `src/app/ZoomToolbar.tsx`, `src/view/PdfViewer.tsx` | "Bates…" button + dialog mount. |
+| `src-tauri/tests/bates.rs` | Consecutive ids, offset, padding, footer-right, rotation, tag, non-WinAnsi reject, actor-undo. |
+| `src/app/__tests__/BatesDialog.test.tsx` | Defaults, preview, suffix/align, validation. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

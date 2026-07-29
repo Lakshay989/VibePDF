@@ -21,6 +21,7 @@ import { WatermarkDialog } from "@/app/WatermarkDialog";
 import { BackgroundDialog } from "@/app/BackgroundDialog";
 import { HeaderFooterDialog } from "@/app/HeaderFooterDialog";
 import { PageNumbersDialog } from "@/app/PageNumbersDialog";
+import { BatesDialog } from "@/app/BatesDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
 import { useFontReport } from "@/app/use-font-report";
@@ -162,6 +163,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false);
   const [pageNumbersOpen, setPageNumbersOpen] = useState(false);
+  const [batesOpen, setBatesOpen] = useState(false);
   const handleInsertFromPdf = useCallback(
     async ({
       sourcePath,
@@ -438,6 +440,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onBackground={doc ? () => setBackgroundOpen(true) : undefined}
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
         onPageNumbers={doc ? () => setPageNumbersOpen(true) : undefined}
+        onBates={doc ? () => setBatesOpen(true) : undefined}
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
@@ -493,6 +496,12 @@ export function PdfViewer({ documentId, path }: Props) {
         documentId={documentId}
         pageCount={doc?.numPages ?? 0}
         onClose={() => setPageNumbersOpen(false)}
+      />
+      <BatesDialog
+        open={batesOpen}
+        documentId={documentId}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setBatesOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden">
         {showThumbnails && doc ? (

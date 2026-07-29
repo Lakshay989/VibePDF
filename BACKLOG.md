@@ -954,6 +954,25 @@ C4a/b, B3b). Four issues found + fixed this session:
   viewers rotate annotations themselves, so they were *not* part of the 3.1 bug; re-check only
   if a reader renders them oddly on rotated pages.
 
+## From P4.D5 (Bates numbering)
+
+- ✅ **DONE 2026-07-29 (D5, P4-EDIT-012) — single-document.** Prefix / suffix / zero-padding /
+  starting number, gap-free on every page, position (H/F × L/C/R, default footer-right). New
+  `bates.rs` (pure `bates_label` + draw reusing the D4/D3 `cos` helpers) + `BatesDialog`.
+  Verification artifact `Sample PDFs/vibepdf-verify-bates.pdf`. Pending the in-app eyeball +
+  three-reader ritual (`[~]`).
+- **🔲 DEFERRED — cross-document batch ("across one *or more* PDFs").** The spec's multi-file
+  clause needs the Phase 8 batch panel. Interim: **merge (P2) then Bates the merged file** — which
+  is exactly the step's acceptance scenario. This is why D5 lands `[~]`, not `[x]`.
+- **No exclusion / page-range** — intentional: a Bates id must be unique *and consecutive*, so every
+  page is stamped. (Contrast page numbers, which allow skips.)
+- **Non-WinAnsi prefix/suffix is rejected** (honest error naming the chars) — base-14 only, no CID
+  path, since the digits are ASCII.
+- **Consolidation candidate:** `bates.rs` and `page_numbers.rs` share ~35 lines of per-page draw
+  glue. Extract a shared `stamp_page_labels(doc, kind, position, align, …, label_for)` helper (in
+  `cos.rs`) **once both P4.D4 and P4.D5 have passed their in-app eyeball** — deferred now to keep
+  D4's pending visual verification clean.
+
 ## From P4.D4 (page numbers)
 
 - ✅ **DONE 2026-07-29 (D4, P4-EDIT-011)** — page numbers with position (H/F × L/C/R), 7 formats

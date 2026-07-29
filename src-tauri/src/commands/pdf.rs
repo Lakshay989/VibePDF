@@ -1034,6 +1034,42 @@ pub async fn pdf_add_page_numbers(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-012 (P4.D5) — stamp a Bates id (`{prefix}{padded seq}{suffix}`,
+/// from `start`) in the `position`/`align` margin of every page. Undoable.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_bates(
+    state: State<'_, AppState>,
+    id: String,
+    position: String,
+    align: String,
+    prefix: String,
+    suffix: String,
+    padding: u32,
+    start: i32,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    margin: f32,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_bates_request(
+            position, align, prefix, suffix, padding, start, font_family, font_size, color, margin,
+        )?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// Shared tail for both background commands: resolve the actor + dispatch.
 async fn run_background(
     state: &State<'_, AppState>,
