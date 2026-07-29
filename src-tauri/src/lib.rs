@@ -55,7 +55,9 @@ impl AppState {
 /// any failure to start the Tauri runtime is fatal and the user will
 /// see the panic message in `stderr`. Convention (`docs/06_CONVENTIONS.md`)
 /// permits `expect` in `main.rs`-equivalent code paths.
-#[allow(clippy::expect_used)]
+// The command registration list grows by one line per new IPC command; the body
+// is a flat builder, not complex logic, so the line-count lint isn't meaningful here.
+#[allow(clippy::expect_used, clippy::too_many_lines)]
 pub fn run() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
@@ -121,6 +123,7 @@ pub fn run() {
             commands::pdf::pdf_add_image_background,
             commands::pdf::pdf_add_pdf_background,
             commands::pdf::pdf_add_header_footer,
+            commands::pdf::pdf_add_page_numbers,
             commands::pdf::pdf_extract_images,
             commands::pdf::pdf_transform_image,
             commands::pdf::pdf_delete_image,

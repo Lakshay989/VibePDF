@@ -7645,6 +7645,66 @@ increment (see BACKLOG edit-perf item).
 
 ---
 
+## P4.D4 — page numbers (a whole feature that reused everything and invented one thing)
+
+### Problem
+
+SPEC P4-EDIT-011: stamp page numbers with a chosen *format* (`1`, `1/N`,
+`Page 1 of N`, `i/I`, `a/A`), a *starting number*, and *exclusion ranges*. It's
+the natural sibling of the header/footer (P4.D3): the same "draw text in the
+margin as page content" job, minus the three-slot templating and plus a
+per-page computed value.
+
+### Concepts learned
+
+- **When to reuse a pattern vs. reuse a function.** Header/footer already solved
+  the hard parts — visual-space placement (so text lands in the *displayed*
+  margin on rotated/cropped pages), exact base-14 advance widths for centre/right
+  alignment, the `/VibePDF` marked-content tag, and the snapshot→reload undo
+  chassis. Page numbers *reuses those cos helpers directly* but is its own module
+  rather than a call into `add_header_footer`: header/footer applies one fixed
+  template to every page, whereas page numbers computes a **distinct string per
+  page**. Forcing one into the other would have meant per-page re-parses or
+  double-substitution. Same *pattern*, separate *function* — the honest boundary.
+- **The one genuinely new bit: numeral formatting.** Roman numerals are a
+  subtractive table walk (`M CM D CD C XC …`); alphabetic numbering is
+  **bijective base-26** (1→`a`, 26→`z`, 27→`aa`) — *bijective* because there's no
+  "zero digit", so it's not plain base-26 (`aa` is 27, not 26). Both are pure,
+  total functions on positive integers, unit-tested in isolation. Keeping them
+  pure (`format_number(fmt, value, total) -> Result<String>`) meant the numeral
+  logic is provable without a PDF in sight.
+- **ASCII-only means no CID path.** Header/footer carries a whole second
+  code path (`add_header_footer_embedded`) for non-WinAnsi text needing an
+  embedded font. Every page-number format is ASCII, so that entire branch simply
+  doesn't exist here — a reminder that matching a sibling's *pattern* doesn't
+  oblige you to match its *surface area*.
+- **Exclusion without a shifting sequence.** The model: `value(page i) = start + i`
+  (0-based), excluded pages are skipped for *drawing* but still consume their
+  index, so skipping page 3 leaves pages 4, 5 reading 4, 5 — not 3, 4. This is
+  the least-surprising reading of "exclusion ranges"; the cover-page *renumber*
+  alternative was noted and deferred.
+- **Native form validation is a real backstop (and a test trap).** The dialog's
+  `min={1}` on the number input makes the browser (and jsdom) block a submit when
+  the value is `0` — so a test that typed `0` to exercise the *JS* guard never
+  reached it. The JS guard still matters for a **cleared** field (empty passes
+  native validation, fails ours); the test drives that path instead.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/page_numbers.rs` | `NumberFormat` + pure `format_number` (roman/alpha/composites) + `add_page_numbers` (single-pass WinAnsi draw) + `PageNumbersEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `AddPageNumbers` message + request/awaiter + handler arm (mirrors header/footer). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_add_page_numbers` command. |
+| `src-tauri/src/lib.rs` | Register the command. |
+| `src/ipc/page-numbers.ts` | Typed `addPageNumbers` wrapper + `NumberFormat` union. |
+| `src/app/PageNumbersDialog.tsx` | Position/align/format + start + skip-pages dialog. |
+| `src/app/ZoomToolbar.tsx`, `src/view/PdfViewer.tsx` | Toolbar button + dialog mount. |
+| `src-tauri/tests/page_numbers.rs` | Format, offset, exclusion, rotation, tag, actor-undo, PDFium-reopen (via actor). |
+| `src/app/__tests__/PageNumbersDialog.test.tsx` | Dialog: formats, skip-page parse, validation. |
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

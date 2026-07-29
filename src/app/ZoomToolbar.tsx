@@ -41,6 +41,9 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-010 — open the header/footer dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onHeaderFooter?: (() => void) | undefined;
+  /** SPEC: P4-EDIT-011 — open the page-numbers dialog (when a doc is open).
+   *  `undefined` (no document loaded) hides the button. */
+  onPageNumbers?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -51,6 +54,7 @@ export function ZoomToolbar({
   onWatermark,
   onBackground,
   onHeaderFooter,
+  onPageNumbers,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -239,6 +243,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Header/Footer…
+        </button>
+      ) : null}
+
+      {onPageNumbers ? (
+        <button
+          type="button"
+          onClick={onPageNumbers}
+          title="Add page numbers (formats, starting number, skip pages)"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Page numbers…
         </button>
       ) : null}
 

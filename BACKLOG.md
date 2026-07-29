@@ -954,6 +954,26 @@ C4a/b, B3b). Four issues found + fixed this session:
   viewers rotate annotations themselves, so they were *not* part of the 3.1 bug; re-check only
   if a reader renders them oddly on rotated pages.
 
+## From P4.D4 (page numbers)
+
+- ✅ **DONE 2026-07-29 (D4, P4-EDIT-011)** — page numbers with position (H/F × L/C/R), 7 formats
+  (`1`, `1/N`, `Page 1 of N`, lower/upper roman, lower/upper alpha), a starting number, and skip
+  ranges. New `page_numbers.rs` (pure `format_number` + WinAnsi draw reusing the D3 cos helpers) +
+  `PageNumbersDialog`. Verification artifact `Sample PDFs/vibepdf-verify-page-numbers.pdf`. Pending
+  the in-app eyeball + three-reader ritual (`[~]`).
+- **Numbering model = suppress-only.** `value(page i) = start + i`; excluded pages are skipped for
+  drawing but keep their index (skip page 3 → pages 4,5 still read 4,5). The **cover-page *renumber***
+  model (excluded pages collapse out so page 2 becomes "1") was the considered alternative — revisit
+  if a real doc wants it.
+- **No explicit "apply to" range** — exclusion-only, per the spec's wording. Sibling decoration
+  dialogs have an apply-range; add here if wanted.
+- **ASCII-only, so no CID/embedded-font path** (unlike header/footer). Custom/non-ASCII numeral
+  formats would reintroduce it.
+- **Applied via dialog → normal epoch reload** (no optimistic overlay). The single pause-blank on a
+  settled reload is the separate deferred PageVirtualizer item, not this feature.
+- **Next: P4.D5 Bates numbering** — shares this numbering core; adds prefix/suffix/padding across
+  one or more files.
+
 ## From P4.D3 (header/footer)
 
 - ✅ **DONE 2026-07-01 (D3, P4-EDIT-010)** — left/centre/right header/footer text over a page range,

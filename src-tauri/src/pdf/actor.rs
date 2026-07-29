@@ -46,6 +46,7 @@ use crate::pdf::annotation::{
 };
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::header_footer::HeaderFooterEdit;
+use crate::pdf::page_numbers::PageNumbersEdit;
 use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
     read_annotations_doc, read_free_text_doc, read_measure_calibration_doc, read_text_boxes_doc,
@@ -430,6 +431,21 @@ pub enum Message {
         color: String,
         margin: f32,
         date: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P4-EDIT-011 — stamp a page number (in `format`, from `start`) in the
+    /// `position`/`align` margin of every page except the 0-based `exclude`d ones.
+    /// Undoable.
+    AddPageNumbers {
+        exclude: Vec<i32>,
+        position: String,
+        align: String,
+        format: String,
+        start: i32,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P3-ANN-004 — add a shape (`/Square` or `/Circle`) at `rect` with a
@@ -1540,6 +1556,27 @@ impl DocumentActorHandle {
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
+    /// SPEC: P4-EDIT-011 (P4.D4) — stamp page numbers. Await-holding for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_page_numbers(
+        &self,
+        exclude: Vec<i32>,
+        position: String,
+        align: String,
+        format: String,
+        start: i32,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_page_numbers_request(
+            exclude, position, align, format, start, font_family, size, color, margin,
+        )?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn add_header_footer_request(
         &self,
@@ -1567,6 +1604,38 @@ impl DocumentActorHandle {
                 color,
                 margin,
                 date,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P4-EDIT-011 — stamp page numbers. Non-blocking; the command awaits.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_page_numbers_request(
+        &self,
+        exclude: Vec<i32>,
+        position: String,
+        align: String,
+        format: String,
+        start: i32,
+        font_family: String,
+        size: f32,
+        color: String,
+        margin: f32,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddPageNumbers {
+                exclude,
+                position,
+                align,
+                format,
+                start,
+                font_family,
+                size,
+                color,
+                margin,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -3044,6 +3113,40 @@ fn run_worker(
                     color,
                     margin,
                     date,
+                };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddPageNumbers {
+                exclude,
+                position,
+                align,
+                format,
+                start,
+                font_family,
+                size,
+                color,
+                margin,
+                reply,
+            } => {
+                // SPEC: P4-EDIT-011 (P4.D4) — page numbers appended as page content;
+                // the inverse is a pre-write byte snapshot (RestoreDocEdit).
+                let edit = PageNumbersEdit {
+                    exclude,
+                    position,
+                    align,
+                    format,
+                    start,
+                    font_family,
+                    size,
+                    color,
+                    margin,
                 };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {

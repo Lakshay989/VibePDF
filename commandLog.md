@@ -3501,6 +3501,29 @@ node scripts/cargo-test.mjs --test text_box --test free_text --test measure \
 
 ---
 
+## P4.D4 — Page numbers (SPEC P4-EDIT-011)
+
+New `pdf/page_numbers.rs` + actor message/command/register; frontend ipc wrapper
++ `PageNumbersDialog` + toolbar button. New dep: none. `docs/02` unchanged.
+
+Verification gates + tests:
+
+```
+npm run check                                                   # tsc + eslint + clippy pedantic clean
+cargo test --test page_numbers                                  # 12 passed, 1 ignored (artifact)
+cargo test --lib page_numbers                                   # 5 passed (format_number: roman/alpha/composites/parse)
+npx vitest run src/app/__tests__/PageNumbersDialog.test.tsx     # 6 passed
+npx vitest run src/app src/tools/__tests__/page-range.test.ts src/view/__tests__  # 135 passed (incl. ZoomToolbar)
+cargo test --lib --test header_footer --test watermark --test background  # 96 + siblings green (no regression)
+cargo test --test page_numbers pn_writes_verification_artifact -- --ignored  # wrote Sample PDFs/vibepdf-verify-page-numbers.pdf
+```
+
+Two clippy fixes on my own additions: `const` moved above the guard in
+`to_roman` (`items_after_statements`); `#[allow(clippy::too_many_lines)]` on
+`lib::run()` (the command list crossed 100 lines by one).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

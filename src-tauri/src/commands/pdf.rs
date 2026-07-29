@@ -998,6 +998,42 @@ pub async fn pdf_add_header_footer(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P4-EDIT-011 (P4.D4) — stamp a page number in `format` (from `start`) in
+/// the `position`/`align` margin of every page except the 0-based `exclude`d ones.
+/// Undoable.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_page_numbers(
+    state: State<'_, AppState>,
+    id: String,
+    exclude: Vec<i32>,
+    position: String,
+    align: String,
+    format: String,
+    start: i32,
+    font_family: String,
+    font_size: f32,
+    color: String,
+    margin: f32,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_page_numbers_request(
+            exclude, position, align, format, start, font_family, font_size, color, margin,
+        )?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// Shared tail for both background commands: resolve the actor + dispatch.
 async fn run_background(
     state: &State<'_, AppState>,
