@@ -611,11 +611,22 @@ a deeper look someday, especially:
   blank runs *once per editing pause* instead of per stroke; the optimistic
   overlay (P4.HF29) carries edits live in between. The remaining single
   pause-blank still wants the doc-level **double-buffer** (keep the old doc
-  mounted, swap a freshly-loaded one in when ready); a first attempt at that
-  skewed page-geometry timing (shapes off-spot, ovals→circles) and was reverted —
-  redo it with the dev app open. Also open: thumbnails re-render (`pdf_render_page`)
-  per page on a reload — ~a minute for a heavy 18-page doc; wants only-changed-page
-  thumbnail refresh.
+  mounted, swap a freshly-loaded one in when ready). **Attempted twice, reverted
+  twice** for the same geometry break: a first try skewed timing; a second
+  (P4.PERF3, 2026-07-29 — never pushed) kept `PageVirtualizer` mounted and swapped
+  `doc` in place (no `setDoc(null)`), with a destroy-after-replace effect. Gates +
+  tests were green, but **in-app the shapes clustered**: after the in-place swap the
+  baked shapes rendered all near each other / off-spot for a few seconds, then
+  settled — i.e. `PageVirtualizer` mis-measures page geometry (scale/offset) when
+  the `doc` prop changes without a remount. **Conclusion: the blocker is
+  `PageVirtualizer`, not the reload.** A real fix must make the virtualizer
+  re-measure page layout correctly on an in-place `doc` swap (or key a *hidden*
+  second virtualizer that fully measures before the visible one swaps) — and it
+  MUST be verified in the dev app (shapes land exactly where drawn; an oval stays
+  an oval). The `setDoc(null)`→remount path is load-bearing for correct geometry;
+  don't remove it without that virtualizer rework. Also open: thumbnails re-render
+  (`pdf_render_page`) per page on a reload — ~a minute for a heavy 18-page doc;
+  wants only-changed-page thumbnail refresh.
 
 ## From the 2026-06-25 verification sweep (Phase-3 in-app pass)
 
