@@ -3549,6 +3549,35 @@ One clippy fix on my own code: `uninlined_format_args` in `bates_label`
 
 ---
 
+## P4.PERF4 — deferring the bake (reload/edit-preview UX)
+
+Frontend only: two-epoch soft/hard reload model + idle backstop, freeze-frame,
+tab-switch fix, plus edit-text no-run toast + instant preview. No dep, no backend
+change, `docs/02` unchanged.
+
+Verification gates + tests:
+
+```
+npm run check                                                   # tsc + eslint + clippy pedantic clean
+npx tsc --noEmit                                                # boundary check mid-way (store + PdfViewer)
+npx vitest run src/state/__tests__/edit-epoch-store.test.ts     # 11 passed (soft/hard, switch-snap, pendingBake lifecycle)
+npm run test                                                    # 408 passed / 94 files (no regressions)
+```
+
+Bugs found + fixed during in-app testing:
+- Idle backstop re-fired forever (compared raw vs bake — independent counters).
+  Replaced with a `pendingBake` flag cleared by any bake → fires exactly once.
+- Tab switch fired a spurious 2nd reload (debounced epoch didn't snap on id change).
+- clippy `uninlined_format_args`, `items_after_statements`; eslint `getComputedStyle`
+  global (used `window.getComputedStyle`); `exactOptionalPropertyTypes` on an
+  optional callback prop.
+
+Debounce: main-view reload now keys off the *bake* epoch (400ms); the bake epoch
+only advances on hard edits / the 8s idle backstop, so bursts of soft edits cause
+no reload.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

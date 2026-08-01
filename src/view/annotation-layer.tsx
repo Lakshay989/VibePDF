@@ -92,7 +92,8 @@ export function AnnotationLayer({
   const setDraft = useAnnotationStore((s) => s.setDraft);
   const addAnnotation = useAnnotationStore((s) => s.add);
   const select = useAnnotationStore((s) => s.select);
-  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  // Soft bump: overlay is the display; no main-view reload until the next bake.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
   const setHistory = useHistoryStore((s) => s.setHistory);
 
   const activeTool = useToolStore((s) => s.activeTool);
@@ -209,7 +210,7 @@ export function AnnotationLayer({
       )
         .then((h) => {
           persisted(h);
-          oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+          oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
         })
         .catch((err: unknown) => {
           oe.remove(documentId, key);
@@ -243,7 +244,7 @@ export function AnnotationLayer({
     )
       .then((h) => {
         persisted(h);
-        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+        oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
       })
       .catch((err: unknown) => {
         oe.remove(documentId, key);

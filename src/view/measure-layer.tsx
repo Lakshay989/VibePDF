@@ -66,7 +66,8 @@ export function MeasureLayer({
   const cancelCalibrating = useMeasureStore((s) => s.cancelCalibrating);
   const calibration = useMeasureStore((s) => s.calibration);
   const setHistory = useHistoryStore((s) => s.setHistory);
-  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  // Soft bump: overlay is the display; no main-view reload until the next bake.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
 
   const [vertices, setVertices] = useState<{ x: number; y: number }[]>([]);
   const [cursor, setCursor] = useState<ScreenPoint | null>(null);
@@ -126,7 +127,7 @@ export function MeasureLayer({
     )
       .then((h) => {
         bumpEpoch(documentId);
-        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+        oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
         setHistory(documentId, h);
       })
       .catch((err: unknown) => {

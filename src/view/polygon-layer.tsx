@@ -59,7 +59,8 @@ export function PolygonLayer({
   const options = useToolStore((s) => s.options);
   const setActiveTool = useToolStore((s) => s.setActiveTool);
   const setHistory = useHistoryStore((s) => s.setHistory);
-  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  // Soft bump: overlay is the display; no main-view reload until the next bake.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
 
   // Vertices in PDF points (stable under scroll/zoom); cursor in layer px.
   const [vertices, setVertices] = useState<{ x: number; y: number }[]>([]);
@@ -111,7 +112,7 @@ export function PolygonLayer({
     )
       .then((h) => {
         bumpEpoch(documentId);
-        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+        oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
         setHistory(documentId, h);
       })
       .catch((err: unknown) => {

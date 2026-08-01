@@ -51,7 +51,8 @@ export function ImageAddLayer({
   const armedPath = useImageAddStore((s) => s.path);
   const arm = useImageAddStore((s) => s.arm);
   const setHistory = useHistoryStore((s) => s.setHistory);
-  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  // Soft bump: overlay is the display; no main-view reload until the next bake.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
 
   const [start, setStart] = useState<ScreenPoint | null>(null);
   const [current, setCurrent] = useState<ScreenPoint | null>(null);
@@ -119,7 +120,7 @@ export function ImageAddLayer({
       try {
         const h = await addImage(documentId, page, pdfRect, path);
         bumpEpoch(documentId);
-        if (key) oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+        if (key) oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
         setHistory(documentId, h);
       } catch (err) {
         if (key) oe.remove(documentId, key);

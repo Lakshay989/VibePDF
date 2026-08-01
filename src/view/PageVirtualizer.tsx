@@ -76,6 +76,9 @@ interface Props {
   darkMode: boolean;
   /** Pinch / Ctrl+wheel zoom: called with the new absolute scale. */
   onZoom?: (scale: number) => void;
+  /** Fires when a page's canvas has painted. Used to lift the freeze-frame
+   *  overlay the instant the reloaded document's first page is visible. */
+  onPageRendered?: (page: number) => void;
 }
 
 export interface PageVirtualizerHandle {
@@ -85,6 +88,10 @@ export interface PageVirtualizerHandle {
   getCurrentPage: () => number;
   /** Current scroll offset (px), captured before an edit reload to restore it. */
   getScrollTop: () => number;
+  /** A PNG data-URL of the currently-visible pages (drawn from their canvases),
+   *  or `null` if nothing is measured. Captured just before an edit reload so a
+   *  freeze-frame can bridge the blank while PDF.js re-parses. */
+  snapshotVisible: () => string | null;
 }
 
 function computeFitScale(
@@ -111,7 +118,7 @@ function computeFitScale(
 
 export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
   function PageVirtualizer(
-    { doc, documentId, epoch, initialPage, initialScrollTop, zoom, fitMode, darkMode, onZoom },
+    { doc, documentId, epoch, initialPage, initialScrollTop, zoom, fitMode, darkMode, onZoom, onPageRendered },
     ref,
   ) {
     const [pages, setPages] = useState<NaturalPage[] | null>(null);
@@ -320,8 +327,40 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
         },
         getCurrentPage: () => currentPageRef.current,
         getScrollTop: () => scrollRef.current?.scrollTop ?? 0,
+        snapshotVisible: () => {
+          const scroller = scrollRef.current;
+          if (!scroller) return null;
+          const w = scroller.clientWidth;
+          const h = scroller.clientHeight;
+          if (w === 0 || h === 0) return null;
+          const dpr = window.devicePixelRatio || 1;
+          const snap = document.createElement("canvas");
+          snap.width = Math.floor(w * dpr);
+          snap.height = Math.floor(h * dpr);
+          const ctx = snap.getContext("2d");
+          if (!ctx) return null;
+          ctx.scale(dpr, dpr);
+          // Fill the scroller's own background so page gaps aren't transparent.
+          ctx.fillStyle = window.getComputedStyle(scroller).backgroundColor || "#f5f5f5";
+          ctx.fillRect(0, 0, w, h);
+          // Dark mode displays the page canvases through a CSS invert filter; match
+          // it so the frozen frame doesn't flash light. (If the WebView ignores
+          // `ctx.filter`, the snapshot is un-inverted — a sub-second cosmetic miss.)
+          if (darkMode) ctx.filter = DARK_PAGE_FILTER;
+          const viewport = scroller.getBoundingClientRect();
+          for (const canvas of scroller.querySelectorAll("canvas")) {
+            const r = canvas.getBoundingClientRect();
+            if (r.bottom < viewport.top || r.top > viewport.bottom) continue; // offscreen
+            try {
+              ctx.drawImage(canvas, r.left - viewport.left, r.top - viewport.top, r.width, r.height);
+            } catch {
+              // A tainted/unreadable canvas can't be drawn — skip it, keep the rest.
+            }
+          }
+          return snap.toDataURL();
+        },
       }),
-      [pages],
+      [pages, darkMode],
     );
 
     const registerSlot = (page: number, el: HTMLDivElement | null) => {
@@ -360,6 +399,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
                 darkMode={darkMode}
                 cache={cacheRef.current}
                 onMount={(el) => registerSlot(info.pageNumber, el)}
+                onRendered={onPageRendered}
               />
             ))}
           </div>
@@ -379,6 +419,8 @@ interface SlotProps {
   darkMode: boolean;
   cache: LruCache<HTMLCanvasElement>;
   onMount: (el: HTMLDivElement | null) => void;
+  /** Fired once this page's canvas is on screen (fresh render or cache hit). */
+  onRendered?: ((page: number) => void) | undefined;
 }
 
 function PageSlot({
@@ -391,6 +433,7 @@ function PageSlot({
   darkMode,
   cache,
   onMount,
+  onRendered,
 }: SlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // The canvas mounts into its own inner div (cleared imperatively) so the React
@@ -399,6 +442,10 @@ function PageSlot({
   // jump-to-page) and observed for visibility.
   const canvasRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  // Latest `onRendered` without making it a render-effect dep (which would force
+  // a needless re-rasterize whenever the parent re-creates the callback).
+  const onRenderedRef = useRef(onRendered);
+  onRenderedRef.current = onRendered;
 
   const cacheKey = useMemo(() => {
     const dpr =
@@ -439,6 +486,7 @@ function PageSlot({
     const cached = cache.get(cacheKey);
     if (cached) {
       el.appendChild(cached);
+      onRenderedRef.current?.(natural.pageNumber);
       return;
     }
 
@@ -461,6 +509,7 @@ function PageSlot({
       .then(() => {
         if (cancelled) return;
         cache.set(cacheKey, canvas);
+        onRenderedRef.current?.(natural.pageNumber);
       })
       .catch((err) => {
         console.warn(

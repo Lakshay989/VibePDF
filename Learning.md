@@ -7771,6 +7771,70 @@ margin" job, different label rule.
 
 ---
 
+## P4.PERF4 — deferring the bake: the optimistic overlay *is* the display
+
+### Problem
+
+Every annotation edit reloaded the *whole* PDF.js document so the canvas would
+show the baked result — a visible refresh (a blank, then a re-render) on every
+single edit. Drawing several pen strokes meant several refreshes; testing feedback
+called it "annoying." An earlier debounce (P4.PERF2) only batched them; the
+double-buffer (P4.PERF3) that tried to remove the blank was reverted twice. The
+real fix is to stop reloading for edits the overlay already shows correctly.
+
+### Concepts learned
+
+- **Two epochs, one per concern.** The edit signal split into a **raw epoch**
+  (bumped by *every* edit → drives the sidebar + the optimistic-overlay
+  bookkeeping, which must be instant) and a **bake epoch** (bumped only by edits
+  that need a true canvas re-render → drives the main-view reload). The
+  add-annotation tools (ink, shapes, line/arrow, polygon, measure, stamp,
+  free-text, text-box, image) do a **soft bump** (raw only): their overlay is the
+  live display, so no reload fires. Undo/redo, delete, page ops, the decoration
+  dialogs, text-edit and image-edit do a **hard bump** (both) and bake promptly.
+- **A bake makes the canvas authoritative, so pruning is always safe.** Overlays
+  `tie` to the bake epoch that will render them; a reload's `markRendered` prunes
+  everything baked ≤ that epoch. Because the reloaded bytes are the actor's true
+  state, even "aggressive" pruning can't lose an edit — undo of one soft edit
+  bakes the *whole* page to truth and the canvas is correct regardless.
+- **Comparing two independent counters is a trap (the idle-backstop bug).** The
+  first backstop fired a bake when `rawEpoch > bakeEpoch` — but those count
+  *different things* (every edit vs every bake), so the guard was ~always true and
+  re-fired forever: a refresh every few seconds while idle. Fixed with an explicit
+  `pendingBake` **flag** that a soft edit sets and any bake clears — so the
+  backstop fires exactly once after editing stops, then goes quiet.
+- **Freeze-frame hides the gray, but only the gray.** When a bake *does* run,
+  `setDoc(null)` still unmounts the view; a canvas snapshot (`snapshotVisible`)
+  bridges the gap so it doesn't flash gray, lifted the instant the reloaded page
+  paints (a new `onPageRendered` signal). The snapshot is canvas-only (no SVG
+  overlay), so a soft stroke blinks once at that rare bake — acceptable now that
+  bakes are rare.
+- **Decouple the sidebar from the reload.** The annotation panel reads on the raw
+  epoch (instant); only the expensive main-view reload is deferred. A debounced
+  hook that *snaps* on a document switch avoids a spurious second reload per tab
+  change (the host component isn't remounted, only its `id` prop changes).
+- **Honest UX for the un-doable.** In edit-text mode a click that hits no
+  decodable run now shows a hint (some fonts have no Unicode map), and a committed
+  text edit is previewed instantly (cover + new text) instead of waiting for the
+  bake — the same overlay pattern, adapted to a *replace*.
+
+### Files in this step
+
+| File | Role |
+|---|---|
+| `src/state/edit-epoch-store.ts` | Raw + bake epochs, `bumpEpochSoft`/`bumpBake`, `pendingBake` flag, shared debounce (switch-snap). |
+| `src/view/PageVirtualizer.tsx` | `snapshotVisible()` + `onPageRendered` (freeze-frame capture + lift signal). |
+| `src/view/PdfViewer.tsx` | Reload on the debounced bake epoch, freeze overlay, panel decouple, one-shot idle backstop. |
+| `src/view/{ink,annotation,polygon,measure,stamp,free-text,text-box,image-add}-layer.tsx` | Soft bump + tie to the next bake. |
+| `src/view/text-edit-layer.tsx` | No-run hint toast + instant optimistic preview; hard bump, tie to its bake. |
+| `src/state/__tests__/edit-epoch-store.test.ts` | Soft/hard split, switch-snap, and the `pendingBake` lifecycle (the backstop-loop regression). |
+
+**Not covered:** the rare bake still blinks a soft stroke (snapshot is canvas-only);
+the text-edit cover is white (wrong for ~1s on a coloured page); notes/links/
+image-edit stay hard. All acceptable; logged in BACKLOG.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

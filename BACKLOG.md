@@ -627,6 +627,27 @@ a deeper look someday, especially:
   don't remove it without that virtualizer rework. Also open: thumbnails re-render
   (`pdf_render_page`) per page on a reload — ~a minute for a heavy 18-page doc;
   wants only-changed-page thumbnail refresh.
+- ✅ **LARGELY RESOLVED 2026-07-30 (P4.PERF4) — defer the bake instead of removing
+  the blank.** Rather than beat the `PageVirtualizer` geometry problem (the
+  double-buffer), we stopped *reloading* for the edits that caused it. A **bake
+  epoch** (separate from the raw edit epoch) drives the main-view reload and is
+  bumped only by **hard** edits (undo/redo, delete, page ops, dialogs, text-edit,
+  image-edit); the add-annotation tools do a **soft** bump and let their optimistic
+  overlay be the live display. So a burst of pen strokes / shapes causes **no
+  reload at all** — the blank only happens on a hard edit or an 8s idle backstop,
+  and even then a canvas **freeze-frame** (`snapshotVisible` + `onPageRendered`)
+  hides the gray. Also fixed: a tab-switch spurious 2nd reload, and an idle-backstop
+  loop (compared raw vs bake — two independent counters — now gated on a
+  `pendingBake` flag). **Residual:** the *rare* bake still blinks a soft stroke
+  once (the snapshot is canvas-only, not the SVG overlay); the full no-blink fix
+  still needs the `PageVirtualizer` in-place-swap geometry rework above, but it's
+  now a rare-path polish, not a per-edit annoyance. Thumbnail per-page re-render
+  latency (above) is unchanged.
+- **Deferred residuals from PERF4:** rare-bake soft-stroke blink (snapshot rasterises
+  canvas only, not overlays — would need SVG→canvas or a persistent overlay layer);
+  the edit-text optimistic cover is **white** (wrong for ~1s on a coloured page);
+  notes / links / image-edit stay **hard** (bake promptly) — revisit if their
+  overlays become accurate enough to defer.
 
 ## From the 2026-06-25 verification sweep (Phase-3 in-app pass)
 

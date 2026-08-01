@@ -75,7 +75,8 @@ export function TextBoxLayer({
   const setActiveTool = useToolStore((s) => s.setActiveTool);
   const setOptions = useToolStore((s) => s.setOptions);
   const setHistory = useHistoryStore((s) => s.setHistory);
-  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  // Soft bump: overlay is the display; no main-view reload until the next bake.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
   const epoch = useDocEpoch(documentId);
 
   const [start, setStart] = useState<ScreenPoint | null>(null);
@@ -248,7 +249,7 @@ export function TextBoxLayer({
     )
       .then((h) => {
         done(h);
-        oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+        oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
       })
       .catch((err: unknown) => {
         oe.remove(documentId, key);

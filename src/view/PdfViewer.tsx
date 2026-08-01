@@ -42,7 +42,13 @@ import {
   pathHash,
   saveViewSettings,
 } from "@/state/view-persistence";
-import { isDocEdited, useDebouncedDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
+import {
+  isDocEdited,
+  useDebouncedBakeEpoch,
+  useDocEpoch,
+  useEditEpochStore,
+  useHasPendingBake,
+} from "@/state/edit-epoch-store";
 import { useOptimisticEditStore } from "@/state/optimistic-edit-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
@@ -55,7 +61,13 @@ interface Props {
 // SPEC: NFR-PERF-005 — how long editing must pause before the main view reloads
 // the baked document. Rapid strokes keep resetting this, so the (blanking) full
 // reload runs at most once per pause; the optimistic overlay shows edits meanwhile.
-const RELOAD_DEBOUNCE_MS = 900;
+// Debounce for the *bake* reload. The bake epoch only advances on edits that need
+// a true re-render (hard edits) or the idle backstop, so this fires rarely — a
+// short window is fine (it just coalesces a hard edit that lands mid-burst).
+const RELOAD_DEBOUNCE_MS = 400;
+// Idle backstop: flush accumulated soft (add-annotation) edits to the canvas after
+// this long with no new edit, so overlays can't pile up unbounded on a long session.
+const IDLE_BAKE_MS = 8000;
 
 // SPEC: P1-VIEW-001, P1-VIEW-005, P1-VIEW-006, NFR-PERF-003.
 //
@@ -68,6 +80,10 @@ const RELOAD_DEBOUNCE_MS = 900;
 export function PdfViewer({ documentId, path }: Props) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A snapshot of the pre-reload view, shown over the blank while an *edit*
+  // reload re-parses the PDF, so switching tools / finishing an edit doesn't
+  // flash gray. Lifted the instant the reloaded doc's first page paints.
+  const [freezeUrl, setFreezeUrl] = useState<string | null>(null);
   const virtRef = useRef<PageVirtualizerHandle>(null);
 
   const zoom = useViewStore((s) => s.zoom);
@@ -84,7 +100,15 @@ export function PdfViewer({ documentId, path }: Props) {
   // reload-from-actor-bytes effect below. Debounced so rapid editing doesn't
   // reload (and blank) the whole document per stroke — the optimistic overlay
   // (P4.HF29) shows edits live, so the baked reload runs once editing pauses.
-  const epoch = useDebouncedDocEpoch(documentId, RELOAD_DEBOUNCE_MS);
+  // The main view reloads/re-rasterizes on the *bake* epoch (debounced), which only
+  // advances on a hard edit or the idle backstop — so a burst of soft edits causes
+  // no reload; their overlays carry the change on the canvas until a bake is due.
+  const epoch = useDebouncedBakeEpoch(documentId, RELOAD_DEBOUNCE_MS);
+  // The panels re-read on the *raw* epoch so the annotation list / thumbnails
+  // reflect every edit at once, without waiting for a bake.
+  const rawEpoch = useDocEpoch(documentId);
+  const hasPendingBake = useHasPendingBake(documentId);
+  const bumpBake = useEditEpochStore((s) => s.bumpBake);
 
   // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
   // embedded or installed, so the user knows editing it will substitute.
@@ -227,6 +251,12 @@ export function PdfViewer({ documentId, path }: Props) {
       ? (virtRef.current?.getCurrentPage() ?? 1)
       : 1;
     initialScrollTopRef.current = sameDoc ? (virtRef.current?.getScrollTop() ?? 0) : 0;
+    // Freeze the current frame across an *edit* reload of the same document (a
+    // tab switch or first open has nothing worth freezing). Captured before the
+    // unmount below; lifted by `onPageRendered` when the new doc paints, with a
+    // timeout backstop so a failed reload can't leave the snapshot stuck.
+    const frozen = sameDoc ? (virtRef.current?.snapshotVisible() ?? null) : null;
+    setFreezeUrl(frozen);
     lastDocIdRef.current = documentId;
     setDoc(null);
     // The (re)loaded bytes carry the real /Rotate, so any cosmetic rotation
@@ -259,16 +289,34 @@ export function PdfViewer({ documentId, path }: Props) {
       } catch (e) {
         const msg =
           e instanceof Error ? e.message : "Failed to open this file as a PDF.";
-        if (!cancelled) setError(msg);
+        if (!cancelled) {
+          setError(msg);
+          setFreezeUrl(null); // a failed reload has no new frame to reveal
+        }
       }
     })();
 
+    // Backstop: if the new doc never reports a painted page (error, empty doc),
+    // don't leave the frozen frame stuck over a live view.
+    const freezeTimer = frozen ? window.setTimeout(() => setFreezeUrl(null), 6000) : undefined;
+
     return () => {
       cancelled = true;
+      if (freezeTimer !== undefined) clearTimeout(freezeTimer);
       void localDoc?.destroy();
       setDoc(null);
     };
   }, [path, epoch, documentId, resetRotations]);
+
+  // Idle backstop for deferred soft edits: once editing pauses, force a *single*
+  // bake to flush the accumulated overlays to the canvas. Gated on the pending-bake
+  // flag (which one bake clears), so it fires once — not repeatedly. `rawEpoch` in
+  // the deps restarts the countdown on each new edit, so "idle" means idle.
+  useEffect(() => {
+    if (!hasPendingBake) return undefined;
+    const timer = setTimeout(() => bumpBake(documentId), IDLE_BAKE_MS);
+    return () => clearTimeout(timer);
+  }, [hasPendingBake, rawEpoch, documentId, bumpBake]);
 
   // SPEC: P1-VIEW-006 — restore persisted zoom + fit-mode on open.
   useEffect(() => {
@@ -532,11 +580,11 @@ export function PdfViewer({ documentId, path }: Props) {
           <AnnotationPanel
             key={`annotations:${documentId}`}
             documentId={documentId}
-            epoch={epoch}
+            epoch={rawEpoch}
             onJump={(page) => virtRef.current?.scrollToPage(page)}
           />
         ) : null}
-        <div className="flex-1 overflow-hidden">
+        <div className="relative flex-1 overflow-hidden">
           {error ? (
             <div className="mx-auto mt-8 max-w-lg rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
               This file does not appear to be a valid PDF.
@@ -548,6 +596,7 @@ export function PdfViewer({ documentId, path }: Props) {
               doc={doc}
               documentId={documentId}
               epoch={epoch}
+              onPageRendered={() => setFreezeUrl(null)}
               initialPage={initialPageRef.current}
               initialScrollTop={initialScrollTopRef.current}
               zoom={zoom}
@@ -558,6 +607,16 @@ export function PdfViewer({ documentId, path }: Props) {
           ) : (
             <div className="p-4 text-sm text-neutral-500">Opening…</div>
           )}
+          {/* Freeze-frame: covers the blank during an edit reload, lifted the
+              instant the reloaded doc's first page paints (onPageRendered). */}
+          {freezeUrl ? (
+            <img
+              src={freezeUrl}
+              alt=""
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-30 h-full w-full object-cover object-top"
+            />
+          ) : null}
         </div>
       </div>
     </div>

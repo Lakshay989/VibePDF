@@ -49,7 +49,8 @@ export function StampLayer({
   const options = useToolStore((s) => s.options);
   const armed = useStampStore((s) => s.armed);
   const setHistory = useHistoryStore((s) => s.setHistory);
-  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
+  // Soft bump: overlay is the display; no main-view reload until the next bake.
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
 
   const active = activeTool === "stamp" && armed !== null;
 
@@ -70,7 +71,7 @@ export function StampLayer({
     const pdf = screenToPdf({ x: e.clientX - r.left, y: e.clientY - r.top }, geo);
     const oe = useOptimisticEditStore.getState();
     const tie = (key: string) =>
-      oe.tie(documentId, key, useEditEpochStore.getState().byDoc[documentId] ?? 0);
+      oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
 
     // Image stamps place aspect-correct around the click (the backend derives the
     // rect from the image's ratio); we mirror that centring for the preview.
