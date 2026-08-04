@@ -6,7 +6,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
-import { readFormSummary, type FormSummary } from "@/ipc/forms";
+import {
+  fillTextField,
+  readFormSummary,
+  readTextFields,
+  type FormField,
+  type FormSummary,
+} from "@/ipc/forms";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -29,5 +35,30 @@ describe("readFormSummary", () => {
     const out = await readFormSummary("doc-2");
     expect(out.hasXfa).toBe(true);
     expect(out.fieldCount).toBe(0);
+  });
+});
+
+describe("readTextFields", () => {
+  it("marshals id + page and returns the fields", async () => {
+    const fields: FormField[] = [
+      { name: "name", rect: [72, 700, 300, 724], value: "", maxLen: null, multiline: false },
+    ];
+    mockInvoke.mockResolvedValue(fields);
+    const out = await readTextFields("doc-1", 0);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_read_text_fields", { id: "doc-1", page: 0 });
+    expect(out).toEqual(fields);
+  });
+});
+
+describe("fillTextField", () => {
+  it("marshals id, name, and value", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    const out = await fillTextField("doc-1", "name", "Ada");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_fill_text_field", {
+      id: "doc-1",
+      name: "name",
+      value: "Ada",
+    });
+    expect(out).toEqual({ canUndo: true, canRedo: false });
   });
 });

@@ -54,7 +54,9 @@ use crate::pdf::cos::{
     read_text_notes_doc, AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
 };
 use crate::pdf::doc_cache::CachedDoc;
-use crate::pdf::form::{read_form_summary_doc, FormSummary};
+use crate::pdf::form::{
+    read_form_summary_doc, read_text_fields_doc, FillTextFieldEdit, FormField, FormSummary,
+};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
 use crate::pdf::image_extract::{extract_images, ImageInfo};
@@ -374,6 +376,19 @@ pub enum Message {
     /// Read-only.
     ReadFormSummary {
         reply: oneshot::Sender<Result<FormSummary, CommandError>>,
+    },
+    /// SPEC: P5-FORM-002 — list the fillable text fields on `page` (0-based) with
+    /// geometry + current value, for the fill overlay. Read-only.
+    ReadTextFields {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<FormField>, CommandError>>,
+    },
+    /// SPEC: P5-FORM-002 — set text field `name` to `value` (truncated to
+    /// `/MaxLen`). Undoable; marks dirty.
+    FillTextField {
+        name: String,
+        value: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
@@ -1397,6 +1412,47 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadFormSummary { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-002 — read a page's fillable text fields. Await-holding for tests.
+    pub async fn read_text_fields(&self, page: usize) -> Result<Vec<FormField>, CommandError> {
+        let rx = self.read_text_fields_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_text_fields_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<FormField>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadTextFields { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-002 — fill a text field. Await-holding for tests.
+    pub async fn fill_text_field(
+        &self,
+        name: String,
+        value: String,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.fill_text_field_request(name, value)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn fill_text_field_request(
+        &self,
+        name: String,
+        value: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::FillTextField { name, value, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3091,6 +3147,29 @@ fn run_worker(
                         doc.save_to_bytes().map_err(CommandError::from)
                     })
                     .and_then(read_form_summary_doc);
+                let _ = reply.send(result);
+            }
+            Message::ReadTextFields { page, reply } => {
+                // SPEC: P5-FORM-002 — read-only; served from the shared parse cache.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(|d| read_text_fields_doc(d, page));
+                let _ = reply.send(result);
+            }
+            Message::FillTextField { name, value, reply } => {
+                // SPEC: P5-FORM-002 — set /V + NeedAppearances; snapshot inverse.
+                // The central post-message check invalidates the read cache.
+                let edit = FillTextFieldEdit { name, value };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::RemoveTextBox { page, id, reply } => {

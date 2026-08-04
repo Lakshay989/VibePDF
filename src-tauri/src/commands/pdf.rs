@@ -7,7 +7,7 @@ use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
-use crate::pdf::form::FormSummary;
+use crate::pdf::form::{FormField, FormSummary};
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -744,6 +744,59 @@ pub async fn pdf_read_form_summary(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.read_form_summary_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-002 — list the fillable text fields on `page` (0-based) with
+/// geometry + current value, for the fill overlay. Read-only.
+#[tauri::command]
+pub async fn pdf_read_text_fields(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+) -> Result<Vec<FormField>, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_text_fields_request(page)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-002 — set the text field `name` to `value` (truncated to the
+/// field's `/MaxLen`). Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_fill_text_field(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    value: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.fill_text_field_request(name, value)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

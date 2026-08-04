@@ -13,10 +13,20 @@
 
 use std::collections::HashSet;
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, Object, ObjectId, StringFormat};
+use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::acroform_dict;
+use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::restore::RestoreDocEdit;
+use crate::pdf::undo::Edit;
+
+/// `.map_err` adapter for lopdf errors (cos keeps its own private copy).
+#[allow(clippy::needless_pass_by_value)]
+fn lop(e: lopdf::Error) -> CommandError {
+    CommandError::PdfError(format!("lopdf: {e}"))
+}
 
 /// A document's interactive-form summary, as the frontend's "Form mode" entry
 /// point consumes it. Crosses the IPC boundary as camelCase.
@@ -109,9 +119,295 @@ pub fn read_form_summary_doc(doc: &Document) -> Result<FormSummary, CommandError
 /// `bytes` with lopdf, then summarises. Used by tests and any caller that has
 /// bytes rather than a live document.
 pub fn read_form_summary(bytes: &[u8]) -> Result<FormSummary, CommandError> {
-    let doc = Document::load_mem(bytes)
-        .map_err(|e| CommandError::PdfError(format!("lopdf: {e}")))?;
+    let doc = Document::load_mem(bytes).map_err(lop)?;
     read_form_summary_doc(&doc)
+}
+
+// ── P5.A2 — fill text fields ────────────────────────────────────────────────
+
+/// One fillable text field on a page, as the fill overlay consumes it. Geometry
+/// is in PDF points (page space, origin bottom-left) — the same space the text
+/// overlays use, so a widget can be positioned via `pdfToScreen`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormField {
+    /// Fully-qualified field name (parent partial names joined by `.`) — the
+    /// stable handle the fill write addresses.
+    pub name: String,
+    /// Widget bounds `[x0, y0, x1, y1]`.
+    pub rect: [f32; 4],
+    /// Current value (`/V`), decoded from UTF-16BE-BOM or `PDFDocEncoding`.
+    pub value: String,
+    /// `/MaxLen` when the field declares one (character cap).
+    pub max_len: Option<u32>,
+    /// `/Ff` bit 13 (multi-line text).
+    pub multiline: bool,
+}
+
+/// Field-flag bit 13 (1-indexed) = multi-line text (`Ff & (1 << 12)`).
+const FF_MULTILINE: i64 = 1 << 12;
+
+/// SPEC: P5-FORM-002 (P5.A2) — every fillable **text** field (`/FT /Tx`) whose
+/// widget sits on `page` (0-based), with geometry + current value. Read-only.
+/// A field's type/value/max-len/flags may be inherited from a `/Parent`, so each
+/// is resolved up the parent chain. Non-text widgets and malformed nodes are
+/// skipped (the "skip one, don't fail the read" convention).
+pub fn read_text_fields_doc(doc: &Document, page: usize) -> Result<Vec<FormField>, CommandError> {
+    if acroform_dict(doc)?.is_none() {
+        return Ok(Vec::new());
+    }
+    let page_no = u32::try_from(page)
+        .map(|n| n + 1)
+        .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let Some(&page_id) = doc.get_pages().get(&page_no) else {
+        return Ok(Vec::new());
+    };
+    let annots = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+    let arr = match annots {
+        Some(Object::Array(a)) => a,
+        Some(Object::Reference(id)) => {
+            doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+        }
+        _ => return Ok(Vec::new()),
+    };
+
+    let mut out = Vec::new();
+    for obj in arr {
+        let Ok(id) = obj.as_reference() else { continue };
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        // Effective field type must be text.
+        if inherited(doc, dict, b"FT").and_then(|o| o.as_name().ok()) != Some(b"Tx".as_slice()) {
+            continue;
+        }
+        let Some(rect) = dict_rect(dict, b"Rect") else { continue };
+        let value = inherited(doc, dict, b"V")
+            .and_then(|o| o.as_str().ok())
+            .map(decode_pdf_text_string)
+            .unwrap_or_default();
+        let max_len = inherited(doc, dict, b"MaxLen")
+            .and_then(|o| o.as_i64().ok())
+            .and_then(|n| u32::try_from(n).ok());
+        let multiline = inherited(doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0)
+            & FF_MULTILINE
+            != 0;
+        out.push(FormField {
+            name: qualified_name(doc, dict).unwrap_or_default(),
+            rect,
+            value,
+            max_len,
+            multiline,
+        });
+    }
+    Ok(out)
+}
+
+/// Byte-level wrapper around [`read_text_fields_doc`].
+pub fn read_text_fields(bytes: &[u8], page: usize) -> Result<Vec<FormField>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(lop)?;
+    read_text_fields_doc(&doc, page)
+}
+
+/// SPEC: P5-FORM-002 — set the text field named `name` to `value`, truncated to
+/// the field's `/MaxLen`. Sets `/V`, drops the widget's stale `/AP`, and flips
+/// `AcroForm` `/NeedAppearances` so viewers regenerate the appearance. Returns the
+/// re-serialised bytes; verification is by re-reading `/V`.
+pub fn set_text_field_value(bytes: &[u8], name: &str, value: &str) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+
+    let target = find_field_by_name(&doc, name)
+        .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+
+    // Truncate to /MaxLen (character count) before writing.
+    let max_len = {
+        let dict = doc.get_dictionary(target).map_err(lop)?;
+        inherited(&doc, dict, b"MaxLen").and_then(|o| o.as_i64().ok()).and_then(|n| usize::try_from(n).ok())
+    };
+    let value: String = match max_len {
+        Some(max) => value.chars().take(max).collect(),
+        None => value.to_owned(),
+    };
+
+    // Set /V on the field and drop its own stale appearance.
+    {
+        let dict = doc.get_dictionary_mut(target).map_err(lop)?;
+        dict.set("V", encode_pdf_text_string(&value));
+        dict.remove(b"AP");
+    }
+    // Drop /AP on any kid widgets (separate field/widget case).
+    for kid in kid_widget_ids(&doc, target) {
+        if let Ok(k) = doc.get_dictionary_mut(kid) {
+            k.remove(b"AP");
+        }
+    }
+    set_need_appearances(&mut doc)?;
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// Locate a field by its fully-qualified name, walking `/Fields` and field-`/Kids`
+/// (an iterative worklist with a visited-set, like the count in `read_form_summary_doc`).
+fn find_field_by_name(doc: &Document, name: &str) -> Option<ObjectId> {
+    let acro = acroform_dict(doc).ok()??;
+    let fields = acro.get(b"Fields").ok()?.as_array().ok()?;
+    let mut stack: Vec<ObjectId> = fields.iter().filter_map(|o| o.as_reference().ok()).collect();
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        if qualified_name(doc, dict).as_deref() == Some(name) {
+            return Some(id);
+        }
+        if let Ok(kids) = dict.get(b"Kids").and_then(Object::as_array) {
+            for k in kids {
+                if let Ok(kid_id) = k.as_reference() {
+                    let is_field = doc
+                        .get_dictionary(kid_id)
+                        .is_ok_and(|d| d.get(b"FT").is_ok() || d.get(b"T").is_ok());
+                    if is_field {
+                        stack.push(kid_id);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The reference ids of a field's `/Kids` (widget or child-field), for `/AP` clearing.
+fn kid_widget_ids(doc: &Document, field: ObjectId) -> Vec<ObjectId> {
+    doc.get_dictionary(field)
+        .ok()
+        .and_then(|d| d.get(b"Kids").ok())
+        .and_then(|o| o.as_array().ok())
+        .map(|kids| kids.iter().filter_map(|k| k.as_reference().ok()).collect())
+        .unwrap_or_default()
+}
+
+/// Flip `AcroForm` `/NeedAppearances true` so viewers regenerate field appearances,
+/// whether the form is stored as a reference or inline in the catalog.
+fn set_need_appearances(doc: &mut Document) -> Result<(), CommandError> {
+    let root = doc.trailer.get(b"Root").and_then(Object::as_reference).map_err(lop)?;
+    let acro = doc.get_dictionary(root).map_err(lop)?.get(b"AcroForm").ok().cloned();
+    match acro {
+        Some(Object::Reference(id)) => {
+            doc.get_dictionary_mut(id).map_err(lop)?.set("NeedAppearances", true);
+        }
+        Some(Object::Dictionary(_)) => {
+            if let Ok(Object::Dictionary(a)) = doc.get_dictionary_mut(root).map_err(lop)?.get_mut(b"AcroForm") {
+                a.set("NeedAppearances", true);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Resolve an inheritable field attribute, walking the `/Parent` chain (capped).
+fn inherited<'a>(doc: &'a Document, start: &'a Dictionary, key: &[u8]) -> Option<&'a Object> {
+    let mut cur = start;
+    for _ in 0..32 {
+        if let Ok(v) = cur.get(key) {
+            return Some(v);
+        }
+        let parent = cur.get(b"Parent").ok()?.as_reference().ok()?;
+        cur = doc.get_dictionary(parent).ok()?;
+    }
+    None
+}
+
+/// A field's fully-qualified name: partial `/T`s from root to leaf joined by `.`.
+fn qualified_name(doc: &Document, start: &Dictionary) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = start;
+    for _ in 0..32 {
+        if let Ok(t) = cur.get(b"T").and_then(Object::as_str) {
+            parts.push(decode_pdf_text_string(t));
+        }
+        let Ok(parent) = cur.get(b"Parent").and_then(Object::as_reference) else { break };
+        let Ok(p) = doc.get_dictionary(parent) else { break };
+        cur = p;
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    parts.reverse();
+    Some(parts.join("."))
+}
+
+/// Decode a PDF text string: UTF-16BE when it carries the `FEFF` BOM, else
+/// `PDFDocEncoding` approximated as Latin-1 (good enough for field values).
+fn decode_pdf_text_string(raw: &[u8]) -> String {
+    if raw.len() >= 2 && raw[0] == 0xFE && raw[1] == 0xFF {
+        let units: Vec<u16> =
+            raw[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        raw.iter().map(|&b| b as char).collect()
+    }
+}
+
+/// Encode a string as a PDF text string: a literal for ASCII, else UTF-16BE with
+/// a `FEFF` BOM (what Acrobat expects for non-Latin field values).
+fn encode_pdf_text_string(s: &str) -> Object {
+    if s.is_ascii() {
+        Object::string_literal(s)
+    } else {
+        let mut bytes = vec![0xFE, 0xFF];
+        for unit in s.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_be_bytes());
+        }
+        Object::String(bytes, StringFormat::Literal)
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn dict_rect(d: &Dictionary, key: &[u8]) -> Option<[f32; 4]> {
+    let Ok(Object::Array(a)) = d.get(key) else { return None };
+    if a.len() != 4 {
+        return None;
+    }
+    let mut out = [0.0f32; 4];
+    for (slot, obj) in out.iter_mut().zip(a) {
+        *slot = match obj {
+            Object::Real(v) => *v,
+            Object::Integer(v) => *v as f32,
+            _ => return None,
+        };
+    }
+    Some(out)
+}
+
+/// SPEC: P5-FORM-002 — fill a text field as one undoable edit. The inverse is a
+/// pre-write byte snapshot (`RestoreDocEdit`), the same chassis as `WatermarkEdit`.
+pub struct FillTextFieldEdit {
+    pub name: String,
+    pub value: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for FillTextFieldEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = set_text_field_value(&pre_bytes, &self.name, &self.value)?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "fill-text-field"
+    }
 }
 
 #[cfg(test)]

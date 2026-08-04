@@ -7887,6 +7887,59 @@ fields. Counting the array would over- or under-count.
 
 ---
 
+## P5.A2 — filling a field without drawing it
+
+### Problem
+Filling a text field means writing its value, but a PDF form field's *appearance*
+(the pixels a viewer draws) is a separate cached stream, `/AP`. Regenerating it
+correctly needs font metrics, the field's `/DA` string, and glyph layout — a lot.
+The spec also says respect `/MaxLen`, and values can be non-Latin.
+
+### Concepts learned
+- **`/V` vs `/AP`** — `/V` is the field's *value* (the data); `/AP` is its cached
+  *appearance* (the drawn glyphs). Setting `/V` alone leaves a stale `/AP`, so a
+  viewer would show the old look.
+- **`/NeedAppearances`** — an AcroForm flag that tells a viewer "my `/AP`s are
+  stale — regenerate them from `/V` on open." Setting it (and dropping the stale
+  `/AP`) is the cheap, well-supported alternative to generating appearances
+  ourselves. Acrobat/Preview honour it; that's why the saved file shows the value.
+- **The overlay is the in-app display** — our PDF.js view doesn't regenerate field
+  appearances, so the value wouldn't show on our canvas. Instead the fill input
+  sits *over* the field and shows the value directly. That also means filling is a
+  **soft** epoch bump — no canvas reload, no flash — since nothing on the canvas
+  changed.
+- **Inherited field attributes** — `/FT`, `/V`, `/MaxLen`, `/Ff` can live on a
+  parent field and be inherited by a widget, so each is resolved up the `/Parent`
+  chain; a field's identity is its **fully-qualified name** (parent names joined
+  by `.`).
+- **PDF text strings** — ASCII goes in a literal; non-Latin is UTF-16BE with a
+  `FEFF` BOM (what Acrobat expects). Reading back detects the BOM to decode.
+
+### Design choices
+- **NeedAppearances over `/AP` generation.** Cost: our own PDF.js canvas won't
+  render the baked value (the overlay covers that); benefit: correct in every real
+  reader for a fraction of the code. Full `/AP` generation is deferred.
+- **Reused the write chassis.** `FillTextFieldEdit` is the same snapshot → transform
+  → reload → `RestoreDocEdit` shape as `WatermarkEdit`, so undo/redo and the
+  byte-budget come for free.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `FormField`, `read_text_fields_doc`, `set_text_field_value`, `FillTextFieldEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `ReadTextFields` + `FillTextField` messages. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_read_text_fields`, `pdf_fill_text_field`. |
+| `src/ipc/forms.ts` | `FormField` + `readTextFields` + `fillTextField`. |
+| `src/view/form-fields-layer.tsx` | Per-page fill overlay (input over each field). |
+| `src/view/PageVirtualizer.tsx` | Mounts the overlay. |
+| `tests/fixtures/basic/forms-multi.pdf` | 3-field fixture (max-len + multiline). |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.3.3 — variable text, `/DA`, `/NeedAppearances`.
+- §7.9.2.2 — text string types (`PDFDocEncoding` vs UTF-16BE).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

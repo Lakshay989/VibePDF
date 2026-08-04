@@ -1,3 +1,4 @@
+import { type HistoryState } from "@/ipc/history";
 import { invoke } from "@/ipc/invoke";
 import type { DocumentId } from "@/ipc/pdf";
 
@@ -20,4 +21,40 @@ export interface FormSummary {
  */
 export async function readFormSummary(id: DocumentId): Promise<FormSummary> {
   return invoke<FormSummary>("pdf_read_form_summary", { id });
+}
+
+/**
+ * One fillable text field on a page, mirroring `pdf::form::FormField` (Rust).
+ * `rect` is `[x0, y0, x1, y1]` in PDF points (page space, origin bottom-left).
+ */
+export interface FormField {
+  /** Fully-qualified field name — the handle `fillTextField` addresses. */
+  name: string;
+  rect: [number, number, number, number];
+  /** Current value (`/V`). */
+  value: string;
+  /** Character cap (`/MaxLen`), or null. */
+  maxLen: number | null;
+  /** Multi-line text field (`/Ff` bit 13). */
+  multiline: boolean;
+}
+
+/**
+ * SPEC: P5-FORM-002 (P5.A2) — read the fillable text fields on `page` (0-based),
+ * with geometry + current value, to place the fill overlay. Read-only.
+ */
+export async function readTextFields(id: DocumentId, page: number): Promise<FormField[]> {
+  return invoke<FormField[]>("pdf_read_text_fields", { id, page });
+}
+
+/**
+ * SPEC: P5-FORM-002 — set the text field `name` to `value` (the backend truncates
+ * to the field's `/MaxLen`). Undoable; runs on the document actor.
+ */
+export async function fillTextField(
+  id: DocumentId,
+  name: string,
+  value: string,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_fill_text_field", { id, name, value });
 }

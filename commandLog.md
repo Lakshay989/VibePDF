@@ -3601,6 +3601,30 @@ concurrently). The project runner serialises PDFium tests.
 
 ---
 
+## P5.A2 — Fill text fields (SPEC P5-FORM-002)
+
+No `npm install` / `cargo add` — no new dependency (reused `lopdf`).
+
+New fixture: `tests/fixtures/basic/forms-multi.pdf` via
+`python3 tests/fixtures/basic/generate-forms-multi.py` (3 text fields: plain,
+`/MaxLen 5`, multiline).
+
+Verification gates + tests:
+
+```
+cargo test --test form_fill_text                   # 7 ok (geometry, fill, max-len, unicode, NeedAppearances, actor fill→undo)
+npm run check                                       # tsc + eslint + clippy pedantic clean
+npm run test                                        # 97 files / 420 passed
+npm run test:rust                                   # every binary 0 failed
+cargo test --test form_fill_text writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf (cross-reader)
+```
+
+Write path → a verification artifact was produced for the cross-reader ritual
+(copied to `Sample PDFs/vibepdf-verify-formfill.pdf`, git-ignored). On macOS
+`std::env::temp_dir()` is `$TMPDIR` (`/var/folders/…`), not `/tmp`.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
