@@ -205,13 +205,14 @@ export function TextEditLayer({
   };
 
   // A click in edit-text mode that lands on no run — the text there isn't a
-  // decodable run (font without a Unicode map, or part of an image). Say so,
-  // rather than silently doing nothing. Throttled so clicks don't stack hints.
+  // decodable run: glyphs flattened to vector outlines (paths), a font without a
+  // Unicode map, or rasterized text in an image. Say so, rather than silently
+  // doing nothing. Throttled so clicks don't stack hints.
   const onMiss = () => {
     const now = Date.now();
     if (now - lastMissToastRef.current < MISS_TOAST_THROTTLE_MS) return;
     lastMissToastRef.current = now;
-    pushToast("info", "No editable text here — it may use a font without a Unicode map, or be part of an image.");
+    pushToast("info", "No editable text here — it may be vector outlines, use a font without a Unicode map, or be part of an image.");
   };
 
   if (!active) return null;
