@@ -7835,6 +7835,58 @@ image-edit stay hard. All acceptable; logged in BACKLOG.
 
 ---
 
+## P5.A1 — detecting a form without opening it
+
+### Problem
+Phase 5 is forms; before filling anything the app must know a PDF *has* a
+fillable form and how many fields, to offer a "Form mode" entry point. The trap:
+"how many fields" is not "the length of `/Fields`." A radio group is one field
+spread across several widget annotations; forms can nest fields under container
+fields. Counting the array would over- or under-count.
+
+### Concepts learned
+- **AcroForm** — the interactive-form dictionary hung off the catalog as
+  `/AcroForm`. Its `/Fields` array holds the top-level fields; each field is a
+  dict with a field type (`/FT`) and/or a partial name (`/T`).
+- **Terminal vs container field** — a field whose kids are themselves fields is a
+  *container* (grouping only); a field with no field-kids is *terminal* — the
+  fillable leaf. A `/Widget` (`/Subtype /Widget`, no `/FT`/`/T`) is a field's
+  on-page appearance, not a field. Counting terminals gives the number a user
+  actually fills: a three-button radio group → 1.
+- **Field-tree walk as a work-list** — the tree can nest and, in malformed files,
+  cycle, so the count is an iterative stack walk with a visited-set (breaks
+  reference cycles) and an iteration budget — not recursion. Same shape as the
+  `collect_refs` worklist.
+- **Read query = borrow, never mutate** — detection runs on the shared parsed
+  lopdf `Document` from the doc cache (NFR-PERF-005), like the annotation reads;
+  it never serializes or writes. The two-engine rule is untouched.
+
+### Design choices
+- **Reused, didn't duplicate.** The catalog→`/AcroForm` resolution already lived
+  in `cos::acroform_field_ids` (built for merge field-renaming); I extracted it as
+  `cos::acroform_dict` so `form.rs` shares one resolver.
+- **`has_xfa` reported, not acted on.** XFA-only forms are P5.A5; A1 just carries
+  the flag. The entry point is gated on `field_count > 0`, so an XFA-only form
+  with no AcroForm fields surfaces nothing.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `FormSummary` + the terminal-field walk. |
+| `src-tauri/src/pdf/cos.rs` | Extracted `acroform_dict`, reused by field-ids + form. |
+| `src-tauri/src/pdf/actor.rs` | `ReadFormSummary` message + cached-doc read. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_read_form_summary` command. |
+| `src/ipc/forms.ts` | Typed `readFormSummary` wrapper + `FormSummary`. |
+| `src/state/form-store.ts` | `detected` + `formMode` toggle (A2 builds fill on it). |
+| `src/app/use-form-detect.ts` | Reads the summary on open; resets on doc switch. |
+| `src/app/App.tsx` | Header "Form mode (N fields)" entry point. |
+
+### Further reading
+- PDF 32000-1:2008 §12.7 (Interactive Forms) — AcroForm, the field/widget split.
+- §12.7.3 — field hierarchy and terminal fields.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -154,17 +154,27 @@ pub fn add_top_level_bookmark(
     Ok(buf)
 }
 
-/// The object ids of the `/AcroForm` `/Fields` entries, handling `/AcroForm`
-/// as either an indirect reference or an inline dictionary. Empty when there
-/// is no form.
-fn acroform_field_ids(doc: &Document) -> Result<Vec<ObjectId>, CommandError> {
+/// Resolve the catalog's `/AcroForm` dictionary, handling it as either an
+/// indirect reference or an inline dictionary. `Ok(None)` when the document has
+/// no interactive form. Shared by the merge field-collision path and the P5
+/// form detector ([`crate::pdf::form`]).
+pub(crate) fn acroform_dict(doc: &Document) -> Result<Option<&Dictionary>, CommandError> {
     let catalog = doc.catalog().map_err(cos_err)?;
     let Ok(acroform) = catalog.get(b"AcroForm") else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     let acro_dict = match acroform.as_reference() {
         Ok(id) => doc.get_dictionary(id).map_err(cos_err)?,
         Err(_) => acroform.as_dict().map_err(cos_err)?,
+    };
+    Ok(Some(acro_dict))
+}
+
+/// The object ids of the `/AcroForm` `/Fields` entries. Empty when there is no
+/// form.
+fn acroform_field_ids(doc: &Document) -> Result<Vec<ObjectId>, CommandError> {
+    let Some(acro_dict) = acroform_dict(doc)? else {
+        return Ok(Vec::new());
     };
     let ids = acro_dict
         .get(b"Fields")

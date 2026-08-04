@@ -54,6 +54,7 @@ use crate::pdf::cos::{
     read_text_notes_doc, AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
 };
 use crate::pdf::doc_cache::CachedDoc;
+use crate::pdf::form::{read_form_summary_doc, FormSummary};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
 use crate::pdf::image_extract::{extract_images, ImageInfo};
@@ -367,6 +368,12 @@ pub enum Message {
     ReadTextBoxes {
         page: usize,
         reply: oneshot::Sender<Result<Vec<TextBoxInfo>, CommandError>>,
+    },
+    /// SPEC: P5-FORM-001 — summarise the document's `AcroForm` (terminal field
+    /// count + XFA flag), so the UI can surface a "Form mode" entry point.
+    /// Read-only.
+    ReadFormSummary {
+        reply: oneshot::Sender<Result<FormSummary, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
@@ -1373,6 +1380,23 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ReadTextBoxes { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-001 — read the document's form summary. Await-holding for tests.
+    pub async fn read_form_summary(&self) -> Result<FormSummary, CommandError> {
+        let rx = self.read_form_summary_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_form_summary_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<FormSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadFormSummary { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3055,6 +3079,18 @@ fn run_worker(
                         doc.save_to_bytes().map_err(CommandError::from)
                     })
                     .and_then(|d| read_text_boxes_doc(d, page));
+                let _ = reply.send(result);
+            }
+            Message::ReadFormSummary { reply } => {
+                // SPEC: P5-FORM-001 — read-only. Served from the shared parse
+                // cache (cold cache serializes under the PDFium lock), like the
+                // other cos read queries.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(read_form_summary_doc);
                 let _ = reply.send(result);
             }
             Message::RemoveTextBox { page, id, reply } => {

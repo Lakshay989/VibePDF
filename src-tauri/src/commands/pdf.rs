@@ -7,6 +7,7 @@ use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
+use crate::pdf::form::FormSummary;
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -720,6 +721,29 @@ pub async fn pdf_read_text_boxes(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.read_text_boxes_request(page)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-001 — summarise the document's interactive form (terminal field
+/// count + XFA flag) so the UI can surface a "Form mode" entry point. Read-only.
+#[tauri::command]
+pub async fn pdf_read_form_summary(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<FormSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_form_summary_request()?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

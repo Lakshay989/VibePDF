@@ -3578,6 +3578,29 @@ no reload.
 
 ---
 
+## P5.A1 — Detect AcroForm + Form-mode entry point (SPEC P5-FORM-001)
+
+No `npm install` / `cargo add` — no new dependency (reused `lopdf`).
+
+Verification gates + tests:
+
+```
+cargo test --lib pdf::form                        # 5 ok (walk semantics: radio→1, hierarchy→2, XFA)
+cargo test --test form_detect                     # 3 ok (forms.pdf via bytes + actor; no-form → 0)
+cargo test --lib pdf::cos                          # 20 ok (acroform_dict refactor)
+cargo test --test merge -- --test-threads=1        # 7 ok (field-rename path intact)
+npm run check                                      # tsc + eslint + clippy pedantic clean
+npm run test                                       # 96 files / 414 passed
+npm run test:rust                                  # every binary 0 failed
+```
+
+Note: `cargo test --test merge` under default parallelism SIGSEGVs inside PDFium
+(known thread-unsafety — the `merge_carries_form_fields_with_rename` test that
+exercises this change passes; the crash is a later PDFium test running
+concurrently). The project runner serialises PDFium tests.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

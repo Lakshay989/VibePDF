@@ -11,7 +11,9 @@ import { useRecovery } from "@/app/use-recovery";
 import { useSave } from "@/app/use-save";
 import { useSessionRestore } from "@/app/use-session-restore";
 import { closePdf, type DocumentId } from "@/ipc/pdf";
+import { useFormDetect } from "@/app/use-form-detect";
 import { useDocumentStore } from "@/state/document-store";
+import { useFormStore } from "@/state/form-store";
 import { useSettingsStore } from "@/state/settings-store";
 import { PdfViewer } from "@/view/PdfViewer";
 
@@ -64,6 +66,14 @@ export function App() {
   // overlay on open and re-sync after undo/redo.
   useNotesSync(current?.id);
 
+  // SPEC: P5-FORM-001 (P5.A1) — detect an AcroForm on open; surface a "Form
+  // mode" entry point with the field count.
+  useFormDetect(current?.id);
+  const formDetected = useFormStore((s) => s.detected);
+  const formMode = useFormStore((s) => s.formMode);
+  const enterFormMode = useFormStore((s) => s.enterFormMode);
+  const exitFormMode = useFormStore((s) => s.exitFormMode);
+
   // One status line: a save message takes precedence over an open message
   // when both are live (both auto-dismiss in 3s, so overlap is brief).
   const statusToast = saveToast ?? toast;
@@ -107,6 +117,25 @@ export function App() {
         >
           Open PDF (⌘O)
         </button>
+        {current && formDetected && formDetected.fieldCount > 0 ? (
+          <button
+            onClick={() => (formMode ? exitFormMode() : enterFormMode())}
+            aria-pressed={formMode}
+            title={
+              formMode
+                ? "Exit form mode"
+                : `This PDF has ${formDetected.fieldCount} fillable form field${formDetected.fieldCount === 1 ? "" : "s"}`
+            }
+            className={
+              "rounded border px-2 py-1 text-sm " +
+              (formMode
+                ? "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                : "border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900")
+            }
+          >
+            {`Form mode (${formDetected.fieldCount} field${formDetected.fieldCount === 1 ? "" : "s"})`}
+          </button>
+        ) : null}
         <button
           onClick={() => void save()}
           disabled={!current}
