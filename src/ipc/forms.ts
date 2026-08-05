@@ -179,3 +179,38 @@ export async function addTextField(
     required: field.required,
   });
 }
+
+/** Spec for a non-text field to create (P5.B2). Text uses `addTextField`. */
+export type NewFieldSpec =
+  | { kind: "checkbox"; required: boolean }
+  | { kind: "radio"; options: string[] }
+  | { kind: "combo"; options: string[]; defaultValue: string }
+  | { kind: "list"; options: string[]; multi: boolean }
+  | { kind: "signature" }
+  | { kind: "pushbutton"; caption: string };
+
+/**
+ * SPEC: P5-FORM-007 (P5.B2) — create a checkbox / radio / combo / list /
+ * signature / push-button field on `page` (0-based) at `rect`. Undoable; runs on
+ * the document actor.
+ */
+export async function addField(
+  id: DocumentId,
+  page: number,
+  rect: [number, number, number, number],
+  name: string,
+  spec: NewFieldSpec,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_add_field", {
+    id,
+    page,
+    rect,
+    name,
+    kind: spec.kind,
+    options: "options" in spec ? spec.options : [],
+    defaultValue: spec.kind === "combo" ? spec.defaultValue : "",
+    multi: spec.kind === "list" ? spec.multi : false,
+    required: spec.kind === "checkbox" ? spec.required : false,
+    caption: spec.kind === "pushbutton" ? spec.caption : "",
+  });
+}

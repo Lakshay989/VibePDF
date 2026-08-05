@@ -8138,6 +8138,59 @@ once — and, if the PDF has no form yet, building the AcroForm itself.
 
 ---
 
+## P5.B2 — the other five (six) field kinds
+
+### Problem
+B1 created one field type (text). B2 creates the rest — checkbox, radio group,
+combo, list, signature, push-button — each with its own `/FT`, flags, and
+appearance needs, from one drag-to-create flow.
+
+### Concepts learned
+- **Button appearances are drawn, choices regenerate** — checkbox/radio need a
+  real `/AP /N` (an on-mark Form-XObject + an empty off), because `/AS` selects a
+  *pre-drawn* look; combo/list are variable-text, so they rely on
+  `/NeedAppearances` like the fill path (A4). Two different appearance strategies
+  in one function.
+- **Radio = a parent field + N widget kids** — the parent (`/FT /Btn /Ff radio
+  /Kids […] /V /Off`) carries the value; each kid is a widget with its own
+  on-state and `/AS`. Reserve the parent id first (`new_object_id`), build the
+  kids pointing at it, then insert the parent — a two-pass wiring so the kids can
+  reference a parent that doesn't exist yet.
+- **Signature is a placeholder** — `/FT /Sig` with no value/appearance; signing is
+  Phase 6. Don't fake it.
+- **Push-button ≈ no value** — `/Ff` pushbutton bit, a `/MK /CA` caption, and a
+  bordered `/AP`. It's excluded from the fillable-button read (A3), same as any
+  pushbutton.
+- **One enum, one edit, flat wire** — `NewFieldKind` (a Rust enum) drives one
+  `add_field`; the command takes *flat* params (`kind` + `options` + `default` +
+  `multi` + `required` + `caption`) and maps them to the enum, keeping the IPC
+  simple and typed.
+
+### Design choices
+- **Separate from B1's text path.** `add_field` handles the 6 non-text kinds;
+  text stays on `add_text_field`. Shared helpers (`ensure_acroform`,
+  `duplicate_field_name`, `append_ref`, `base_widget`) mean no duplication.
+- **Verified with A3/A4's readers.** Checkbox/radio via `read_button_fields`,
+  combo/list via `read_choice_fields`, signature/pushbutton via COS `/FT`,`/Ff`
+  inspection — the create and fill features meet in the middle.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `NewFieldKind` + `add_field` + `AddFieldEdit` + appearance helpers. |
+| `src-tauri/src/pdf/actor.rs` | `AddField` message. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_add_field` (flat params → enum). |
+| `src/ipc/forms.ts` | `addField` + the `NewFieldSpec` union. |
+| `src/view/form-create-layer.tsx` | Type dropdown + per-type inputs (broadened from B1). |
+| `src/app/MarkupToolbar.tsx` | "Form Field" tool label. |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.4 (field types: `/Btn`, `/Ch`, `/Sig`), §12.7.4.2.3 (radio).
+
+**Track B partway: B1 (text) + B2 (other kinds) create; B3 = properties + tab order.**
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

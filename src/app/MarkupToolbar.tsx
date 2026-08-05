@@ -449,15 +449,15 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       <button
         type="button"
         onClick={() => setActiveTool(createFieldActive ? null : "create-text-field")}
-        title="Create a form text field (drag a box, then set name / default / max length / multi-line / required)"
-        aria-label="Create text field tool"
+        title="Create a form field (drag a box, then choose text / checkbox / radio / dropdown / list / signature / button)"
+        aria-label="Create form field tool"
         aria-pressed={createFieldActive}
         className={
           "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
           (createFieldActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
         }
       >
-        Text Field
+        Form Field
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

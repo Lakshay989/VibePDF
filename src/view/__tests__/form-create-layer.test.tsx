@@ -6,15 +6,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 vi.mock("@/ipc/forms", () => ({
   addTextField: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
+  addField: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   readFormSummary: vi.fn().mockResolvedValue({ fieldCount: 1, hasXfa: false }),
 }));
 
-import { addTextField } from "@/ipc/forms";
+import { addField, addTextField } from "@/ipc/forms";
 import { useToolStore } from "@/state/tool-store";
 import { FormCreateLayer } from "@/view/form-create-layer";
 
 const DOC = "doc-1";
 const mockAdd = vi.mocked(addTextField);
+const mockAddField = vi.mocked(addField);
 
 const layer = () => (
   <FormCreateLayer
@@ -70,5 +72,23 @@ describe("FormCreateLayer", () => {
     await screen.findByLabelText("Field name");
     // Name left empty → the button is disabled.
     expect(screen.getByText("Create field").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("creates a non-text field through addField", async () => {
+    const { container } = render(layer());
+    dragBox(container.firstElementChild as Element);
+    await screen.findByLabelText("Field name");
+    fireEvent.change(screen.getByLabelText("Field type"), { target: { value: "radio" } });
+    fireEvent.change(screen.getByLabelText("Field name"), { target: { value: "color" } });
+    fireEvent.change(screen.getByLabelText("Options"), { target: { value: "Red, Green" } });
+    fireEvent.click(screen.getByText("Create field"));
+
+    await waitFor(() => expect(mockAddField).toHaveBeenCalledTimes(1));
+    const [id, page, , name, spec] = mockAddField.mock.calls[0]!;
+    expect(id).toBe(DOC);
+    expect(page).toBe(0);
+    expect(name).toBe("color");
+    expect(spec).toEqual({ kind: "radio", options: ["Red", "Green"] });
+    expect(mockAdd).not.toHaveBeenCalled();
   });
 });

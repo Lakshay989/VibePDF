@@ -1,14 +1,15 @@
-// SPEC: P5-FORM-006 (P5.B1) — the per-page "create text field" overlay.
+// SPEC: P5-FORM-006/007 (P5.B1/B2) — the per-page "create form field" overlay.
 //
-// When the Create-text-field tool is active, drag a box on the page; on release a
-// popover asks for the field's name / default / max-length / multi-line / required.
-// Confirm creates an AcroForm text field via addTextField and re-reads the form
-// summary so the Form-mode entry point updates. Pointer events (WKWebView; docs/04).
+// When the Create-field tool is active, drag a box on the page; on release a
+// popover picks the field type and its config. Text fields go through
+// addTextField (B1); checkbox / radio / combo / list / signature / push-button go
+// through addField (B2). On success the form summary is re-read so the Form-mode
+// entry point updates. Pointer events (WKWebView; docs/04).
 
 import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent, useState } from "react";
 
-import { addTextField, readFormSummary } from "@/ipc/forms";
+import { addField, addTextField, readFormSummary, type NewFieldSpec } from "@/ipc/forms";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useFormStore } from "@/state/form-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -20,12 +21,9 @@ export interface FormCreateLayerProps {
   documentId: string;
   /** 0-based page index. */
   page: number;
-  /** Displayed (rotation-swapped) page size in PDF points. */
   displayedWidth: number;
   displayedHeight: number;
-  /** CSS px per point. */
   scale: number;
-  /** Page display rotation in degrees. */
   rotation: number;
 }
 
@@ -33,6 +31,18 @@ interface Pending {
   rect: [number, number, number, number];
   box: { left: number; top: number; width: number; height: number };
 }
+
+type FieldType = "text" | "checkbox" | "radio" | "combo" | "list" | "signature" | "pushbutton";
+
+const TYPE_LABELS: Record<FieldType, string> = {
+  text: "Text",
+  checkbox: "Checkbox",
+  radio: "Radio group",
+  combo: "Dropdown (combo)",
+  list: "List box",
+  signature: "Signature",
+  pushbutton: "Push button",
+};
 
 export function FormCreateLayer({
   documentId,
@@ -51,11 +61,16 @@ export function FormCreateLayer({
   const [start, setStart] = useState<ScreenPoint | null>(null);
   const [current, setCurrent] = useState<ScreenPoint | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
+
+  const [type, setType] = useState<FieldType>("text");
   const [name, setName] = useState("");
   const [defaultValue, setDefaultValue] = useState("");
   const [maxLen, setMaxLen] = useState("");
   const [multiline, setMultiline] = useState(false);
   const [required, setRequired] = useState(false);
+  const [optionsText, setOptionsText] = useState("");
+  const [multi, setMulti] = useState(false);
+  const [caption, setCaption] = useState("");
 
   const placing = activeTool === "create-text-field";
 
@@ -76,11 +91,15 @@ export function FormCreateLayer({
   };
 
   const resetForm = () => {
+    setType("text");
     setName("");
     setDefaultValue("");
     setMaxLen("");
     setMultiline(false);
     setRequired(false);
+    setOptionsText("");
+    setMulti(false);
+    setCaption("");
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -116,20 +135,51 @@ export function FormCreateLayer({
     resetForm();
   };
 
+  const parseOptions = (): string[] =>
+    optionsText
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "");
+
+  const canCreate = (): boolean => {
+    if (name.trim() === "") return false;
+    if (type === "radio") return parseOptions().length >= 2;
+    if (type === "combo" || type === "list") return parseOptions().length >= 1;
+    return true;
+  };
+
   const confirm = () => {
-    if (!pending || name.trim() === "") return;
+    if (!pending || !canCreate()) return;
     const { rect } = pending;
-    const parsed = Number.parseInt(maxLen, 10);
-    const field = {
-      name: name.trim(),
-      defaultValue,
-      maxLen: maxLen.trim() !== "" && Number.isFinite(parsed) && parsed > 0 ? parsed : null,
-      multiline,
-      required,
-    };
+    const fieldName = name.trim();
+    let work: Promise<{ canUndo: boolean; canRedo: boolean }>;
+    if (type === "text") {
+      const parsed = Number.parseInt(maxLen, 10);
+      work = addTextField(documentId, page, rect, {
+        name: fieldName,
+        defaultValue,
+        maxLen: maxLen.trim() !== "" && Number.isFinite(parsed) && parsed > 0 ? parsed : null,
+        multiline,
+        required,
+      });
+    } else {
+      const spec: NewFieldSpec =
+        type === "checkbox"
+          ? { kind: "checkbox", required }
+          : type === "radio"
+            ? { kind: "radio", options: parseOptions() }
+            : type === "combo"
+              ? { kind: "combo", options: parseOptions(), defaultValue }
+              : type === "list"
+                ? { kind: "list", options: parseOptions(), multi }
+                : type === "pushbutton"
+                  ? { kind: "pushbutton", caption }
+                  : { kind: "signature" };
+      work = addField(documentId, page, rect, fieldName, spec);
+    }
     cancel();
     setActiveTool(null);
-    addTextField(documentId, page, rect, field)
+    work
       .then((h) => {
         bumpEpoch(documentId);
         setHistory(documentId, h);
@@ -141,6 +191,8 @@ export function FormCreateLayer({
   if (!placing) return null;
 
   const preview = start && current ? normalizeScreenRect(start, current) : null;
+  const showOptions = type === "radio" || type === "combo" || type === "list";
+  const input = "rounded border border-neutral-300 px-2 py-1";
 
   return (
     <div
@@ -182,11 +234,26 @@ export function FormCreateLayer({
             onPointerDown={(e) => e.stopPropagation()}
           >
             <label className="flex flex-col gap-0.5">
+              <span className="text-xs text-neutral-500">Field type</span>
+              <select
+                aria-label="Field type"
+                className={input}
+                value={type}
+                onChange={(e) => setType(e.target.value as FieldType)}
+              >
+                {(Object.keys(TYPE_LABELS) as FieldType[]).map((t) => (
+                  <option key={t} value={t}>
+                    {TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5">
               <span className="text-xs text-neutral-500">Field name</span>
               <input
                 autoFocus
                 aria-label="Field name"
-                className="rounded border border-neutral-300 px-2 py-1"
+                className={input}
                 placeholder="e.g. email"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -196,46 +263,67 @@ export function FormCreateLayer({
                 }}
               />
             </label>
-            <label className="flex flex-col gap-0.5">
-              <span className="text-xs text-neutral-500">Default value</span>
-              <input
-                aria-label="Default value"
-                className="rounded border border-neutral-300 px-2 py-1"
-                value={defaultValue}
-                onChange={(e) => setDefaultValue(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-0.5">
-              <span className="text-xs text-neutral-500">Max length (optional)</span>
-              <input
-                aria-label="Max length"
-                type="number"
-                min={1}
-                className="rounded border border-neutral-300 px-2 py-1"
-                value={maxLen}
-                onChange={(e) => setMaxLen(e.target.value)}
-              />
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={multiline} onChange={(e) => setMultiline(e.target.checked)} />
-              <span>Multi-line</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-              <span>Required</span>
-            </label>
+
+            {type === "text" ? (
+              <>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-xs text-neutral-500">Default value</span>
+                  <input aria-label="Default value" className={input} value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-xs text-neutral-500">Max length (optional)</span>
+                  <input aria-label="Max length" type="number" min={1} className={input} value={maxLen} onChange={(e) => setMaxLen(e.target.value)} />
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={multiline} onChange={(e) => setMultiline(e.target.checked)} />
+                  <span>Multi-line</span>
+                </label>
+              </>
+            ) : null}
+
+            {showOptions ? (
+              <label className="flex flex-col gap-0.5">
+                <span className="text-xs text-neutral-500">Options (comma-separated)</span>
+                <input aria-label="Options" className={input} placeholder="Red, Green, Blue" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} />
+              </label>
+            ) : null}
+
+            {type === "combo" ? (
+              <label className="flex flex-col gap-0.5">
+                <span className="text-xs text-neutral-500">Default option</span>
+                <input aria-label="Default option" className={input} value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} />
+              </label>
+            ) : null}
+
+            {type === "list" ? (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} />
+                <span>Allow multiple selection</span>
+              </label>
+            ) : null}
+
+            {type === "pushbutton" ? (
+              <label className="flex flex-col gap-0.5">
+                <span className="text-xs text-neutral-500">Button caption</span>
+                <input aria-label="Button caption" className={input} value={caption} onChange={(e) => setCaption(e.target.value)} />
+              </label>
+            ) : null}
+
+            {type === "checkbox" || type === "text" ? (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
+                <span>Required</span>
+              </label>
+            ) : null}
+
             <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-neutral-600 hover:bg-neutral-100"
-                onClick={cancel}
-              >
+              <button type="button" className="rounded px-2 py-1 text-neutral-600 hover:bg-neutral-100" onClick={cancel}>
                 Cancel
               </button>
               <button
                 type="button"
                 className="rounded bg-blue-600 px-2 py-1 text-white disabled:opacity-40"
-                disabled={name.trim() === ""}
+                disabled={!canCreate()}
                 onClick={confirm}
               >
                 Create field

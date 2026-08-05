@@ -3714,6 +3714,26 @@ Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-creat
 
 ---
 
+## P5.B2 — Create other field kinds (SPEC P5-FORM-007)
+
+No `npm install` / `cargo add` — no new dependency. No new fixture (uses
+`hello.pdf` + `forms.pdf`).
+
+Verification gates + tests:
+
+```
+cargo test --test form_create_other                  # 9 ok (checkbox, radio group (3 kids), radio<2 reject, combo, list multi, signature /FT /Sig, pushbutton /Ff bit + excluded from button read, dup reject, actor create→undo)
+npm run check                                         # tsc + eslint + clippy pedantic clean
+npm run test                                          # 101 files / 443 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_create_other writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf
+```
+
+Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-createfields.pdf`
+(git-ignored) — checkbox + radio + combo + push-button on one page.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

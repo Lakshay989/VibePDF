@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, StringFormat};
+use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream, StringFormat};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
@@ -950,22 +950,7 @@ pub fn add_text_field(
         .ok_or_else(|| CommandError::InvalidInput(format!("no page {page}")))?;
 
     let acro_id = ensure_acroform(&mut doc)?;
-
-    // Reject a colliding top-level field name (duplicate /T merges into one field).
-    let duplicate = doc
-        .get_dictionary(acro_id)
-        .ok()
-        .and_then(|a| a.get(b"Fields").ok())
-        .and_then(|o| o.as_array().ok())
-        .is_some_and(|fields| {
-            fields
-                .iter()
-                .filter_map(|f| f.as_reference().ok())
-                .filter_map(|id| doc.get_dictionary(id).ok())
-                .filter_map(|d| d.get(b"T").and_then(Object::as_str).ok())
-                .any(|t| String::from_utf8_lossy(t) == name)
-        });
-    if duplicate {
+    if duplicate_field_name(&doc, acro_id, name) {
         return Err(CommandError::InvalidInput(format!("a form field named {name} already exists")));
     }
 
@@ -1052,6 +1037,270 @@ impl<'a> Edit<PdfDocument<'a>> for AddTextFieldEdit {
 
     fn label(&self) -> &'static str {
         "add-text-field"
+    }
+}
+
+// ── P5.B2 — create the other field kinds ────────────────────────────────────
+
+/// A `[x0 y0 x1 y1]` rect → PDF number array.
+fn rect_obj(r: [f32; 4]) -> Object {
+    Object::Array(vec![Object::Real(r[0]), Object::Real(r[1]), Object::Real(r[2]), Object::Real(r[3])])
+}
+
+/// The common widget-annotation entries every field starts from.
+fn base_widget(name: &str, rect: [f32; 4], page_id: ObjectId) -> Dictionary {
+    let mut d = Dictionary::new();
+    d.set("Type", "Annot");
+    d.set("Subtype", "Widget");
+    d.set("T", encode_pdf_text_string(name));
+    d.set("Rect", rect_obj(rect));
+    d.set("P", Object::Reference(page_id));
+    d.set("F", Object::Integer(4)); // Print
+    d
+}
+
+/// Is `name` already a top-level field name in the `AcroForm`?
+fn duplicate_field_name(doc: &Document, acro_id: ObjectId, name: &str) -> bool {
+    doc.get_dictionary(acro_id)
+        .ok()
+        .and_then(|a| a.get(b"Fields").ok())
+        .and_then(|o| o.as_array().ok())
+        .is_some_and(|fields| {
+            fields
+                .iter()
+                .filter_map(|f| f.as_reference().ok())
+                .filter_map(|id| doc.get_dictionary(id).ok())
+                .filter_map(|d| d.get(b"T").and_then(Object::as_str).ok())
+                .any(|t| String::from_utf8_lossy(t) == name)
+        })
+}
+
+/// A button widget's `/AP /N` sub-appearance: a filled inset mark ("on") or an
+/// empty stream ("off"), as a Form `XObject` sized to the widget.
+fn button_appearance(doc: &mut Document, on: bool, w: f32, h: f32) -> ObjectId {
+    let inset = (w.min(h) * 0.2).clamp(1.0, 4.0);
+    let content = if on {
+        format!("q 0 0 0 rg {inset:.2} {inset:.2} {:.2} {:.2} re f Q", w - 2.0 * inset, h - 2.0 * inset)
+            .into_bytes()
+    } else {
+        Vec::new()
+    };
+    let dict = dictionary! {
+        "Type" => "XObject", "Subtype" => "Form",
+        "BBox" => vec![Object::Real(0.0), Object::Real(0.0), Object::Real(w), Object::Real(h)],
+    };
+    doc.add_object(Stream::new(dict, content))
+}
+
+/// A push-button `/AP /N`: a light-filled, bordered box sized to the widget.
+fn pushbutton_appearance(doc: &mut Document, w: f32, h: f32) -> ObjectId {
+    let content = format!(
+        "q 0.9 0.9 0.9 rg 0 0 {w:.2} {h:.2} re f 0 0 0 RG 1 w 0.5 0.5 {:.2} {:.2} re S Q",
+        w - 1.0,
+        h - 1.0
+    )
+    .into_bytes();
+    let dict = dictionary! {
+        "Type" => "XObject", "Subtype" => "Form",
+        "BBox" => vec![Object::Real(0.0), Object::Real(0.0), Object::Real(w), Object::Real(h)],
+    };
+    doc.add_object(Stream::new(dict, content))
+}
+
+/// Reference a single-widget field from both the page `/Annots` and the `AcroForm`
+/// `/Fields`.
+fn wire_field(
+    doc: &mut Document,
+    page_id: ObjectId,
+    acro_id: ObjectId,
+    field_id: ObjectId,
+) -> Result<(), CommandError> {
+    append_ref(doc, page_id, b"Annots", field_id)?;
+    append_ref(doc, acro_id, b"Fields", field_id)?;
+    Ok(())
+}
+
+/// The kind of field [`add_field`] creates (text is P5.B1's `add_text_field`).
+pub enum NewFieldKind {
+    Checkbox { required: bool },
+    RadioGroup { options: Vec<String> },
+    Combo { options: Vec<String>, default: String },
+    ListBox { options: Vec<String>, multi: bool },
+    Signature,
+    PushButton { caption: String },
+}
+
+/// SPEC: P5-FORM-007 (P5.B2) — create a checkbox / radio group / combo / list /
+/// signature / push-button field on `page` at `rect`, wired into the `AcroForm`.
+/// Rejects a duplicate name; sets `/NeedAppearances`.
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
+pub fn add_field(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    name: &str,
+    kind: &NewFieldKind,
+) -> Result<Vec<u8>, CommandError> {
+    if name.trim().is_empty() {
+        return Err(CommandError::InvalidInput("field name is required".into()));
+    }
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let page_no = u32::try_from(page)
+        .map(|n| n + 1)
+        .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("no page {page}")))?;
+    let acro_id = ensure_acroform(&mut doc)?;
+    if duplicate_field_name(&doc, acro_id, name) {
+        return Err(CommandError::InvalidInput(format!("a form field named {name} already exists")));
+    }
+    let w = rect[2] - rect[0];
+    let h = rect[3] - rect[1];
+
+    match kind {
+        NewFieldKind::Checkbox { required } => {
+            let on = button_appearance(&mut doc, true, w, h);
+            let off = button_appearance(&mut doc, false, w, h);
+            let mut d = base_widget(name, rect, page_id);
+            d.set("FT", "Btn");
+            if *required {
+                d.set("Ff", Object::Integer(FF_REQUIRED));
+            }
+            d.set("AS", Object::Name(b"Off".to_vec()));
+            d.set("AP", dictionary! { "N" => dictionary! { "Yes" => on, "Off" => off } });
+            let id = doc.add_object(d);
+            wire_field(&mut doc, page_id, acro_id, id)?;
+        }
+        NewFieldKind::RadioGroup { options } => {
+            if options.len() < 2 {
+                return Err(CommandError::InvalidInput("a radio group needs at least 2 options".into()));
+            }
+            let parent_id = doc.new_object_id();
+            let n = options.len() as f32;
+            let row_h = h / n;
+            let mut kids = Vec::new();
+            for (i, opt) in options.iter().enumerate() {
+                let y1 = rect[3] - i as f32 * row_h;
+                let krect = [rect[0], y1 - row_h, rect[2], y1];
+                let on = button_appearance(&mut doc, true, w, row_h);
+                let off = button_appearance(&mut doc, false, w, row_h);
+                let mut kd = Dictionary::new();
+                kd.set("Type", "Annot");
+                kd.set("Subtype", "Widget");
+                kd.set("Parent", Object::Reference(parent_id));
+                kd.set("Rect", rect_obj(krect));
+                kd.set("P", Object::Reference(page_id));
+                kd.set("F", Object::Integer(4));
+                kd.set("AS", Object::Name(b"Off".to_vec()));
+                kd.set(
+                    "AP",
+                    dictionary! { "N" => dictionary! { opt.as_bytes().to_vec() => on, "Off" => off } },
+                );
+                kids.push(Object::Reference(doc.add_object(kd)));
+            }
+            let mut parent = Dictionary::new();
+            parent.set("FT", "Btn");
+            parent.set("Ff", Object::Integer(FF_RADIO));
+            parent.set("T", encode_pdf_text_string(name));
+            parent.set("V", Object::Name(b"Off".to_vec()));
+            parent.set("Kids", Object::Array(kids.clone()));
+            doc.objects.insert(parent_id, Object::Dictionary(parent));
+            for k in &kids {
+                if let Ok(kid) = k.as_reference() {
+                    append_ref(&mut doc, page_id, b"Annots", kid)?;
+                }
+            }
+            append_ref(&mut doc, acro_id, b"Fields", parent_id)?;
+        }
+        NewFieldKind::Combo { options, default } => {
+            if options.is_empty() {
+                return Err(CommandError::InvalidInput("a combo box needs at least 1 option".into()));
+            }
+            let mut d = base_widget(name, rect, page_id);
+            d.set("FT", "Ch");
+            d.set("Ff", Object::Integer(FF_COMBO));
+            d.set("Opt", Object::Array(options.iter().map(|o| encode_pdf_text_string(o)).collect()));
+            d.set("DA", Object::string_literal("/Helv 0 Tf 0 g"));
+            if !default.is_empty() && options.iter().any(|o| o == default) {
+                d.set("V", encode_pdf_text_string(default));
+            }
+            let id = doc.add_object(d);
+            wire_field(&mut doc, page_id, acro_id, id)?;
+        }
+        NewFieldKind::ListBox { options, multi } => {
+            if options.is_empty() {
+                return Err(CommandError::InvalidInput("a list box needs at least 1 option".into()));
+            }
+            let mut d = base_widget(name, rect, page_id);
+            d.set("FT", "Ch");
+            if *multi {
+                d.set("Ff", Object::Integer(FF_MULTISELECT));
+            }
+            d.set("Opt", Object::Array(options.iter().map(|o| encode_pdf_text_string(o)).collect()));
+            d.set("DA", Object::string_literal("/Helv 0 Tf 0 g"));
+            let id = doc.add_object(d);
+            wire_field(&mut doc, page_id, acro_id, id)?;
+        }
+        NewFieldKind::Signature => {
+            let mut d = base_widget(name, rect, page_id);
+            d.set("FT", "Sig");
+            let id = doc.add_object(d);
+            wire_field(&mut doc, page_id, acro_id, id)?;
+        }
+        NewFieldKind::PushButton { caption } => {
+            let ap = pushbutton_appearance(&mut doc, w, h);
+            let mut d = base_widget(name, rect, page_id);
+            d.set("FT", "Btn");
+            d.set("Ff", Object::Integer(FF_PUSHBUTTON));
+            d.set(
+                "MK",
+                dictionary! {
+                    "CA" => Object::string_literal(caption.clone()),
+                    "BG" => vec![Object::Real(0.9)],
+                    "BC" => vec![Object::Real(0.0)],
+                },
+            );
+            d.set("AP", dictionary! { "N" => ap });
+            let id = doc.add_object(d);
+            wire_field(&mut doc, page_id, acro_id, id)?;
+        }
+    }
+
+    set_need_appearances(&mut doc)?;
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-007 — create a non-text field as one undoable edit.
+pub struct AddFieldEdit {
+    pub page: usize,
+    pub rect: [f32; 4],
+    pub name: String,
+    pub kind: NewFieldKind,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for AddFieldEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = add_field(&pre_bytes, self.page, self.rect, &self.name, &self.kind)?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "add-field"
     }
 }
 

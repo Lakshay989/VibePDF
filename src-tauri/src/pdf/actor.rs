@@ -56,8 +56,8 @@ use crate::pdf::cos::{
 use crate::pdf::doc_cache::CachedDoc;
 use crate::pdf::form::{
     read_button_fields_doc, read_choice_fields_doc, read_form_summary_doc, read_text_fields_doc,
-    AddTextFieldEdit, ButtonField, ChoiceField, FillTextFieldEdit, FormField, FormSummary,
-    SetButtonFieldEdit, SetChoiceFieldEdit, StripXfaEdit,
+    AddFieldEdit, AddTextFieldEdit, ButtonField, ChoiceField, FillTextFieldEdit, FormField,
+    FormSummary, NewFieldKind, SetButtonFieldEdit, SetChoiceFieldEdit, StripXfaEdit,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -434,6 +434,15 @@ pub enum Message {
         max_len: Option<u32>,
         multiline: bool,
         required: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-007 — create a checkbox/radio/combo/list/signature/
+    /// push-button field on `page` (0-based) at `rect`. Undoable; marks dirty.
+    AddField {
+        page: usize,
+        rect: [f32; 4],
+        name: String,
+        kind: NewFieldKind,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
@@ -1644,6 +1653,33 @@ impl DocumentActorHandle {
                 required,
                 reply,
             })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-007 — create a non-text field. Await-holding for tests.
+    pub async fn add_field(
+        &self,
+        page: usize,
+        rect: [f32; 4],
+        name: String,
+        kind: NewFieldKind,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.add_field_request(page, rect, name, kind)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn add_field_request(
+        &self,
+        page: usize,
+        rect: [f32; 4],
+        name: String,
+        kind: NewFieldKind,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::AddField { page, rect, name, kind, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3430,6 +3466,18 @@ fn run_worker(
             } => {
                 // SPEC: P5-FORM-006 — create an AcroForm text field; snapshot inverse.
                 let edit = AddTextFieldEdit { page, rect, name, default, max_len, multiline, required };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::AddField { page, rect, name, kind, reply } => {
+                // SPEC: P5-FORM-007 — create a non-text field; snapshot inverse.
+                let edit = AddFieldEdit { page, rect, name, kind };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

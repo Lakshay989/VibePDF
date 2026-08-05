@@ -7,6 +7,7 @@ vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
 import {
+  addField,
   addTextField,
   fillTextField,
   readButtonFields,
@@ -154,6 +155,45 @@ describe("addTextField", () => {
       maxLen: 64,
       multiline: false,
       required: true,
+    });
+  });
+});
+
+describe("addField", () => {
+  it("flattens a radio spec to the wire", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await addField("doc-1", 0, [72, 620, 260, 700], "color", {
+      kind: "radio",
+      options: ["Red", "Green"],
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_add_field", {
+      id: "doc-1",
+      page: 0,
+      rect: [72, 620, 260, 700],
+      name: "color",
+      kind: "radio",
+      options: ["Red", "Green"],
+      defaultValue: "",
+      multi: false,
+      required: false,
+      caption: "",
+    });
+  });
+
+  it("flattens a pushbutton spec", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await addField("doc-1", 0, [0, 0, 10, 10], "go", { kind: "pushbutton", caption: "Go" });
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_add_field", {
+      id: "doc-1",
+      page: 0,
+      rect: [0, 0, 10, 10],
+      name: "go",
+      kind: "pushbutton",
+      options: [],
+      defaultValue: "",
+      multi: false,
+      required: false,
+      caption: "Go",
     });
   });
 });
