@@ -42,7 +42,8 @@ export type ToolId =
   | "add-text"
   | "add-image"
   | "edit-image"
-  | "add-link";
+  | "add-link"
+  | "create-text-field";
 
 /** A base-14 font family the free-text tool can request. */
 export type FontFamily = "Helvetica" | "Times" | "Courier";

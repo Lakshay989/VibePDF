@@ -8087,6 +8087,57 @@ detect, A2 text, A3 checkbox/radio, A4 choice, A5 XFA-degraded.
 
 ---
 
+## P5.B1 — creating a form field (not filling one)
+
+### Problem
+A2–A4 *fill* existing fields; B1 *creates* one. That means minting a new AcroForm
+field from nothing and wiring it into the document's object graph in two places at
+once — and, if the PDF has no form yet, building the AcroForm itself.
+
+### Concepts learned
+- **A field lives in two lists** — a widget/field is referenced from **both** the
+  owning page's `/Annots` (so it's drawn/hit-tested on that page) and the AcroForm
+  `/Fields` (so it's part of the form). Miss either and the field half-exists.
+- **`/DA` + `/DR`** — a field needs a *default appearance* string (`/DA`, e.g.
+  `/Helv 0 Tf 0 g`) naming a font, and that font must exist in the AcroForm's
+  *default resources* (`/DR /Font /Helv`). Creating a form means seeding both, and
+  **merging** `/Helv` into an existing `/DR` rather than clobbering other fields'
+  fonts.
+- **Bootstrapping an AcroForm** — on a form-less PDF we create the catalog
+  `/AcroForm` (normalising an inline one to an indirect object so it's referenceable),
+  with `/Fields`, `/DA`, `/DR`, and `/NeedAppearances`.
+- **Field flags again** — `/Ff` bit 2 (`1<<1`) = required, bit 13 (`1<<12`) =
+  multi-line. Duplicate top-level `/T` names *merge* into one logical field, so a
+  colliding name is rejected.
+- **Drag-to-create UI** — the tool mirrors the link tool: a pointer-drag box →
+  `screenToPdf` for the PDF-space rect → a config popover → the IPC write. It also
+  re-reads the form summary so the "Form mode" entry point appears once the doc has
+  its first field.
+
+### Design choices
+- **Verify with the reader you already have.** The created field is checked by
+  A2's `read_text_fields` — the write and the read meet in the middle.
+- **Same edit chassis.** `AddTextFieldEdit` is snapshot-inverse like every other
+  form write, so undo removes the field (and any AcroForm we bootstrapped).
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `add_text_field` (+ `ensure_acroform`, `append_ref`) + `AddTextFieldEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `AddTextField` message. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_add_text_field`. |
+| `src/ipc/forms.ts` | `addTextField` + `NewTextField`. |
+| `src/view/form-create-layer.tsx` | Drag-to-create overlay + config popover. |
+| `src/app/MarkupToolbar.tsx` | "Text Field" tool button. |
+| `src/tools/_framework/types.ts` | `"create-text-field"` tool id. |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.3 (field dicts), §12.7.3.3 (`/DA`), §12.5.6.19 (widget annots).
+
+**Track A complete; B1 opens Track B (form authoring).**
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

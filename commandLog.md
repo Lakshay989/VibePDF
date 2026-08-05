@@ -3694,6 +3694,26 @@ Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-xfa-f
 
 ---
 
+## P5.B1 — Create text field (SPEC P5-FORM-006)
+
+No `npm install` / `cargo add` — no new dependency (reused `lopdf`). No new
+fixture (uses `hello.pdf` for the form-less path + `forms.pdf` for the existing-form path).
+
+Verification gates + tests:
+
+```
+cargo test --test form_create_text                   # 8 ok (create, AcroForm-when-absent, default+flags, dup reject, NeedAppearances, add-into-existing, empty-name reject, actor create→undo)
+npm run check                                         # tsc + eslint + clippy pedantic clean
+npm run test                                          # 101 files / 440 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_create_text writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf
+```
+
+Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-createfield.pdf`
+(git-ignored) for the cross-reader ritual. **Opens Track B (form authoring).**
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

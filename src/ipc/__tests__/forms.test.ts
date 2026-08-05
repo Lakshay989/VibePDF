@@ -7,6 +7,7 @@ vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@/ipc/invoke";
 import {
+  addTextField,
   fillTextField,
   readButtonFields,
   readChoiceFields,
@@ -131,5 +132,28 @@ describe("stripXfa", () => {
     mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
     await stripXfa("doc-1");
     expect(mockInvoke).toHaveBeenCalledWith("pdf_strip_xfa", { id: "doc-1" });
+  });
+});
+
+describe("addTextField", () => {
+  it("marshals the field config", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await addTextField("doc-1", 0, [72, 700, 300, 724], {
+      name: "email",
+      defaultValue: "",
+      maxLen: 64,
+      multiline: false,
+      required: true,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_add_text_field", {
+      id: "doc-1",
+      page: 0,
+      rect: [72, 700, 300, 724],
+      name: "email",
+      defaultValue: "",
+      maxLen: 64,
+      multiline: false,
+      required: true,
+    });
   });
 });

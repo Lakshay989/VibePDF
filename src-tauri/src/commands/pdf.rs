@@ -932,6 +932,42 @@ pub async fn pdf_strip_xfa(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P5-FORM-006 — create a text field on `page` (0-based) at `rect`
+/// (`[x0,y0,x1,y1]` PDF points), configured with name/default/max-length/
+/// multi-line/required. Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_add_text_field(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    rect: [f32; 4],
+    name: String,
+    default_value: String,
+    max_len: Option<u32>,
+    multiline: bool,
+    required: bool,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_text_field_request(page, rect, name, default_value, max_len, multiline, required)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `box_id` on `page`
 /// (0-based). Undoable; runs on the actor.
 #[tauri::command]

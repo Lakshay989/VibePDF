@@ -13,6 +13,7 @@ import { AnnotationLayer } from "@/view/annotation-layer";
 import { FreeTextLayer } from "@/view/free-text-layer";
 import { FormButtonsLayer } from "@/view/form-buttons-layer";
 import { FormChoicesLayer } from "@/view/form-choices-layer";
+import { FormCreateLayer } from "@/view/form-create-layer";
 import { FormFieldsLayer } from "@/view/form-fields-layer";
 import { TextEditLayer } from "@/view/text-edit-layer";
 import { TextBoxLayer } from "@/view/text-box-layer";
@@ -600,6 +601,14 @@ function PageSlot({
         rotation={rotation}
       />
       <FormChoicesLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <FormCreateLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

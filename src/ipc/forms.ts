@@ -146,3 +146,36 @@ export async function setChoiceField(
 export async function stripXfa(id: DocumentId): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_strip_xfa", { id });
 }
+
+/** Configuration for a new text field (P5.B1). */
+export interface NewTextField {
+  name: string;
+  defaultValue: string;
+  /** Character cap, or null for none. */
+  maxLen: number | null;
+  multiline: boolean;
+  required: boolean;
+}
+
+/**
+ * SPEC: P5-FORM-006 (P5.B1) — create a text field on `page` (0-based) at `rect`
+ * (`[x0,y0,x1,y1]` PDF points). Rejects a duplicate name. Undoable; runs on the
+ * document actor.
+ */
+export async function addTextField(
+  id: DocumentId,
+  page: number,
+  rect: [number, number, number, number],
+  field: NewTextField,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_add_text_field", {
+    id,
+    page,
+    rect,
+    name: field.name,
+    defaultValue: field.defaultValue,
+    maxLen: field.maxLen,
+    multiline: field.multiline,
+    required: field.required,
+  });
+}

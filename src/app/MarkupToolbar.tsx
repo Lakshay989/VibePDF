@@ -73,6 +73,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const addImageActive = activeTool === "add-image";
   const editImageActive = activeTool === "edit-image";
   const addLinkActive = activeTool === "add-link";
+  const createFieldActive = activeTool === "create-text-field";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
@@ -444,6 +445,19 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Add Link
+      </button>
+      <button
+        type="button"
+        onClick={() => setActiveTool(createFieldActive ? null : "create-text-field")}
+        title="Create a form text field (drag a box, then set name / default / max length / multi-line / required)"
+        aria-label="Create text field tool"
+        aria-pressed={createFieldActive}
+        className={
+          "rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 " +
+          (createFieldActive ? "bg-blue-200 dark:bg-blue-300/30" : "")
+        }
+      >
+        Text Field
       </button>
       {fillable ? (
         <div className="flex items-center gap-1">

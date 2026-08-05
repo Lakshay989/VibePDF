@@ -121,6 +121,7 @@ pub fn run() {
             commands::pdf::pdf_read_choice_fields,
             commands::pdf::pdf_set_choice_field,
             commands::pdf::pdf_strip_xfa,
+            commands::pdf::pdf_add_text_field,
             commands::pdf::pdf_delete_text_box,
             commands::pdf::pdf_add_image,
             commands::pdf::pdf_add_link,

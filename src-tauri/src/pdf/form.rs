@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use lopdf::{Dictionary, Document, Object, ObjectId, StringFormat};
+use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, StringFormat};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
@@ -837,6 +837,221 @@ impl<'a> Edit<PdfDocument<'a>> for StripXfaEdit {
 
     fn label(&self) -> &'static str {
         "strip-xfa"
+    }
+}
+
+// ── P5.B1 — create text field ───────────────────────────────────────────────
+
+/// `/Ff` bit 2 = required.
+const FF_REQUIRED: i64 = 1 << 1;
+
+/// Ensure the catalog has an indirect `AcroForm` with `/Fields`, a default `/DA`,
+/// and a `/DR` font named `/Helv` (added without clobbering existing DR fonts).
+/// Returns the `AcroForm` object id. Normalises an inline `AcroForm` to indirect.
+fn ensure_acroform(doc: &mut Document) -> Result<ObjectId, CommandError> {
+    let root = doc.trailer.get(b"Root").and_then(Object::as_reference).map_err(lop)?;
+    let acro_id = match doc.get_dictionary(root).map_err(lop)?.get(b"AcroForm") {
+        Ok(Object::Reference(id)) => *id,
+        Ok(Object::Dictionary(d)) => {
+            let d = d.clone();
+            let id = doc.add_object(d);
+            doc.get_dictionary_mut(root).map_err(lop)?.set("AcroForm", Object::Reference(id));
+            id
+        }
+        _ => {
+            let id = doc.add_object(dictionary! { "Fields" => Object::Array(Vec::new()) });
+            doc.get_dictionary_mut(root).map_err(lop)?.set("AcroForm", Object::Reference(id));
+            id
+        }
+    };
+
+    let has_helv = doc
+        .get_dictionary(acro_id)
+        .ok()
+        .and_then(|a| a.get(b"DR").ok())
+        .and_then(|o| o.as_dict().ok())
+        .and_then(|dr| dr.get(b"Font").ok())
+        .and_then(|o| o.as_dict().ok())
+        .is_some_and(|f| f.get(b"Helv").is_ok());
+    if !has_helv {
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let mut dr: Dictionary = doc
+            .get_dictionary(acro_id)
+            .ok()
+            .and_then(|a| a.get(b"DR").ok())
+            .and_then(|o| o.as_dict().ok())
+            .cloned()
+            .unwrap_or_default();
+        let mut fonts: Dictionary =
+            dr.get(b"Font").ok().and_then(|o| o.as_dict().ok()).cloned().unwrap_or_default();
+        fonts.set("Helv", Object::Reference(font_id));
+        dr.set("Font", Object::Dictionary(fonts));
+        doc.get_dictionary_mut(acro_id).map_err(lop)?.set("DR", Object::Dictionary(dr));
+    }
+    let acro = doc.get_dictionary_mut(acro_id).map_err(lop)?;
+    if acro.get(b"Fields").is_err() {
+        acro.set("Fields", Object::Array(Vec::new()));
+    }
+    if acro.get(b"DA").is_err() {
+        acro.set("DA", Object::string_literal("/Helv 0 Tf 0 g"));
+    }
+    Ok(acro_id)
+}
+
+/// Append `item` to the array at `dict[key]`, handling the array being inline or
+/// an indirect reference, and creating it if absent.
+fn append_ref(doc: &mut Document, dict_id: ObjectId, key: &[u8], item: ObjectId) -> Result<(), CommandError> {
+    let arr_ref = doc
+        .get_dictionary(dict_id)
+        .ok()
+        .and_then(|d| d.get(key).ok())
+        .and_then(|o| o.as_reference().ok());
+    if let Some(arr_id) = arr_ref {
+        if let Ok(Object::Array(a)) = doc.get_object_mut(arr_id) {
+            a.push(Object::Reference(item));
+        }
+        return Ok(());
+    }
+    let d = doc.get_dictionary_mut(dict_id).map_err(lop)?;
+    match d.get_mut(key) {
+        Ok(Object::Array(a)) => a.push(Object::Reference(item)),
+        _ => d.set(key.to_vec(), Object::Array(vec![Object::Reference(item)])),
+    }
+    Ok(())
+}
+
+/// SPEC: P5-FORM-006 (P5.B1) — create a text field on `page` (0-based) at `rect`,
+/// wired into the `AcroForm` and the page's `/Annots`. Rejects a duplicate
+/// top-level field name. Sets `/NeedAppearances` so viewers render it.
+#[allow(clippy::too_many_arguments)]
+pub fn add_text_field(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    name: &str,
+    default: &str,
+    max_len: Option<u32>,
+    multiline: bool,
+    required: bool,
+) -> Result<Vec<u8>, CommandError> {
+    if name.trim().is_empty() {
+        return Err(CommandError::InvalidInput("field name is required".into()));
+    }
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+
+    let page_no = u32::try_from(page)
+        .map(|n| n + 1)
+        .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let page_id = *doc
+        .get_pages()
+        .get(&page_no)
+        .ok_or_else(|| CommandError::InvalidInput(format!("no page {page}")))?;
+
+    let acro_id = ensure_acroform(&mut doc)?;
+
+    // Reject a colliding top-level field name (duplicate /T merges into one field).
+    let duplicate = doc
+        .get_dictionary(acro_id)
+        .ok()
+        .and_then(|a| a.get(b"Fields").ok())
+        .and_then(|o| o.as_array().ok())
+        .is_some_and(|fields| {
+            fields
+                .iter()
+                .filter_map(|f| f.as_reference().ok())
+                .filter_map(|id| doc.get_dictionary(id).ok())
+                .filter_map(|d| d.get(b"T").and_then(Object::as_str).ok())
+                .any(|t| String::from_utf8_lossy(t) == name)
+        });
+    if duplicate {
+        return Err(CommandError::InvalidInput(format!("a form field named {name} already exists")));
+    }
+
+    let mut field = Dictionary::new();
+    field.set("Type", "Annot");
+    field.set("Subtype", "Widget");
+    field.set("FT", "Tx");
+    field.set("T", encode_pdf_text_string(name));
+    field.set(
+        "Rect",
+        Object::Array(vec![
+            Object::Real(rect[0]),
+            Object::Real(rect[1]),
+            Object::Real(rect[2]),
+            Object::Real(rect[3]),
+        ]),
+    );
+    field.set("P", Object::Reference(page_id));
+    field.set("F", Object::Integer(4)); // Print
+    field.set("DA", Object::string_literal("/Helv 0 Tf 0 g"));
+    let mut ff = 0i64;
+    if multiline {
+        ff |= FF_MULTILINE;
+    }
+    if required {
+        ff |= FF_REQUIRED;
+    }
+    if ff != 0 {
+        field.set("Ff", Object::Integer(ff));
+    }
+    if !default.is_empty() {
+        field.set("V", encode_pdf_text_string(default));
+    }
+    if let Some(ml) = max_len {
+        field.set("MaxLen", Object::Integer(i64::from(ml)));
+    }
+    let field_id = doc.add_object(field);
+
+    append_ref(&mut doc, page_id, b"Annots", field_id)?;
+    append_ref(&mut doc, acro_id, b"Fields", field_id)?;
+    set_need_appearances(&mut doc)?;
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-006 — create a text field as one undoable edit.
+pub struct AddTextFieldEdit {
+    pub page: usize,
+    pub rect: [f32; 4],
+    pub name: String,
+    pub default: String,
+    pub max_len: Option<u32>,
+    pub multiline: bool,
+    pub required: bool,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for AddTextFieldEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = add_text_field(
+            &pre_bytes,
+            self.page,
+            self.rect,
+            &self.name,
+            &self.default,
+            self.max_len,
+            self.multiline,
+            self.required,
+        )?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "add-text-field"
     }
 }
 
