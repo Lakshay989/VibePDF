@@ -7987,6 +7987,55 @@ records which one is showing. So "toggle a checkbox" isn't "draw a check", it's
 
 ---
 
+## P5.A4 — combos and lists: options in, selection out
+
+### Problem
+A choice field stores its menu (`/Opt`) and its current pick (`/V`) — but the
+shapes vary: an option may be a bare string or an `[export display]` pair, and
+`/V` is a single string for one pick or an *array* for a multi-select list, with
+a parallel `/I` index array. Filling one means reading all those shapes and
+writing them back consistently.
+
+### Concepts learned
+- **`/Opt`** — the option list. Each entry is a text string (export == label) or
+  a two-element array `[exportValue displayText]`; the export is what lands in
+  `/V`, the display is what the user sees. Reading the pair right is the whole
+  game for labelled options.
+- **`/V` polymorphism** — one selection is a string; several (multi-select list)
+  is an array of strings. The read accepts both; the write emits a string for one
+  value and an array for many.
+- **`/I` (selected indices)** — for list boxes, the 0-based positions into `/Opt`
+  of the selected items, ascending. Recomputed from the chosen values so it can't
+  drift out of sync with `/V`.
+- **Combo vs list** — `/Ff` bit 18 (`1<<17`) = combo (dropdown); bit 22 (`1<<21`)
+  = multi-select (list only). Appearance is like text (regenerated), so the write
+  sets `/NeedAppearances` — unlike buttons.
+- **Reject undeclared values** — A4 offers only the declared `/Opt` options; a
+  value that isn't one is an `InvalidInput` (editable combos, which allow free
+  text via the `/Ff` Edit bit, are deferred).
+
+### Design choices
+- **Native `<select>` overlay + soft bump**, consistent with A2/A3. `<select multiple>`
+  for multi-select lists; the overlay is the in-app display, the saved
+  `/V`+`/I`+`/NeedAppearances` render elsewhere.
+- **Indices derived, not trusted.** `/I` is rebuilt from the chosen values'
+  positions in `/Opt` every write — never carried over — so it always matches.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `ChoiceOption`/`ChoiceField`, `read_choice_fields_doc`, `set_choice_field`, `SetChoiceFieldEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `ReadChoiceFields` + `SetChoiceField` messages. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_read_choice_fields`, `pdf_set_choice_field`. |
+| `src/ipc/forms.ts` | `ChoiceField` + `readChoiceFields` + `setChoiceField`. |
+| `src/view/form-choices-layer.tsx` | Per-page `<select>` overlay. |
+| `tests/fixtures/basic/forms-choice.pdf` | Single combo (labelled option) + multi-select list. |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.4.4 — choice fields, `/Opt`, `/V`, `/I`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

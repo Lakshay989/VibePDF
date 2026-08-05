@@ -9,10 +9,13 @@ import { invoke } from "@/ipc/invoke";
 import {
   fillTextField,
   readButtonFields,
+  readChoiceFields,
   readFormSummary,
   readTextFields,
   setButtonField,
+  setChoiceField,
   type ButtonField,
+  type ChoiceField,
   type FormField,
   type FormSummary,
 } from "@/ipc/forms";
@@ -87,6 +90,37 @@ describe("setButtonField", () => {
       name: "color",
       onState: "Green",
       checked: true,
+    });
+  });
+});
+
+describe("readChoiceFields", () => {
+  it("marshals id + page and returns the choices", async () => {
+    const fields: ChoiceField[] = [
+      {
+        name: "fruit",
+        kind: "combo",
+        rect: [72, 700, 250, 724],
+        options: [{ export: "chy", label: "Cherry" }],
+        selected: ["chy"],
+        multi: false,
+      },
+    ];
+    mockInvoke.mockResolvedValue(fields);
+    const out = await readChoiceFields("doc-1", 0);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_read_choice_fields", { id: "doc-1", page: 0 });
+    expect(out).toEqual(fields);
+  });
+});
+
+describe("setChoiceField", () => {
+  it("marshals id, name, and values", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await setChoiceField("doc-1", "colors", ["Red", "Blue"]);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_set_choice_field", {
+      id: "doc-1",
+      name: "colors",
+      values: ["Red", "Blue"],
     });
   });
 });

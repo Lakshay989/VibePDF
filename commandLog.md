@@ -3648,6 +3648,29 @@ Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-formb
 
 ---
 
+## P5.A4 — Fill choice fields (combo, list) (SPEC P5-FORM-004)
+
+No `npm install` / `cargo add` — no new dependency (reused `lopdf`).
+
+New fixture: `tests/fixtures/basic/forms-choice.pdf` via
+`python3 tests/fixtures/basic/generate-forms-choice.py` (single combo `fruit`
+with a labelled `[chy Cherry]` option + multi-select list `colors`).
+
+Verification gates + tests:
+
+```
+cargo test --test form_fill_choice                   # 7 ok (read options/kind/multi/selection, labelled export≠display, combo select, multi list /V array + /I, reject unknown, NeedAppearances, actor set→undo)
+npm run check                                         # tsc + eslint + clippy pedantic clean
+npm run test                                          # 99 files / 431 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_fill_choice writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf
+```
+
+Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-formchoice.pdf`
+(git-ignored) for the cross-reader ritual.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

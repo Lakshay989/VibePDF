@@ -118,6 +118,8 @@ pub fn run() {
             commands::pdf::pdf_fill_text_field,
             commands::pdf::pdf_read_button_fields,
             commands::pdf::pdf_set_button_field,
+            commands::pdf::pdf_read_choice_fields,
+            commands::pdf::pdf_set_choice_field,
             commands::pdf::pdf_delete_text_box,
             commands::pdf::pdf_add_image,
             commands::pdf::pdf_add_link,

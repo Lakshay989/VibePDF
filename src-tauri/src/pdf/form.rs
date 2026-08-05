@@ -584,6 +584,205 @@ impl<'a> Edit<PdfDocument<'a>> for SetButtonFieldEdit {
     }
 }
 
+// ── P5.A4 — fill choice fields (combo / list) ───────────────────────────────
+
+/// `/Ff` bit 18 = combo (dropdown); bit 22 = multi-select (list only).
+const FF_COMBO: i64 = 1 << 17;
+const FF_MULTISELECT: i64 = 1 << 21;
+
+/// One option of a choice field: its export value (stored in `/V`) and the label
+/// shown to the user. Equal when the `/Opt` entry is a bare string.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceOption {
+    pub export: String,
+    pub label: String,
+}
+
+/// A combo box or list box, as the choice overlay consumes it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceField {
+    /// Fully-qualified field name.
+    pub name: String,
+    /// `"combo"` (dropdown) or `"list"`.
+    pub kind: String,
+    /// Widget bounds `[x0, y0, x1, y1]`.
+    pub rect: [f32; 4],
+    /// The declared options, in `/Opt` order.
+    pub options: Vec<ChoiceOption>,
+    /// Currently-selected export values (from `/V`).
+    pub selected: Vec<String>,
+    /// Multi-select (list boxes only).
+    pub multi: bool,
+}
+
+/// Follow an indirect reference to its object; other objects pass through.
+fn deref<'a>(doc: &'a Document, obj: &'a Object) -> &'a Object {
+    obj.as_reference().ok().and_then(|id| doc.get_object(id).ok()).unwrap_or(obj)
+}
+
+/// Parse a choice field's `/Opt` into options. Each entry is a text string
+/// (export == label) or a two-element array `[export display]` (PDF 32000
+/// Table 231).
+fn parse_opt(doc: &Document, opt: Option<&Object>) -> Vec<ChoiceOption> {
+    let Some(Object::Array(arr)) = opt.map(|o| deref(doc, o)) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in arr {
+        match deref(doc, entry) {
+            Object::String(s, _) => {
+                let text = decode_pdf_text_string(s);
+                out.push(ChoiceOption { export: text.clone(), label: text });
+            }
+            Object::Array(pair) if pair.len() == 2 => {
+                let export = pair[0].as_str().map(decode_pdf_text_string).unwrap_or_default();
+                let label = pair[1].as_str().map(decode_pdf_text_string).unwrap_or_default();
+                out.push(ChoiceOption { export, label });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Parse a choice field's `/V` into the selected export values (a single string,
+/// an array of strings, or occasionally a Name).
+fn parse_choice_value(doc: &Document, v: Option<&Object>) -> Vec<String> {
+    match v.map(|o| deref(doc, o)) {
+        Some(Object::String(s, _)) => vec![decode_pdf_text_string(s)],
+        Some(Object::Name(n)) => vec![decode_pdf_text_string(n)],
+        Some(Object::Array(a)) => {
+            a.iter().filter_map(|e| e.as_str().ok().map(decode_pdf_text_string)).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// SPEC: P5-FORM-004 (P5.A4) — every choice field (`/FT /Ch`) whose widget sits
+/// on `page` (0-based), with its options + current selection. Read-only.
+pub fn read_choice_fields_doc(doc: &Document, page: usize) -> Result<Vec<ChoiceField>, CommandError> {
+    if acroform_dict(doc)?.is_none() {
+        return Ok(Vec::new());
+    }
+    let page_no = u32::try_from(page)
+        .map(|n| n + 1)
+        .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let Some(&page_id) = doc.get_pages().get(&page_no) else {
+        return Ok(Vec::new());
+    };
+    let annots = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+    let arr = match annots {
+        Some(Object::Array(a)) => a,
+        Some(Object::Reference(id)) => {
+            doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+        }
+        _ => return Ok(Vec::new()),
+    };
+
+    let mut out = Vec::new();
+    for obj in arr {
+        let Ok(id) = obj.as_reference() else { continue };
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        if inherited(doc, dict, b"FT").and_then(|o| o.as_name().ok()) != Some(b"Ch".as_slice()) {
+            continue;
+        }
+        let Some(rect) = dict_rect(dict, b"Rect") else { continue };
+        let ff = inherited(doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
+        out.push(ChoiceField {
+            name: qualified_name(doc, dict).unwrap_or_default(),
+            kind: (if ff & FF_COMBO != 0 { "combo" } else { "list" }).to_owned(),
+            rect,
+            options: parse_opt(doc, inherited(doc, dict, b"Opt")),
+            selected: parse_choice_value(doc, inherited(doc, dict, b"V")),
+            multi: ff & FF_MULTISELECT != 0,
+        });
+    }
+    Ok(out)
+}
+
+/// Byte-level wrapper around [`read_choice_fields_doc`].
+pub fn read_choice_fields(bytes: &[u8], page: usize) -> Result<Vec<ChoiceField>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(lop)?;
+    read_choice_fields_doc(&doc, page)
+}
+
+/// SPEC: P5-FORM-004 — set choice field `name`'s selection to `values` (export
+/// values, each of which must be a declared `/Opt` option). Sets `/V` (a string
+/// for one, an array for many), `/I` (selected indices, list boxes), and
+/// `/NeedAppearances`. Returns the re-serialised bytes.
+pub fn set_choice_field(bytes: &[u8], name: &str, values: &[String]) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let field = find_field_by_name(&doc, name)
+        .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+
+    let (options, is_list) = {
+        let dict = doc.get_dictionary(field).map_err(lop)?;
+        let opts = parse_opt(&doc, inherited(&doc, dict, b"Opt"));
+        let ff = inherited(&doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
+        (opts, ff & FF_COMBO == 0)
+    };
+    // Reject any value not declared in /Opt (an editable combo would relax this;
+    // A4 offers only the declared options).
+    if let Some(bad) = values.iter().find(|v| !options.iter().any(|o| o.export == **v)) {
+        return Err(CommandError::InvalidInput(format!("not an option of {name}: {bad}")));
+    }
+
+    let v_obj = match values {
+        [] => Object::string_literal(""),
+        [one] => encode_pdf_text_string(one),
+        many => Object::Array(many.iter().map(|v| encode_pdf_text_string(v)).collect()),
+    };
+    doc.get_dictionary_mut(field).map_err(lop)?.set("V", v_obj);
+
+    if is_list {
+        let mut idx: Vec<i64> = values
+            .iter()
+            .filter_map(|v| options.iter().position(|o| o.export == *v))
+            .filter_map(|p| i64::try_from(p).ok())
+            .collect();
+        idx.sort_unstable();
+        doc.get_dictionary_mut(field)
+            .map_err(lop)?
+            .set("I", Object::Array(idx.into_iter().map(Object::Integer).collect()));
+    }
+    set_need_appearances(&mut doc)?;
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-004 — set a choice field's selection as one undoable edit. Same
+/// snapshot-inverse chassis as [`FillTextFieldEdit`].
+pub struct SetChoiceFieldEdit {
+    pub name: String,
+    pub values: Vec<String>,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for SetChoiceFieldEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = set_choice_field(&pre_bytes, &self.name, &self.values)?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "set-choice-field"
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

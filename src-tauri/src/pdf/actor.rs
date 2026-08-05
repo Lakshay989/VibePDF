@@ -55,8 +55,9 @@ use crate::pdf::cos::{
 };
 use crate::pdf::doc_cache::CachedDoc;
 use crate::pdf::form::{
-    read_button_fields_doc, read_form_summary_doc, read_text_fields_doc, ButtonField,
-    FillTextFieldEdit, FormField, FormSummary, SetButtonFieldEdit,
+    read_button_fields_doc, read_choice_fields_doc, read_form_summary_doc, read_text_fields_doc,
+    ButtonField, ChoiceField, FillTextFieldEdit, FormField, FormSummary, SetButtonFieldEdit,
+    SetChoiceFieldEdit,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -403,6 +404,19 @@ pub enum Message {
         name: String,
         on_state: String,
         checked: bool,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-004 — list the choice fields (combo/list) on `page`
+    /// (0-based) with options + selection. Read-only.
+    ReadChoiceFields {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<ChoiceField>, CommandError>>,
+    },
+    /// SPEC: P5-FORM-004 — set choice field `name`'s selection to `values`.
+    /// Undoable; marks dirty.
+    SetChoiceField {
+        name: String,
+        values: Vec<String>,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
@@ -1511,6 +1525,47 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::SetButtonField { name, on_state, checked, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-004 — read a page's choice fields. Await-holding for tests.
+    pub async fn read_choice_fields(&self, page: usize) -> Result<Vec<ChoiceField>, CommandError> {
+        let rx = self.read_choice_fields_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_choice_fields_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<ChoiceField>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadChoiceFields { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-004 — set a choice field's selection. Await-holding for tests.
+    pub async fn set_choice_field(
+        &self,
+        name: String,
+        values: Vec<String>,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.set_choice_field_request(name, values)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn set_choice_field_request(
+        &self,
+        name: String,
+        values: Vec<String>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::SetChoiceField { name, values, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3243,6 +3298,28 @@ fn run_worker(
             Message::SetButtonField { name, on_state, checked, reply } => {
                 // SPEC: P5-FORM-003 — set /V + /AS; snapshot inverse.
                 let edit = SetButtonFieldEdit { name, on_state, checked };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReadChoiceFields { page, reply } => {
+                // SPEC: P5-FORM-004 — read-only; served from the shared parse cache.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(|d| read_choice_fields_doc(d, page));
+                let _ = reply.send(result);
+            }
+            Message::SetChoiceField { name, values, reply } => {
+                // SPEC: P5-FORM-004 — set /V + /I + NeedAppearances; snapshot inverse.
+                let edit = SetChoiceFieldEdit { name, values };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

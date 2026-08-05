@@ -93,3 +93,46 @@ export async function setButtonField(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_set_button_field", { id, name, onState, checked });
 }
+
+/** One option of a choice field, mirroring `pdf::form::ChoiceOption`. */
+export interface ChoiceOption {
+  /** The value stored in `/V`. */
+  export: string;
+  /** The label shown to the user (equals `export` for a bare-string option). */
+  label: string;
+}
+
+/**
+ * A combo box or list box, mirroring `pdf::form::ChoiceField`. `rect` is
+ * `[x0, y0, x1, y1]` in PDF points.
+ */
+export interface ChoiceField {
+  name: string;
+  kind: "combo" | "list";
+  rect: [number, number, number, number];
+  options: ChoiceOption[];
+  /** Currently-selected export values. */
+  selected: string[];
+  /** Multi-select (list boxes only). */
+  multi: boolean;
+}
+
+/**
+ * SPEC: P5-FORM-004 (P5.A4) — read the choice fields on `page` (0-based) with
+ * their options + current selection, to place the choice overlay.
+ */
+export async function readChoiceFields(id: DocumentId, page: number): Promise<ChoiceField[]> {
+  return invoke<ChoiceField[]>("pdf_read_choice_fields", { id, page });
+}
+
+/**
+ * SPEC: P5-FORM-004 — set a choice field's selection to `values` (declared
+ * export values). Undoable; runs on the document actor.
+ */
+export async function setChoiceField(
+  id: DocumentId,
+  name: string,
+  values: string[],
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_set_choice_field", { id, name, values });
+}
