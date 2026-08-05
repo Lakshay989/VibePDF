@@ -3625,6 +3625,29 @@ Write path → a verification artifact was produced for the cross-reader ritual
 
 ---
 
+## P5.A3 — Fill checkbox / radio (SPEC P5-FORM-003)
+
+No `npm install` / `cargo add` — no new dependency (reused `lopdf`).
+
+New fixture: `tests/fixtures/basic/forms-buttons.pdf` via
+`python3 tests/fixtures/basic/generate-forms-buttons.py` (checkbox `agree` +
+radio group `color` with `/Red`,`/Green`; real `/AP /N` on/off appearances).
+
+Verification gates + tests:
+
+```
+cargo test --test form_fill_checkbox                 # 6 ok (read kind/on-state, check/uncheck, radio sibling /AS flip, non-Yes state, NeedAppearances untouched, actor set→undo)
+npm run check                                         # tsc + eslint + clippy pedantic clean
+npm run test                                          # 98 files / 426 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_fill_checkbox writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf
+```
+
+Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-formbuttons.pdf`
+(git-ignored) for the cross-reader ritual.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

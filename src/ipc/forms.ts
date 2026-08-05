@@ -58,3 +58,38 @@ export async function fillTextField(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_fill_text_field", { id, name, value });
 }
+
+/**
+ * One clickable button widget (a checkbox, or one option of a radio group),
+ * mirroring `pdf::form::ButtonField` (Rust). `rect` is `[x0, y0, x1, y1]` in PDF
+ * points. `onState` is this widget's "on" appearance-state name.
+ */
+export interface ButtonField {
+  /** Fully-qualified name of the owning field (the group, for a radio option). */
+  fieldName: string;
+  kind: "checkbox" | "radio";
+  rect: [number, number, number, number];
+  onState: string;
+  checked: boolean;
+}
+
+/**
+ * SPEC: P5-FORM-003 (P5.A3) — read the checkbox/radio widgets on `page`
+ * (0-based), with geometry + on/off state, to place the button overlay.
+ */
+export async function readButtonFields(id: DocumentId, page: number): Promise<ButtonField[]> {
+  return invoke<ButtonField[]>("pdf_read_button_fields", { id, page });
+}
+
+/**
+ * SPEC: P5-FORM-003 — toggle/select a button field: set `name` to `onState`
+ * (checked) or `/Off` (unchecked). Undoable; runs on the document actor.
+ */
+export async function setButtonField(
+  id: DocumentId,
+  name: string,
+  onState: string,
+  checked: boolean,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_set_button_field", { id, name, onState, checked });
+}

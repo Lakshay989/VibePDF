@@ -11,6 +11,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { renderPageOnDoc } from "@/view/render-page";
 import { AnnotationLayer } from "@/view/annotation-layer";
 import { FreeTextLayer } from "@/view/free-text-layer";
+import { FormButtonsLayer } from "@/view/form-buttons-layer";
 import { FormFieldsLayer } from "@/view/form-fields-layer";
 import { TextEditLayer } from "@/view/text-edit-layer";
 import { TextBoxLayer } from "@/view/text-box-layer";
@@ -582,6 +583,14 @@ function PageSlot({
         rotation={rotation}
       />
       <FormFieldsLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <FormButtonsLayer
         documentId={documentId}
         page={natural.pageNumber - 1}
         displayedWidth={natural.width}

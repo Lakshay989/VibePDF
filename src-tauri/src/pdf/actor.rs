@@ -55,7 +55,8 @@ use crate::pdf::cos::{
 };
 use crate::pdf::doc_cache::CachedDoc;
 use crate::pdf::form::{
-    read_form_summary_doc, read_text_fields_doc, FillTextFieldEdit, FormField, FormSummary,
+    read_button_fields_doc, read_form_summary_doc, read_text_fields_doc, ButtonField,
+    FillTextFieldEdit, FormField, FormSummary, SetButtonFieldEdit,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -388,6 +389,20 @@ pub enum Message {
     FillTextField {
         name: String,
         value: String,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-003 — list the checkbox/radio widgets on `page` (0-based).
+    /// Read-only.
+    ReadButtonFields {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<ButtonField>, CommandError>>,
+    },
+    /// SPEC: P5-FORM-003 — set button field `name` on/off to `on_state`.
+    /// Undoable; marks dirty.
+    SetButtonField {
+        name: String,
+        on_state: String,
+        checked: bool,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
@@ -1453,6 +1468,49 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::FillTextField { name, value, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-003 — read a page's checkbox/radio widgets. Await-holding for tests.
+    pub async fn read_button_fields(&self, page: usize) -> Result<Vec<ButtonField>, CommandError> {
+        let rx = self.read_button_fields_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_button_fields_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<ButtonField>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadButtonFields { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-003 — toggle/select a button field. Await-holding for tests.
+    pub async fn set_button_field(
+        &self,
+        name: String,
+        on_state: String,
+        checked: bool,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.set_button_field_request(name, on_state, checked)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn set_button_field_request(
+        &self,
+        name: String,
+        on_state: String,
+        checked: bool,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::SetButtonField { name, on_state, checked, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3163,6 +3221,28 @@ fn run_worker(
                 // SPEC: P5-FORM-002 — set /V + NeedAppearances; snapshot inverse.
                 // The central post-message check invalidates the read cache.
                 let edit = FillTextFieldEdit { name, value };
+                let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReadButtonFields { page, reply } => {
+                // SPEC: P5-FORM-003 — read-only; served from the shared parse cache.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(|d| read_button_fields_doc(d, page));
+                let _ = reply.send(result);
+            }
+            Message::SetButtonField { name, on_state, checked, reply } => {
+                // SPEC: P5-FORM-003 — set /V + /AS; snapshot inverse.
+                let edit = SetButtonFieldEdit { name, on_state, checked };
                 let result = match Box::new(edit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);

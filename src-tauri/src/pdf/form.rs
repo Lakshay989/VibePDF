@@ -410,6 +410,180 @@ impl<'a> Edit<PdfDocument<'a>> for FillTextFieldEdit {
     }
 }
 
+// ── P5.A3 — fill checkbox / radio ───────────────────────────────────────────
+
+/// `/Ff` bit 16 (1-indexed) = radio; bit 17 = pushbutton (no value).
+const FF_RADIO: i64 = 1 << 15;
+const FF_PUSHBUTTON: i64 = 1 << 16;
+
+/// One clickable button widget (a checkbox, or one option of a radio group), as
+/// the button overlay consumes it. Geometry is in PDF points.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ButtonField {
+    /// Fully-qualified name of the owning field (the *group* for a radio option).
+    pub field_name: String,
+    /// `"checkbox"` or `"radio"`.
+    pub kind: String,
+    /// Widget bounds `[x0, y0, x1, y1]`.
+    pub rect: [f32; 4],
+    /// This widget's "on" state — the non-`/Off` key of its `/AP /N`.
+    pub on_state: String,
+    /// Whether this widget is currently on (the field's `/V` equals `on_state`).
+    pub checked: bool,
+}
+
+/// This widget's "on" appearance-state name: the non-`/Off` key of `/AP /N`.
+fn widget_on_state(doc: &Document, dict: &Dictionary) -> Option<String> {
+    let ap = dict.get(b"AP").ok().and_then(|o| node_dict(doc, o))?;
+    let n = ap.get(b"N").ok().and_then(|o| node_dict(doc, o))?;
+    n.iter()
+        .map(|(k, _)| k.as_slice())
+        .find(|k| *k != b"Off")
+        .map(|k| String::from_utf8_lossy(k).into_owned())
+}
+
+/// SPEC: P5-FORM-003 (P5.A3) — every fillable button widget (checkbox or radio
+/// option, `/FT /Btn`, not a pushbutton) on `page` (0-based), with geometry, its
+/// on-state, and whether it's currently on. Read-only. Widgets that declare no
+/// `/AP /N` appearance states are skipped (nothing to toggle).
+pub fn read_button_fields_doc(doc: &Document, page: usize) -> Result<Vec<ButtonField>, CommandError> {
+    if acroform_dict(doc)?.is_none() {
+        return Ok(Vec::new());
+    }
+    let page_no = u32::try_from(page)
+        .map(|n| n + 1)
+        .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    let Some(&page_id) = doc.get_pages().get(&page_no) else {
+        return Ok(Vec::new());
+    };
+    let annots = doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned());
+    let arr = match annots {
+        Some(Object::Array(a)) => a,
+        Some(Object::Reference(id)) => {
+            doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+        }
+        _ => return Ok(Vec::new()),
+    };
+
+    let mut out = Vec::new();
+    for obj in arr {
+        let Ok(id) = obj.as_reference() else { continue };
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        if inherited(doc, dict, b"FT").and_then(|o| o.as_name().ok()) != Some(b"Btn".as_slice()) {
+            continue;
+        }
+        let ff = inherited(doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
+        if ff & FF_PUSHBUTTON != 0 {
+            continue; // pushbuttons carry no value
+        }
+        let Some(on_state) = widget_on_state(doc, dict) else { continue };
+        let Some(rect) = dict_rect(dict, b"Rect") else { continue };
+        let value = inherited(doc, dict, b"V")
+            .and_then(|o| o.as_name().ok())
+            .map(|n| String::from_utf8_lossy(n).into_owned());
+        let checked = value.as_deref() == Some(on_state.as_str());
+        out.push(ButtonField {
+            field_name: qualified_name(doc, dict).unwrap_or_default(),
+            kind: (if ff & FF_RADIO != 0 { "radio" } else { "checkbox" }).to_owned(),
+            rect,
+            on_state,
+            checked,
+        });
+    }
+    Ok(out)
+}
+
+/// Byte-level wrapper around [`read_button_fields_doc`].
+pub fn read_button_fields(bytes: &[u8], page: usize) -> Result<Vec<ButtonField>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(lop)?;
+    read_button_fields_doc(&doc, page)
+}
+
+/// The widget object ids that carry a button field's appearance: its `/Kids`
+/// (radio options / separate widgets), or the field itself when it is its own
+/// widget (a merged checkbox with no kids).
+fn field_widget_ids(doc: &Document, field: ObjectId) -> Vec<ObjectId> {
+    let kids = kid_widget_ids(doc, field);
+    if kids.is_empty() {
+        vec![field]
+    } else {
+        kids
+    }
+}
+
+/// SPEC: P5-FORM-003 — set button field `name` on/off to `on_state`. Sets the
+/// field's `/V` and each widget's `/AS` (the pre-baked `/AP /N` appearance is
+/// selected by `/AS`, so — unlike text — `/NeedAppearances` is *not* touched).
+/// `checked` false turns it off (`/Off`), which also deselects a radio group.
+pub fn set_button_field(
+    bytes: &[u8],
+    name: &str,
+    on_state: &str,
+    checked: bool,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let field = find_field_by_name(&doc, name)
+        .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+
+    // Compute each widget's target /AS first (immutable), then apply (mutable).
+    let widgets = field_widget_ids(&doc, field);
+    let targets: Vec<(ObjectId, Vec<u8>)> = widgets
+        .iter()
+        .map(|&wid| {
+            let wid_on = doc.get_dictionary(wid).ok().and_then(|d| widget_on_state(&doc, d));
+            let as_name = if checked && wid_on.as_deref() == Some(on_state) {
+                on_state.as_bytes().to_vec()
+            } else {
+                b"Off".to_vec()
+            };
+            (wid, as_name)
+        })
+        .collect();
+
+    let field_value = if checked { on_state.as_bytes().to_vec() } else { b"Off".to_vec() };
+    doc.get_dictionary_mut(field).map_err(lop)?.set("V", Object::Name(field_value));
+    for (wid, as_name) in targets {
+        if let Ok(w) = doc.get_dictionary_mut(wid) {
+            w.set("AS", Object::Name(as_name));
+        }
+    }
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-003 — toggle/select a button field as one undoable edit. Same
+/// snapshot-inverse chassis as [`FillTextFieldEdit`].
+pub struct SetButtonFieldEdit {
+    pub name: String,
+    pub on_state: String,
+    pub checked: bool,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for SetButtonFieldEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = set_button_field(&pre_bytes, &self.name, &self.on_state, self.checked)?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "set-button-field"
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

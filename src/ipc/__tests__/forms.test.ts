@@ -8,8 +8,11 @@ vi.mock("@/ipc/invoke", () => ({ invoke: vi.fn() }));
 import { invoke } from "@/ipc/invoke";
 import {
   fillTextField,
+  readButtonFields,
   readFormSummary,
   readTextFields,
+  setButtonField,
+  type ButtonField,
   type FormField,
   type FormSummary,
 } from "@/ipc/forms";
@@ -60,5 +63,30 @@ describe("fillTextField", () => {
       value: "Ada",
     });
     expect(out).toEqual({ canUndo: true, canRedo: false });
+  });
+});
+
+describe("readButtonFields", () => {
+  it("marshals id + page and returns the buttons", async () => {
+    const buttons: ButtonField[] = [
+      { fieldName: "agree", kind: "checkbox", rect: [72, 700, 90, 718], onState: "Yes", checked: false },
+    ];
+    mockInvoke.mockResolvedValue(buttons);
+    const out = await readButtonFields("doc-1", 0);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_read_button_fields", { id: "doc-1", page: 0 });
+    expect(out).toEqual(buttons);
+  });
+});
+
+describe("setButtonField", () => {
+  it("marshals id, name, onState, and checked", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await setButtonField("doc-1", "color", "Green", true);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_set_button_field", {
+      id: "doc-1",
+      name: "color",
+      onState: "Green",
+      checked: true,
+    });
   });
 });

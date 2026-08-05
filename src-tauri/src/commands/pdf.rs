@@ -7,7 +7,7 @@ use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
-use crate::pdf::form::{FormField, FormSummary};
+use crate::pdf::form::{ButtonField, FormField, FormSummary};
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -797,6 +797,60 @@ pub async fn pdf_fill_text_field(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.fill_text_field_request(name, value)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-003 — list the checkbox/radio widgets on `page` (0-based) with
+/// geometry + state, for the button overlay. Read-only.
+#[tauri::command]
+pub async fn pdf_read_button_fields(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+) -> Result<Vec<ButtonField>, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_button_fields_request(page)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-003 — toggle/select button field `name` to `on_state`.
+/// Undoable; runs on the actor.
+#[tauri::command]
+pub async fn pdf_set_button_field(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    on_state: String,
+    checked: bool,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.set_button_field_request(name, on_state, checked)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

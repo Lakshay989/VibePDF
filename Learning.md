@@ -7940,6 +7940,53 @@ The spec also says respect `/MaxLen`, and values can be non-Latin.
 
 ---
 
+## P5.A3 — checkboxes and radios: a name, not a pixel
+
+### Problem
+Text fields carry their appearance as pixels to regenerate; buttons don't — a
+checkbox or radio ships its *on* and *off* looks pre-drawn, and the file just
+records which one is showing. So "toggle a checkbox" isn't "draw a check", it's
+"point the field at its on-state name."
+
+### Concepts learned
+- **`/AS` (appearance state)** — a Name that selects which sub-appearance of
+  `/AP /N` a viewer draws. `/AP /N` is a *dictionary* keyed by state name, e.g.
+  `<< /Yes … /Off … >>`; setting `/AS /Yes` shows the check, `/AS /Off` hides it.
+- **On-state discovery** — the "on" name is just the non-`/Off` key of `/AP /N`.
+  It's often `/Yes` but not always (`/On`, an export value…), so you must *read*
+  it, never assume.
+- **Radio = one field, many widgets** — a radio group is a single `/FT /Btn`
+  field (radio bit `1<<15`) whose `/Kids` are the option widgets, each with its
+  own on-state. Selecting one sets the field's `/V` to that name and every kid's
+  `/AS` to its own name or `/Off` — miss a kid and two dots show at once.
+- **Pushbuttons carry no value** (`/Ff` bit `1<<16`) — excluded.
+- **No `/NeedAppearances` for buttons** — the on/off looks are already baked in
+  `/AP /N`; `/AS` picks one. Forcing regeneration (needed for *text*) can blank a
+  pre-baked check in some viewers, so buttons deliberately don't touch it.
+
+### Design choices
+- **Overlay + soft bump, like A2.** We draw our own ☐/☑ and ○/● and set `/V`+`/AS`
+  underneath; consistent with text fill, no canvas flash. Saved `/V`+`/AS` render
+  in other readers from the existing `/AP`.
+- **`checked` derives from `/V`, `/AS` mirrors it.** The read reports `checked`
+  from the field's `/V`; the write sets both `/V` and each widget's `/AS` in one
+  pass, so they never disagree.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `ButtonField`, `read_button_fields_doc`, `set_button_field`, `SetButtonFieldEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `ReadButtonFields` + `SetButtonField` messages. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_read_button_fields`, `pdf_set_button_field`. |
+| `src/ipc/forms.ts` | `ButtonField` + `readButtonFields` + `setButtonField`. |
+| `src/view/form-buttons-layer.tsx` | Per-page checkbox/radio overlay. |
+| `tests/fixtures/basic/forms-buttons.pdf` | Checkbox + 2-option radio, with `/AP /N`. |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.4.2 (button fields) and §12.5.5 (`/AP`, `/AS`).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
