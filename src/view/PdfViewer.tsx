@@ -24,6 +24,7 @@ import { PageNumbersDialog } from "@/app/PageNumbersDialog";
 import { BatesDialog } from "@/app/BatesDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
+import { XfaNotice } from "@/app/XfaNotice";
 import { useFontReport } from "@/app/use-font-report";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
@@ -497,6 +498,7 @@ export function PdfViewer({ documentId, path }: Props) {
         dismissed={fontReport.dismissed}
         onDismiss={fontReport.dismiss}
       />
+      <XfaNotice documentId={documentId} />
       <ExtractDialog
         open={extractOpen}
         pageCount={doc?.numPages ?? 0}

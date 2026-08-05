@@ -783,6 +783,63 @@ impl<'a> Edit<PdfDocument<'a>> for SetChoiceFieldEdit {
     }
 }
 
+// ── P5.A5 — XFA degraded support ────────────────────────────────────────────
+
+/// SPEC: P5-FORM-005 (P5.A5) — drop the dynamic XFA layer: remove `/XFA` from the
+/// `AcroForm` and set `/NeedAppearances` so the document's static content (and any
+/// static `AcroForm` fields) render. We don't render XFA; this is the honest
+/// "convert to flat content (read-only)". Errors if there is no `/XFA` to strip.
+pub fn strip_xfa(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let root = doc.trailer.get(b"Root").and_then(Object::as_reference).map_err(lop)?;
+    let acro = doc.get_dictionary(root).map_err(lop)?.get(b"AcroForm").ok().cloned();
+
+    let removed = match acro {
+        Some(Object::Reference(id)) => doc.get_dictionary_mut(id).map_err(lop)?.remove(b"XFA").is_some(),
+        Some(Object::Dictionary(_)) => {
+            match doc.get_dictionary_mut(root).map_err(lop)?.get_mut(b"AcroForm") {
+                Ok(Object::Dictionary(a)) => a.remove(b"XFA").is_some(),
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    if !removed {
+        return Err(CommandError::InvalidInput("document has no XFA form".into()));
+    }
+    set_need_appearances(&mut doc)?;
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-005 — strip the XFA layer as one undoable edit. Same
+/// snapshot-inverse chassis as [`FillTextFieldEdit`].
+pub struct StripXfaEdit;
+
+impl<'a> Edit<PdfDocument<'a>> for StripXfaEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        let pre_bytes = {
+            let _guard = pdfium_lock()?;
+            doc.save_to_bytes().map_err(CommandError::from)?
+        };
+        let new_bytes = strip_xfa(&pre_bytes)?;
+        {
+            let _guard = pdfium_lock()?;
+            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        }
+        Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+    }
+
+    fn label(&self) -> &'static str {
+        "strip-xfa"
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

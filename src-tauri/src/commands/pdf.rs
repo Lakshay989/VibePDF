@@ -909,6 +909,29 @@ pub async fn pdf_set_choice_field(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P5-FORM-005 — drop the dynamic XFA layer of an XFA-only document (remove
+/// `/XFA` + set `/NeedAppearances`) so its static content renders. Undoable.
+#[tauri::command]
+pub async fn pdf_strip_xfa(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.strip_xfa_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `box_id` on `page`
 /// (0-based). Undoable; runs on the actor.
 #[tauri::command]

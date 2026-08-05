@@ -14,6 +14,7 @@ import {
   readTextFields,
   setButtonField,
   setChoiceField,
+  stripXfa,
   type ButtonField,
   type ChoiceField,
   type FormField,
@@ -122,5 +123,13 @@ describe("setChoiceField", () => {
       name: "colors",
       values: ["Red", "Blue"],
     });
+  });
+});
+
+describe("stripXfa", () => {
+  it("marshals the document id", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await stripXfa("doc-1");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_strip_xfa", { id: "doc-1" });
   });
 });

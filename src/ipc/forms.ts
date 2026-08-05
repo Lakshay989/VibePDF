@@ -136,3 +136,13 @@ export async function setChoiceField(
 ): Promise<HistoryState> {
   return invoke<HistoryState>("pdf_set_choice_field", { id, name, values });
 }
+
+/**
+ * SPEC: P5-FORM-005 (P5.A5) — drop the dynamic XFA layer of an XFA-only document
+ * (remove `/XFA` + set `/NeedAppearances`) so its static content renders. VibePDF
+ * doesn't render XFA; this is the "convert to flat content (read-only)" action.
+ * Undoable; runs on the document actor.
+ */
+export async function stripXfa(id: DocumentId): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_strip_xfa", { id });
+}

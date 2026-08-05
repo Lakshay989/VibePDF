@@ -3671,6 +3671,29 @@ Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-formc
 
 ---
 
+## P5.A5 — XFA degraded support (SPEC P5-FORM-005)
+
+No `npm install` / `cargo add` — no new dependency (reused `lopdf`).
+
+New fixture: `tests/fixtures/basic/forms-xfa.pdf` via
+`python3 tests/fixtures/basic/generate-forms-xfa.py` (XFA-only: empty AcroForm
+`/Fields` + an `/XFA` stream + static page text).
+
+Verification gates + tests:
+
+```
+cargo test --test form_xfa_degraded                  # 5 ok (detect XFA-only, strip removes /XFA, NeedAppearances, no-XFA errors, actor strip→undo)
+npm run check                                         # tsc + eslint + clippy pedantic clean
+npm run test                                          # 100 files / 436 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_xfa_degraded writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf
+```
+
+Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-xfa-flattened.pdf`
+(git-ignored) for the cross-reader ritual. **Closes Track A of Phase 5.**
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -8036,6 +8036,57 @@ writing them back consistently.
 
 ---
 
+## P5.A5 — XFA: the form we can't edit, and the honest way out
+
+### Problem
+Some PDFs carry an **XFA** (XML Forms Architecture) form — a whole XML-described,
+scriptable form layout that lives in `/AcroForm /XFA`, separate from the AcroForm
+fields A2–A4 fill. Rendering or editing XFA needs an XFA engine we don't have. So
+when a PDF is *XFA-only* (an XFA layer with no fillable AcroForm fields), the right
+move is to say so and offer a graceful exit — not to fail silently or pretend.
+
+### Concepts learned
+- **AcroForm vs XFA vs hybrid** — AcroForm is the classic widget/field model;
+  XFA is Adobe's dynamic XML form. A *hybrid* has both (the AcroForm is a static
+  shadow of the XFA); *XFA-only* dynamic forms have an empty/absent AcroForm
+  `/Fields`. We detect XFA-only as `has_xfa && field_count == 0` (reusing the A1
+  summary) — a hybrid keeps Form mode and shows no warning.
+- **"Convert to flat content (read-only)" — honestly** — with no XFA engine, the
+  most we can truthfully do is *drop the dynamic layer*: remove `/XFA` from the
+  AcroForm and set `/NeedAppearances`, leaving the document's static page content
+  (what a non-XFA viewer falls back to). We never claim to render the XFA layout.
+- **Shape-agnostic key removal** — `/XFA` can be a single stream or an array of
+  named packets; the strip just removes the `/XFA` *key* from the AcroForm dict,
+  so both shapes are handled the same way.
+- **Degrade, don't crash** — the whole feature is a UX affordance over an
+  unsupported format: a banner + an undoable one-shot edit. This is the pattern
+  for "a capability we deliberately don't have."
+
+### Design choices
+- **Detection reuses A1.** No new read — `FormSummary { has_xfa, field_count }`
+  already tells us everything; the notice is pure frontend gating.
+- **Undoable + re-detect.** The convert is `StripXfaEdit` (snapshot inverse, same
+  chassis as A2–A4); on success the notice re-reads the summary and clears itself.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `strip_xfa` + `StripXfaEdit`. |
+| `src-tauri/src/pdf/actor.rs` | `StripXfa` message. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_strip_xfa`. |
+| `src/ipc/forms.ts` | `stripXfa`. |
+| `src/app/XfaNotice.tsx` | The XFA-only warning + convert offer. |
+| `src/view/PdfViewer.tsx` | Mounts the notice. |
+| `tests/fixtures/basic/forms-xfa.pdf` | XFA-only doc (empty `/Fields` + `/XFA` stream + static text). |
+
+### Further reading
+- PDF 32000-1:2008 §12.8 (XFA) and Table 219 (`/AcroForm /XFA`).
+
+**Track A of Phase 5 (form detection + filling) is now feature-complete:** A1
+detect, A2 text, A3 checkbox/radio, A4 choice, A5 XFA-degraded.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

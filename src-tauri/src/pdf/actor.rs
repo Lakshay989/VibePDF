@@ -57,7 +57,7 @@ use crate::pdf::doc_cache::CachedDoc;
 use crate::pdf::form::{
     read_button_fields_doc, read_choice_fields_doc, read_form_summary_doc, read_text_fields_doc,
     ButtonField, ChoiceField, FillTextFieldEdit, FormField, FormSummary, SetButtonFieldEdit,
-    SetChoiceFieldEdit,
+    SetChoiceFieldEdit, StripXfaEdit,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -417,6 +417,11 @@ pub enum Message {
     SetChoiceField {
         name: String,
         values: Vec<String>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-005 — drop the dynamic XFA layer (remove `/XFA` +
+    /// `/NeedAppearances`), for XFA-only documents. Undoable; marks dirty.
+    StripXfa {
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
@@ -1566,6 +1571,23 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::SetChoiceField { name, values, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-005 — strip the XFA layer. Await-holding for tests.
+    pub async fn strip_xfa(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.strip_xfa_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn strip_xfa_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::StripXfa { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3321,6 +3343,17 @@ fn run_worker(
                 // SPEC: P5-FORM-004 — set /V + /I + NeedAppearances; snapshot inverse.
                 let edit = SetChoiceFieldEdit { name, values };
                 let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::StripXfa { reply } => {
+                // SPEC: P5-FORM-005 — remove /XFA + set NeedAppearances; snapshot inverse.
+                let result = match Box::new(StripXfaEdit).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         Ok(history.state())
