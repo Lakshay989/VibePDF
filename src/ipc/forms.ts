@@ -180,6 +180,68 @@ export async function addTextField(
   });
 }
 
+/** One form field on a page, mirroring `pdf::form::PageField` (P5.B3). */
+export interface PageField {
+  name: string;
+  kind: "text" | "checkbox" | "radio" | "combo" | "list" | "signature" | "pushbutton";
+  rect: [number, number, number, number];
+}
+
+/**
+ * Editable field properties (P5.B3). Omit a key to leave it untouched; pass `""`
+ * (or `null` for `maxLen`) to clear it.
+ */
+export interface FieldPropertyPatch {
+  newName?: string;
+  defaultValue?: string;
+  maxLen?: number | null;
+  multiline?: boolean;
+  required?: boolean;
+  tooltip?: string;
+}
+
+/**
+ * SPEC: P5-FORM-006b (P5.B3) — list every form field on `page` (0-based), any
+ * kind, in tab order — the field-properties panel's source of truth.
+ */
+export async function readPageFields(id: DocumentId, page: number): Promise<PageField[]> {
+  return invoke<PageField[]>("pdf_read_page_fields", { id, page });
+}
+
+/** SPEC: P5-FORM-006b — edit an existing field's properties. Undoable. */
+export async function updateFieldProperties(
+  id: DocumentId,
+  name: string,
+  patch: FieldPropertyPatch,
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_update_field_properties", {
+    id,
+    name,
+    newName: patch.newName ?? null,
+    defaultValue: patch.defaultValue ?? null,
+    // `maxLen: null` clears the cap; omitting the key leaves it untouched.
+    maxLen: patch.maxLen ?? null,
+    clearMaxLen: patch.maxLen === null,
+    multiline: patch.multiline ?? null,
+    required: patch.required ?? null,
+    tooltip: patch.tooltip ?? null,
+  });
+}
+
+/** SPEC: P5-FORM-006c — set the page's tab order to `names`. Undoable. */
+export async function setTabOrder(
+  id: DocumentId,
+  page: number,
+  names: string[],
+): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_set_tab_order", { id, page, names });
+}
+
+/** SPEC: P5-FORM-006b — delete the form field `name` (and its widgets). Undoable. */
+export async function deleteField(id: DocumentId, name: string): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_delete_field", { id, name });
+}
+
 /** Spec for a non-text field to create (P5.B2). Text uses `addTextField`. */
 export type NewFieldSpec =
   | { kind: "checkbox"; required: boolean }

@@ -9,7 +9,11 @@ import { invoke } from "@/ipc/invoke";
 import {
   addField,
   addTextField,
+  deleteField,
   fillTextField,
+  readPageFields,
+  setTabOrder,
+  updateFieldProperties,
   readButtonFields,
   readChoiceFields,
   readFormSummary,
@@ -195,5 +199,55 @@ describe("addField", () => {
       required: false,
       caption: "Go",
     });
+  });
+});
+
+describe("readPageFields / setTabOrder / deleteField", () => {
+  it("marshals readPageFields", async () => {
+    mockInvoke.mockResolvedValue([]);
+    await readPageFields("doc-1", 2);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_read_page_fields", { id: "doc-1", page: 2 });
+  });
+
+  it("marshals setTabOrder", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await setTabOrder("doc-1", 0, ["b", "a"]);
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_set_tab_order", {
+      id: "doc-1",
+      page: 0,
+      names: ["b", "a"],
+    });
+  });
+
+  it("marshals deleteField", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await deleteField("doc-1", "a");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_delete_field", { id: "doc-1", name: "a" });
+  });
+});
+
+describe("updateFieldProperties", () => {
+  it("sends a value for maxLen and leaves omitted keys null", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await updateFieldProperties("doc-1", "a", { newName: "first", maxLen: 5 });
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_update_field_properties", {
+      id: "doc-1",
+      name: "a",
+      newName: "first",
+      defaultValue: null,
+      maxLen: 5,
+      clearMaxLen: false,
+      multiline: null,
+      required: null,
+      tooltip: null,
+    });
+  });
+
+  it("clears maxLen when it is null", async () => {
+    mockInvoke.mockResolvedValue({ canUndo: true, canRedo: false });
+    await updateFieldProperties("doc-1", "a", { maxLen: null });
+    const args = mockInvoke.mock.calls.at(-1)?.[1] as { maxLen: unknown; clearMaxLen: unknown };
+    expect(args.maxLen).toBeNull();
+    expect(args.clearMaxLen).toBe(true);
   });
 });

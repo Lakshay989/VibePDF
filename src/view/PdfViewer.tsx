@@ -25,7 +25,9 @@ import { BatesDialog } from "@/app/BatesDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
 import { XfaNotice } from "@/app/XfaNotice";
+import { FieldPropertiesPanel } from "@/app/FieldPropertiesPanel";
 import { useFontReport } from "@/app/use-font-report";
+import { useFormStore } from "@/state/form-store";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
 import { mergeDocuments } from "@/ipc/merge";
@@ -114,6 +116,16 @@ export function PdfViewer({ documentId, path }: Props) {
   // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
   // embedded or installed, so the user knows editing it will substitute.
   const fontReport = useFontReport(documentId);
+
+  // SPEC: P5-FORM-006b (P5.B3) — the page whose fields the properties panel
+  // lists. `getCurrentPage` is imperative (no re-render signal), so we snap it
+  // when form mode opens and after each edit; scroll-follow is a later polish.
+  const formMode = useFormStore((s) => s.formMode);
+  const [fieldPage, setFieldPage] = useState(0);
+  useEffect(() => {
+    if (!formMode) return;
+    setFieldPage(Math.max((virtRef.current?.getCurrentPage() ?? 1) - 1, 0));
+  }, [formMode, rawEpoch]);
 
   // SPEC: P2-PAGE-006 — extract pages: pick a range, then a native save
   // dialog, then write the new PDF. Read-only on the open document.
@@ -620,6 +632,9 @@ export function PdfViewer({ documentId, path }: Props) {
             />
           ) : null}
         </div>
+        {/* SPEC: P5-FORM-006b/006c (P5.B3) — field properties + tab order for the
+            page that was visible when form mode opened (re-snapped on each edit). */}
+        <FieldPropertiesPanel documentId={documentId} page={fieldPage} />
       </div>
     </div>
   );

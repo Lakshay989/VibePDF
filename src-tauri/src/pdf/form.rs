@@ -1304,6 +1304,385 @@ impl<'a> Edit<PdfDocument<'a>> for AddFieldEdit {
     }
 }
 
+// ── P5.B3 — field properties, tab order, delete ─────────────────────────────
+
+/// A page's form fields as the properties panel lists them (every kind).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageField {
+    /// Fully-qualified field name.
+    pub name: String,
+    /// `"text" | "checkbox" | "radio" | "combo" | "list" | "signature" | "pushbutton"`.
+    pub kind: String,
+    /// Widget bounds `[x0, y0, x1, y1]`.
+    pub rect: [f32; 4],
+}
+
+/// Editable field properties. `None` leaves the existing entry untouched;
+/// `Some("")`/`Some(None)` clears it.
+#[derive(Default)]
+pub struct FieldProperties {
+    pub new_name: Option<String>,
+    pub default_value: Option<String>,
+    pub max_len: Option<Option<u32>>,
+    pub multiline: Option<bool>,
+    pub required: Option<bool>,
+    pub tooltip: Option<String>,
+}
+
+/// A widget's field kind, from its effective `/FT` + `/Ff` bits.
+fn field_kind(doc: &Document, dict: &Dictionary) -> Option<&'static str> {
+    let ft = inherited(doc, dict, b"FT").and_then(|o| o.as_name().ok())?;
+    let ff = inherited(doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
+    Some(match ft {
+        b"Tx" => "text",
+        b"Btn" if ff & FF_PUSHBUTTON != 0 => "pushbutton",
+        b"Btn" if ff & FF_RADIO != 0 => "radio",
+        b"Btn" => "checkbox",
+        b"Ch" if ff & FF_COMBO != 0 => "combo",
+        b"Ch" => "list",
+        b"Sig" => "signature",
+        _ => return None,
+    })
+}
+
+/// The page's `/Annots` entries, resolving an indirect array.
+fn page_annots(doc: &Document, page_id: ObjectId) -> Vec<Object> {
+    match doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned()) {
+        Some(Object::Array(a)) => a,
+        Some(Object::Reference(id)) => {
+            doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Replace the page's `/Annots`, writing through an indirect array if that's how
+/// the page stores it.
+fn set_page_annots(doc: &mut Document, page_id: ObjectId, items: Vec<Object>) -> Result<(), CommandError> {
+    let arr_ref = doc
+        .get_dictionary(page_id)
+        .ok()
+        .and_then(|p| p.get(b"Annots").ok())
+        .and_then(|o| o.as_reference().ok());
+    if let Some(id) = arr_ref {
+        doc.objects.insert(id, Object::Array(items));
+    } else {
+        doc.get_dictionary_mut(page_id).map_err(lop)?.set("Annots", Object::Array(items));
+    }
+    Ok(())
+}
+
+/// The 0-based page index a widget sits on (via `/P`, else by scanning `/Annots`).
+fn resolve_page(doc: &Document, page: usize) -> Result<ObjectId, CommandError> {
+    let page_no = u32::try_from(page)
+        .map(|n| n + 1)
+        .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
+    doc.get_pages()
+        .get(&page_no)
+        .copied()
+        .ok_or_else(|| CommandError::InvalidInput(format!("no page {page}")))
+}
+
+/// SPEC: P5-FORM-006b — every form field whose widget sits on `page` (0-based),
+/// of any kind, in `/Annots` (tab) order. Read-only; feeds the properties panel
+/// and the tab-order list. Radio options collapse to one entry per group.
+pub fn read_page_fields_doc(doc: &Document, page: usize) -> Result<Vec<PageField>, CommandError> {
+    if acroform_dict(doc)?.is_none() {
+        return Ok(Vec::new());
+    }
+    let Ok(page_id) = resolve_page(doc, page) else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<PageField> = Vec::new();
+    for obj in page_annots(doc, page_id) {
+        let Ok(id) = obj.as_reference() else { continue };
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        let Some(kind) = field_kind(doc, dict) else { continue };
+        let Some(rect) = dict_rect(dict, b"Rect") else { continue };
+        let Some(name) = qualified_name(doc, dict) else { continue };
+        // One row per field: a radio group's option widgets collapse to the group.
+        if out.iter().any(|f| f.name == name) {
+            continue;
+        }
+        out.push(PageField { name, kind: kind.to_owned(), rect });
+    }
+    Ok(out)
+}
+
+/// Byte-level wrapper around [`read_page_fields_doc`].
+pub fn read_page_fields(bytes: &[u8], page: usize) -> Result<Vec<PageField>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(lop)?;
+    read_page_fields_doc(&doc, page)
+}
+
+/// Set or clear a `/Ff` bit on a value.
+fn with_flag(ff: i64, bit: i64, on: bool) -> i64 {
+    if on {
+        ff | bit
+    } else {
+        ff & !bit
+    }
+}
+
+/// SPEC: P5-FORM-006b — edit an existing field's properties. A rename rejects a
+/// collision with another top-level field. Sets `/NeedAppearances` (text/choice
+/// appearances regenerate).
+pub fn update_field_properties(
+    bytes: &[u8],
+    name: &str,
+    props: &FieldProperties,
+) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let field = find_field_by_name(&doc, name)
+        .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+    let acro_id = ensure_acroform(&mut doc)?;
+
+    if let Some(new_name) = props.new_name.as_deref() {
+        if new_name.trim().is_empty() {
+            return Err(CommandError::InvalidInput("field name is required".into()));
+        }
+        if new_name != name && duplicate_field_name(&doc, acro_id, new_name) {
+            return Err(CommandError::InvalidInput(format!(
+                "a form field named {new_name} already exists"
+            )));
+        }
+    }
+
+    let ff_before =
+        doc.get_dictionary(field).ok().and_then(|d| d.get(b"Ff").ok()).and_then(|o| o.as_i64().ok()).unwrap_or(0);
+    let mut ff = ff_before;
+    if let Some(m) = props.multiline {
+        ff = with_flag(ff, FF_MULTILINE, m);
+    }
+    if let Some(r) = props.required {
+        ff = with_flag(ff, FF_REQUIRED, r);
+    }
+
+    let d = doc.get_dictionary_mut(field).map_err(lop)?;
+    if let Some(new_name) = props.new_name.as_deref() {
+        d.set("T", encode_pdf_text_string(new_name));
+    }
+    if let Some(v) = props.default_value.as_deref() {
+        if v.is_empty() {
+            d.remove(b"V");
+        } else {
+            d.set("V", encode_pdf_text_string(v));
+        }
+    }
+    if let Some(ml) = props.max_len {
+        match ml {
+            Some(n) => d.set("MaxLen", Object::Integer(i64::from(n))),
+            None => {
+                d.remove(b"MaxLen");
+            }
+        }
+    }
+    if let Some(t) = props.tooltip.as_deref() {
+        if t.is_empty() {
+            d.remove(b"TU");
+        } else {
+            d.set("TU", encode_pdf_text_string(t));
+        }
+    }
+    if ff != ff_before {
+        if ff == 0 {
+            d.remove(b"Ff");
+        } else {
+            d.set("Ff", Object::Integer(ff));
+        }
+    }
+    set_need_appearances(&mut doc)?;
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-006c — set `page`'s tab order to `names` by permuting the field
+/// widgets within `/Annots` (non-field annotations keep their slots) and setting
+/// `/Tabs /S` (use annotation-array order). Unknown names are ignored; fields
+/// omitted from `names` keep their relative order after the listed ones.
+pub fn set_tab_order(bytes: &[u8], page: usize, names: &[String]) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let page_id = resolve_page(&doc, page)?;
+    let annots = page_annots(&doc, page_id);
+
+    // Partition: field-widget slots (to be re-filled in the new order) vs the rest.
+    let mut field_slots: Vec<usize> = Vec::new();
+    let mut widget_names: Vec<(usize, String)> = Vec::new();
+    for (i, obj) in annots.iter().enumerate() {
+        let Ok(id) = obj.as_reference() else { continue };
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        if field_kind(&doc, dict).is_none() {
+            continue;
+        }
+        let Some(n) = qualified_name(&doc, dict) else { continue };
+        field_slots.push(i);
+        widget_names.push((i, n));
+    }
+    if field_slots.is_empty() {
+        return Err(CommandError::InvalidInput("no form fields on this page".into()));
+    }
+
+    // Order the widgets: listed names first (in order, all widgets of a group
+    // together), then anything unlisted in its original order.
+    let mut ordered: Vec<usize> = Vec::new();
+    for want in names {
+        for (i, n) in &widget_names {
+            if n == want && !ordered.contains(i) {
+                ordered.push(*i);
+            }
+        }
+    }
+    for (i, _) in &widget_names {
+        if !ordered.contains(i) {
+            ordered.push(*i);
+        }
+    }
+
+    let mut next = annots.clone();
+    for (slot, src) in field_slots.iter().zip(ordered.iter()) {
+        next[*slot] = annots[*src].clone();
+    }
+    set_page_annots(&mut doc, page_id, next)?;
+    doc.get_dictionary_mut(page_id).map_err(lop)?.set("Tabs", Object::Name(b"S".to_vec()));
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-006b — delete a field: drop it from the `AcroForm` `/Fields` and
+/// remove its widget(s) — the field itself and any `/Kids` — from every page's
+/// `/Annots`.
+pub fn delete_field(bytes: &[u8], name: &str) -> Result<Vec<u8>, CommandError> {
+    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let field = find_field_by_name(&doc, name)
+        .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+    let acro_id = ensure_acroform(&mut doc)?;
+
+    let mut widgets: HashSet<ObjectId> = kid_widget_ids(&doc, field).into_iter().collect();
+    widgets.insert(field);
+
+    // Drop the widgets from every page's /Annots.
+    let pages: Vec<ObjectId> = doc.get_pages().values().copied().collect();
+    for page_id in pages {
+        let annots = page_annots(&doc, page_id);
+        if annots.is_empty() {
+            continue;
+        }
+        let kept: Vec<Object> = annots
+            .into_iter()
+            .filter(|o| !o.as_reference().is_ok_and(|id| widgets.contains(&id)))
+            .collect();
+        set_page_annots(&mut doc, page_id, kept)?;
+    }
+
+    // Drop it from the AcroForm /Fields.
+    let fields_ref = doc
+        .get_dictionary(acro_id)
+        .ok()
+        .and_then(|a| a.get(b"Fields").ok())
+        .and_then(|o| o.as_reference().ok());
+    let current: Vec<Object> = match fields_ref {
+        Some(id) => doc.get_object(id).and_then(Object::as_array).cloned().unwrap_or_default(),
+        None => doc
+            .get_dictionary(acro_id)
+            .ok()
+            .and_then(|a| a.get(b"Fields").ok())
+            .and_then(|o| o.as_array().ok())
+            .cloned()
+            .unwrap_or_default(),
+    };
+    let kept: Vec<Object> =
+        current.into_iter().filter(|o| o.as_reference().ok() != Some(field)).collect();
+    match fields_ref {
+        Some(id) => {
+            doc.objects.insert(id, Object::Array(kept));
+        }
+        None => doc.get_dictionary_mut(acro_id).map_err(lop)?.set("Fields", Object::Array(kept)),
+    }
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-006b — edit field properties as one undoable edit.
+pub struct UpdateFieldPropertiesEdit {
+    pub name: String,
+    pub props: FieldProperties,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for UpdateFieldPropertiesEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        form_apply(doc, |bytes| update_field_properties(bytes, &self.name, &self.props))
+    }
+
+    fn label(&self) -> &'static str {
+        "field-properties"
+    }
+}
+
+/// SPEC: P5-FORM-006c — set the page's tab order as one undoable edit.
+pub struct SetTabOrderEdit {
+    pub page: usize,
+    pub names: Vec<String>,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for SetTabOrderEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        form_apply(doc, |bytes| set_tab_order(bytes, self.page, &self.names))
+    }
+
+    fn label(&self) -> &'static str {
+        "tab-order"
+    }
+}
+
+/// SPEC: P5-FORM-006b — delete a field as one undoable edit.
+pub struct DeleteFieldEdit {
+    pub name: String,
+}
+
+impl<'a> Edit<PdfDocument<'a>> for DeleteFieldEdit {
+    fn apply(
+        self: Box<Self>,
+        doc: &mut PdfDocument<'a>,
+    ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+        form_apply(doc, |bytes| delete_field(bytes, &self.name))
+    }
+
+    fn label(&self) -> &'static str {
+        "delete-field"
+    }
+}
+
+/// Snapshot the live document, run a bytes → bytes form edit, reload; the inverse
+/// is the pre-edit snapshot. (The chassis every P5 write shares.)
+fn form_apply<'a>(
+    doc: &mut PdfDocument<'a>,
+    f: impl FnOnce(&[u8]) -> Result<Vec<u8>, CommandError>,
+) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
+    let pre_bytes = {
+        let _guard = pdfium_lock()?;
+        doc.save_to_bytes().map_err(CommandError::from)?
+    };
+    let new_bytes = f(&pre_bytes)?;
+    {
+        let _guard = pdfium_lock()?;
+        *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+    }
+    Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

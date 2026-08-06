@@ -55,9 +55,10 @@ use crate::pdf::cos::{
 };
 use crate::pdf::doc_cache::CachedDoc;
 use crate::pdf::form::{
-    read_button_fields_doc, read_choice_fields_doc, read_form_summary_doc, read_text_fields_doc,
-    AddFieldEdit, AddTextFieldEdit, ButtonField, ChoiceField, FillTextFieldEdit, FormField,
-    FormSummary, NewFieldKind, SetButtonFieldEdit, SetChoiceFieldEdit, StripXfaEdit,
+    read_button_fields_doc, read_choice_fields_doc, read_form_summary_doc, read_page_fields_doc,
+    read_text_fields_doc, AddFieldEdit, AddTextFieldEdit, ButtonField, ChoiceField, DeleteFieldEdit,
+    FieldProperties, FillTextFieldEdit, FormField, FormSummary, NewFieldKind, PageField,
+    SetButtonFieldEdit, SetChoiceFieldEdit, SetTabOrderEdit, StripXfaEdit, UpdateFieldPropertiesEdit,
 };
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -443,6 +444,29 @@ pub enum Message {
         rect: [f32; 4],
         name: String,
         kind: NewFieldKind,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-006b — list every form field on `page` (0-based), any kind,
+    /// in tab order. Read-only.
+    ReadPageFields {
+        page: usize,
+        reply: oneshot::Sender<Result<Vec<PageField>, CommandError>>,
+    },
+    /// SPEC: P5-FORM-006b — edit an existing field's properties. Undoable.
+    UpdateFieldProperties {
+        name: String,
+        props: FieldProperties,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-006c — set `page`'s tab order to `names`. Undoable.
+    SetTabOrder {
+        page: usize,
+        names: Vec<String>,
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-006b — delete a field (and its widgets). Undoable.
+    DeleteField {
+        name: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
@@ -1680,6 +1704,84 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::AddField { page, rect, name, kind, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-006b — read a page's fields (any kind). Await-holding for tests.
+    pub async fn read_page_fields(&self, page: usize) -> Result<Vec<PageField>, CommandError> {
+        let rx = self.read_page_fields_request(page)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn read_page_fields_request(
+        &self,
+        page: usize,
+    ) -> Result<oneshot::Receiver<Result<Vec<PageField>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ReadPageFields { page, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-006b — edit field properties. Await-holding for tests.
+    pub async fn update_field_properties(
+        &self,
+        name: String,
+        props: FieldProperties,
+    ) -> Result<HistoryState, CommandError> {
+        let rx = self.update_field_properties_request(name, props)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn update_field_properties_request(
+        &self,
+        name: String,
+        props: FieldProperties,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::UpdateFieldProperties { name, props, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-006c — set the page's tab order. Await-holding for tests.
+    pub async fn set_tab_order(&self, page: usize, names: Vec<String>) -> Result<HistoryState, CommandError> {
+        let rx = self.set_tab_order_request(page, names)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn set_tab_order_request(
+        &self,
+        page: usize,
+        names: Vec<String>,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::SetTabOrder { page, names, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-006b — delete a field. Await-holding for tests.
+    pub async fn delete_field(&self, name: String) -> Result<HistoryState, CommandError> {
+        let rx = self.delete_field_request(name)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn delete_field_request(
+        &self,
+        name: String,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::DeleteField { name, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3479,6 +3581,49 @@ fn run_worker(
                 // SPEC: P5-FORM-007 — create a non-text field; snapshot inverse.
                 let edit = AddFieldEdit { page, rect, name, kind };
                 let result = match Box::new(edit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::ReadPageFields { page, reply } => {
+                // SPEC: P5-FORM-006b — read-only; served from the shared parse cache.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(|d| read_page_fields_doc(d, page));
+                let _ = reply.send(result);
+            }
+            Message::UpdateFieldProperties { name, props, reply } => {
+                // SPEC: P5-FORM-006b — edit field properties; snapshot inverse.
+                let result = match Box::new(UpdateFieldPropertiesEdit { name, props }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::SetTabOrder { page, names, reply } => {
+                // SPEC: P5-FORM-006c — permute /Annots + set /Tabs; snapshot inverse.
+                let result = match Box::new(SetTabOrderEdit { page, names }).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
+            }
+            Message::DeleteField { name, reply } => {
+                // SPEC: P5-FORM-006b — delete a field + widgets; snapshot inverse.
+                let result = match Box::new(DeleteFieldEdit { name }).apply(&mut doc) {
                     Ok(inverse) => {
                         history.record(inverse);
                         Ok(history.state())

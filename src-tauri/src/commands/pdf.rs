@@ -7,7 +7,9 @@ use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
-use crate::pdf::form::{ButtonField, ChoiceField, FormField, FormSummary, NewFieldKind};
+use crate::pdf::form::{
+    ButtonField, ChoiceField, FieldProperties, FormField, FormSummary, NewFieldKind, PageField,
+};
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -1011,6 +1013,122 @@ pub async fn pdf_add_field(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.add_field_request(page, rect, name, kind)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-006b — list every form field on `page` (0-based), any kind, in
+/// tab order, for the field-properties panel. Read-only.
+#[tauri::command]
+pub async fn pdf_read_page_fields(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+) -> Result<Vec<PageField>, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.read_page_fields_request(page)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-006b — edit an existing field's properties. Every property is
+/// optional: `null` leaves it untouched, `""`/`null` inside a `Some` clears it.
+/// Undoable; runs on the actor.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_update_field_properties(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    new_name: Option<String>,
+    default_value: Option<String>,
+    max_len: Option<u32>,
+    clear_max_len: bool,
+    multiline: Option<bool>,
+    required: Option<bool>,
+    tooltip: Option<String>,
+) -> Result<HistoryState, CommandError> {
+    // `Option<Option<u32>>` can't round-trip through JSON, so the wire carries a
+    // value plus an explicit clear flag: clear wins, then a value, else untouched.
+    let max_len = if clear_max_len { Some(None) } else { max_len.map(Some) };
+    let props = FieldProperties { new_name, default_value, max_len, multiline, required, tooltip };
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.update_field_properties_request(name, props)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-006c — set `page`'s tab order to `names`. Undoable.
+#[tauri::command]
+pub async fn pdf_set_tab_order(
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    names: Vec<String>,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let page = usize::try_from(page).unwrap_or(0);
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.set_tab_order_request(page, names)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-006b — delete the form field `name` (and its widgets). Undoable.
+#[tauri::command]
+pub async fn pdf_delete_field(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.delete_field_request(name)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

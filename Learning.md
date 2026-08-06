@@ -8191,6 +8191,65 @@ appearance needs, from one drag-to-create flow.
 
 ---
 
+## P5.B3 — editing a field after the fact, and what "tab order" really is
+
+### Problem
+B1/B2 configure a field *at creation*. B3 edits an existing one — rename, default,
+max length, flags, tooltip — plus deleting it and controlling the **tab order**.
+The surprise: tab order isn't a separate structure to build. It's already there.
+
+### Concepts learned
+- **Tab order = `/Annots` order + `/Tabs`** — a page's annotation array *is* the
+  tab sequence, but only if the page says how to interpret it: `/Tabs /S` means
+  "use the annotation array order" (vs `/R` row-order, `/C` column-order).
+  So "reorder the tab sequence" = permute the field widgets inside `/Annots` and
+  set `/Tabs /S`. No new object graph.
+- **Permute in place, don't rebuild** — `/Annots` also holds highlights, links,
+  notes. The reorder collects the *field-widget slots*, fills those slots with the
+  widgets in the new order, and leaves every other annotation exactly where it was.
+- **Deleting a field is two removals** — drop it from the AcroForm `/Fields`
+  *and* remove its widget(s) from every page's `/Annots`. A radio group means the
+  parent plus all its `/Kids`; miss the kids and you leave orphan widgets that
+  still draw.
+- **`Option<Option<T>>` can't cross JSON** — "leave untouched" vs "clear" vs "set"
+  is three states, but JSON only gives you a value or `null`. The wire carries a
+  value **plus an explicit `clear` flag**; the command maps the pair back to
+  `Option<Option<u32>>`. (I wrote the naive version first and caught it before it
+  shipped — serde would have silently read `[5]` as nothing.)
+- **Imperative handles don't re-render** — `PageVirtualizer.getCurrentPage()` is a
+  ref-read with no subscription, so the panel snaps the page when form mode opens
+  and after each edit rather than following the scroll. Honest limitation, noted.
+
+### Design choices
+- **One `form_apply` chassis.** B3's three writes share the snapshot → transform →
+  reload → `RestoreDocEdit` helper (extracted here), so undo behaves identically
+  across properties, ordering, and delete.
+- **Reorder is optimistic, then re-read.** The list updates instantly and the
+  backend write re-reads authoritative order — same "show it now, confirm after"
+  pattern as the fill overlays.
+
+### Spec note
+B3 had **no spec line** (`steps/P5.md` calls it "UX completeness"). I drafted
+**P5-FORM-006b** (edit field properties) and **P5-FORM-006c** (tab order) and
+implemented against them; they still need adding to `docs/02_PRODUCT_SPEC.md`
+(that file is the human's).
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `PageField`/`FieldProperties`, `read_page_fields_doc`, `update_field_properties`, `set_tab_order`, `delete_field` + Edits + `form_apply`. |
+| `src-tauri/src/pdf/actor.rs` | 4 messages (read + 3 writes). |
+| `src-tauri/src/commands/pdf.rs` | 4 commands (`max_len` + `clear_max_len` pair). |
+| `src/ipc/forms.ts` | `readPageFields`, `updateFieldProperties`, `setTabOrder`, `deleteField`. |
+| `src/tools/form-author/tab-order.ts` | Pure `moveItem`/`moveUp`/`moveDown`. |
+| `src/app/FieldPropertiesPanel.tsx` | The panel: list + reorder + properties + delete. |
+| `src/view/PdfViewer.tsx` | Mounts the panel in form mode. |
+
+### Further reading
+- PDF 32000-1:2008 §12.5.6 (`/Annots`), Table 30 (`/Tabs`), §12.7.3.1 (`/TU` tooltip).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -3734,6 +3734,34 @@ Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-creat
 
 ---
 
+## P5.B3 — Tab order + field property editor (SPEC P5-FORM-006b/006c, drafted)
+
+No `npm install` / `cargo add` — no new dependency. No new fixture (builds test
+docs from `hello.pdf` via the B1/B2 create paths).
+
+**Spec note:** B3 had no spec line; drafted P5-FORM-006b (edit properties) and
+P5-FORM-006c (tab order) and implemented against them — they still need adding to
+`docs/02_PRODUCT_SPEC.md` (human-owned).
+
+Verification gates + tests:
+
+```
+cargo test --test form_properties                    # 11 ok (list in tab order, rename, rename collision, value/maxlen/flags/tooltip, clear maxlen+tooltip, unknown field, tab order + /Tabs /S, unlisted-kept, delete, delete radio+kids, actor edit→undo)
+npx vitest run src/tools/form-author/__tests__/tab-order.test.ts   # 8 ok (moveItem/up/down, clamping, immutability)
+npm run check                                         # tsc + eslint + clippy pedantic clean (first try)
+npm run test                                          # 103 files / 461 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_properties writes_verification_artifact -- --ignored   # → $TMPDIR/vibepdf-verify.pdf
+```
+
+Design note: the `max_len` wire is a value + `clear_max_len` flag, because
+`Option<Option<u32>>` cannot round-trip through JSON (caught before shipping).
+
+Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-fieldprops.pdf`
+(git-ignored) — renamed + required + tooltipped field with a reordered tab sequence.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
