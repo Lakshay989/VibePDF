@@ -258,6 +258,49 @@ export async function exportFormData(
   return invoke<number>("pdf_export_form_data", { id, format, dest });
 }
 
+/** One entry the import refused to coerce (P5.C2). */
+export interface TypeMismatch {
+  /** The field name as it appears in the data file. */
+  name: string;
+  /** What the data claimed — a declared type, or the shape of its value. */
+  expected: string;
+  /** What the document's field actually is. */
+  got: string;
+}
+
+/**
+ * SPEC: P5-FORM-009 (P5.C2) — the outcome of an import. `unmatched` and
+ * `mismatched` are the spec's two "SHALL be reported" clauses: a mismatched
+ * entry is skipped whole, never coerced onto the field.
+ */
+export interface ImportReport {
+  applied: number;
+  unmatched: string[];
+  mismatched: TypeMismatch[];
+  history: HistoryState;
+}
+
+/**
+ * SPEC: P5-FORM-009 (P5.C2) — import form data from `src` in `format`, filling
+ * fields by fully-qualified name. Undoable.
+ */
+export async function importFormData(
+  id: DocumentId,
+  format: FormDataFormat,
+  src: string,
+): Promise<ImportReport> {
+  return invoke<ImportReport>("pdf_import_form_data", { id, format, src });
+}
+
+/**
+ * SPEC: P5-FORM-010 (P5.C2) — flatten the form: each field's current appearance
+ * is rendered into the page content and the interactive definitions are removed.
+ * Undoable in-session only — once saved and reopened, it is permanent.
+ */
+export async function flattenForm(id: DocumentId): Promise<HistoryState> {
+  return invoke<HistoryState>("pdf_flatten_form", { id });
+}
+
 /** Spec for a non-text field to create (P5.B2). Text uses `addTextField`. */
 export type NewFieldSpec =
   | { kind: "checkbox"; required: boolean }

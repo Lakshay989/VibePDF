@@ -42,6 +42,9 @@ vibepdf/
 │   │   │   ├── background.rs     # Colour/image/PDF-page background behind page content (P4.D1)
 │   │   │   ├── header_footer.rs  # Header/footer text with {n}/{total}/{date} placeholders (P4.D3)
 │   │   │   ├── form.rs           # Form fields
+│   │   │   ├── form_data.rs      # Form-data export: FDF/XFDF/JSON/CSV (P5.C1)
+│   │   │   ├── form_import.rs    # Form-data import + match/mismatch report (P5.C2)
+│   │   │   ├── form_flatten.rs   # Synthesize field appearances, bake, drop AcroForm (P5.C2)
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
 │   │   ├── ocr/                  # Tesseract pipeline
@@ -328,6 +331,33 @@ via `cos_edit`, so the inverse is a pre-flatten snapshot: **undoable in-session,
 gone once saved + reopened** — exactly the spec's wording. `/AP`-less notes/replies
 have no appearance to bake and are **kept live**. Command `pdf_flatten_annotations`;
 the `AnnotationPanel` ▦ action is gated behind an inline confirm.
+
+**Form flatten (P5.C2, P5-FORM-010)** reuses that machinery through a predicate:
+`flatten.rs` exposes `flatten_annots_where(doc, keep)`, and **`pdf/form_flatten.rs`**
+passes "keep everything that isn't a `/Widget`" so page markup survives. The half
+that *isn't* reuse is the appearance pass in front of it, and it exists because of
+how filling works: the P5.A2/A4 writers set `/V`, **delete the stale `/AP`**, and
+flip `/NeedAppearances true` so the viewer regenerates the look — right for an
+interactive form, fatal for flatten, since a naive widget-bake would find no
+appearance and silently drop every typed value. So `form_flatten` first synthesizes
+an `/AP /N` for each valued text/choice widget from `/V` + `/DA` (font size,
+colour, and `/DR`-resolved base font parsed out of the `/DA` fragment; size `0`
+auto-fits the box), routing through `cos::free_text_appearance` so non-WinAnsi
+values take the same embedded-CID branch free text does. Buttons need none of it —
+their `/AP /N` is pre-baked per state and picked by `/AS`. After the bake, every
+remaining widget (hidden, or appearance-less) is swept from `/Annots` and the
+catalog's `/AcroForm` is removed, taking `/XFA` with it. Same in-session-only undo
+contract. Command `pdf_flatten_form`, behind the field panel's confirm.
+
+**Form-data interchange (P5.C1/C2)** is a matched pair: `pdf/form_data.rs` walks
+the `AcroForm` `/Fields` tree and serialises name/type/value as FDF, XFDF, JSON or
+CSV; `pdf/form_import.rs` parses the same four back (FDF via lopdf after swapping
+`%FDF-` → `%PDF-`, XFDF hand-rolled like `xfdf.rs`, JSON via serde, CSV RFC-4180)
+and matches on the **fully-qualified** name. P5-FORM-009's "reported, not silently
+coerced" is why import returns an `ImportReport` rather than a count, and why it
+can't be a plain `Edit` (which only hands back an inverse): `import_into` opens the
+`form_apply` chassis up so the actor records the snapshot inverse itself and
+replies with the report alongside the history state.
 
 **Phase 4 — content editing — adds a third read pattern.** P3's reads went through
 the cos byte path (`save_to_bytes` → lopdf); but *text* lives in encoded content

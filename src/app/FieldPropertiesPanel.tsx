@@ -7,11 +7,13 @@
 
 import { reportError } from "@/app/report-error";
 import { useEffect, useState } from "react";
-import { save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 
 import {
   deleteField,
   exportFormData,
+  flattenForm,
+  importFormData,
   readFormSummary,
   readPageFields,
   setTabOrder,
@@ -23,6 +25,7 @@ import {
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
 import { useFormStore } from "@/state/form-store";
 import { useHistoryStore } from "@/state/history-store";
+import { describeImport, formatFromPath } from "@/tools/form-author/import-report";
 import { moveDown, moveUp } from "@/tools/form-author/tab-order";
 
 interface Props {
@@ -46,6 +49,7 @@ export function FieldPropertiesPanel({ documentId, page }: Props) {
   const [multiline, setMultiline] = useState(false);
   const [required, setRequired] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [confirmFlatten, setConfirmFlatten] = useState(false);
 
   useEffect(() => {
     if (!formMode) {
@@ -139,6 +143,55 @@ export function FieldPropertiesPanel({ documentId, page }: Props) {
     })();
   };
 
+  // SPEC: P5-FORM-009 (P5.C2) — import fills matching fields by name. The format
+  // comes from the chosen file's extension; the report's two "reported, not
+  // coerced" lists are surfaced verbatim rather than folded into a count.
+  const doImport = () => {
+    void (async () => {
+      try {
+        const path = await openFileDialog({
+          multiple: false,
+          filters: [{ name: "Form data", extensions: ["fdf", "xfdf", "json", "csv"] }],
+        });
+        if (typeof path !== "string") return; // cancelled
+        const format = formatFromPath(path);
+        if (!format) {
+          setNote("Unrecognised form-data file — expected .fdf, .xfdf, .json or .csv");
+          return;
+        }
+        const report = await importFormData(documentId, format, path);
+        setHistory(documentId, report.history);
+        bumpEpoch(documentId);
+        await Promise.all([
+          readPageFields(documentId, page).then(setFields),
+          readFormSummary(documentId).then(setDetected),
+        ]);
+        setNote(describeImport(report.applied, report.unmatched, report.mismatched));
+      } catch (err) {
+        reportError("Couldn't import form data", err);
+      }
+    })();
+  };
+
+  // SPEC: P5-FORM-010 (P5.C2) — flatten bakes each field's current appearance
+  // into the page and drops the interactivity. Undoable in-session only, so it's
+  // gated behind an inline confirm (the same shape as the annotation flatten).
+  const doFlatten = () => {
+    setConfirmFlatten(false);
+    setSelected(null);
+    flattenForm(documentId)
+      .then((h) => {
+        setHistory(documentId, h);
+        bumpEpoch(documentId);
+        setNote("Form flattened — fields are now page content");
+        return Promise.all([
+          readPageFields(documentId, page).then(setFields),
+          readFormSummary(documentId).then(setDetected),
+        ]);
+      })
+      .catch((err: unknown) => reportError("Couldn't flatten the form", err));
+  };
+
   const input = "w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900";
 
   return (
@@ -163,6 +216,47 @@ export function FieldPropertiesPanel({ documentId, page }: Props) {
             {f.toUpperCase()}
           </button>
         ))}
+      </div>
+      {/* SPEC: P5-FORM-009 / P5-FORM-010 — import data, or bake the form flat. */}
+      <div className="mb-3 flex flex-wrap items-center gap-1">
+        <button
+          type="button"
+          onClick={doImport}
+          aria-label="Import form data"
+          className="rounded border border-neutral-300 px-1.5 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        >
+          Import…
+        </button>
+        {confirmFlatten ? (
+          <>
+            <span className="text-xs text-neutral-500">Flatten? Not undoable once saved.</span>
+            <button
+              type="button"
+              onClick={doFlatten}
+              aria-label="Confirm flatten form"
+              className="rounded bg-red-600 px-1.5 py-0.5 text-xs text-white hover:bg-red-700"
+            >
+              Flatten
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmFlatten(false)}
+              aria-label="Cancel flatten form"
+              className="rounded border border-neutral-300 px-1.5 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmFlatten(true)}
+            aria-label="Flatten form"
+            className="rounded border border-neutral-300 px-1.5 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            Flatten form
+          </button>
+        )}
       </div>
       {note ? <p className="mb-2 text-xs text-neutral-500">{note}</p> : null}
       <ol className="flex flex-col gap-1">

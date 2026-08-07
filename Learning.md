@@ -8299,6 +8299,97 @@ dumb renderers. Getting the read right is the whole job.
 
 ---
 
+## P5.C2 — import that refuses to guess, and flatten that has to draw first
+
+### Problem
+Two spec lines that look symmetric and aren't. **Import** (P5-FORM-009) is the
+inverse of C1's export — parse the same four formats, put the values back. Easy,
+except the spec spends two of its three sentences on *reporting*: unmatched
+fields and type mismatches must surface, and mismatches must not be "silently
+coerced". **Flatten** (P5-FORM-010) sounds like it's already done — P3.E2 built
+a flatten for annotations, and form widgets *are* annotations — but running it
+as-is would have thrown away every value the user typed.
+
+### Concepts learned
+- **The bug hiding inside "just reuse it"** — filling a text field (P5.A2) sets
+  `/V`, **deletes** the widget's `/AP`, and sets `AcroForm /NeedAppearances true`.
+  That is correct: it tells the viewer "regenerate the look from the value", which
+  is how you avoid re-implementing Acrobat's text layout. But it means a filled
+  field has **no appearance stream**. P3's flatten bakes `/AP` into page content —
+  so on a filled form it would have found nothing to bake, dropped the widget, and
+  produced a blank page. The fix isn't a flag; it's an extra pass that *builds*
+  the missing appearance from `/V` before baking. Lesson: when two features share
+  a data structure, check what each one does to the parts the other depends on.
+- **Deferred rendering has a settlement date.** `/NeedAppearances` is an IOU —
+  "someone else will draw this later". Interactive viewers honour it. Flatten is
+  the moment the IOU comes due and *we* are the someone else.
+- **Predicate injection instead of a copy** — rather than fork `flatten.rs`, it
+  now takes a `keep: &dyn Fn(&Dictionary) -> bool`. Annotation flatten passes
+  "keep nothing"; form flatten passes "keep everything that isn't a `/Widget`".
+  One matrix/resources/content-splice implementation, two behaviours. The cost is
+  one indirection; the alternative was two copies of §12.5.5 placement maths.
+- **`/DA` is a content-stream fragment, not a struct.** A field's default
+  appearance is literally a snippet of PDF operators — `/Helv 10 Tf 0 g`. Parsing
+  it means reading *backwards from each operator* (`Tf` takes the two tokens
+  before it; `rg` takes three; `k` takes four, in CMYK you convert). A size of
+  `0` means "auto" — fit the box.
+- **The appearance must be self-contained.** `/DA` names a font from the
+  `AcroForm` `/DR` resource dictionary — which flatten is about to delete. So the
+  synthesized `/AP` carries its own `/Resources`, either an inline base-14 font
+  dict or a hand-built CID font (reusing `cos::free_text_appearance`, so a
+  non-Latin field value flattens the same way non-Latin free text does). Never
+  bake a reference to something you're about to remove.
+- **`BBox == Rect` is what makes the placement matrix the identity.** §12.5.5
+  maps a form XObject's `/BBox` (through its `/Matrix`) onto the annotation's
+  `/Rect`. Build the appearance in absolute page coordinates and the two agree,
+  so no scaling sneaks in.
+- **"Reported, not coerced" changes the return type.** An importer that filled
+  what it could and dropped the rest would be *silent* — technically filling
+  matching fields, violating the other two sentences. So import returns
+  `ImportReport { applied, unmatched, mismatched }`. A mismatched entry is skipped
+  **whole** — never half-applied.
+- **Four flavours of "type mismatch"** — a declared type that disagrees (JSON,
+  CSV, and our own FDF carry `type`; XFDF doesn't, so it's judged on value shape
+  alone); more values than the field holds; a button value that isn't one of that
+  field's `/AP` states; a choice value outside `/Opt`. Each is a thing a coercing
+  importer would quietly paper over.
+- **`Edit` can only return an inverse.** The command trait's `apply` hands back
+  the undo action and nothing else, which is fine for 14 of the 15 P5 writes and
+  wrong for this one. Rather than smuggle the report through shared mutable state,
+  `import_into` *opens the chassis*: it does the snapshot/reload itself and returns
+  `(inverse, report)`, and the actor records the inverse. When an abstraction
+  doesn't fit one caller, widening that caller beats bending the abstraction.
+- **One parse, N writes.** The A2–A4 setters are `bytes → bytes`: load, mutate,
+  save. Chaining them for a 200-row CSV would re-parse the document 200 times. So
+  each got split into a `_doc` half taking `&mut Document`, with the byte wrapper
+  calling it — behaviour identical, and the existing A2–A4 suites are the proof.
+- **RFC 4180 by hand** — CSV's quoting rules (a quoted cell may contain commas,
+  newlines, and `""`-escaped quotes) are a ~30-line character state machine. Worth
+  writing; not worth a dependency.
+- **Hidden ≠ empty.** A widget with `/F` bit 2 set renders nothing. Flatten must
+  *remove* it without *drawing* it — otherwise flattening reveals text the
+  document deliberately hid. It's a separate outcome from both "bake" and "keep".
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form_flatten.rs` | Synthesize field appearances from `/V` + `/DA`, bake widgets, sweep the rest, drop `/AcroForm`. |
+| `src-tauri/src/pdf/form_import.rs` | Four parsers, name matching, the mismatch rules, `ImportReport`, `import_into`. |
+| `src-tauri/src/pdf/flatten.rs` | `flatten_annots_where(doc, keep)` — the shared core, now predicate-driven. |
+| `src-tauri/src/pdf/form.rs` | `_doc` halves of the three setters; `terminal_field_ids`; helpers made `pub(crate)`. |
+| `src-tauri/src/pdf/cos.rs` | `free_text_appearance` made `pub(crate)` — one appearance builder, two callers. |
+| `src-tauri/src/pdf/actor.rs` | `ImportFormData` + `FlattenForm` messages. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_import_form_data`, `pdf_flatten_form`. |
+| `src/ipc/forms.ts` | `importFormData`, `flattenForm`, `ImportReport`. |
+| `src/tools/form-author/import-report.ts` | `formatFromPath`, `describeImport` — the pure UI logic. |
+| `src/app/FieldPropertiesPanel.tsx` | Import… button + Flatten behind an inline confirm. |
+
+### Further reading
+- PDF 32000-1:2008 §12.5.5 (appearance streams), §12.7.3.3 (`/DA`), §12.7.2 (`/NeedAppearances`).
+- RFC 4180 — the CSV quoting rules the parser implements.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

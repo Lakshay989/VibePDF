@@ -11,6 +11,7 @@ use crate::pdf::form::{
     ButtonField, ChoiceField, FieldProperties, FormField, FormSummary, NewFieldKind, PageField,
 };
 use crate::pdf::form_data::ExportFormat;
+use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -1156,6 +1157,57 @@ pub async fn pdf_export_form_data(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.export_form_data_request(format, std::path::PathBuf::from(dest))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-009 — import form data from `src` (FDF / XFDF / JSON / CSV),
+/// filling fields by name. Undoable; replies with the report (applied count,
+/// unmatched names, type mismatches) plus the new history state.
+#[tauri::command]
+pub async fn pdf_import_form_data(
+    state: State<'_, AppState>,
+    id: String,
+    format: String,
+    src: String,
+) -> Result<ImportOutcome, CommandError> {
+    let format = ExportFormat::parse(&format)?;
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.import_form_data_request(format, std::path::PathBuf::from(src))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-010 — flatten the interactive form: render each field's current
+/// appearance into the page content and remove the field definitions. Undoable
+/// in-session only; runs on the actor.
+#[tauri::command]
+pub async fn pdf_flatten_form(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<HistoryState, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.flatten_form_request()?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

@@ -16,18 +16,35 @@ const { FIELDS } = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn().mockResolvedValue("/tmp/form-data.json"),
+  open: vi.fn().mockResolvedValue("/tmp/form-data.csv"),
 }));
 
 vi.mock("@/ipc/forms", () => ({
   readPageFields: vi.fn().mockResolvedValue(FIELDS),
   exportFormData: vi.fn().mockResolvedValue(2),
+  importFormData: vi.fn().mockResolvedValue({
+    applied: 1,
+    unmatched: ["ghost"],
+    mismatched: [{ name: "b", expected: "text", got: "checkbox" }],
+    history: { canUndo: true, canRedo: false },
+  }),
+  flattenForm: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   readFormSummary: vi.fn().mockResolvedValue({ fieldCount: 2, hasXfa: false }),
   updateFieldProperties: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   setTabOrder: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   deleteField: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
-import { deleteField, exportFormData, readPageFields, setTabOrder, updateFieldProperties } from "@/ipc/forms";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import {
+  deleteField,
+  exportFormData,
+  flattenForm,
+  importFormData,
+  readPageFields,
+  setTabOrder,
+  updateFieldProperties,
+} from "@/ipc/forms";
 import { useFormStore } from "@/state/form-store";
 import { FieldPropertiesPanel } from "@/app/FieldPropertiesPanel";
 
@@ -36,6 +53,9 @@ const mockUpdate = vi.mocked(updateFieldProperties);
 const mockOrder = vi.mocked(setTabOrder);
 const mockDelete = vi.mocked(deleteField);
 const mockExport = vi.mocked(exportFormData);
+const mockImport = vi.mocked(importFormData);
+const mockFlatten = vi.mocked(flattenForm);
+const mockOpen = vi.mocked(openFileDialog);
 
 const panel = () => <FieldPropertiesPanel documentId={DOC} page={0} />;
 
@@ -46,6 +66,7 @@ afterEach(() => {
 beforeEach(() => {
   useFormStore.setState({ detected: { fieldCount: 2, hasXfa: false }, formMode: true });
   vi.mocked(readPageFields).mockResolvedValue(FIELDS);
+  mockOpen.mockResolvedValue("/tmp/form-data.csv");
 });
 
 describe("FieldPropertiesPanel", () => {
@@ -95,5 +116,46 @@ describe("FieldPropertiesPanel", () => {
     await waitFor(() =>
       expect(mockExport).toHaveBeenCalledWith(DOC, "json", "/tmp/form-data.json"),
     );
+  });
+
+  // SPEC: P5-FORM-009 (P5.C2)
+  it("imports with the format taken from the chosen file's extension", async () => {
+    render(panel());
+    fireEvent.click(await screen.findByLabelText("Import form data"));
+    await waitFor(() => expect(mockImport).toHaveBeenCalledWith(DOC, "csv", "/tmp/form-data.csv"));
+  });
+
+  it("reports the unmatched and mismatched entries after an import", async () => {
+    render(panel());
+    fireEvent.click(await screen.findByLabelText("Import form data"));
+    expect(await screen.findByText(/Filled 1 field/)).toBeTruthy();
+    expect(screen.getByText(/1 not in this form \(ghost\)/)).toBeTruthy();
+    expect(screen.getByText(/b: data says text, field is checkbox/)).toBeTruthy();
+  });
+
+  it("refuses a file whose extension isn't a form-data format", async () => {
+    mockOpen.mockResolvedValue("/tmp/sheet.xlsx");
+    render(panel());
+    fireEvent.click(await screen.findByLabelText("Import form data"));
+    expect(await screen.findByText(/Unrecognised form-data file/)).toBeTruthy();
+    expect(mockImport).not.toHaveBeenCalled();
+  });
+
+  // SPEC: P5-FORM-010 (P5.C2)
+  it("asks for confirmation before flattening the form", async () => {
+    render(panel());
+    fireEvent.click(await screen.findByLabelText("Flatten form"));
+    expect(mockFlatten).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("Confirm flatten form"));
+    await waitFor(() => expect(mockFlatten).toHaveBeenCalledWith(DOC));
+  });
+
+  it("cancelling the flatten confirm leaves the document alone", async () => {
+    render(panel());
+    fireEvent.click(await screen.findByLabelText("Flatten form"));
+    fireEvent.click(screen.getByLabelText("Cancel flatten form"));
+    expect(await screen.findByLabelText("Flatten form")).toBeTruthy();
+    expect(mockFlatten).not.toHaveBeenCalled();
   });
 });

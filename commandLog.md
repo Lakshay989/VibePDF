@@ -3787,6 +3787,42 @@ All four artifacts copied to `Sample PDFs/vibepdf-verify-formdata.*` (git-ignore
 
 ---
 
+## P5.C2 — Import form data + Flatten (SPEC P5-FORM-009, P5-FORM-010)
+
+No `npm install` / `cargo add` — every parser is hand-rolled or uses the existing
+`serde_json`. No new fixture (both suites build their forms from `hello.pdf` via
+the B1/B2 create paths; the XFA case reuses `tests/fixtures/basic/forms-xfa.pdf`).
+
+Verification gates + tests:
+
+```
+cargo check --all-targets                            # after each increment (refactor / new modules / actor / commands)
+cargo test --test form_import --test form_flatten    # 14 + 14 ok
+npx tsc --noEmit -p tsconfig.json                    # frontend typecheck after the IPC + panel wiring
+npx vitest run src/app/__tests__/FieldPropertiesPanel.test.tsx src/tools/form-author/__tests__/import-report.test.ts   # 18 passed
+npm run check                                         # tsc + eslint + clippy pedantic (one doc_markdown fix: XObject → `XObject`)
+npm run test                                          # 104 files, 475 passed
+npm run test:rust                                     # 73 binaries, every one 0 failed
+cargo test --test form_import --test form_flatten -- --ignored --nocapture   # → $TMPDIR/vibepdf-verify-form-{import,flatten}.pdf
+```
+
+Artifact sanity check (no pdftotext/mutool/qpdf on this box, so a raw-bytes probe):
+
+```
+python3 -c "d=open('Sample PDFs/vibepdf-verify-form-flatten.pdf','rb').read(); print(b'/AcroForm' in d, b'/Widget' in d, b'Ada Lovelace' in d)"   # False False True
+python3 -c "d=open('Sample PDFs/vibepdf-verify-form-import.pdf','rb').read(); print(b'/AcroForm' in d, d.count(b'/Widget'), b'Ada' in d)"        # True 6 True
+```
+
+Both artifacts copied to `Sample PDFs/` (git-ignored); the flatten one also to
+`/tmp/vibepdf-verify.pdf` for the cross-reader ritual.
+
+Only real course-correction: the plan said flatten would skip push-buttons, but a
+push-button's face *is* its current appearance, so the generic bake handles it and
+no special case was written. Hidden widgets (`/F` bit 2) are the one thing removed
+without being drawn.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

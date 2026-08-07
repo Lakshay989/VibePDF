@@ -2359,9 +2359,13 @@ fn wrap_lines(text: &str, size: f32, em: f32, max_width: f32) -> Vec<String> {
 }
 
 /// Build the free-text `/AP` form (added to `doc`) + its `/DA` string for the
-/// given geometry/style. Shared by [`add_free_text`] and [`update_free_text`].
+/// given geometry/style. Shared by [`add_free_text`], [`update_free_text`], and
+/// form flatten ([`crate::pdf::form_flatten`]), which needs the same self-
+/// contained appearance — base-14 inline, or a hand-built CID font for text the
+/// base-14 encodings can't represent. The form's `/BBox` **equals** `rect`, which
+/// is what makes [`crate::pdf::flatten`]'s placement matrix the identity.
 #[allow(clippy::too_many_arguments)]
-fn free_text_appearance(
+pub(crate) fn free_text_appearance(
     doc: &mut Document,
     rect: [f32; 4],
     text: &str,

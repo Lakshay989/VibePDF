@@ -52,7 +52,7 @@ fn is_field(dict: &Dictionary) -> bool {
 
 /// Resolve a `/Fields` or `/Kids` entry to its dictionary, whether it is stored
 /// as an indirect reference or inline. `None` for anything that isn't a dict.
-fn node_dict<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Dictionary> {
+pub(crate) fn node_dict<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Dictionary> {
     match obj {
         Object::Reference(id) => doc.get_dictionary(*id).ok(),
         Object::Dictionary(d) => Some(d),
@@ -145,7 +145,7 @@ pub struct FormField {
 }
 
 /// Field-flag bit 13 (1-indexed) = multi-line text (`Ff & (1 << 12)`).
-const FF_MULTILINE: i64 = 1 << 12;
+pub(crate) const FF_MULTILINE: i64 = 1 << 12;
 
 /// SPEC: P5-FORM-002 (P5.A2) — every fillable **text** field (`/FT /Tx`) whose
 /// widget sits on `page` (0-based), with geometry + current value. Read-only.
@@ -213,14 +213,27 @@ pub fn read_text_fields(bytes: &[u8], page: usize) -> Result<Vec<FormField>, Com
 /// re-serialised bytes; verification is by re-reading `/V`.
 pub fn set_text_field_value(bytes: &[u8], name: &str, value: &str) -> Result<Vec<u8>, CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(lop)?;
-
     let target = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+    set_text_field_value_doc(&mut doc, target, value)?;
 
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-002 — the in-document half of [`set_text_field_value`], against
+/// an already-resolved field id. Import (P5.C2) fills many fields from one parse,
+/// so the byte wrapper's load/save can't sit inside the loop.
+pub(crate) fn set_text_field_value_doc(
+    doc: &mut Document,
+    target: ObjectId,
+    value: &str,
+) -> Result<(), CommandError> {
     // Truncate to /MaxLen (character count) before writing.
     let max_len = {
         let dict = doc.get_dictionary(target).map_err(lop)?;
-        inherited(&doc, dict, b"MaxLen").and_then(|o| o.as_i64().ok()).and_then(|n| usize::try_from(n).ok())
+        inherited(doc, dict, b"MaxLen").and_then(|o| o.as_i64().ok()).and_then(|n| usize::try_from(n).ok())
     };
     let value: String = match max_len {
         Some(max) => value.chars().take(max).collect(),
@@ -234,21 +247,17 @@ pub fn set_text_field_value(bytes: &[u8], name: &str, value: &str) -> Result<Vec
         dict.remove(b"AP");
     }
     // Drop /AP on any kid widgets (separate field/widget case).
-    for kid in kid_widget_ids(&doc, target) {
+    for kid in kid_widget_ids(doc, target) {
         if let Ok(k) = doc.get_dictionary_mut(kid) {
             k.remove(b"AP");
         }
     }
-    set_need_appearances(&mut doc)?;
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
-    Ok(out)
+    set_need_appearances(doc)
 }
 
 /// Locate a field by its fully-qualified name, walking `/Fields` and field-`/Kids`
 /// (an iterative worklist with a visited-set, like the count in `read_form_summary_doc`).
-fn find_field_by_name(doc: &Document, name: &str) -> Option<ObjectId> {
+pub(crate) fn find_field_by_name(doc: &Document, name: &str) -> Option<ObjectId> {
     let acro = acroform_dict(doc).ok()??;
     let fields = acro.get(b"Fields").ok()?.as_array().ok()?;
     let mut stack: Vec<ObjectId> = fields.iter().filter_map(|o| o.as_reference().ok()).collect();
@@ -275,6 +284,50 @@ fn find_field_by_name(doc: &Document, name: &str) -> Option<ObjectId> {
         }
     }
     None
+}
+
+/// Every **terminal** field in the `AcroForm` `/Fields` tree, in tree order — the
+/// leaves a user actually fills (the same notion [`read_form_summary_doc`]
+/// counts). Import (P5.C2) builds its name→id map from this in one pass instead
+/// of running [`find_field_by_name`] per datum; flatten walks it to synthesize
+/// appearances.
+pub(crate) fn terminal_field_ids(doc: &Document) -> Vec<ObjectId> {
+    let Ok(Some(acro)) = acroform_dict(doc) else { return Vec::new() };
+    let Ok(fields) = acro.get(b"Fields").and_then(Object::as_array) else { return Vec::new() };
+
+    let mut out = Vec::new();
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    // Reverse-push so popping yields /Fields order.
+    let mut stack: Vec<ObjectId> = fields.iter().filter_map(|o| o.as_reference().ok()).rev().collect();
+    let mut budget = 100_000u32;
+
+    while let Some(id) = stack.pop() {
+        budget = budget.saturating_sub(1);
+        if budget == 0 {
+            break;
+        }
+        if !visited.insert(id) {
+            continue;
+        }
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        // Kids that are themselves fields ⇒ this is a container, not a terminal.
+        let child_fields: Vec<ObjectId> = dict
+            .get(b"Kids")
+            .and_then(Object::as_array)
+            .map(|kids| {
+                kids.iter()
+                    .filter_map(|k| k.as_reference().ok())
+                    .filter(|&k| doc.get_dictionary(k).is_ok_and(is_field))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if child_fields.is_empty() {
+            out.push(id);
+        } else {
+            stack.extend(child_fields.into_iter().rev());
+        }
+    }
+    out
 }
 
 /// The reference ids of a field's `/Kids` (widget or child-field), for `/AP` clearing.
@@ -365,7 +418,7 @@ fn encode_pdf_text_string(s: &str) -> Object {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn dict_rect(d: &Dictionary, key: &[u8]) -> Option<[f32; 4]> {
+pub(crate) fn dict_rect(d: &Dictionary, key: &[u8]) -> Option<[f32; 4]> {
     let Ok(Object::Array(a)) = d.get(key) else { return None };
     if a.len() != 4 {
         return None;
@@ -434,7 +487,7 @@ pub struct ButtonField {
 }
 
 /// This widget's "on" appearance-state name: the non-`/Off` key of `/AP /N`.
-fn widget_on_state(doc: &Document, dict: &Dictionary) -> Option<String> {
+pub(crate) fn widget_on_state(doc: &Document, dict: &Dictionary) -> Option<String> {
     let ap = dict.get(b"AP").ok().and_then(|o| node_dict(doc, o))?;
     let n = ap.get(b"N").ok().and_then(|o| node_dict(doc, o))?;
     n.iter()
@@ -503,7 +556,7 @@ pub fn read_button_fields(bytes: &[u8], page: usize) -> Result<Vec<ButtonField>,
 /// The widget object ids that carry a button field's appearance: its `/Kids`
 /// (radio options / separate widgets), or the field itself when it is its own
 /// widget (a merged checkbox with no kids).
-fn field_widget_ids(doc: &Document, field: ObjectId) -> Vec<ObjectId> {
+pub(crate) fn field_widget_ids(doc: &Document, field: ObjectId) -> Vec<ObjectId> {
     let kids = kid_widget_ids(doc, field);
     if kids.is_empty() {
         vec![field]
@@ -525,13 +578,27 @@ pub fn set_button_field(
     let mut doc = Document::load_mem(bytes).map_err(lop)?;
     let field = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+    set_button_field_doc(&mut doc, field, on_state, checked)?;
 
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-003 — the in-document half of [`set_button_field`] (see
+/// [`set_text_field_value_doc`] for why the split exists).
+pub(crate) fn set_button_field_doc(
+    doc: &mut Document,
+    field: ObjectId,
+    on_state: &str,
+    checked: bool,
+) -> Result<(), CommandError> {
     // Compute each widget's target /AS first (immutable), then apply (mutable).
-    let widgets = field_widget_ids(&doc, field);
+    let widgets = field_widget_ids(doc, field);
     let targets: Vec<(ObjectId, Vec<u8>)> = widgets
         .iter()
         .map(|&wid| {
-            let wid_on = doc.get_dictionary(wid).ok().and_then(|d| widget_on_state(&doc, d));
+            let wid_on = doc.get_dictionary(wid).ok().and_then(|d| widget_on_state(doc, d));
             let as_name = if checked && wid_on.as_deref() == Some(on_state) {
                 on_state.as_bytes().to_vec()
             } else {
@@ -548,10 +615,7 @@ pub fn set_button_field(
             w.set("AS", Object::Name(as_name));
         }
     }
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
-    Ok(out)
+    Ok(())
 }
 
 /// SPEC: P5-FORM-003 — toggle/select a button field as one undoable edit. Same
@@ -588,7 +652,7 @@ impl<'a> Edit<PdfDocument<'a>> for SetButtonFieldEdit {
 
 /// `/Ff` bit 18 = combo (dropdown); bit 22 = multi-select (list only).
 const FF_COMBO: i64 = 1 << 17;
-const FF_MULTISELECT: i64 = 1 << 21;
+pub(crate) const FF_MULTISELECT: i64 = 1 << 21;
 
 /// One option of a choice field: its export value (stored in `/V`) and the label
 /// shown to the user. Equal when the `/Opt` entry is a bare string.
@@ -625,7 +689,7 @@ fn deref<'a>(doc: &'a Document, obj: &'a Object) -> &'a Object {
 /// Parse a choice field's `/Opt` into options. Each entry is a text string
 /// (export == label) or a two-element array `[export display]` (PDF 32000
 /// Table 231).
-fn parse_opt(doc: &Document, opt: Option<&Object>) -> Vec<ChoiceOption> {
+pub(crate) fn parse_opt(doc: &Document, opt: Option<&Object>) -> Vec<ChoiceOption> {
     let Some(Object::Array(arr)) = opt.map(|o| deref(doc, o)) else {
         return Vec::new();
     };
@@ -716,11 +780,26 @@ pub fn set_choice_field(bytes: &[u8], name: &str, values: &[String]) -> Result<V
     let mut doc = Document::load_mem(bytes).map_err(lop)?;
     let field = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
+    set_choice_field_doc(&mut doc, field, name, values)?;
 
+    let mut out = Vec::new();
+    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
+    Ok(out)
+}
+
+/// SPEC: P5-FORM-004 — the in-document half of [`set_choice_field`] (see
+/// [`set_text_field_value_doc`] for why the split exists). `name` is used only in
+/// the rejection message.
+pub(crate) fn set_choice_field_doc(
+    doc: &mut Document,
+    field: ObjectId,
+    name: &str,
+    values: &[String],
+) -> Result<(), CommandError> {
     let (options, is_list) = {
         let dict = doc.get_dictionary(field).map_err(lop)?;
-        let opts = parse_opt(&doc, inherited(&doc, dict, b"Opt"));
-        let ff = inherited(&doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
+        let opts = parse_opt(doc, inherited(doc, dict, b"Opt"));
+        let ff = inherited(doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
         (opts, ff & FF_COMBO == 0)
     };
     // Reject any value not declared in /Opt (an editable combo would relax this;
@@ -747,11 +826,7 @@ pub fn set_choice_field(bytes: &[u8], name: &str, values: &[String]) -> Result<V
             .map_err(lop)?
             .set("I", Object::Array(idx.into_iter().map(Object::Integer).collect()));
     }
-    set_need_appearances(&mut doc)?;
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out).map_err(|e| CommandError::PdfError(format!("lopdf save: {e}")))?;
-    Ok(out)
+    set_need_appearances(doc)
 }
 
 /// SPEC: P5-FORM-004 — set a choice field's selection as one undoable edit. Same

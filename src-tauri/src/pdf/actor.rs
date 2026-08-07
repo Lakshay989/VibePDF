@@ -61,6 +61,8 @@ use crate::pdf::form::{
     FieldProperties, FillTextFieldEdit, FormField, FormSummary, NewFieldKind, PageField,
     SetButtonFieldEdit, SetChoiceFieldEdit, SetTabOrderEdit, StripXfaEdit, UpdateFieldPropertiesEdit,
 };
+use crate::pdf::form_flatten::FlattenFormEdit;
+use crate::pdf::form_import::{import_into, ImportOutcome};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
 use crate::pdf::image_extract::{extract_images, ImageInfo};
@@ -476,6 +478,18 @@ pub enum Message {
         format: ExportFormat,
         dest: PathBuf,
         reply: oneshot::Sender<Result<usize, CommandError>>,
+    },
+    /// SPEC: P5-FORM-009 — fill fields from `src` (an FDF/XFDF/JSON/CSV file).
+    /// Undoable; replies with the report *and* the new history state.
+    ImportFormData {
+        format: ExportFormat,
+        src: PathBuf,
+        reply: oneshot::Sender<Result<ImportOutcome, CommandError>>,
+    },
+    /// SPEC: P5-FORM-010 — bake the form into the page content and remove the
+    /// `AcroForm`. Undoable in-session only (byte-snapshot inverse).
+    FlattenForm {
+        reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
@@ -1813,6 +1827,46 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::ExportFormData { format, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-009 — import form data from `src`. Await-holding for tests.
+    pub async fn import_form_data(
+        &self,
+        format: ExportFormat,
+        src: PathBuf,
+    ) -> Result<ImportOutcome, CommandError> {
+        let rx = self.import_form_data_request(format, src)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn import_form_data_request(
+        &self,
+        format: ExportFormat,
+        src: PathBuf,
+    ) -> Result<oneshot::Receiver<Result<ImportOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ImportFormData { format, src, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-010 — flatten the form. Await-holding for tests.
+    pub async fn flatten_form(&self) -> Result<HistoryState, CommandError> {
+        let rx = self.flatten_form_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn flatten_form_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<HistoryState, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::FlattenForm { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3668,6 +3722,30 @@ fn run_worker(
                         })?;
                         Ok(data.len())
                     });
+                let _ = reply.send(result);
+            }
+            Message::ImportFormData { format, src, reply } => {
+                // SPEC: P5-FORM-009 — read the data file, fill matching fields,
+                // record the snapshot inverse, and hand back the report.
+                let result = std::fs::read(&src)
+                    .map_err(|e| CommandError::Internal(format!("read {}: {e}", src.display())))
+                    .and_then(|data| import_into(&mut doc, &data, format))
+                    .map(|(inverse, report)| {
+                        history.record(inverse);
+                        ImportOutcome { report, history: history.state() }
+                    });
+                let _ = reply.send(result);
+            }
+            Message::FlattenForm { reply } => {
+                // SPEC: P5-FORM-010 — bake the fields into the page; the inverse is
+                // a pre-flatten byte snapshot (in-session undo only).
+                let result = match Box::new(FlattenFormEdit).apply(&mut doc) {
+                    Ok(inverse) => {
+                        history.record(inverse);
+                        Ok(history.state())
+                    }
+                    Err(e) => Err(e),
+                };
                 let _ = reply.send(result);
             }
             Message::DeleteField { name, reply } => {

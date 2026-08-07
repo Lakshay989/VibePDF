@@ -19,13 +19,17 @@ use crate::pdf::form::{decode_pdf_text_string, field_kind, inherited, qualified_
 
 /// One exported field: its qualified name, kind, and value(s). Multi-select list
 /// boxes carry several values; a signature carries none.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// `Deserialize` is what makes the JSON path of import (P5.C2) the exact inverse
+/// of export; the other three formats parse into the same shape by hand.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FormDatum {
     pub name: String,
     /// `"text" | "checkbox" | "radio" | "combo" | "list" | "signature"`.
-    /// Push-buttons are excluded entirely — they hold no value.
-    #[serde(rename = "type")]
+    /// Push-buttons are excluded entirely — they hold no value. Empty when the
+    /// source format declares no type (FDF, XFDF) — see `form_import::mismatch`.
+    #[serde(rename = "type", default)]
     pub kind: String,
+    #[serde(default)]
     pub value: Vec<String>,
 }
 

@@ -36,11 +36,28 @@ fn flat_err(e: lopdf::Error) -> CommandError {
 /// renderable appearance are left untouched.
 pub fn flatten_annotations(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(flat_err)?;
+    flatten_annots_where(&mut doc, &|_| false)?;
+    let mut buf = Vec::new();
+    doc.save_to(&mut buf)?;
+    Ok(buf)
+}
+
+/// The shared flatten core: bake every `/AP`-bearing annotation the `keep`
+/// predicate does **not** claim into its page's content, and drop it from
+/// `/Annots`. Returns whether anything changed.
+///
+/// P3-ANN-011 keeps nothing (every appearance-bearing annotation is flattened);
+/// form flatten (P5-FORM-010, [`crate::pdf::form_flatten`]) keeps every
+/// annotation that isn't a `/Widget`, so page markup survives the form bake.
+pub(crate) fn flatten_annots_where(
+    doc: &mut Document,
+    keep: &dyn Fn(&Dictionary) -> bool,
+) -> Result<bool, CommandError> {
     let page_ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
     let mut changed = false;
 
     for page_id in page_ids {
-        if flatten_page(&mut doc, page_id)? {
+        if flatten_page(doc, page_id, keep)? {
             changed = true;
         }
     }
@@ -50,13 +67,15 @@ pub fn flatten_annotations(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
         // the page `/Resources /XObject` references them after `add_xobject`.
         doc.prune_objects();
     }
-    let mut buf = Vec::new();
-    doc.save_to(&mut buf)?;
-    Ok(buf)
+    Ok(changed)
 }
 
 /// Flatten one page's `/AP`-bearing annotations. Returns whether anything changed.
-fn flatten_page(doc: &mut Document, page_id: ObjectId) -> Result<bool, CommandError> {
+fn flatten_page(
+    doc: &mut Document,
+    page_id: ObjectId,
+    keep: &dyn Fn(&Dictionary) -> bool,
+) -> Result<bool, CommandError> {
     let annots = match doc.get_dictionary(page_id).ok().and_then(|p| p.get(b"Annots").ok().cloned()) {
         Some(Object::Array(a)) => a,
         Some(Object::Reference(id)) => {
@@ -72,12 +91,14 @@ fn flatten_page(doc: &mut Document, page_id: ObjectId) -> Result<bool, CommandEr
     let mut placements: Vec<(ObjectId, [f32; 6])> = Vec::new();
     let mut kept: Vec<Object> = Vec::new();
     for obj in annots {
-        let placement = obj
-            .as_reference()
-            .ok()
-            .and_then(|id| doc.get_dictionary(id).ok())
-            .and_then(|annot| flatten_placement(doc, annot));
-        match placement {
+        let annot = obj.as_reference().ok().and_then(|id| doc.get_dictionary(id).ok());
+        // Claimed by the caller (e.g. a non-widget annotation during a form
+        // flatten) → leave it live without even looking for an appearance.
+        if annot.is_some_and(keep) {
+            kept.push(obj);
+            continue;
+        }
+        match annot.and_then(|annot| flatten_placement(doc, annot)) {
             Some(p) => placements.push(p),
             None => kept.push(obj), // /AP-less or unresolvable — keep it live
         }
