@@ -127,6 +127,7 @@ pub fn run() {
             commands::pdf::pdf_update_field_properties,
             commands::pdf::pdf_set_tab_order,
             commands::pdf::pdf_delete_field,
+            commands::pdf::pdf_export_form_data,
             commands::pdf::pdf_delete_text_box,
             commands::pdf::pdf_add_image,
             commands::pdf::pdf_add_link,

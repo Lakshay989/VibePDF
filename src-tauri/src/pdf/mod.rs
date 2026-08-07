@@ -14,6 +14,7 @@ pub mod font_embed_cid;
 pub mod font_metrics;
 pub mod font_resolver;
 pub mod form;
+pub mod form_data;
 pub mod header_footer;
 pub mod image_edit;
 pub mod image_extract;

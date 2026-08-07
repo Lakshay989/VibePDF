@@ -14,15 +14,20 @@ const { FIELDS } = vi.hoisted(() => ({
   ] satisfies PageField[],
 }));
 
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  save: vi.fn().mockResolvedValue("/tmp/form-data.json"),
+}));
+
 vi.mock("@/ipc/forms", () => ({
   readPageFields: vi.fn().mockResolvedValue(FIELDS),
+  exportFormData: vi.fn().mockResolvedValue(2),
   readFormSummary: vi.fn().mockResolvedValue({ fieldCount: 2, hasXfa: false }),
   updateFieldProperties: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   setTabOrder: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
   deleteField: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
 }));
 
-import { deleteField, readPageFields, setTabOrder, updateFieldProperties } from "@/ipc/forms";
+import { deleteField, exportFormData, readPageFields, setTabOrder, updateFieldProperties } from "@/ipc/forms";
 import { useFormStore } from "@/state/form-store";
 import { FieldPropertiesPanel } from "@/app/FieldPropertiesPanel";
 
@@ -30,6 +35,7 @@ const DOC = "doc-1";
 const mockUpdate = vi.mocked(updateFieldProperties);
 const mockOrder = vi.mocked(setTabOrder);
 const mockDelete = vi.mocked(deleteField);
+const mockExport = vi.mocked(exportFormData);
 
 const panel = () => <FieldPropertiesPanel documentId={DOC} page={0} />;
 
@@ -81,5 +87,13 @@ describe("FieldPropertiesPanel", () => {
     fireEvent.click(await screen.findByLabelText("Field b"));
     fireEvent.click(screen.getByLabelText("Delete field b"));
     await waitFor(() => expect(mockDelete).toHaveBeenCalledWith(DOC, "b"));
+  });
+
+  it("exports form data in the chosen format", async () => {
+    render(panel());
+    fireEvent.click(await screen.findByLabelText("Export form data as JSON"));
+    await waitFor(() =>
+      expect(mockExport).toHaveBeenCalledWith(DOC, "json", "/tmp/form-data.json"),
+    );
   });
 });

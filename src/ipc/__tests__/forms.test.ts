@@ -10,6 +10,7 @@ import {
   addField,
   addTextField,
   deleteField,
+  exportFormData,
   fillTextField,
   readPageFields,
   setTabOrder,
@@ -249,5 +250,18 @@ describe("updateFieldProperties", () => {
     const args = mockInvoke.mock.calls.at(-1)?.[1] as { maxLen: unknown; clearMaxLen: unknown };
     expect(args.maxLen).toBeNull();
     expect(args.clearMaxLen).toBe(true);
+  });
+});
+
+describe("exportFormData", () => {
+  it("marshals id, format, and dest", async () => {
+    mockInvoke.mockResolvedValue(5);
+    const n = await exportFormData("doc-1", "csv", "/tmp/out.csv");
+    expect(mockInvoke).toHaveBeenCalledWith("pdf_export_form_data", {
+      id: "doc-1",
+      format: "csv",
+      dest: "/tmp/out.csv",
+    });
+    expect(n).toBe(5);
   });
 });

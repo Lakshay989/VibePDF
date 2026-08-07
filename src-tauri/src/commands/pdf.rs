@@ -10,6 +10,7 @@ use crate::pdf::font_resolver::FontReport;
 use crate::pdf::form::{
     ButtonField, ChoiceField, FieldProperties, FormField, FormSummary, NewFieldKind, PageField,
 };
+use crate::pdf::form_data::ExportFormat;
 use crate::pdf::image_extract::ImageInfo;
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -1129,6 +1130,32 @@ pub async fn pdf_delete_field(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.delete_field_request(name)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P5-FORM-008 — export the document's form data (name, type, value) to
+/// `dest` as FDF / XFDF / JSON / CSV. Read-only; replies with the field count.
+#[tauri::command]
+pub async fn pdf_export_form_data(
+    state: State<'_, AppState>,
+    id: String,
+    format: String,
+    dest: String,
+) -> Result<usize, CommandError> {
+    let format = ExportFormat::parse(&format)?;
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_form_data_request(format, std::path::PathBuf::from(dest))?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

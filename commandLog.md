@@ -3762,6 +3762,31 @@ Write path → verification artifact copied to `Sample PDFs/vibepdf-verify-field
 
 ---
 
+## P5.C1 — Export form data (FDF / XFDF / JSON / CSV) (SPEC P5-FORM-008)
+
+No `npm install` / `cargo add` — `serde_json` was already a dependency. No new
+fixture (builds a mixed form from `hello.pdf` via the B1/B2 create paths).
+
+Verification gates + tests:
+
+```
+cargo test --test form_export                        # 10 ok (collect all kinds + pushbutton excluded, signature empty, FDF parses as PDF syntax, XFDF escaping + repeated <value>, JSON round-trip, CSV header + join, unicode, no-form, bad format, actor export)
+npm run check                                         # tsc + eslint + clippy pedantic clean (after 6 nit fixes)
+npm run test                                          # 463 passed
+npm run test:rust                                     # every binary 0 failed
+cargo test --test form_export writes_verification_artifacts -- --ignored   # → $TMPDIR/vibepdf-verify-formdata.{fdf,xfdf,json,csv}
+```
+
+Two things caught mid-flight: (1) the FDF test failed with
+`Parse(InvalidFileHeader)` — lopdf's loader requires `%PDF-`, so the test now
+swaps the header back to verify the *body*; the product's `%FDF-1.2` header is
+correct. (2) clippy pedantic flagged 6 nits (redundant closure, two missing
+`#[must_use]`, three `format!`-append) — fixed with `writeln!`.
+
+All four artifacts copied to `Sample PDFs/vibepdf-verify-formdata.*` (git-ignored).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

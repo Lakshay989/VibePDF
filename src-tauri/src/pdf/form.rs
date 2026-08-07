@@ -307,7 +307,7 @@ fn set_need_appearances(doc: &mut Document) -> Result<(), CommandError> {
 }
 
 /// Resolve an inheritable field attribute, walking the `/Parent` chain (capped).
-fn inherited<'a>(doc: &'a Document, start: &'a Dictionary, key: &[u8]) -> Option<&'a Object> {
+pub(crate) fn inherited<'a>(doc: &'a Document, start: &'a Dictionary, key: &[u8]) -> Option<&'a Object> {
     let mut cur = start;
     for _ in 0..32 {
         if let Ok(v) = cur.get(key) {
@@ -320,7 +320,7 @@ fn inherited<'a>(doc: &'a Document, start: &'a Dictionary, key: &[u8]) -> Option
 }
 
 /// A field's fully-qualified name: partial `/T`s from root to leaf joined by `.`.
-fn qualified_name(doc: &Document, start: &Dictionary) -> Option<String> {
+pub(crate) fn qualified_name(doc: &Document, start: &Dictionary) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut cur = start;
     for _ in 0..32 {
@@ -340,7 +340,7 @@ fn qualified_name(doc: &Document, start: &Dictionary) -> Option<String> {
 
 /// Decode a PDF text string: UTF-16BE when it carries the `FEFF` BOM, else
 /// `PDFDocEncoding` approximated as Latin-1 (good enough for field values).
-fn decode_pdf_text_string(raw: &[u8]) -> String {
+pub(crate) fn decode_pdf_text_string(raw: &[u8]) -> String {
     if raw.len() >= 2 && raw[0] == 0xFE && raw[1] == 0xFF {
         let units: Vec<u16> =
             raw[2..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
@@ -1331,7 +1331,7 @@ pub struct FieldProperties {
 }
 
 /// A widget's field kind, from its effective `/FT` + `/Ff` bits.
-fn field_kind(doc: &Document, dict: &Dictionary) -> Option<&'static str> {
+pub(crate) fn field_kind(doc: &Document, dict: &Dictionary) -> Option<&'static str> {
     let ft = inherited(doc, dict, b"FT").and_then(|o| o.as_name().ok())?;
     let ff = inherited(doc, dict, b"Ff").and_then(|o| o.as_i64().ok()).unwrap_or(0);
     Some(match ft {

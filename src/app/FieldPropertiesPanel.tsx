@@ -7,14 +7,17 @@
 
 import { reportError } from "@/app/report-error";
 import { useEffect, useState } from "react";
+import { save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 
 import {
   deleteField,
+  exportFormData,
   readFormSummary,
   readPageFields,
   setTabOrder,
   updateFieldProperties,
   type FieldPropertyPatch,
+  type FormDataFormat,
   type PageField,
 } from "@/ipc/forms";
 import { useDocEpoch, useEditEpochStore } from "@/state/edit-epoch-store";
@@ -42,6 +45,7 @@ export function FieldPropertiesPanel({ documentId, page }: Props) {
   const [maxLen, setMaxLen] = useState("");
   const [multiline, setMultiline] = useState(false);
   const [required, setRequired] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!formMode) {
@@ -117,6 +121,24 @@ export function FieldPropertiesPanel({ documentId, page }: Props) {
     run(deleteField(documentId, fieldName), "Couldn't delete the field");
   };
 
+  // SPEC: P5-FORM-008 (P5.C1) — export the document's form data. Read-only, so
+  // it's not an undoable edit: pick a file, write it, report the count.
+  const doExport = (format: FormDataFormat) => {
+    void (async () => {
+      try {
+        const path = await saveFileDialog({
+          defaultPath: `form-data.${format}`,
+          filters: [{ name: `${format.toUpperCase()} form data`, extensions: [format] }],
+        });
+        if (!path) return; // cancelled
+        const n = await exportFormData(documentId, format, path);
+        setNote(`Exported ${n} field${n === 1 ? "" : "s"}`);
+      } catch (err) {
+        reportError("Couldn't export form data", err);
+      }
+    })();
+  };
+
   const input = "w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900";
 
   return (
@@ -127,6 +149,22 @@ export function FieldPropertiesPanel({ documentId, page }: Props) {
       <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-400">
         Form fields (tab order)
       </h2>
+      {/* SPEC: P5-FORM-008 — export the whole document's data. */}
+      <div className="mb-3 flex flex-wrap items-center gap-1">
+        <span className="text-xs text-neutral-400">Export</span>
+        {(["fdf", "xfdf", "json", "csv"] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => doExport(f)}
+            aria-label={`Export form data as ${f.toUpperCase()}`}
+            className="rounded border border-neutral-300 px-1.5 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            {f.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      {note ? <p className="mb-2 text-xs text-neutral-500">{note}</p> : null}
       <ol className="flex flex-col gap-1">
         {fields.map((f, i) => (
           <li key={f.name} className="flex items-center gap-1">

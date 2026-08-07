@@ -8250,6 +8250,55 @@ implemented against them; they still need adding to `docs/02_PRODUCT_SPEC.md`
 
 ---
 
+## P5.C1 — one read, four serialisers
+
+### Problem
+Export the form's data as FDF, XFDF, JSON, **and** CSV. The temptation is four
+exporters; the reality is one *read* (name, type, value for every field) plus four
+dumb renderers. Getting the read right is the whole job.
+
+### Concepts learned
+- **Read the field tree, not the pages** — A2–A4 read per-page `/Annots` because
+  they position overlays. Export doesn't care where a field *is*, only that each
+  appears **once**, so it walks the `AcroForm` `/Fields` tree depth-first. Reading
+  `/Annots` instead would emit a radio group once per option widget.
+- **FDF is PDF syntax under a different header** — an FDF file is a real PDF
+  object graph (catalog → `/FDF` → `/Fields`) whose header reads `%FDF-1.2`. So
+  it's built with lopdf, not string-concatenated. (My test tried to re-parse it
+  with lopdf and failed: `Parse(InvalidFileHeader)` — lopdf's loader insists on
+  `%PDF-`. The *product* was right; the test now swaps the header back to check
+  the body parses.)
+- **Value shape varies by kind** — text/combo a string, multi-select list an
+  *array*, checkbox/radio a **Name**. `FormDatum.value: Vec<String>` normalises
+  all three; CSV joins with `;`, JSON/XFDF/FDF keep the array.
+- **Which fields have data** — push-buttons carry no value, so they're excluded
+  entirely; signatures export with an empty value (present, unsigned) rather than
+  being dropped. Both decisions are testable and were confirmed with the user.
+- **Escaping is per-format** — XML entities for XFDF, RFC-4180 quoting for CSV
+  (quote when the cell holds `,`/`"`/CR/LF; double inner quotes). Both are unit
+  tested with hostile values.
+
+### Design choices
+- **`serialize(data, format)` is the only branch.** Everything upstream is
+  format-agnostic, so C2's import can reuse `FormDatum` unchanged.
+- **Export is not an edit.** It's a read + a file write on the actor (like
+  `ExportAnnotations`) — no history entry, no dirty flag.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form_data.rs` | `FormDatum`, `collect_form_data`, `to_fdf`/`to_xfdf`/`to_json`/`to_csv`, `serialize`. |
+| `src-tauri/src/pdf/form.rs` | 4 helpers made `pub(crate)` for reuse. |
+| `src-tauri/src/pdf/actor.rs` | `ExportFormData` message (read + write file). |
+| `src-tauri/src/commands/pdf.rs` | `pdf_export_form_data`. |
+| `src/ipc/forms.ts` | `exportFormData` + `FormDataFormat`. |
+| `src/app/FieldPropertiesPanel.tsx` | FDF/XFDF/JSON/CSV export buttons. |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.7 (FDF), §12.7.8 (XFDF); RFC 4180 (CSV).
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

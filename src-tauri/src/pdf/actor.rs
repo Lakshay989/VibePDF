@@ -54,6 +54,7 @@ use crate::pdf::cos::{
     read_text_notes_doc, AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo,
 };
 use crate::pdf::doc_cache::CachedDoc;
+use crate::pdf::form_data::{collect_form_data, serialize, ExportFormat};
 use crate::pdf::form::{
     read_button_fields_doc, read_choice_fields_doc, read_form_summary_doc, read_page_fields_doc,
     read_text_fields_doc, AddFieldEdit, AddTextFieldEdit, ButtonField, ChoiceField, DeleteFieldEdit,
@@ -468,6 +469,13 @@ pub enum Message {
     DeleteField {
         name: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P5-FORM-008 — write the document's form data to `dest` in `format`.
+    /// Read-only; replies with the number of fields written.
+    ExportFormData {
+        format: ExportFormat,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<usize, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
@@ -1782,6 +1790,29 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::DeleteField { name, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P5-FORM-008 — export the form data to `dest`. Await-holding for tests.
+    pub async fn export_form_data(
+        &self,
+        format: ExportFormat,
+        dest: PathBuf,
+    ) -> Result<usize, CommandError> {
+        let rx = self.export_form_data_request(format, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn export_form_data_request(
+        &self,
+        format: ExportFormat,
+        dest: PathBuf,
+    ) -> Result<oneshot::Receiver<Result<usize, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportFormData { format, dest, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3619,6 +3650,24 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::ExportFormData { format, dest, reply } => {
+                // SPEC: P5-FORM-008 — read-only; served from the shared parse cache,
+                // then serialised and written to disk.
+                let result = doc_cache
+                    .get(|| {
+                        let _guard = pdfium_lock()?;
+                        doc.save_to_bytes().map_err(CommandError::from)
+                    })
+                    .and_then(collect_form_data)
+                    .and_then(|data| {
+                        let bytes = serialize(&data, format)?;
+                        std::fs::write(&dest, bytes).map_err(|e| {
+                            CommandError::Internal(format!("write {}: {e}", dest.display()))
+                        })?;
+                        Ok(data.len())
+                    });
                 let _ = reply.send(result);
             }
             Message::DeleteField { name, reply } => {

@@ -242,6 +242,22 @@ export async function deleteField(id: DocumentId, name: string): Promise<History
   return invoke<HistoryState>("pdf_delete_field", { id, name });
 }
 
+/** The form-data export formats (P5.C1). */
+export type FormDataFormat = "fdf" | "xfdf" | "json" | "csv";
+
+/**
+ * SPEC: P5-FORM-008 (P5.C1) — export the document's form data (name, type,
+ * value) to `dest` in `format`. Read-only; resolves with the field count.
+ * Push-buttons are excluded (no value); signatures export with an empty value.
+ */
+export async function exportFormData(
+  id: DocumentId,
+  format: FormDataFormat,
+  dest: string,
+): Promise<number> {
+  return invoke<number>("pdf_export_form_data", { id, format, dest });
+}
+
 /** Spec for a non-text field to create (P5.B2). Text uses `addTextField`. */
 export type NewFieldSpec =
   | { kind: "checkbox"; required: boolean }
