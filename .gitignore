@@ -26,6 +26,11 @@ src-tauri/resources/pdfium/*
 # Test output
 coverage/
 
+# Scratch / exploratory / verification PDFs. Its own README always claimed this
+# folder was ignored; it wasn't — only untracked, so one `git add -A` would have
+# committed tens of MB of scratch. See `Sample PDFs/README.md` for the layout.
+Sample PDFs/
+
 # Tauri build artifacts
 *.dmg
 *.app
