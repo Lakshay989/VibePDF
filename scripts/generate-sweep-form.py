@@ -63,19 +63,24 @@ def label(x: int, y: int, text: str, size: int = 10) -> bytes:
 #  12 checkbox      13 radio group   14 radio Red     15 radio Green
 #  16 combo         17 list
 
+# Layout rule: every label sits ABOVE its widget with a clear gap, and no label
+# shares an x-range with a widget rect. The first cut violated both for the radio
+# group and the list box — the label was drawn *inside* the widget, which made
+# the Red option unclickable (the widget was under the text) and the list look
+# like it had garbled contents. Keep the bands below disjoint when editing.
 page_text = (
     label(72, 750, "VibePDF - Phase 5 sweep form", 16)
     + label(72, 730, "Every fillable field kind, blank. Work through steps/P5-SWEEP.md.")
-    + label(72, 694, "1. Full name (plain text)")
-    + label(72, 654, "2. Code (max 5 chars)")
-    + label(72, 614, "3. Notes (multi-line)")
-    + label(72, 520, "4. Agree (checkbox)")
-    + label(72, 480, "5. Colour (radio: Red / Green)")
-    + label(112, 482, "Red")
-    + label(112, 452, "Green")
-    + label(72, 410, "6. Fruit (combo / dropdown)")
-    + label(72, 340, "7. Tags (list, multi-select)")
-    + label(72, 250, "Empty space below - drag new fields here for B1 / B2.")
+    + label(72, 700, "1. Full name (plain text)")
+    + label(72, 648, "2. Code (max 5 chars)")
+    + label(72, 596, "3. Notes (multi-line)")
+    + label(72, 492, "4. Agree (checkbox)")
+    + label(72, 440, "5. Colour (radio: Red / Green)")
+    + label(118, 420, "Red")
+    + label(118, 390, "Green")
+    + label(72, 356, "6. Fruit (combo / dropdown)")
+    + label(72, 300, "7. Tags (list) - hold Cmd to select more than one")
+    + label(72, 190, "Empty space below - drag new fields here for B1 / B2.")
 )
 
 on_face = b"q 0 0 0 rg 3 3 12 12 re f Q"
@@ -94,29 +99,29 @@ sweep = [
     stream(b"<< /Type /XObject /Subtype /Form /BBox [0 0 18 18]", b""),
     # 9 — plain text
     b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (fullName) /TU (Your full name) "
-    b"/Rect [72 668 400 692] /DA (/F1 12 Tf 0 g) /P 3 0 R >>",
+    b"/Rect [72 672 400 696] /DA (/F1 12 Tf 0 g) /P 3 0 R >>",
     # 10 — /MaxLen 5
     b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (code) /MaxLen 5 "
-    b"/Rect [72 628 200 652] /DA (/F1 12 Tf 0 g) /P 3 0 R >>",
+    b"/Rect [72 620 200 644] /DA (/F1 12 Tf 0 g) /P 3 0 R >>",
     # 11 — multi-line (/Ff bit 13 = 4096)
     b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (notes) /Ff 4096 "
-    b"/Rect [72 540 400 608] /DA (/F1 11 Tf 0 g) /P 3 0 R >>",
+    b"/Rect [72 520 400 592] /DA (/F1 11 Tf 0 g) /P 3 0 R >>",
     # 12 — checkbox, on-state /Yes
     b"<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) "
-    b"/Rect [72 496 90 514] /AS /Off /AP << /N << /Yes 7 0 R /Off 8 0 R >> >> /P 3 0 R >>",
+    b"/Rect [72 466 90 484] /AS /Off /AP << /N << /Yes 7 0 R /Off 8 0 R >> >> /P 3 0 R >>",
     # 13 — radio group (/Ff bit 16 = 32768)
     b"<< /FT /Btn /Ff 32768 /T (colour) /V /Off /Kids [14 0 R 15 0 R] >>",
-    b"<< /Type /Annot /Subtype /Widget /Parent 13 0 R /Rect [72 474 90 492] "
+    b"<< /Type /Annot /Subtype /Widget /Parent 13 0 R /Rect [92 414 110 432] "
     b"/AS /Off /AP << /N << /Red 7 0 R /Off 8 0 R >> >> /P 3 0 R >>",
-    b"<< /Type /Annot /Subtype /Widget /Parent 13 0 R /Rect [72 444 90 462] "
+    b"<< /Type /Annot /Subtype /Widget /Parent 13 0 R /Rect [92 384 110 402] "
     b"/AS /Off /AP << /N << /Green 7 0 R /Off 8 0 R >> >> /P 3 0 R >>",
     # 16 — combo (/Ff bit 18 = 131072)
     b"<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (fruit) "
-    b"/Opt [(Apple) (Banana) (Cherry)] /Rect [72 380 300 404] "
+    b"/Opt [(Apple) (Banana) (Cherry)] /Rect [72 328 300 352] "
     b"/DA (/F1 12 Tf 0 g) /P 3 0 R >>",
     # 17 — list, multi-select (/Ff bit 22 = 2097152)
     b"<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 2097152 /T (tags) "
-    b"/Opt [(urgent) (review) (archive)] /Rect [72 290 300 364] "
+    b"/Opt [(urgent) (review) (archive)] /Rect [72 220 300 296] "
     b"/DA (/F1 12 Tf 0 g) /P 3 0 R >>",
 ]
 

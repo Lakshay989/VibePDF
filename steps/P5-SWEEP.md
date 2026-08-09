@@ -51,8 +51,11 @@ Enter form mode.
 - **Tab** → focus moves to *Code*, then *Notes*, in that order.
 - **Code** field: type `ABCDEFGH` → only `ABCDE` is kept (`/MaxLen 5`).
 - **Notes**: type two lines with Enter → both survive; it doesn't submit or lose the second.
-- Hover *Full name* → tooltip `Your full name` (`/TU`).
 - ⌘Z undoes the last fill; ⌘⇧Z redoes it.
+
+*(A tooltip from `/TU` was in an earlier draft of this list — the fill overlay
+never implemented one. `/TU` is only surfaced in the B3 properties panel. Logged
+as a gap, not a sweep failure.)*
 
 ### [ ] A3 — Fill checkbox / radio
 - Click **Agree** → shows checked. Click again → unchecked.
@@ -61,7 +64,10 @@ Enter form mode.
 
 ### [ ] A4 — Fill choice fields
 - **Fruit** dropdown lists exactly `Apple / Banana / Cherry`. Pick `Banana`.
-- **Tags** list lists `urgent / review / archive`. Select `urgent` **and** `archive` (multi-select).
+- **Tags** list lists `urgent / review / archive`. Select `urgent`, then **⌘-click**
+  `archive` — it's a native multi-select, so a plain second click *replaces* the
+  selection rather than adding to it. (No affordance says so; that's a real UX
+  gap, but it isn't a broken feature.)
 - Undo removes the selection.
 
 ### [ ] A5 — XFA degraded support
@@ -76,15 +82,31 @@ Go back to `p5-sweep-form.pdf` for the rest.
 
 ## Track B — authoring
 
+> **There is no "form-edit mode".** An earlier draft of this list said there was.
+> Two *independent* controls, in two different bars:
+>
+> | Control | Where | Does |
+> |---|---|---|
+> | **`Form mode (7 fields)`** | top bar, right of *Open PDF* | **fills** fields (Track A) |
+> | **`Form Field`** | markup toolbar, right of *Add Link* | **creates** fields (Track B) |
+>
+> `Form Field` is a *tool*, not a mode — click it, it highlights blue, you drag
+> one box, it deactivates. Click it again for the next field. It works whether
+> or not Form mode is on, and turning Form mode off is the easier way to see
+> what you're drawing.
+
 ### [ ] B1 — Create text field
-- Switch to **form-edit** mode.
-- Drag a box in the empty space below the "drag new fields here" line.
+- Click **Form Field** in the markup toolbar (it turns blue).
+- Drag a box anywhere on the page — the empty band below the
+  "drag new fields here" line is clear space kept for exactly this.
+- On release a popover appears: pick **Text**, then set the config.
 - Configure name / default value / max length / multi-line / required — all five stick.
 - The new field is immediately fillable after leaving edit mode.
 - Undo removes it cleanly (no orphan widget left drawn).
 
 ### [ ] B2 — Create the other six kinds
-One of each, in the empty space: **checkbox**, **radio group** (≥2 options),
+Same tool, one drag each (re-click **Form Field** every time), picking a
+different type in the popover: **checkbox**, **radio group** (≥2 options),
 **combo**, **list**, **signature**, **push-button**.
 - Each renders with a sane default appearance.
 - The radio group behaves as *one* group (picking one clears the other).
