@@ -307,3 +307,26 @@ fn duplicate_name_nested_in_kids_is_rejected() {
         &NewFieldKind::Checkbox { required: false }).unwrap_err();
     assert!(matches!(err, CommandError::InvalidInput(_)), "got {err:?}");
 }
+
+/// P5 sweep: a repeated option is not a cosmetic duplicate — the export value
+/// IS the option's identity (`/V` stores the value, not an index), so two
+/// entries sharing one cannot be told apart: selecting either selects both.
+#[test]
+fn duplicate_options_are_rejected_for_every_choice_kind() {
+    let kinds = [
+        NewFieldKind::RadioGroup { options: opts(&["Red", "Green", "Red"]) },
+        NewFieldKind::Combo { options: opts(&["Apple", "Apple"]), default: String::new() },
+        NewFieldKind::ListBox { options: opts(&["a", "b", "a"]), multi: true },
+    ];
+    for (i, kind) in kinds.into_iter().enumerate() {
+        let err = add_field(&read("hello.pdf"), 0, [72.0, 600.0, 300.0, 660.0], "f", &kind)
+            .unwrap_err();
+        assert!(matches!(err, CommandError::InvalidInput(_)), "kind #{i} gave {err:?}");
+    }
+}
+
+#[test]
+fn distinct_options_are_still_accepted() {
+    add_field(&read("hello.pdf"), 0, [72.0, 600.0, 300.0, 660.0], "colour",
+        &NewFieldKind::RadioGroup { options: opts(&["Red", "Green", "Blue"]) }).expect("radio");
+}

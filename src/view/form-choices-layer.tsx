@@ -151,8 +151,14 @@ export function FormChoicesLayer({
                 — select —
               </option>
             )}
-            {field.options.map((opt) => (
-              <option key={opt.export} value={opt.export}>
+            {/* Keyed by position, not export value. A PDF we did not write can
+                carry duplicate `/Opt` entries, and duplicate keys make React
+                drop options. (Selecting one duplicate still highlights all of
+                them — a `<select>` selects by value, so identical values are
+                indistinguishable. That is inherent to the format; the fix is to
+                stop *creating* duplicates, below.) */}
+            {field.options.map((opt, i) => (
+              <option key={`${i}:${opt.export}`} value={opt.export}>
                 {opt.label}
               </option>
             ))}

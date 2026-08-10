@@ -141,8 +141,23 @@ export function FormCreateLayer({
       .map((s) => s.trim())
       .filter((s) => s !== "");
 
+  /** Options typed more than once. An option's value is its identity, so a
+   *  repeat is not a duplicate label — it is an entry nothing can distinguish
+   *  (selecting one selects them all). Reported rather than silently deduped. */
+  const duplicateOptions = (): string[] => {
+    const seen = new Set<string>();
+    const dupes = new Set<string>();
+    for (const o of parseOptions()) {
+      if (seen.has(o)) dupes.add(o);
+      seen.add(o);
+    }
+    return [...dupes];
+  };
+
   const canCreate = (): boolean => {
     if (name.trim() === "") return false;
+    const hasOptions = type === "radio" || type === "combo" || type === "list";
+    if (hasOptions && duplicateOptions().length > 0) return false;
     if (type === "radio") return parseOptions().length >= 2;
     if (type === "combo") {
       const opts = parseOptions();
@@ -292,6 +307,11 @@ export function FormCreateLayer({
               <label className="flex flex-col gap-0.5">
                 <span className="text-xs text-neutral-500">Options (comma-separated)</span>
                 <input aria-label="Options" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={input} placeholder="Red, Green, Blue" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} />
+                {duplicateOptions().length > 0 ? (
+                  <span role="alert" className="text-xs text-red-600">
+                    {`Repeated: ${duplicateOptions().join(", ")} — each option must be unique`}
+                  </span>
+                ) : null}
               </label>
             ) : null}
 

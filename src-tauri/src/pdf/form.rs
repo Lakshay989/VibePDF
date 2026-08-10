@@ -1134,6 +1134,21 @@ impl<'a> Edit<PdfDocument<'a>> for AddTextFieldEdit {
 // ── P5.B2 — create the other field kinds ────────────────────────────────────
 
 /// A `[x0 y0 x1 y1]` rect → PDF number array.
+/// Reject repeated options. A choice field's export value *is* its identity —
+/// `/V` stores the value, not an index — so two options sharing one is not a
+/// cosmetic duplicate, it is two entries that cannot be told apart: selecting
+/// either selects both, in our overlay and in any other viewer. Same for a radio
+/// group, where the option name is the `/AP` state that `/AS` selects.
+fn reject_duplicate_options(options: &[String]) -> Result<(), CommandError> {
+    let mut seen = HashSet::new();
+    for o in options {
+        if !seen.insert(o.as_str()) {
+            return Err(CommandError::InvalidInput(format!("duplicate option: {o}")));
+        }
+    }
+    Ok(())
+}
+
 /// Grow a choice widget's box downward (top edge fixed) until `rows` option rows
 /// fit. A drag is a rough gesture: dragging a 20pt box for a 5-option list box
 /// used to produce a widget that showed one row and clipped the rest (P5 sweep
@@ -1402,6 +1417,7 @@ pub fn add_field(
             if options.len() < 2 {
                 return Err(CommandError::InvalidInput("a radio group needs at least 2 options".into()));
             }
+            reject_duplicate_options(options)?;
             let parent_id = doc.new_object_id();
             #[allow(clippy::cast_precision_loss)]
             let n = options.len() as f32;
@@ -1452,6 +1468,7 @@ pub fn add_field(
             if options.is_empty() {
                 return Err(CommandError::InvalidInput("a combo box needs at least 1 option".into()));
             }
+            reject_duplicate_options(options)?;
             // Reject a default that isn't one of the options instead of silently
             // dropping it (P5 sweep B4) — the caller thought it had been set.
             if !default.is_empty() && !options.iter().any(|o| o == default) {
@@ -1474,6 +1491,7 @@ pub fn add_field(
             if options.is_empty() {
                 return Err(CommandError::InvalidInput("a list box needs at least 1 option".into()));
             }
+            reject_duplicate_options(options)?;
             // Grow a too-short box so every option is visible (P5 sweep B5) —
             // a 4-option list dragged 20pt tall showed one row and clipped the rest.
             let mut d = base_widget(name, fit_choice_rect(rect, options.len()), page_id);
