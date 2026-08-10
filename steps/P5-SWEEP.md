@@ -145,6 +145,22 @@ different type in the popover: **checkbox**, **radio group** (≥2 options),
 
 ---
 
+## Unexplained, watch for it
+
+**A list box rendered as nothing, once.** Form mode was on, the combo box beside
+it rendered fine, and the list was simply absent; it came back after a
+regenerate-and-reopen. No code path was found where that can happen — `size`
+never computes to zero, the select carries an explicit height and a visible
+border, and a thrown error or failed read would have taken the combo with it.
+
+Suspected a stale Fast Refresh state (`form-choices-layer.tsx` had just been
+edited twice in quick succession). Not fixed, because the mechanism is unknown
+and a defensive patch would be a guess.
+
+If it happens again: does it survive a **full app restart**, or only an HMR
+reload? A cold start that still hides the list means it is real and worth
+chasing. HMR-only means it is a dev-mode artifact that cannot reach a build.
+
 ## Track C — data interchange
 
 > Read this first. Three PDFs are in play, and mixing them up is the only hard
