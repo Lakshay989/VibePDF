@@ -112,7 +112,13 @@ sweep = [
     b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
     b"/Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R "
     b"/Annots [9 0 R 10 0 R 11 0 R 12 0 R 14 0 R 15 0 R 16 0 R 17 0 R] >>",
+    # /NeedAppearances tells a viewer to draw the fields from their values. The
+    # text and choice widgets here carry no /AP of their own (only the buttons
+    # do), so without it PDF.js paints nothing for them and they are invisible
+    # outside form mode — which is not how a real form behaves, and made a
+    # missing list box impossible to tell apart from an unrendered one.
     b"<< /Fields [9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 16 0 R 17 0 R] "
+    b"/NeedAppearances true "
     b"/DR << /Font << /F1 5 0 R >> >> /DA (/F1 0 Tf 0 g) >>",
     b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     stream(b"<<", page_text),
