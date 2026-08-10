@@ -71,7 +71,7 @@ export function OutlinePanel({ doc, onJump }: Props) {
   }, [doc]);
 
   return (
-    <aside className="flex h-full w-60 flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
+    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
       <header className="border-b border-neutral-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:border-neutral-800">
         Outline
         {tree && tree.length > 0 ? (

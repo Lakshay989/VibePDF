@@ -598,7 +598,12 @@ export function PdfViewer({ documentId, path }: Props) {
             onJump={(page) => virtRef.current?.scrollToPage(page)}
           />
         ) : null}
-        <div className="relative flex-1 overflow-hidden">
+        {/* `min-w-0` is what lets the page area give way instead of the panels.
+            A flex item defaults to `min-width: auto`, so without it the squeeze
+            in a narrow window lands on the siblings — the side panels, which
+            (unlike this one) had no `shrink-0` and got crushed below their
+            content. Panels hold their width now; the page shrinks. */}
+        <div className="relative flex-1 min-w-0 overflow-hidden">
           {error ? (
             <div className="mx-auto mt-8 max-w-lg rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
               This file does not appear to be a valid PDF.
