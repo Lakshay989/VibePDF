@@ -16,6 +16,9 @@ import { useFormStore } from "@/state/form-store";
 import { useHistoryStore } from "@/state/history-store";
 import { type PageGeometry, pdfToScreen } from "@/tools/_framework";
 
+/** Roughly one option row in CSS px — how many rows a list box shows. */
+const ROW_PX = 16;
+
 interface ScreenRect {
   left: number;
   top: number;
@@ -123,11 +126,20 @@ export function FormChoicesLayer({
       {fields.map((field) => {
         const rect = bboxRect(field.rect);
         const selected = values[field.name] ?? field.selected;
+        // `multiple` and `size` are independent — in HTML and in the PDF flags.
+        // `/Ff` bit 18 (combo) decides dropdown-vs-list; bit 22 (multi-select)
+        // decides one-vs-many. This overlay keyed BOTH off `multi`, so a list
+        // box that happened not to be multi-select rendered as a dropdown.
+        const rows =
+          field.kind === "list"
+            ? Math.max(2, Math.min(field.options.length, Math.floor(rect.height / ROW_PX)))
+            : undefined;
         return (
           <select
             key={field.name}
             aria-label={`Choice field ${field.name}`}
             multiple={field.multi}
+            size={rows}
             title={
               field.tooltip ??
               (field.multi ? "Hold \u2318 (Ctrl on Windows) to select more than one" : undefined)
@@ -146,11 +158,11 @@ export function FormChoicesLayer({
             }}
             style={selectStyle(rect)}
           >
-            {field.multi ? null : (
+            {field.kind === "combo" ? (
               <option value="" disabled>
                 — select —
               </option>
-            )}
+            ) : null}
             {/* Keyed by position, not export value. A PDF we did not write can
                 carry duplicate `/Opt` entries, and duplicate keys make React
                 drop options. (Selecting one duplicate still highlights all of

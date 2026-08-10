@@ -108,4 +108,44 @@ describe("FormChoicesLayer", () => {
     const select = await screen.findByLabelText("Choice field fruit");
     expect(select.getAttribute("title")).toBe("Pick your fruit");
   });
+
+  // P5 sweep: `multiple` and `size` are independent. The layer keyed both off
+  // `multi`, so a single-select LIST box rendered as a dropdown.
+  it("renders a single-select list box as a list, not a dropdown", async () => {
+    vi.mocked(readChoiceFields).mockResolvedValue([
+      { ...FIELDS[0]!, name: "tags", kind: "list", multi: false, selected: [] },
+    ]);
+    render(layer());
+    const select = (await screen.findByLabelText("Choice field tags")) as HTMLSelectElement;
+    expect(select.multiple).toBe(false);
+    expect(select.size).toBeGreaterThan(1);
+  });
+
+  it("renders a multi-select list box as a multi list", async () => {
+    vi.mocked(readChoiceFields).mockResolvedValue([
+      { ...FIELDS[0]!, name: "tags", kind: "list", multi: true, selected: [] },
+    ]);
+    render(layer());
+    const select = (await screen.findByLabelText("Choice field tags")) as HTMLSelectElement;
+    expect(select.multiple).toBe(true);
+    expect(select.size).toBeGreaterThan(1);
+  });
+
+  it("leaves a combo box as a dropdown with its placeholder", async () => {
+    render(layer());
+    const select = (await screen.findByLabelText("Choice field fruit")) as HTMLSelectElement;
+    expect(select.multiple).toBe(false);
+    // size 0 is the DOM default meaning "dropdown".
+    expect(select.size).toBe(0);
+    expect(Array.from(select.options).some((o) => o.value === "")).toBe(true);
+  });
+
+  it("gives a list box no fake placeholder row", async () => {
+    vi.mocked(readChoiceFields).mockResolvedValue([
+      { ...FIELDS[0]!, name: "tags", kind: "list", multi: false, selected: [] },
+    ]);
+    render(layer());
+    const select = (await screen.findByLabelText("Choice field tags")) as HTMLSelectElement;
+    expect(Array.from(select.options).some((o) => o.value === "")).toBe(false);
+  });
 });
