@@ -111,6 +111,7 @@ export function PdfViewer({ documentId, path }: Props) {
   // reflect every edit at once, without waiting for a bake.
   const rawEpoch = useDocEpoch(documentId);
   const hasPendingBake = useHasPendingBake(documentId);
+  const formEditing = useFormStore((s) => s.editing);
   const bumpBake = useEditEpochStore((s) => s.bumpBake);
 
   // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
@@ -325,11 +326,18 @@ export function PdfViewer({ documentId, path }: Props) {
   // bake to flush the accumulated overlays to the canvas. Gated on the pending-bake
   // flag (which one bake clears), so it fires once — not repeatedly. `rawEpoch` in
   // the deps restarts the countdown on each new edit, so "idle" means idle.
+  //
+  // `formEditing` is part of "idle" for a reason that cost real typing: a text
+  // field's value lives in the overlay's local state until blur, and a bake
+  // reloads the document, remounting the overlay and throwing that buffer away.
+  // Typing does NOT bump `rawEpoch` — only committing does — so a long note
+  // looked exactly like an idle document, and got wiped 8s after the *previous*
+  // field was committed. Blur re-arms the countdown.
   useEffect(() => {
-    if (!hasPendingBake) return undefined;
+    if (!hasPendingBake || formEditing) return undefined;
     const timer = setTimeout(() => bumpBake(documentId), IDLE_BAKE_MS);
     return () => clearTimeout(timer);
-  }, [hasPendingBake, rawEpoch, documentId, bumpBake]);
+  }, [hasPendingBake, formEditing, rawEpoch, documentId, bumpBake]);
 
   // SPEC: P1-VIEW-006 — restore persisted zoom + fit-mode on open.
   useEffect(() => {

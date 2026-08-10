@@ -83,7 +83,23 @@ page_text = (
     + label(72, 190, "Empty space below - drag new fields here for B1 / B2.")
 )
 
+# Checkbox "on" is a filled square; a radio option's is a DOT. The first cut
+# used the square for both, so a selected radio showed a square peeking out
+# from under the round overlay. Bézier circle: k = 4/3 × (√2 − 1).
 on_face = b"q 0 0 0 rg 3 3 12 12 re f Q"
+radio_on = (
+    b"q 0 0 0 RG 0.8 w 9 1.6 m 13.08 1.6 16.4 4.92 16.4 9 c "
+    b"16.4 13.08 13.08 16.4 9 16.4 c 4.92 16.4 1.6 13.08 1.6 9 c "
+    b"1.6 4.92 4.92 1.6 9 1.6 c S "
+    b"0 0 0 rg 9 4.9 m 11.27 4.9 13.1 6.73 13.1 9 c "
+    b"13.1 11.27 11.27 13.1 9 13.1 c 6.73 13.1 4.9 11.27 4.9 9 c "
+    b"4.9 6.73 6.73 4.9 9 4.9 c f Q"
+)
+radio_off = (
+    b"q 0 0 0 RG 0.8 w 9 1.6 m 13.08 1.6 16.4 4.92 16.4 9 c "
+    b"16.4 13.08 13.08 16.4 9 16.4 c 4.92 16.4 1.6 13.08 1.6 9 c "
+    b"1.6 4.92 4.92 1.6 9 1.6 c S Q"
+)
 
 sweep = [
     b"<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>",
@@ -112,9 +128,9 @@ sweep = [
     # 13 — radio group (/Ff bit 16 = 32768)
     b"<< /FT /Btn /Ff 32768 /T (colour) /V /Off /Kids [14 0 R 15 0 R] >>",
     b"<< /Type /Annot /Subtype /Widget /Parent 13 0 R /Rect [92 414 110 432] "
-    b"/AS /Off /AP << /N << /Red 7 0 R /Off 8 0 R >> >> /P 3 0 R >>",
+    b"/AS /Off /AP << /N << /Red 18 0 R /Off 19 0 R >> >> /P 3 0 R >>",
     b"<< /Type /Annot /Subtype /Widget /Parent 13 0 R /Rect [92 384 110 402] "
-    b"/AS /Off /AP << /N << /Green 7 0 R /Off 8 0 R >> >> /P 3 0 R >>",
+    b"/AS /Off /AP << /N << /Green 18 0 R /Off 19 0 R >> >> /P 3 0 R >>",
     # 16 — combo (/Ff bit 18 = 131072)
     b"<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (fruit) "
     b"/Opt [(Apple) (Banana) (Cherry)] /Rect [72 328 300 352] "
@@ -123,6 +139,9 @@ sweep = [
     b"<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 2097152 /T (tags) "
     b"/Opt [(urgent) (review) (archive)] /Rect [72 220 300 296] "
     b"/DA (/F1 12 Tf 0 g) /P 3 0 R >>",
+    # 18 / 19 — the radio faces (the checkbox reuses 7 / 8).
+    stream(b"<< /Type /XObject /Subtype /Form /BBox [0 0 18 18]", radio_on),
+    stream(b"<< /Type /XObject /Subtype /Form /BBox [0 0 18 18]", radio_off),
 ]
 
 # ── the XFA form (A5's degraded path) ───────────────────────────────────────

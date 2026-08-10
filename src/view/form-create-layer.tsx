@@ -259,6 +259,7 @@ export function FormCreateLayer({
               <input
                 autoFocus
                 aria-label="Field name"
+                  autoCapitalize="off" autoCorrect="off" spellCheck={false}
                 className={input}
                 placeholder="e.g. email"
                 value={name}
@@ -274,7 +275,7 @@ export function FormCreateLayer({
               <>
                 <label className="flex flex-col gap-0.5">
                   <span className="text-xs text-neutral-500">Default value</span>
-                  <input aria-label="Default value" className={input} value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} />
+                  <input aria-label="Default value" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={input} value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} />
                 </label>
                 <label className="flex flex-col gap-0.5">
                   <span className="text-xs text-neutral-500">Max length (optional)</span>
@@ -290,7 +291,7 @@ export function FormCreateLayer({
             {showOptions ? (
               <label className="flex flex-col gap-0.5">
                 <span className="text-xs text-neutral-500">Options (comma-separated)</span>
-                <input aria-label="Options" className={input} placeholder="Red, Green, Blue" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} />
+                <input aria-label="Options" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={input} placeholder="Red, Green, Blue" value={optionsText} onChange={(e) => setOptionsText(e.target.value)} />
               </label>
             ) : null}
 
@@ -325,7 +326,7 @@ export function FormCreateLayer({
             {type === "pushbutton" ? (
               <label className="flex flex-col gap-0.5">
                 <span className="text-xs text-neutral-500">Button caption</span>
-                <input aria-label="Button caption" className={input} value={caption} onChange={(e) => setCaption(e.target.value)} />
+                <input aria-label="Button caption" autoCapitalize="off" autoCorrect="off" spellCheck={false} className={input} value={caption} onChange={(e) => setCaption(e.target.value)} />
               </label>
             ) : null}
 

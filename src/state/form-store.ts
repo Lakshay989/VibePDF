@@ -12,15 +12,30 @@ interface FormState {
   detected: FormSummary | null;
   /** Whether the user has entered form-fill mode for the current document. */
   formMode: boolean;
+  /**
+   * True while a form input holds focus with an uncommitted edit in it.
+   *
+   * A text field's value lives in the overlay's local state until blur, and the
+   * idle-bake backstop (`PdfViewer`) reloads the document — remounting the
+   * overlay and destroying that buffer. The backstop measures "idle" by the edit
+   * epoch, which typing does *not* bump, so a long note could be wiped mid-word
+   * 8s after the previous field was committed. This is the signal that says
+   * someone is still typing.
+   */
+  editing: boolean;
   setDetected: (summary: FormSummary | null) => void;
   enterFormMode: () => void;
   exitFormMode: () => void;
+  setEditing: (editing: boolean) => void;
 }
 
 export const useFormStore = create<FormState>((set) => ({
   detected: null,
   formMode: false,
+  editing: false,
   setDetected: (summary) => set({ detected: summary }),
   enterFormMode: () => set({ formMode: true }),
-  exitFormMode: () => set({ formMode: false }),
+  // Leaving form mode unmounts the overlays, so nothing can still be mid-edit.
+  exitFormMode: () => set({ formMode: false, editing: false }),
+  setEditing: (editing) => set({ editing }),
 }));

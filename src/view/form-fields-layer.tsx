@@ -55,6 +55,7 @@ export function FormFieldsLayer({
   const formMode = useFormStore((s) => s.formMode);
   const setHistory = useHistoryStore((s) => s.setHistory);
   const bumpEpochSoft = useEditEpochStore((s) => s.bumpEpochSoft);
+  const setEditing = useFormStore((s) => s.setEditing);
   const epoch = useDocEpoch(documentId);
 
   const [fields, setFields] = useState<FormField[]>([]);
@@ -152,7 +153,11 @@ export function FormFieldsLayer({
               value={value}
               maxLength={field.maxLen ?? undefined}
               onChange={(e) => onChange(e.target.value)}
-              onBlur={() => commit(field)}
+              onFocus={() => setEditing(true)}
+              onBlur={() => {
+                setEditing(false);
+                commit(field);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") e.currentTarget.blur();
               }}
@@ -169,7 +174,11 @@ export function FormFieldsLayer({
             value={value}
             maxLength={field.maxLen ?? undefined}
             onChange={(e) => onChange(e.target.value)}
-            onBlur={() => commit(field)}
+            onFocus={() => setEditing(true)}
+            onBlur={() => {
+              setEditing(false);
+              commit(field);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
             }}

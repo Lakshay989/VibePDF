@@ -103,4 +103,30 @@ describe("FormFieldsLayer", () => {
     const input = await screen.findByLabelText("Form field first");
     expect(input.getAttribute("title")).toBeNull();
   });
+
+  // P5 sweep: typing in a field must mark the document "not idle". The idle-bake
+  // backstop reloads the document, remounting this layer and destroying the
+  // uncommitted local buffer — and typing does not bump the edit epoch, so a
+  // long note looked idle and got wiped mid-word.
+  it("flags an edit in progress on focus and clears it on blur", async () => {
+    render(layer());
+    const input = await screen.findByLabelText("Form field first");
+
+    fireEvent.focus(input);
+    expect(useFormStore.getState().editing).toBe(true);
+
+    fireEvent.blur(input);
+    expect(useFormStore.getState().editing).toBe(false);
+  });
+
+  it("still commits the value on blur while clearing the flag", async () => {
+    render(layer());
+    const input = await screen.findByLabelText("Form field first");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Grace" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(mockFill).toHaveBeenCalledWith(DOC, "first", "Grace"));
+    expect(useFormStore.getState().editing).toBe(false);
+  });
 });
