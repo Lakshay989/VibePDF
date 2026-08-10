@@ -219,13 +219,29 @@ Expect (these numbers were checked against the real importer, not guessed):
 
 **Import…** → `Sample PDFs/sweep/p5-import-broken.json`.
 
-That's the good file with two deliberate faults: a `ghostField` this form
-doesn't have, and `code` declared a `checkbox` when the form says text. Expect:
+Two deliberate faults: a `ghostField` this form doesn't have, and `code`
+declared a `checkbox` when the form says text. Every *other* value differs from
+the good file, so you can see the overwrite happen:
+
+| Field | after `good` | after `broken` |
+|---|---|---|
+| `fullName` | Ada Lovelace | Grace Hopper |
+| `colour` | Green | Red |
+| `fruit` | Banana | Cherry |
+| `tags` | urgent + archive | review |
+| `agree` | checked | unchecked |
+
+Expect:
 
 - **`Filled 6 fields`** — everything except `code`
 - **`1 not in this form (ghostField)`**
 - **`code: data says checkbox, field is text`**
-- `code` keeps its previous value
+- `code` keeps whatever it had — a rejected entry is never half-applied
+- the five fields above visibly change
+
+**Import overwrites.** A field named in the data is replaced whether or not it
+already had a value; a field *not* named is left alone. An empty value clears
+the field.
 
 A rejected entry is skipped whole, never half-applied. That's the spec's
 "reported, not silently coerced" clause.

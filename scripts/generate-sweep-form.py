@@ -204,9 +204,18 @@ GOOD_DATA = [
     {"name": "tags", "type": "list", "value": ["urgent", "archive"]},
 ]
 
+# Deliberately *different* values from GOOD_DATA. The first cut reused them, so
+# importing good-then-broken applied six fields to the values they already held
+# and looked like it had done nothing at all — which reads as "import is not
+# overwriting". Distinct values make the overwrite visible either way round.
 BROKEN_DATA = [
-    *[d for d in GOOD_DATA if d["name"] != "code"],
-    {"name": "code", "type": "checkbox", "value": ["Yes"]},   # form says text
+    {"name": "fullName", "type": "text", "value": ["Grace Hopper"]},
+    {"name": "notes", "type": "text", "value": ["Replaced by the broken import"]},
+    {"name": "agree", "type": "checkbox", "value": ["Off"]},
+    {"name": "colour", "type": "radio", "value": ["Red"]},
+    {"name": "fruit", "type": "combo", "value": ["Cherry"]},
+    {"name": "tags", "type": "list", "value": ["review"]},
+    {"name": "code", "type": "checkbox", "value": ["Yes"]},     # the form says text
     {"name": "ghostField", "type": "text", "value": ["nope"]},  # not in the form
 ]
 
