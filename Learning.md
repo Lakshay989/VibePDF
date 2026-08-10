@@ -8472,6 +8472,75 @@ adding more tests of the kind already written — which is the interesting part.
 
 ---
 
+## The sweep, round two — five more, and what they had in common
+
+### Problem
+The first sweep pass produced fifteen findings and a round of fixes. Running the
+sweep *again* on the fixed build produced five more. None were regressions of the
+first ten; they were the next layer down, reachable only once the first layer
+stopped blocking the path.
+
+### Concepts learned
+- **Two flex defaults, one symptom, opposite fixes.** The side panels collapsed
+  in a narrow window because every flex item defaults to `flex-shrink: 1` and
+  only one panel had opted out — so the whole squeeze landed on the others.
+  Adding `shrink-0` fixed that and immediately exposed a second bug: the page
+  column centres its pages with `align-items: center`, and centring a child
+  *wider* than its container overflows it **equally on both sides**. A scroll
+  container cannot scroll to negative coordinates, so the left slice became
+  unreachable — measured at 148px gone, with the scroller reporting
+  `scrollWidth` 550 for a 700px page. `min-width: min-content` on the column
+  makes it as wide as its widest child, so centring never has to overflow.
+- **Fixing the thing that was absorbing the damage reveals what it was hiding.**
+  Worth expecting rather than being surprised by: the first fix was correct and
+  still made the app visibly worse, because it moved the failure to a place with
+  no guard.
+- **"Idle" is only as good as the signal you measure it with.** A backstop
+  reloaded the document 8s after the edit epoch stopped changing. Typing does not
+  bump the epoch — only *committing* does — so a half-written note looked exactly
+  like an untouched document, and the reload wiped it. The bug was not the timer
+  or the reload; it was that "nothing has happened recently" and "the user is not
+  doing anything" had been assumed to be the same predicate.
+- **Identity versus display.** A choice option's export value *is* its identity —
+  `/V` stores the value, not an index. Two options sharing one are not a cosmetic
+  duplicate; they are two entries nothing can distinguish, in our overlay or any
+  other viewer, because `<select>` selects by value. The fix is to refuse to
+  create them, not to render them more cleverly.
+- **Two independent flags, collapsed into one.** `multiple` and `size` are
+  orthogonal in HTML, and so are the PDF flags they mirror: `/Ff` bit 18 (combo)
+  decides dropdown-vs-list, bit 22 decides one-vs-many. The overlay derived both
+  from "multi", which happens to be right for three of the four combinations —
+  and the fixture only ever exercised those three.
+- **A fixture encodes its author's assumptions twice over.** The sweep form was
+  written by the same person as the code, from the same mental model, so it chose
+  the same defaults the code handled. A list box created *by hand* with the
+  non-default combination found in seconds what the fixture could not find at
+  all. This is the argument for manual passes stated precisely: not "humans catch
+  more", but "humans make choices the author didn't think to encode".
+- **A false positive is worse than a failure.** A `curl` health check reported a
+  dev server up; the port was held by an unrelated project's Vite, which answers
+  every path. The check "passed" while measuring nothing. Verification that can
+  succeed for the wrong reason is not verification.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src/panels/*Panel.tsx`, `src/app/FieldPropertiesPanel.tsx` | `shrink-0` so panels hold their width. |
+| `src/view/PdfViewer.tsx` | `min-w-0` on the page area; `formEditing` added to the idle-bake gate. |
+| `src/view/PageVirtualizer.tsx` | `min-w-min` so centring cannot overflow leftward. |
+| `src/state/form-store.ts` | `editing` flag — "someone is mid-edit". |
+| `src/view/form-fields-layer.tsx` | Focus/blur drive that flag. |
+| `src/view/form-choices-layer.tsx` | `size` from kind, placeholder only on combos, options keyed by position. |
+| `src/view/form-create-layer.tsx` | Duplicate-option rejection; autocapitalise off on identifier inputs. |
+| `src/pdf/form.rs` | `reject_duplicate_options` for radio/combo/list. |
+| `src/view/__tests__/panel-layout.test.ts` | Source guard — jsdom does no layout, so nothing else can catch these. |
+
+### Further reading
+- CSS Box Alignment: overflow under `align-items: center`, and the `safe` keyword.
+- CSS Flexible Box: `min-width: auto` on flex items, and why `overflow` changes it.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

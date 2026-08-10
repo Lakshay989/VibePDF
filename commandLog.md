@@ -3870,6 +3870,65 @@ with the Tauri file watcher; run one or the other.
 
 ---
 
+## Sweep round two — layout + five form fixes (be21bdd → f426fda)
+
+Five commits, no bookkeeping entry until now; this covers all of them.
+No `npm install` / `cargo add`. No new fixture — `scripts/generate-sweep-form.py`
+changed (round radio `/AP` faces), so **regenerate before re-running the sweep**:
+
+```
+python3 scripts/generate-sweep-form.py
+```
+
+Investigation:
+
+```
+grep -n "NeedAppearances" node_modules/pdfjs-dist/build/pdf.worker.mjs      # 53085 — PDF.js synthesizes from /V
+grep -o '<aside className="[^"]*"' src/panels/*.tsx                          # only one panel had shrink-0
+grep -rn "bumpBake\|useHasPendingBake" src/view/PdfViewer.tsx                # IDLE_BAKE_MS = 8000
+```
+
+The centering bug was **measured**, not reasoned about — a probe page served to
+a real browser, 700px child in a 400px scroller:
+
+```
+before  clippedLeft 148px  scrollWidth 550   (page is 700 — 148px uncounted)
+after   clippedLeft 0      scrollWidth 700   maxScrollLeft 300
+```
+
+Getting a browser onto it took three attempts and is worth recording:
+`preview_start` renders `file://` outside the project as a static snapshot (no
+JS); the Browser pane blocks `localhost` by policy; a file written **inside** the
+project and opened via the Browser pane does run scripts. Also confirmed the
+Tailwind class actually lands, because a class that silently doesn't exist is a
+no-op that still passes every test:
+
+```
+npm run build && grep -ro "min-width:min-content" dist/assets/*.css   # found
+rm -rf dist
+```
+
+Gates:
+
+```
+npm run check                        # clean (5 clippy nits fixed along the way)
+npm run test                         # 502 passed
+cargo test --test form_create_other  # 20 ok
+```
+
+Two traps hit while doing this, both self-inflicted:
+
+- A `curl` loop reported "vite serving" — port 5199 was held by an unrelated
+  project's Vite, which answers any path. The check passed while measuring
+  nothing. Don't health-check a port you didn't bind.
+- `git add -A` staged the local-only `docs/PORTFOLIO_*.md` and `docs/story/`.
+  Unstaged and added to `.gitignore` so it can't recur.
+
+`npm run dev` and `cargo check` still cannot run at the same time — the Tauri
+watcher exits. Run one or the other.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
