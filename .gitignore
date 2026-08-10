@@ -26,6 +26,12 @@ src-tauri/resources/pdfium/*
 # Test output
 coverage/
 
+# Generated portfolio / story / summary write-ups. Deliberately local-only —
+# they're drafts about the project, not part of it, and a `git add -A` would
+# otherwise sweep them in.
+docs/PORTFOLIO_*.md
+docs/story/
+
 # Scratch / exploratory / verification PDFs. Its own README always claimed this
 # folder was ignored; it wasn't — only untracked, so one `git add -A` would have
 # committed tens of MB of scratch. See `Sample PDFs/README.md` for the layout.

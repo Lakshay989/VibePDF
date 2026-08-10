@@ -28,6 +28,29 @@ edits, and eventually flattens the file in place.
 ⚠️ Never open a committed fixture from `tests/fixtures/` for this. VibePDF saves
 in place, so you'd clobber it.
 
+## Fixed since the first pass — re-check these
+
+The first sweep produced fifteen findings. Ten were real and are now fixed;
+re-run these rows specifically:
+
+| Was | Now |
+|---|---|
+| Filled values showed a ghost duplicate (A2) | Overlay is opaque — PDF.js paints `/V` too, which the old 92%-alpha let through |
+| No tooltip on a field (A2) | `/TU` reaches the fill overlay |
+| Couldn't multi-select (A4) | Works — needs ⌘-click; the list now says so on hover |
+| Radio marks were flat bars (B2) | Circles, in square buttons, whatever the drag shape |
+| Dropdown's blank first option errored (B2) | Placeholder is disabled and never commits |
+| Combo accepted an invalid default (B2) | It's a picker over the options; backend rejects loudly too |
+| Short list box clipped its options (B2) | Grows downward to fit them |
+| Signature drew nothing (B2) | Dashed placeholder box |
+| Push-button had no caption (B2) | Caption drawn into the appearance |
+| Field count stale after ⌘Z (B3) | Re-reads on every edit |
+
+Two were **not** bugs: a push-button does nothing because it has no `/A` action
+(actions aren't in the P5 spec), and a signature exports while a push-button
+doesn't (P5-FORM-008 — a button holds no value). Three were this checklist or
+the fixture being wrong, and are corrected above.
+
 ## How to mark
 
 Each row: do the action, check the expectation. If it passes, tick the box here

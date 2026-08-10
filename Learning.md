@@ -8390,6 +8390,88 @@ as-is would have thrown away every value the user typed.
 
 ---
 
+## P5 sweep fixes — what a green test suite could not see
+
+### Problem
+Phase 5 shipped with 71 Rust tests and 475 frontend tests green, and ten
+features that had never been run in the app. The first manual sweep produced
+fifteen findings in about an hour. Not one of them would have been caught by
+adding more tests of the kind already written — which is the interesting part.
+
+### Concepts learned
+- **Green tests measure the code you wrote, not the code you shipped.** The
+  frontend tests mock IPC; the Rust tests never render. So a `<select>` whose
+  placeholder option was submittable, an appearance stream that drew a square
+  where a circle belonged, and a header count that never refreshed all passed
+  everything. Manual passes aren't a weaker substitute for automation — they
+  cover a different axis, and the two barely overlap.
+- **A false premise in a comment is a bug with a long fuse.** The fill overlay's
+  header said "our PDF.js view doesn't regenerate field appearances", and every
+  design decision downstream (soft epoch bump, 92%-alpha input background) was
+  correct *given* that. PDF.js honours `/NeedAppearances` and synthesizes the
+  appearance from `/V` itself — one line in its worker:
+  `data.hasAppearance ||= this._needAppearances && data.fieldValue != null`.
+  So the value was drawn twice, canvas and DOM, slightly offset. The lesson is
+  to verify the premise you're writing into a comment; a wrong one propagates
+  further than wrong code, because the next person reads it as settled.
+- **Three fixes for one symptom, and picking the right one is a UX call.** The
+  double-draw could be fixed by telling PDF.js to skip form widgets
+  (`annotationMode: ENABLE_FORMS`), or by making our input opaque. The first is
+  "more correct" — one renderer owns the field — but it means a filled form
+  renders *blank* when form mode is off, because the overlay is unmounted then.
+  Opacity wins: we cover PDF.js's copy while we're on top of it, and hand the
+  page back when we leave.
+- **The invalid state should be unrepresentable, not validated.** The combo
+  default was a free-text input; the backend quietly refused anything outside
+  `/Opt`. Two fixes: make the backend *reject* loudly (so the caller can't
+  believe a lie), and make the UI a picker over the actual options (so the bad
+  value can't be typed). Validation is the fallback for the case the picker
+  can't cover — editing the options after choosing a default.
+- **A placeholder is not a value.** The `<option value="">` prepended to a
+  single-select is a UI affordance; committing it sent `[""]` to a setter whose
+  job is to reject values that aren't options. It did its job, and the user saw
+  "not an option" for doing something the UI invited. `disabled` on the option,
+  plus a guard in the handler.
+- **Geometry is content.** A radio option inherited the full dragged width, so a
+  wide-short drag produced a flat bar. And the mark itself was `re f` — a
+  rectangle — because it was copied from the checkbox. A radio button is a
+  circle, and PDF has no circle operator: four Bézier arcs with control points
+  at `r × 0.5523` from each quadrant.
+- **A field that draws nothing reads as a broken feature.** The signature field
+  set `/FT /Sig` and no `/AP`, which is *legal* and invisible. The count went up,
+  the page didn't change, and the reasonable conclusion was "signature is
+  broken". Acrobat draws a placeholder box; now so do we. Correct-but-invisible
+  is a bug in everything except the spec.
+- **`/MK /CA` is data, `/AP` is pixels.** The push-button stored its caption in
+  the right place per spec — and nothing rendered it, because a viewer paints the
+  appearance stream verbatim. If you supply the `/AP`, you own everything drawn
+  in it.
+- **Refresh keys must match what can change the value.** `useFormDetect` keyed
+  its read on `documentId`, with a comment explaining that A1 adds no fields.
+  True when written; false once B1/B2/B3 could create and delete them, and
+  falsest for undo, which changes the count without touching the panel that had
+  quietly become the only thing refreshing it. Keyed on the edit epoch now.
+- **A tree walk that stops at the top level is a guardrail with a hole.** The
+  duplicate-name check scanned `/Fields` entries only, so any name nested under
+  `/Kids` was invisible to it — and qualified names, which is what fill/export/
+  import actually address fields by, were never compared at all.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/form.rs` | `radio_appearance` (Bézier circle), `signature_appearance`, caption-drawing `pushbutton_appearance`, `fit_choice_rect`, combo-default rejection, recursive duplicate-name check, `/TU` on the read models. |
+| `src/view/form-fields-layer.tsx` | Opaque input; `/TU` tooltip; corrected header premise. |
+| `src/view/form-choices-layer.tsx` | Disabled placeholder + commit guard; tooltip; multi-select hint; opaque select. |
+| `src/view/form-create-layer.tsx` | Combo default is a picker over the parsed options. |
+| `src/app/use-form-detect.ts` | Split into reset-on-document and re-read-on-epoch effects. |
+| `scripts/generate-sweep-form.py` | Sweep fixture re-spaced (labels were drawn inside two widgets). |
+
+### Further reading
+- PDF 32000-1:2008 §12.7.4.2 (`/MK`), §12.7.5.3 (radio), §12.7.2 (`/NeedAppearances`).
+- The Bézier circle constant: `k = 4/3 × (√2 − 1) ≈ 0.5523`.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

@@ -37,6 +37,8 @@ export interface FormField {
   maxLen: number | null;
   /** Multi-line text field (`/Ff` bit 13). */
   multiline: boolean;
+  /** `/TU`, the field's user-facing description. Shown as the input's tooltip. */
+  tooltip: string | null;
 }
 
 /**
@@ -115,6 +117,8 @@ export interface ChoiceField {
   selected: string[];
   /** Multi-select (list boxes only). */
   multi: boolean;
+  /** `/TU`, the field's user-facing description. Shown as the select's tooltip. */
+  tooltip: string | null;
 }
 
 /**

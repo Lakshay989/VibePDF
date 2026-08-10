@@ -144,7 +144,13 @@ export function FormCreateLayer({
   const canCreate = (): boolean => {
     if (name.trim() === "") return false;
     if (type === "radio") return parseOptions().length >= 2;
-    if (type === "combo" || type === "list") return parseOptions().length >= 1;
+    if (type === "combo") {
+      const opts = parseOptions();
+      // Editing the options after picking a default can strand it — the backend
+      // rejects that, so don't let it be submitted (P5 sweep B4).
+      return opts.length >= 1 && (defaultValue === "" || opts.includes(defaultValue));
+    }
+    if (type === "list") return parseOptions().length >= 1;
     return true;
   };
 
@@ -291,7 +297,21 @@ export function FormCreateLayer({
             {type === "combo" ? (
               <label className="flex flex-col gap-0.5">
                 <span className="text-xs text-neutral-500">Default option</span>
-                <input aria-label="Default option" className={input} value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} />
+                {/* Chosen from the options above, never typed — a default outside
+                    the option list is not a legal combo value (P5 sweep B4). */}
+                <select
+                  aria-label="Default option"
+                  className={input}
+                  value={defaultValue}
+                  onChange={(e) => setDefaultValue(e.target.value)}
+                >
+                  <option value="">(none)</option>
+                  {parseOptions().map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
               </label>
             ) : null}
 

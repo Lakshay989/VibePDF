@@ -3823,6 +3823,53 @@ without being drawn.
 
 ---
 
+## P5 sweep fixes — ten defects from the first in-app pass
+
+No `npm install` / `cargo add`. No new fixture; the sweep assets are rebuilt by
+the committed `scripts/generate-sweep-form.py`.
+
+Investigation (how each verdict was reached rather than guessed):
+
+```
+grep -n "NeedAppearances" node_modules/pdfjs-dist/build/pdf.worker.mjs   # → line 53085 proves PDF.js synthesizes the appearance from /V
+grep -n "pub struct FormField" -A 22 src-tauri/src/pdf/form.rs           # → no tooltip field; /TU never reached the fill overlay
+sed -n '/fn pushbutton_appearance/,/^}/p' src-tauri/src/pdf/form.rs      # → grey box + border, caption never drawn
+grep -n "readFormSummary\|setDetected" src/app/use-form-detect.ts        # → keyed on documentId only
+```
+
+Verification gates + tests:
+
+```
+cargo check --all-targets                             # after each increment
+cargo test --test form_create_other                   # 18 ok (8 new: radio square + curves, combo default reject/keep, list grow/no-shrink, signature /AP, caption drawn, nested duplicate name)
+npx vitest run src/view/__tests__/form-choices-layer.test.tsx   # 6 ok (3 new)
+npx vitest run src/view/__tests__/form-fields-layer.test.tsx    # 7 ok (3 new)
+npx vitest run src/app/__tests__/use-form-detect.test.tsx       # 5 ok (new file)
+npm run check                                          # clean after 5 clippy nits (redundant closure, excessive float precision, format!-append, doc_markdown, for_kv_map)
+npm run test                                           # 105 files, 486 passed
+npm run test:rust                                      # 73 binaries, every one 0 failed
+cargo test --test form_create_other --test form_flatten --test form_import writes_verification -- --ignored --nocapture
+```
+
+Artifacts refreshed in `Sample PDFs/verify/p5-forms/` (createfields now covers
+all six field kinds, not four). Byte probe on the new createfields artifact:
+
+```
+python3 -c "d=open('Sample PDFs/verify/p5-forms/vibepdf-verify-createfields.pdf','rb').read(); print(b'(Submit) Tj' in d, b'/Sig' in d, b'[3 2] 0 d' in d)"   # True True True
+```
+
+The grown list-box rect could NOT be confirmed from the artifact bytes — lopdf
+compresses objects into object streams — so that one rests on
+`list_box_grows_to_fit_its_options`, which asserts it directly.
+
+Two self-inflicted stumbles worth recording: a bulk regex that added `tooltip:
+null` to every `multi:`/`multiline:` literal also hit two `pdf_add_field` **wire
+payload** expectations (addField sends no tooltip) — caught by the full suite,
+not by the targeted runs. And `npm run dev` exited when `cargo check` collided
+with the Tauri file watcher; run one or the other.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

@@ -12,6 +12,7 @@
 //! not counted, only its leaves are. Bare `/Widget` annotations are never fields.
 
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream, StringFormat};
 use pdfium_render::prelude::PdfDocument;
@@ -142,6 +143,9 @@ pub struct FormField {
     pub max_len: Option<u32>,
     /// `/Ff` bit 13 (multi-line text).
     pub multiline: bool,
+    /// `/TU` — the field's user-facing description. Surfaced as the overlay
+    /// input's tooltip; the fill UI had no tooltip at all before (P5 sweep A2).
+    pub tooltip: Option<String>,
 }
 
 /// Field-flag bit 13 (1-indexed) = multi-line text (`Ff & (1 << 12)`).
@@ -196,6 +200,7 @@ pub fn read_text_fields_doc(doc: &Document, page: usize) -> Result<Vec<FormField
             value,
             max_len,
             multiline,
+            tooltip: read_tooltip(doc, dict),
         });
     }
     Ok(out)
@@ -415,6 +420,14 @@ fn encode_pdf_text_string(s: &str) -> Object {
         }
         Object::String(bytes, StringFormat::Literal)
     }
+}
+
+/// A field's `/TU` (user description), inherited from a `/Parent` like the rest
+/// of the field attributes. `None` when absent or empty.
+fn read_tooltip(doc: &Document, dict: &Dictionary) -> Option<String> {
+    let raw = inherited(doc, dict, b"TU")?.as_str().ok()?;
+    let text = decode_pdf_text_string(raw);
+    (!text.trim().is_empty()).then_some(text)
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -679,6 +692,8 @@ pub struct ChoiceField {
     pub selected: Vec<String>,
     /// Multi-select (list boxes only).
     pub multi: bool,
+    /// `/TU` — surfaced as the overlay `<select>`'s tooltip (P5 sweep A2).
+    pub tooltip: Option<String>,
 }
 
 /// Follow an indirect reference to its object; other objects pass through.
@@ -761,6 +776,7 @@ pub fn read_choice_fields_doc(doc: &Document, page: usize) -> Result<Vec<ChoiceF
             options: parse_opt(doc, inherited(doc, dict, b"Opt")),
             selected: parse_choice_value(doc, inherited(doc, dict, b"V")),
             multi: ff & FF_MULTISELECT != 0,
+            tooltip: read_tooltip(doc, dict),
         });
     }
     Ok(out)
@@ -1118,6 +1134,23 @@ impl<'a> Edit<PdfDocument<'a>> for AddTextFieldEdit {
 // ── P5.B2 — create the other field kinds ────────────────────────────────────
 
 /// A `[x0 y0 x1 y1]` rect → PDF number array.
+/// Grow a choice widget's box downward (top edge fixed) until `rows` option rows
+/// fit. A drag is a rough gesture: dragging a 20pt box for a 5-option list box
+/// used to produce a widget that showed one row and clipped the rest (P5 sweep
+/// B5). Never shrinks — a deliberately tall box is left alone.
+fn fit_choice_rect(rect: [f32; 4], rows: usize) -> [f32; 4] {
+    /// Row height a viewer lays out a choice option at, plus the box's padding.
+    const ROW_H: f32 = 14.0;
+    const PAD: f32 = 4.0;
+    #[allow(clippy::cast_precision_loss)]
+    let needed = rows.max(1) as f32 * ROW_H + PAD;
+    let [x0, y0, x1, y1] = rect;
+    if y1 - y0 >= needed {
+        return rect;
+    }
+    [x0, y1 - needed, x1, y1]
+}
+
 fn rect_obj(r: [f32; 4]) -> Object {
     Object::Array(vec![Object::Real(r[0]), Object::Real(r[1]), Object::Real(r[2]), Object::Real(r[3])])
 }
@@ -1135,23 +1168,108 @@ fn base_widget(name: &str, rect: [f32; 4], page_id: ObjectId) -> Dictionary {
 }
 
 /// Is `name` already a top-level field name in the `AcroForm`?
+/// Whether `name` is already taken by **any** field in the tree.
+///
+/// This used to scan only the top-level `/Fields` entries, so a name nested
+/// under a container field's `/Kids` slipped through and you could create a
+/// second field that shadowed it (P5 sweep B7). It now walks the whole tree,
+/// comparing both the partial name (`/T`) and the fully-qualified name — the
+/// latter is what fill, export, and import address a field by, so a collision
+/// there is the one that actually breaks things.
 fn duplicate_field_name(doc: &Document, acro_id: ObjectId, name: &str) -> bool {
-    doc.get_dictionary(acro_id)
-        .ok()
-        .and_then(|a| a.get(b"Fields").ok())
-        .and_then(|o| o.as_array().ok())
-        .is_some_and(|fields| {
-            fields
-                .iter()
-                .filter_map(|f| f.as_reference().ok())
-                .filter_map(|id| doc.get_dictionary(id).ok())
-                .filter_map(|d| d.get(b"T").and_then(Object::as_str).ok())
-                .any(|t| String::from_utf8_lossy(t) == name)
-        })
+    let Ok(fields) = doc
+        .get_dictionary(acro_id)
+        .and_then(|a| a.get(b"Fields"))
+        .and_then(Object::as_array)
+    else {
+        return false;
+    };
+
+    let mut stack: Vec<ObjectId> = fields.iter().filter_map(|f| f.as_reference().ok()).collect();
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut budget = 100_000u32;
+
+    while let Some(id) = stack.pop() {
+        budget = budget.saturating_sub(1);
+        if budget == 0 {
+            break;
+        }
+        if !visited.insert(id) {
+            continue;
+        }
+        let Ok(dict) = doc.get_dictionary(id) else { continue };
+        let partial = dict
+            .get(b"T")
+            .and_then(Object::as_str)
+            .ok()
+            .map(decode_pdf_text_string);
+        if partial.as_deref() == Some(name) || qualified_name(doc, dict).as_deref() == Some(name) {
+            return true;
+        }
+        if let Ok(kids) = dict.get(b"Kids").and_then(Object::as_array) {
+            stack.extend(kids.iter().filter_map(|k| k.as_reference().ok()));
+        }
+    }
+    false
 }
 
 /// A button widget's `/AP /N` sub-appearance: a filled inset mark ("on") or an
 /// empty stream ("off"), as a Form `XObject` sized to the widget.
+/// A radio option's `/AP` state: a **circle**, which is what a radio button is
+/// supposed to look like — `button_appearance`'s square is right for a checkbox
+/// and wrong here. Drawn as four Bézier arcs (PDF has no circle operator); the
+/// on-state fills an inner dot inside the ring.
+fn radio_appearance(doc: &mut Document, on: bool, size: f32) -> ObjectId {
+    /// Bézier circle constant: control-point offset as a fraction of the radius.
+    const K: f32 = 0.552_285;
+    let c = size / 2.0;
+
+    let circle = |r: f32| {
+        let k = r * K;
+        format!(
+            "{:.2} {c:.2} m \
+             {:.2} {:.2} {:.2} {:.2} {c:.2} {:.2} c \
+             {:.2} {:.2} {:.2} {:.2} {:.2} {c:.2} c \
+             {:.2} {:.2} {:.2} {:.2} {c:.2} {:.2} c \
+             {:.2} {:.2} {:.2} {:.2} {:.2} {c:.2} c",
+            c + r,
+            c + r, c + k, c + k, c + r, c + r,
+            c - k, c + r, c - r, c + k, c - r,
+            c - r, c - k, c - k, c - r, c - r,
+            c + k, c - r, c + r, c - k, c + r,
+        )
+    };
+
+    // Always draw the ring so the target is visible when off; fill a dot when on.
+    let mut content = format!("q 0 0 0 RG 1 w {} S Q", circle(c - 1.0));
+    if on {
+        let _ = write!(content, " q 0 0 0 rg {} f Q", circle((c - 1.0) * 0.55));
+    }
+    let dict = dictionary! {
+        "Type" => "XObject", "Subtype" => "Form",
+        "BBox" => vec![Object::Real(0.0), Object::Real(0.0), Object::Real(size), Object::Real(size)],
+    };
+    doc.add_object(Stream::new(dict, content.into_bytes()))
+}
+
+/// A signature field's placeholder `/AP`: a dashed box, so an unsigned signature
+/// field is **visible**. Without one the field is a real, countable field that
+/// draws nothing at all — which reads as "signature is broken" (P5 sweep B6).
+/// Signing itself is Phase 6; this is only the empty target.
+fn signature_appearance(doc: &mut Document, w: f32, h: f32) -> ObjectId {
+    let content = format!(
+        "q 0.97 0.97 0.97 rg 0 0 {w:.2} {h:.2} re f \
+         0.45 0.45 0.45 RG 1 w [3 2] 0 d 0.5 0.5 {:.2} {:.2} re S Q",
+        w - 1.0,
+        h - 1.0
+    );
+    let dict = dictionary! {
+        "Type" => "XObject", "Subtype" => "Form",
+        "BBox" => vec![Object::Real(0.0), Object::Real(0.0), Object::Real(w), Object::Real(h)],
+    };
+    doc.add_object(Stream::new(dict, content.into_bytes()))
+}
+
 fn button_appearance(doc: &mut Document, on: bool, w: f32, h: f32) -> ObjectId {
     let inset = (w.min(h) * 0.2).clamp(1.0, 4.0);
     let content = if on {
@@ -1168,18 +1286,50 @@ fn button_appearance(doc: &mut Document, on: bool, w: f32, h: f32) -> ObjectId {
 }
 
 /// A push-button `/AP /N`: a light-filled, bordered box sized to the widget.
-fn pushbutton_appearance(doc: &mut Document, w: f32, h: f32) -> ObjectId {
-    let content = format!(
+/// A push-button's `/AP`: the face **plus its caption**. `/MK /CA` is where the
+/// caption belongs per spec, but nothing draws that for us — a viewer paints the
+/// `/AP` verbatim — so the appearance has to render the text itself, or the
+/// button comes out blank (P5 sweep B8).
+///
+/// The caption is centred with the real Helvetica metrics and clipped to the
+/// face. A caption the `WinAnsi` encoding can't represent is dropped rather than
+/// mojibaked; `/MK /CA` still carries it for viewers that regenerate.
+fn pushbutton_appearance(doc: &mut Document, w: f32, h: f32, caption: &str) -> ObjectId {
+    let mut content = format!(
         "q 0.9 0.9 0.9 rg 0 0 {w:.2} {h:.2} re f 0 0 0 RG 1 w 0.5 0.5 {:.2} {:.2} re S Q",
         w - 1.0,
         h - 1.0
-    )
-    .into_bytes();
-    let dict = dictionary! {
+    );
+
+    let label = caption.trim();
+    if !label.is_empty() && crate::pdf::cos::winansi_fits(label) {
+        // Fit the caption to the face: cap by height, shrink if too wide.
+        let mut size = (h * 0.55).clamp(5.0, 12.0);
+        let avail = (w - 6.0).max(1.0);
+        let width_at = |s: f32| crate::pdf::font_metrics::text_width("Helvetica", label, s);
+        if width_at(size) > avail {
+            size = (size * avail / width_at(size)).max(4.0);
+        }
+        let tx = ((w - width_at(size)) / 2.0).max(2.0);
+        let ty = (h - size * 0.72) / 2.0 + size * 0.05;
+        let _ = write!(
+            content,
+            " q 0 0 {w:.2} {h:.2} re W n BT /F1 {size:.2} Tf 0 0 0 rg {tx:.2} {ty:.2} Td ({}) Tj ET Q",
+            crate::pdf::cos::escape_pdf_string(label)
+        );
+    }
+
+    let mut dict = dictionary! {
         "Type" => "XObject", "Subtype" => "Form",
         "BBox" => vec![Object::Real(0.0), Object::Real(0.0), Object::Real(w), Object::Real(h)],
     };
-    doc.add_object(Stream::new(dict, content))
+    // Self-contained resources: the `/AP` must not depend on the AcroForm `/DR`,
+    // which flatten (P5.C2) removes.
+    dict.set(
+        "Resources",
+        dictionary! { "Font" => dictionary! { "F1" => crate::pdf::cos::base14_font_dict("Helvetica") } },
+    );
+    doc.add_object(Stream::new(dict, content.into_bytes()))
 }
 
 /// Reference a single-widget field from both the page `/Annots` and the `AcroForm`
@@ -1253,14 +1403,23 @@ pub fn add_field(
                 return Err(CommandError::InvalidInput("a radio group needs at least 2 options".into()));
             }
             let parent_id = doc.new_object_id();
+            #[allow(clippy::cast_precision_loss)]
             let n = options.len() as f32;
-            let row_h = h / n;
+            // Each option gets a SQUARE button at the left of its row, not the
+            // full dragged width — a wide, short drag used to stretch the mark
+            // into a flat bar (P5 sweep B1). The row still owns the height so
+            // the options stay evenly spaced down the box.
+            let row_h = (h / n).max(1.0);
+            let side = row_h.min(w).clamp(6.0, 18.0);
             let mut kids = Vec::new();
             for (i, opt) in options.iter().enumerate() {
+                #[allow(clippy::cast_precision_loss)]
                 let y1 = rect[3] - i as f32 * row_h;
-                let krect = [rect[0], y1 - row_h, rect[2], y1];
-                let on = button_appearance(&mut doc, true, w, row_h);
-                let off = button_appearance(&mut doc, false, w, row_h);
+                // Centre the square vertically in its row.
+                let top = y1 - (row_h - side) / 2.0;
+                let krect = [rect[0], top - side, rect[0] + side, top];
+                let on = radio_appearance(&mut doc, true, side);
+                let off = radio_appearance(&mut doc, false, side);
                 let mut kd = Dictionary::new();
                 kd.set("Type", "Annot");
                 kd.set("Subtype", "Widget");
@@ -1293,12 +1452,19 @@ pub fn add_field(
             if options.is_empty() {
                 return Err(CommandError::InvalidInput("a combo box needs at least 1 option".into()));
             }
-            let mut d = base_widget(name, rect, page_id);
+            // Reject a default that isn't one of the options instead of silently
+            // dropping it (P5 sweep B4) — the caller thought it had been set.
+            if !default.is_empty() && !options.iter().any(|o| o == default) {
+                return Err(CommandError::InvalidInput(format!(
+                    "default value {default} is not one of the options"
+                )));
+            }
+            let mut d = base_widget(name, fit_choice_rect(rect, 1), page_id);
             d.set("FT", "Ch");
             d.set("Ff", Object::Integer(FF_COMBO));
             d.set("Opt", Object::Array(options.iter().map(|o| encode_pdf_text_string(o)).collect()));
             d.set("DA", Object::string_literal("/Helv 0 Tf 0 g"));
-            if !default.is_empty() && options.iter().any(|o| o == default) {
+            if !default.is_empty() {
                 d.set("V", encode_pdf_text_string(default));
             }
             let id = doc.add_object(d);
@@ -1308,7 +1474,9 @@ pub fn add_field(
             if options.is_empty() {
                 return Err(CommandError::InvalidInput("a list box needs at least 1 option".into()));
             }
-            let mut d = base_widget(name, rect, page_id);
+            // Grow a too-short box so every option is visible (P5 sweep B5) —
+            // a 4-option list dragged 20pt tall showed one row and clipped the rest.
+            let mut d = base_widget(name, fit_choice_rect(rect, options.len()), page_id);
             d.set("FT", "Ch");
             if *multi {
                 d.set("Ff", Object::Integer(FF_MULTISELECT));
@@ -1319,13 +1487,17 @@ pub fn add_field(
             wire_field(&mut doc, page_id, acro_id, id)?;
         }
         NewFieldKind::Signature => {
+            let ap = signature_appearance(&mut doc, w, h);
             let mut d = base_widget(name, rect, page_id);
             d.set("FT", "Sig");
+            // An unsigned signature field draws nothing without this, so it looks
+            // like nothing was created (P5 sweep B6). Signing is Phase 6.
+            d.set("AP", dictionary! { "N" => ap });
             let id = doc.add_object(d);
             wire_field(&mut doc, page_id, acro_id, id)?;
         }
         NewFieldKind::PushButton { caption } => {
-            let ap = pushbutton_appearance(&mut doc, w, h);
+            let ap = pushbutton_appearance(&mut doc, w, h, caption);
             let mut d = base_widget(name, rect, page_id);
             d.set("FT", "Btn");
             d.set("Ff", Object::Integer(FF_PUSHBUTTON));

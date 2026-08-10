@@ -2,10 +2,18 @@
 //
 // In form mode this layer fetches the page's fillable text fields (A2) and lays a
 // text input over each, at the field's widget rect. Typing is local; on blur/Enter
-// the value is written via `fillTextField` on the document actor. The input *is*
-// the in-app display — our PDF.js view doesn't regenerate field appearances — so
-// the fill is a *soft* epoch bump (no main-view reload/flash); the saved file
-// carries `/NeedAppearances`, so other readers render the value.
+// the value is written via `fillTextField` on the document actor. The fill is a
+// *soft* epoch bump (no main-view reload/flash); the saved file carries
+// `/NeedAppearances`, so other readers render the value.
+//
+// The input background is deliberately **opaque**. An earlier version of this
+// file claimed "our PDF.js view doesn't regenerate field appearances" and used a
+// 92%-alpha white — but PDF.js honours `/NeedAppearances` and synthesizes the
+// widget appearance from `/V` itself (`pdf.worker.mjs`: `hasAppearance ||=
+// _needAppearances && fieldValue != null`). So the canvas *does* paint the value,
+// and a translucent input let it ghost through, offset by the HTML padding
+// (P5 sweep A1/A6). Covering it is correct: leaving form mode unmounts this layer
+// and PDF.js's copy is then the one you want to see.
 
 import { reportError } from "@/app/report-error";
 import { type CSSProperties, useEffect, useState } from "react";
@@ -117,7 +125,7 @@ export function FormFieldsLayer({
     width: Math.max(rect.width, 24),
     height: Math.max(rect.height, 14),
     border: "1px solid #2563eb",
-    background: "rgba(255,255,255,0.92)",
+    background: "#fff",
     padding: "0 2px",
     fontSize: `${Math.min(Math.max(rect.height * 0.7, 9), 16)}px`,
     lineHeight: 1.1,
@@ -139,6 +147,7 @@ export function FormFieldsLayer({
             <textarea
               key={field.name}
               aria-label={`Form field ${field.name}`}
+              title={field.tooltip ?? undefined}
               tabIndex={i + 1}
               value={value}
               maxLength={field.maxLen ?? undefined}
@@ -155,6 +164,7 @@ export function FormFieldsLayer({
           <input
             key={field.name}
             aria-label={`Form field ${field.name}`}
+            title={field.tooltip ?? undefined}
             tabIndex={i + 1}
             value={value}
             maxLength={field.maxLen ?? undefined}

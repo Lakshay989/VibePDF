@@ -18,7 +18,7 @@ const { FIELDS } = vi.hoisted(() => ({
         { export: "chy", label: "Cherry" },
       ],
       selected: ["Apple"],
-      multi: false,
+      multi: false, tooltip: null,
     },
   ] satisfies ChoiceField[],
 }));
@@ -75,5 +75,37 @@ describe("FormChoicesLayer", () => {
     useFormStore.setState({ formMode: false });
     render(layer());
     expect(screen.queryByLabelText("Choice field fruit")).toBeNull();
+  });
+
+  // SPEC: P5-FORM-004 — P5 sweep B2. The single-select placeholder used to be a
+  // real, selectable option, so picking it committed `[""]` and the backend
+  // rejected it with "not an option".
+  it("does not commit the empty placeholder option", async () => {
+    render(layer());
+    const select = (await screen.findByLabelText("Choice field fruit")) as HTMLSelectElement;
+    const placeholder = Array.from(select.options).find((o) => o.value === "");
+    expect(placeholder).toBeTruthy();
+    expect(placeholder?.disabled).toBe(true);
+
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(mockSet).not.toHaveBeenCalled());
+  });
+
+  it("tells the user how to multi-select on a list box", async () => {
+    vi.mocked(readChoiceFields).mockResolvedValue([
+      { ...FIELDS[0]!, name: "tags", kind: "list", multi: true, selected: [] },
+    ]);
+    render(layer());
+    const select = await screen.findByLabelText("Choice field tags");
+    expect(select.getAttribute("title")).toMatch(/select more than one/i);
+  });
+
+  it("prefers the field tooltip over the multi-select hint", async () => {
+    vi.mocked(readChoiceFields).mockResolvedValue([
+      { ...FIELDS[0]!, multi: true, tooltip: "Pick your fruit" },
+    ]);
+    render(layer());
+    const select = await screen.findByLabelText("Choice field fruit");
+    expect(select.getAttribute("title")).toBe("Pick your fruit");
   });
 });

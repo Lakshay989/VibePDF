@@ -55,7 +55,7 @@ describe("readFormSummary", () => {
 describe("readTextFields", () => {
   it("marshals id + page and returns the fields", async () => {
     const fields: FormField[] = [
-      { name: "name", rect: [72, 700, 300, 724], value: "", maxLen: null, multiline: false },
+      { name: "name", rect: [72, 700, 300, 724], value: "", maxLen: null, multiline: false, tooltip: null },
     ];
     mockInvoke.mockResolvedValue(fields);
     const out = await readTextFields("doc-1", 0);
@@ -111,7 +111,7 @@ describe("readChoiceFields", () => {
         rect: [72, 700, 250, 724],
         options: [{ export: "chy", label: "Cherry" }],
         selected: ["chy"],
-        multi: false,
+        multi: false, tooltip: null,
       },
     ];
     mockInvoke.mockResolvedValue(fields);

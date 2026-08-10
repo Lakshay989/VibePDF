@@ -109,7 +109,7 @@ export function FormChoicesLayer({
     width: Math.max(rect.width, 40),
     height: Math.max(rect.height, 16),
     border: "1px solid #2563eb",
-    background: "rgba(255,255,255,0.95)",
+    background: "#fff",
     fontSize: `${Math.min(Math.max(rect.height * 0.5, 9), 14)}px`,
     boxSizing: "border-box",
     pointerEvents: "auto",
@@ -128,16 +128,29 @@ export function FormChoicesLayer({
             key={field.name}
             aria-label={`Choice field ${field.name}`}
             multiple={field.multi}
+            title={
+              field.tooltip ??
+              (field.multi ? "Hold \u2318 (Ctrl on Windows) to select more than one" : undefined)
+            }
             value={field.multi ? selected : (selected[0] ?? "")}
             onChange={(e) => {
               const next = field.multi
                 ? Array.from(e.target.selectedOptions, (o) => o.value)
                 : [e.target.value];
+              // The single-select placeholder is not a value: picking it would
+              // commit `[""]`, which `set_choice_field` rejects as "not an option"
+              // (P5 sweep B2). `disabled` blocks it in most browsers; this is the
+              // belt-and-braces half.
+              if (!field.multi && next[0] === "") return;
               commit(field, next);
             }}
             style={selectStyle(rect)}
           >
-            {field.multi ? null : <option value="" />}
+            {field.multi ? null : (
+              <option value="" disabled>
+                — select —
+              </option>
+            )}
             {field.options.map((opt) => (
               <option key={opt.export} value={opt.export}>
                 {opt.label}
