@@ -241,8 +241,12 @@ the values you exported.
 
 ### [ ] C2 — Flatten
 
-**You are in:** `sweep/p5-sweep-filled.pdf`, the snapshot, opened from disk.
-Do this last — it destroys the form.
+**You are in:** your working `sweep/p5-sweep-form.pdf`. Do this last — it
+destroys the form.
+
+Flatten the *working* file, not the snapshot. `p5-sweep-filled.pdf` is the
+escape hatch: leave it untouched and you can always get the interactive form
+back by opening it, however the flatten goes.
 
 1. **Flatten form** → it asks to confirm. Cancel once; check nothing happened.
 2. Confirm, then check:
