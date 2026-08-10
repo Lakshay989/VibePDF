@@ -147,28 +147,95 @@ different type in the popover: **checkbox**, **radio group** (≥2 options),
 
 ## Track C — data interchange
 
-### [ ] C1 — Export form data
-With the form filled (redo your A2–A4 values if you undid them):
-- Export **JSON** → open it: every field, with `name` / `type` / `value`.
-- Export **CSV**, **FDF**, **XFDF** → all four write without error.
-- The push-button from B2 is **absent** from the data; the signature has an empty value.
+> Read this first. Three PDFs are in play, and mixing them up is the only hard
+> part of Track C:
+>
+> | File | What it is |
+> |---|---|
+> | `sweep/p5-sweep-form.pdf` | the one you've been working in — filled, plus whatever you built in Track B |
+> | `sweep/p5-sweep-filled.pdf` | a snapshot of the above, so flatten can't cost you it |
+> | a **regenerated** `p5-sweep-form.pdf` | blank again — the target you import *into* |
+>
+> Every step below opens with which one you should be looking at.
 
-### [ ] C2 — Import form data
-- Regenerate a blank form: `python3 scripts/generate-sweep-form.py`, open it.
-- Import the JSON you exported → every value restored, **form still interactive**.
-- Hand-edit the JSON: change one `name` to garbage, and one `type` to a wrong kind.
-  Import again → the panel **names both**: unmatched, and the type mismatch.
-  Neither is applied; the rest still fill.
+### [ ] C1 — Export form data
+
+**You are in:** your filled `p5-sweep-form.pdf`.
+
+1. Make sure the fields still have values (redo A2–A4 if you undid them).
+2. Field panel → **JSON**. Save into `Sample PDFs/verify/p5-forms/`.
+3. Open that JSON in a text editor and check:
+   - every field is there, with `name`, `type`, `value`
+   - the fields you created in Track B are included
+   - the **push-button is absent** — it holds no value
+   - the **signature is present with an empty value**
+4. Repeat for **CSV**, **FDF**, **XFDF**. All four write without an error.
+
+### [ ] C1 — Snapshot, before going any further
+
+⌘S, then tell me and I'll copy the file to `sweep/p5-sweep-filled.pdf`.
+
+Flatten is destructive and there is no undo once it's saved. Skip this and you
+rebuild your Track B fields by hand if you want to test anything twice.
+
+### [ ] C2 — Import into a blank form
+
+**You are in:** a freshly regenerated, blank `p5-sweep-form.pdf`.
+
+```bash
+python3 scripts/generate-sweep-form.py
+```
+
+Reopen it in the app — it's blank again. Then **Import…** →
+`Sample PDFs/sweep/p5-import-good.json`.
+
+Expect (these numbers were checked against the real importer, not guessed):
+
+- the note reads **`Filled 7 fields`**, and nothing else
+- every built-in field carries its value: `fullName` = Ada Lovelace,
+  `code` = ABCDE, `notes` = two lines, `agree` checked, `colour` = Green,
+  `fruit` = Banana, `tags` = urgent + archive
+- the form is **still interactive** — click into a field and retype
+
+### [ ] C2 — An import that should be partly refused
+
+**You are in:** the same document.
+
+**Import…** → `Sample PDFs/sweep/p5-import-broken.json`.
+
+That's the good file with two deliberate faults: a `ghostField` this form
+doesn't have, and `code` declared a `checkbox` when the form says text. Expect:
+
+- **`Filled 6 fields`** — everything except `code`
+- **`1 not in this form (ghostField)`**
+- **`code: data says checkbox, field is text`**
+- `code` keeps its previous value
+
+A rejected entry is skipped whole, never half-applied. That's the spec's
+"reported, not silently coerced" clause.
+
+### [ ] C2 — Your own round trip
+
+**You are in:** the blank form again — regenerate it first.
+
+Import the **JSON you exported in C1**, not the prepared one. Your Track B
+fields will come back as unmatched: they don't exist in a regenerated blank, and
+reporting them is correct, not a failure. The seven built-ins should return with
+the values you exported.
 
 ### [ ] C2 — Flatten
-Last, on the filled form (it's destructive):
-- **Flatten form** asks for confirmation first.
-- After confirming: values are **visible as page content**, nothing is clickable,
-  no field highlight, form mode is gone.
-- ⌘Z restores the interactive form (in-session undo only).
-- Save the flattened file, reopen it → still flat, still shows the values.
 
----
+**You are in:** `sweep/p5-sweep-filled.pdf`, the snapshot, opened from disk.
+Do this last — it destroys the form.
+
+1. **Flatten form** → it asks to confirm. Cancel once; check nothing happened.
+2. Confirm, then check:
+   - the values are still visible, now as **page content**
+   - nothing is clickable — no field highlight, no cursor change
+   - the **Form mode** button is gone from the top bar
+3. **⌘Z** — the interactive form returns. In-session undo only.
+4. Redo the flatten, ⌘S, close the tab, reopen the file: still flat, values still
+   there. That's the "permanent once saved" contract.
 
 ## Cross-reader check
 

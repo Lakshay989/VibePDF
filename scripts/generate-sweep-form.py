@@ -12,6 +12,11 @@ the two files it works through:
   Sample PDFs/sweep/p5-sweep-xfa.pdf    an XFA-carrying form for A5's degraded
                                         path (XFA and a real AcroForm can't
                                         coexist meaningfully, hence two files).
+  Sample PDFs/sweep/p5-import-good.json    valid data for every built-in field
+  Sample PDFs/sweep/p5-import-broken.json  the same, plus one name that isn't in
+                                        the form and one field given the wrong
+                                        type — so the C2 report has something to
+                                        report without anyone hand-editing JSON.
 
 The output is deliberately NOT a committed fixture: the sweep edits and saves it
 in place, and VibePDF writes next to the file it opened. This script is
@@ -176,8 +181,38 @@ xfa = [
     stream(b"<<", xfa_packet),
 ]
 
+# ── import test data (P5.C2) ────────────────────────────────────────────────
+#
+# Field names must match `sweep` above. The "broken" file exercises both of the
+# spec's reporting clauses in one import: `ghostField` has no counterpart in the
+# form (unmatched), and `code` is declared a checkbox when the form says text
+# (type mismatch). Neither is applied; everything else still fills.
+
+GOOD_DATA = [
+    {"name": "fullName", "type": "text", "value": ["Ada Lovelace"]},
+    {"name": "code", "type": "text", "value": ["ABCDE"]},
+    {"name": "notes", "type": "text", "value": ["First line\nSecond line"]},
+    {"name": "agree", "type": "checkbox", "value": ["Yes"]},
+    {"name": "colour", "type": "radio", "value": ["Green"]},
+    {"name": "fruit", "type": "combo", "value": ["Banana"]},
+    {"name": "tags", "type": "list", "value": ["urgent", "archive"]},
+]
+
+BROKEN_DATA = [
+    *[d for d in GOOD_DATA if d["name"] != "code"],
+    {"name": "code", "type": "checkbox", "value": ["Yes"]},   # form says text
+    {"name": "ghostField", "type": "text", "value": ["nope"]},  # not in the form
+]
+
+
 if __name__ == "__main__":
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    import json
+
+    for name, data in (("p5-import-good.json", GOOD_DATA), ("p5-import-broken.json", BROKEN_DATA)):
+        (OUT_DIR / name).write_text(json.dumps(data, indent=2) + "\n")
+        print(f"wrote {OUT_DIR / name}")
+
     for name, objects in (("p5-sweep-form.pdf", sweep), ("p5-sweep-xfa.pdf", xfa)):
         data = build(objects)
         (OUT_DIR / name).write_bytes(data)
