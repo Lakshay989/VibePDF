@@ -390,7 +390,14 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
         ) : !effectivePages ? (
           <div className="p-4 text-sm text-neutral-500">Reading pages…</div>
         ) : (
-          <div className="flex flex-col items-center gap-4 py-4">
+          // `min-w-min` (min-width: min-content) is load-bearing, not cosmetic.
+          // `items-center` centres a page that is WIDER than this column by
+          // overflowing it equally on both sides — and a scroll container cannot
+          // scroll to negative coordinates, so the left edge of the page becomes
+          // unreachable. Sizing the column to its widest child means centring
+          // never has to overflow: the column itself overflows the scroller, to
+          // the right only, where `overflow-auto` can reach it.
+          <div className="flex min-w-min flex-col items-center gap-4 py-4">
             {effectivePages.map((info) => (
               <PageSlot
                 key={info.pageNumber}

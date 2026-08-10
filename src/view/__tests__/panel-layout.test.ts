@@ -45,6 +45,15 @@ describe("side panel layout contract", () => {
     expect(asideClasses(file)).toMatch(/\bw-(\d+|\[[^\]]+\])/);
   });
 
+  it("the page column is at least as wide as its widest page", () => {
+    // Measured: with `items-center` alone, a 700px page in a 400px scroller put
+    // 148px of the page LEFT of the scroll origin — where `overflow-auto` cannot
+    // reach it — and reported scrollWidth 550, so the browser did not even count
+    // it. `min-w-min` moved that to clippedLeft 0 / scrollWidth 700.
+    const src = read("src/view/PageVirtualizer.tsx");
+    expect(src).toMatch(/className="flex min-w-min flex-col items-center/);
+  });
+
   it("the page container can shrink below its content", () => {
     // Without `min-w-0` the page area refuses to give way and the panels take
     // the whole squeeze — the original bug.
