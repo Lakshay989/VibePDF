@@ -145,21 +145,18 @@ different type in the popover: **checkbox**, **radio group** (≥2 options),
 
 ---
 
-## Unexplained, watch for it
+## Resolved — the list box that vanished once
 
-**A list box rendered as nothing, once.** Form mode was on, the combo box beside
-it rendered fine, and the list was simply absent; it came back after a
-regenerate-and-reopen. No code path was found where that can happen — `size`
-never computes to zero, the select carries an explicit height and a visible
-border, and a thrown error or failed read would have taken the combo with it.
+A list box rendered as nothing, once, with the combo beside it rendering fine.
+No code path was ever found that produces it.
 
-Suspected a stale Fast Refresh state (`form-choices-layer.tsx` had just been
-edited twice in quick succession). Not fixed, because the mechanism is unknown
-and a defensive patch would be a guess.
+**Closed:** a later cold start (full quit and relaunch, not an HMR reload) showed
+the list rendering normally. That was the test written down at the time to tell
+the two cases apart, and it came back on the side of a stale Fast Refresh state
+rather than a defect — `form-choices-layer.tsx` had been edited twice in quick
+succession just before it happened. A dev-mode artifact cannot reach a build.
 
-If it happens again: does it survive a **full app restart**, or only an HMR
-reload? A cold start that still hides the list means it is real and worth
-chasing. HMR-only means it is a dev-mode artifact that cannot reach a build.
+Reopen this if it ever appears on a cold start.
 
 ## Track C — data interchange
 
