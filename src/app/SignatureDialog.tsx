@@ -68,22 +68,38 @@ export function SignatureDialog({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  const sample = (e: ReactPointerEvent<HTMLCanvasElement>): InkPoint => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top, pressure: e.pressure || 0.5 };
-  };
+  // Takes values, not the event. A helper that accepts the event can be called
+  // from inside a state updater — which runs during render, after React has
+  // nulled `currentTarget` — and that is exactly the crash this shipped with.
+  // Requiring the caller to have already read the DOM makes that impossible.
+  const sample = (
+    origin: { left: number; top: number },
+    clientX: number,
+    clientY: number,
+    pressure: number,
+  ): InkPoint => ({
+    x: clientX - origin.left,
+    y: clientY - origin.top,
+    pressure: pressure || 0.5,
+  });
 
   const onDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     // Capture so a stroke that wanders off the pad still lands here, and still
     // ends — without it a pointerup outside the element is never seen.
     e.currentTarget.setPointerCapture?.(e.pointerId);
     drawing.current = true;
-    setStrokes((prev) => [...prev, [sample(e)]]);
+    // Read the event BEFORE handing a closure to setState. React nulls
+    // `currentTarget` as soon as the handler returns, and a state updater runs
+    // later, during render — so `sample(e)` inside the updater dereferences
+    // null and takes the whole tree down. jsdom does not reproduce this (the
+    // flush timing differs), which is exactly why it reached the app.
+    const p = sample(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY, e.pressure);
+    setStrokes((prev) => [...prev, [p]]);
   };
 
   const onMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!drawing.current) return;
-    const p = sample(e);
+    const p = sample(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY, e.pressure);
     setStrokes((prev) => {
       const next = [...prev];
       const last = next[next.length - 1];
