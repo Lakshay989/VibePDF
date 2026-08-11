@@ -17,7 +17,8 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } f
 import { reportError } from "@/app/report-error";
 import type { InkPoint } from "@/tools/ink/ink";
 import { hasInk, type Stroke } from "@/tools/signature/draw";
-import { strokesToPng } from "@/tools/signature/raster";
+import { availableFonts, canvasMeasurer, type FontCandidate } from "@/tools/signature/fonts";
+import { strokesToPng, textToPng } from "@/tools/signature/raster";
 import { useSignatureStore } from "@/state/signature-store";
 
 /** Pad size in CSS pixels. The stored PNG is rasterised independently at a
@@ -35,7 +36,11 @@ export function SignatureDialog({ open, onClose }: Props) {
   const refresh = useSignatureStore((s) => s.refresh);
   const add = useSignatureStore((s) => s.add);
 
+  const [mode, setMode] = useState<"draw" | "type">("draw");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [typed, setTyped] = useState("");
+  const [family, setFamily] = useState<string | null>(null);
+  const [fonts, setFonts] = useState<FontCandidate[]>([]);
   const [saving, setSaving] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
@@ -45,6 +50,19 @@ export function SignatureDialog({ open, onClose }: Props) {
   useEffect(() => {
     if (open) void refresh();
   }, [open, refresh]);
+
+  // Which families this machine can render *this text* in. Re-run as the text
+  // changes: a Latin-only script face is available for "Ada" and not for a name
+  // in another script, and the picker should say so. Before anything is typed,
+  // probe with a stand-in so the menu is populated on arrival.
+  useEffect(() => {
+    if (!open || mode !== "type") return;
+    const found = availableFonts(typed.trim() || "Signature", canvasMeasurer());
+    setFonts(found);
+    setFamily((current) =>
+      current && found.some((f) => f.family === current) ? current : (found[0]?.family ?? null),
+    );
+  }, [open, mode, typed]);
 
   // Live preview. Redrawn from scratch on every change — a signature is a few
   // hundred points, so this is cheaper than tracking incremental damage.
@@ -112,19 +130,22 @@ export function SignatureDialog({ open, onClose }: Props) {
     drawing.current = false;
   };
 
-  const clear = () => setStrokes([]);
+  const clear = () => (mode === "draw" ? setStrokes([]) : setTyped(""));
 
   const save = () => {
     void (async () => {
       setSaving(true);
       try {
-        const png = await strokesToPng(strokes);
-        await add("draw", png);
-        // Keep the dialog open on the library view; clearing the pad is the
-        // signal that the save landed.
-        setStrokes([]);
+        if (mode === "draw") {
+          await add("draw", await strokesToPng(strokes));
+          setStrokes([]);
+        } else {
+          await add("type", await textToPng(typed, family ? { family } : {}));
+          setTyped("");
+        }
+        // Clearing the input is the signal that the save landed.
       } catch (err) {
-        // Leave the strokes alone — a failed save must not lose the drawing.
+        // Leave the input alone — a failed save must not lose the work.
         reportError("Couldn't save the signature", err);
       } finally {
         setSaving(false);
@@ -132,7 +153,9 @@ export function SignatureDialog({ open, onClose }: Props) {
     })();
   };
 
-  const canSave = hasInk(strokes) && !saving;
+  const canSave = (mode === "draw" ? hasInk(strokes) : typed.trim().length > 0) && !saving;
+  // Switching modes keeps both drafts; only an explicit Clear discards one.
+  const clearable = mode === "draw" ? hasInk(strokes) : typed.length > 0;
 
   return (
     <div
@@ -141,7 +164,73 @@ export function SignatureDialog({ open, onClose }: Props) {
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
     >
       <div className="w-[560px] rounded-lg bg-white p-4 shadow-xl dark:bg-neutral-900">
-        <h2 className="mb-2 text-sm font-semibold">Draw a signature</h2>
+        <div className="mb-3 flex items-center gap-1" role="tablist" aria-label="Signature source">
+          {(["draw", "type"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => setMode(m)}
+              className={
+                "rounded px-2 py-1 text-xs capitalize " +
+                (mode === m
+                  ? "bg-blue-600 text-white"
+                  : "border border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700")
+              }
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+
+        {mode === "type" ? (
+          <div className="flex flex-col gap-2">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-xs text-neutral-500">Your name</span>
+              <input
+                aria-label="Signature text"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={60}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                className="w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-xs text-neutral-500">Handwriting font</span>
+              <select
+                aria-label="Handwriting font"
+                value={family ?? ""}
+                onChange={(e) => setFamily(e.target.value)}
+                className="w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+              >
+                {fonts.map((f) => (
+                  <option key={f.family} value={f.family}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {fonts.length === 1 && fonts[0]?.family === "cursive" ? (
+              <p className="text-xs text-amber-700 dark:text-amber-500">
+                No handwriting fonts were found on this machine, so the system default is
+                being used.
+              </p>
+            ) : null}
+            {/* Preview in the chosen family. The saved PNG is rendered
+                independently at 600px, so this is for choosing, not fidelity. */}
+            <div
+              aria-label="Signature preview"
+              style={{ fontFamily: family ? `"${family}", cursive` : "cursive" }}
+              className="flex h-[120px] items-center justify-center overflow-hidden rounded border border-dashed border-neutral-400 bg-white text-4xl text-neutral-900"
+            >
+              {typed.trim() || <span className="text-base text-neutral-400">Type your name</span>}
+            </div>
+          </div>
+        ) : null}
 
         <canvas
           ref={canvasRef}
@@ -152,14 +241,17 @@ export function SignatureDialog({ open, onClose }: Props) {
           onPointerMove={onMove}
           onPointerUp={onUp}
           onPointerCancel={onUp}
-          className="w-full cursor-crosshair rounded border border-dashed border-neutral-400 bg-white touch-none dark:bg-neutral-100"
+          className={
+            "w-full cursor-crosshair rounded border border-dashed border-neutral-400 bg-white touch-none dark:bg-neutral-100 " +
+            (mode === "draw" ? "" : "hidden")
+          }
         />
 
         <div className="mt-3 flex items-center gap-2">
           <button
             type="button"
             onClick={clear}
-            disabled={!hasInk(strokes)}
+            disabled={!clearable}
             className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-neutral-700"
           >
             Clear
@@ -188,7 +280,7 @@ export function SignatureDialog({ open, onClose }: Props) {
           {entries.length === 0 ? (
             <p className="text-xs text-neutral-500">None yet.</p>
           ) : (
-            <ul className="flex flex-col gap-0.5 text-xs">
+            <ul aria-label="Saved signatures" className="flex flex-col gap-0.5 text-xs">
               {entries.map((e) => (
                 <li key={e.id} className="flex items-center gap-2 text-neutral-600 dark:text-neutral-300">
                   <span className="rounded bg-neutral-100 px-1 dark:bg-neutral-800">{e.kind}</span>

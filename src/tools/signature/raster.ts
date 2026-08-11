@@ -122,3 +122,80 @@ export async function strokesToPng(
   if (!blob) throw new Error("could not encode the signature as PNG");
   return new Uint8Array(await blob.arrayBuffer());
 }
+
+
+/** Font size the text is measured at before being scaled to the target. */
+const PROBE_PX = 100;
+
+/** Fractions of the em box used when a browser gives no glyph metrics. */
+const EST_ASCENT = 0.8;
+const EST_DESCENT = 0.2;
+
+export interface TextRasterOptions extends RasterOptions {
+  /** CSS family name. Quoted at use site; pass the bare name. */
+  family?: string;
+}
+
+/**
+ * SPEC: P6-SEC-002 (P6.A3) — render `text` in `family` to a transparent PNG.
+ *
+ * Shares everything structural with `strokesToPng`: the same `createCanvas`
+ * seam, the same `fitToRaster` trim-and-scale, the same never-fill rule. Only
+ * the source of ink differs — glyphs instead of strokes.
+ *
+ * The crop comes from `measureText`'s glyph bounds rather than the advance
+ * width, so a script face with long swashes or a deep descender is not clipped.
+ * Those metrics are widely but not universally implemented; when they are
+ * missing or zero the em-box estimates above stand in, which is loose but never
+ * cuts anything off.
+ */
+export async function textToPng(
+  text: string,
+  {
+    target = TARGET_LONG_EDGE,
+    color = "#111",
+    family = "cursive",
+    createCanvas = () => document.createElement("canvas"),
+  }: TextRasterOptions = {},
+): Promise<Uint8Array> {
+  const line = text.trim();
+  if (line.length === 0) throw new Error("nothing typed");
+
+  const canvas = createCanvas();
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas is unavailable");
+
+  const font = (px: number) => `${px}px "${family}", cursive`;
+  ctx.font = font(PROBE_PX);
+  const m = ctx.measureText(line);
+
+  // Glyph bounds around the text origin (baseline, left edge). `left` grows
+  // leftward, so it is negated to give a box in the same space as the strokes.
+  const left = m.actualBoundingBoxLeft || 0;
+  const right = m.actualBoundingBoxRight || m.width || 0;
+  const ascent = m.actualBoundingBoxAscent || PROBE_PX * EST_ASCENT;
+  const descent = m.actualBoundingBoxDescent || PROBE_PX * EST_DESCENT;
+
+  const width = left + right;
+  if (width <= 0) throw new Error("the font produced no glyphs for this text");
+
+  const fit = fitToRaster(
+    { x: -left, y: -ascent, width, height: ascent + descent },
+    target,
+  );
+  canvas.width = fit.width;
+  canvas.height = fit.height;
+
+  // Setting the canvas size resets the context, so state goes on afterwards.
+  // No fillRect: the surface starts transparent and must stay that way.
+  ctx.font = font(PROBE_PX * fit.scale);
+  ctx.fillStyle = color;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(line, fit.offsetX, fit.offsetY);
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/png"),
+  );
+  if (!blob) throw new Error("could not encode the signature as PNG");
+  return new Uint8Array(await blob.arrayBuffer());
+}

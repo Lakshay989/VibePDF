@@ -16,24 +16,73 @@
 import { describe, expect, it } from "vitest";
 
 import { RASTER_PAD, TARGET_LONG_EDGE, type Stroke } from "@/tools/signature/draw";
-import { strokesToPng } from "@/tools/signature/raster";
+import { strokesToPng, textToPng } from "@/tools/signature/raster";
 
 interface Recorded {
   calls: string[];
   points: Array<{ x: number; y: number }>;
   widths: number[];
   size: { width: number; height: number };
+  /** Every value assigned to ctx.font, in order. */
+  fonts: string[];
+  /** Arguments of each fillText call. */
+  texts: Array<{ text: string; x: number; y: number }>;
 }
 
+/** Glyph metrics the stub reports. `null` mimics an engine that omits them. */
+interface StubMetrics {
+  width: number;
+  left: number | null;
+  right: number | null;
+  ascent: number | null;
+  descent: number | null;
+}
+
+const DEFAULT_METRICS: StubMetrics = {
+  width: 300,
+  left: 0,
+  right: 300,
+  ascent: 70,
+  descent: 20,
+};
+
 /** A canvas that records instructions instead of rasterising them. */
-function recorder(): { createCanvas: () => HTMLCanvasElement; rec: Recorded } {
-  const rec: Recorded = { calls: [], points: [], widths: [], size: { width: 0, height: 0 } };
+function recorder(metrics: StubMetrics = DEFAULT_METRICS): {
+  createCanvas: () => HTMLCanvasElement;
+  rec: Recorded;
+} {
+  const rec: Recorded = {
+    calls: [],
+    points: [],
+    widths: [],
+    size: { width: 0, height: 0 },
+    fonts: [],
+    texts: [],
+  };
 
   const ctx = {
     lineCap: "",
     lineJoin: "",
     strokeStyle: "",
     fillStyle: "",
+    textBaseline: "",
+    set font(v: string) {
+      rec.fonts.push(v);
+    },
+    get font() {
+      return rec.fonts[rec.fonts.length - 1] ?? "";
+    },
+    measureText: () => ({
+      width: metrics.width,
+      actualBoundingBoxLeft: metrics.left,
+      actualBoundingBoxRight: metrics.right,
+      actualBoundingBoxAscent: metrics.ascent,
+      actualBoundingBoxDescent: metrics.descent,
+    }),
+    fillText: (text: string, x: number, y: number) => {
+      rec.calls.push("fillText");
+      rec.texts.push({ text, x, y });
+    },
     set lineWidth(v: number) {
       rec.widths.push(v);
     },
@@ -168,5 +217,91 @@ describe("strokesToPng", () => {
     const png = await strokesToPng(squiggle, { createCanvas });
     expect(png).toBeInstanceOf(Uint8Array);
     expect(Array.from(png)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("textToPng", () => {
+  it("never fills a background — same transparency rule as the pad", async () => {
+    const { createCanvas, rec } = recorder();
+    await textToPng("Ada Lovelace", { createCanvas, family: "Snell Roundhand" });
+
+    expect(rec.calls).not.toContain("fillRect");
+    expect(rec.calls).toContain("fillText");
+  });
+
+  it("draws in the family it was given, with the generic as a safety net", async () => {
+    const { createCanvas, rec } = recorder();
+    await textToPng("Ada", { createCanvas, family: "Zapfino" });
+
+    expect(rec.fonts.every((f) => f.includes('"Zapfino"'))).toBe(true);
+    // If Zapfino vanished between detection and draw, cursive still beats a
+    // silent Helvetica.
+    expect(rec.fonts.every((f) => f.includes("cursive"))).toBe(true);
+  });
+
+  it("sizes the surface from the glyph bounds, long edge at the target", async () => {
+    const { createCanvas, rec } = recorder();
+    await textToPng("Ada", { createCanvas });
+
+    // 300 wide vs 90 tall → width is the long edge.
+    expect(rec.size.width).toBe(TARGET_LONG_EDGE);
+    expect(rec.size.height).toBeLessThan(rec.size.width);
+  });
+
+  it("crops to the glyphs, not the advance width", async () => {
+    // A swash face whose ink starts left of the origin and overshoots the
+    // advance: cropping by `width` alone would clip both ends.
+    const { createCanvas, rec } = recorder({
+      width: 200,
+      left: 40,
+      right: 260,
+      ascent: 70,
+      descent: 20,
+    });
+    await textToPng("Ada", { createCanvas });
+
+    const drawn = rec.texts[0]!;
+    // The origin sits `left` in from the padded edge, so the leftward swash
+    // lands exactly at the padding rather than off-canvas.
+    expect(drawn.x).toBeGreaterThan(RASTER_PAD);
+  });
+
+  it("falls back to em-box estimates when the engine reports no glyph metrics", async () => {
+    const { createCanvas, rec } = recorder({
+      width: 300,
+      left: null,
+      right: null,
+      ascent: null,
+      descent: null,
+    });
+    await textToPng("Ada", { createCanvas });
+
+    // Loose, but nothing is clipped and nothing divides by zero.
+    expect(rec.size.width).toBe(TARGET_LONG_EDGE);
+    expect(rec.size.height).toBeGreaterThan(2 * RASTER_PAD);
+  });
+
+  it("refuses empty or whitespace-only text", async () => {
+    const { createCanvas } = recorder();
+    await expect(textToPng("", { createCanvas })).rejects.toThrow(/nothing typed/);
+    await expect(textToPng("   \n\t ", { createCanvas })).rejects.toThrow(/nothing typed/);
+  });
+
+  it("refuses when the font produced no glyphs at all", async () => {
+    // Zero-width text is what a face with no coverage for the script gives.
+    const { createCanvas } = recorder({ width: 0, left: 0, right: 0, ascent: 0, descent: 0 });
+    await expect(textToPng("आदित्य", { createCanvas })).rejects.toThrow(/no glyphs/);
+  });
+
+  it("trims surrounding whitespace before drawing", async () => {
+    const { createCanvas, rec } = recorder();
+    await textToPng("  Ada  ", { createCanvas });
+    expect(rec.texts[0]!.text).toBe("Ada");
+  });
+
+  it("surfaces a missing 2D context", async () => {
+    const createCanvas = () =>
+      ({ getContext: () => null, width: 0, height: 0 }) as unknown as HTMLCanvasElement;
+    await expect(textToPng("Ada", { createCanvas })).rejects.toThrow(/canvas is unavailable/);
   });
 });

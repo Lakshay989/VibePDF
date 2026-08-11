@@ -6,19 +6,31 @@
 // sends, and that a failure does not cost you the drawing.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/tools/signature/raster", () => ({
   strokesToPng: vi.fn(),
+  textToPng: vi.fn(),
+}));
+// Font detection needs a canvas to measure with; jsdom has none, so the set of
+// available families is supplied directly.
+vi.mock("@/tools/signature/fonts", async (orig) => ({
+  ...(await orig<typeof import("@/tools/signature/fonts")>()),
+  canvasMeasurer: () => () => 0,
+  availableFonts: vi.fn(() => [
+    { family: "Snell Roundhand", label: "Snell Roundhand" },
+    { family: "Segoe Script", label: "Segoe Script" },
+  ]),
 }));
 vi.mock("@/app/report-error", () => ({ reportError: vi.fn() }));
 
 import { reportError } from "@/app/report-error";
 import { SignatureDialog } from "@/app/SignatureDialog";
 import { useSignatureStore } from "@/state/signature-store";
-import { strokesToPng } from "@/tools/signature/raster";
+import { strokesToPng, textToPng } from "@/tools/signature/raster";
 
 const mockPng = vi.mocked(strokesToPng);
+const mockText = vi.mocked(textToPng);
 const mockReport = vi.mocked(reportError);
 
 const refresh = vi.fn().mockResolvedValue(undefined);
@@ -36,6 +48,7 @@ const draw = (pad: HTMLElement) => {
 beforeEach(() => {
   useSignatureStore.setState({ entries: [], loading: false, refresh, add } as never);
   mockPng.mockResolvedValue(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]));
+  mockText.mockResolvedValue(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]));
   vi.clearAllMocks();
 });
 afterEach(cleanup);
@@ -117,11 +130,82 @@ describe("SignatureDialog", () => {
     render(dialog());
 
     expect(screen.getByText(/Saved signatures \(2\)/)).toBeTruthy();
-    expect(screen.getByText("type")).toBeTruthy();
+    // Scoped to the list: "type" is also the label of the mode-switch button.
+    const list = screen.getByLabelText("Saved signatures");
+    expect(within(list).getByText("type")).toBeTruthy();
+    expect(within(list).getByText("draw")).toBeTruthy();
   });
 
   it("reloads the library when opened", async () => {
     render(dialog());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  // SPEC: P6-SEC-002 (P6.A3) — typed signatures.
+  it("switches to Type and offers the detected fonts", async () => {
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+
+    expect(screen.getByLabelText("Signature text")).toBeTruthy();
+    const picker = (await screen.findByLabelText("Handwriting font")) as HTMLSelectElement;
+    // "several handwriting-style fonts", and the user picks — the spec's words.
+    expect(picker.options.length).toBeGreaterThan(1);
+  });
+
+  it("keeps Save disabled until something is typed", async () => {
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Signature text"), { target: { value: "Ada" } });
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("will not save whitespace as a signature", () => {
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+    fireEvent.change(screen.getByLabelText("Signature text"), { target: { value: "   " } });
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("saves typed text with the chosen font, as a type signature", async () => {
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+    fireEvent.change(screen.getByLabelText("Signature text"), { target: { value: "Ada" } });
+    fireEvent.change(await screen.findByLabelText("Handwriting font"), {
+      target: { value: "Segoe Script" },
+    });
+    fireEvent.click(screen.getByText("Save to library"));
+
+    await waitFor(() => expect(add).toHaveBeenCalledTimes(1));
+    expect(add.mock.calls[0]![0]).toBe("type");
+    const [text, opts] = mockText.mock.calls[0]!;
+    expect(text).toBe("Ada");
+    expect(opts).toMatchObject({ family: "Segoe Script" });
+  });
+
+  it("switching modes does not discard the other draft", () => {
+    render(dialog());
+    draw(screen.getByLabelText("Signature pad"));
+
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+    fireEvent.change(screen.getByLabelText("Signature text"), { target: { value: "Ada" } });
+    fireEvent.click(screen.getByRole("tab", { name: "draw" }));
+
+    // The drawing survived the round trip — only Clear discards.
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+    expect((screen.getByLabelText("Signature text") as HTMLInputElement).value).toBe("Ada");
+  });
+
+  it("keeps the text when a typed save fails", async () => {
+    mockText.mockRejectedValue(new Error("no glyphs"));
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "type" }));
+    fireEvent.change(screen.getByLabelText("Signature text"), { target: { value: "Ada" } });
+    fireEvent.click(screen.getByText("Save to library"));
+
+    await waitFor(() => expect(mockReport).toHaveBeenCalled());
+    expect((screen.getByLabelText("Signature text") as HTMLInputElement).value).toBe("Ada");
   });
 });

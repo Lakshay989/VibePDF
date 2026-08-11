@@ -3990,6 +3990,40 @@ reason in a comment.
 
 ---
 
+## P6.A3 — Type signature (SPEC P6-SEC-002)
+
+No `npm install` / `cargo add`, no Rust changes, no new IPC — A1's
+`signatures_add` still takes the PNG. **No fonts bundled**: Option A (system
+fonts, detected at runtime) was the approved route, so nothing was downloaded.
+
+Verification gates + tests:
+
+```
+npx vitest run src/tools/signature/__tests__/fonts.test.ts    # 9 ok
+npx vitest run src/tools/signature/__tests__/raster.test.ts   # 18 ok (9 new for textToPng)
+npx vitest run src/app/__tests__/SignatureDialog.test.tsx     # 14 ok (6 new for Type mode)
+npm run check                                                 # clean after one exactOptionalPropertyTypes fix
+npm run test                                                  # 563 passed
+```
+
+`npm run test:rust` not re-run — no Rust file touched.
+
+Two things worth remembering:
+
+- `exactOptionalPropertyTypes: true` rejects `{ family: undefined }`. Omit the
+  key instead: `family ? { family } : {}`.
+- Adding the "type" mode button broke an existing assertion —
+  `getByText("type")` had been unambiguous and now matched both the button and a
+  library badge. Fixed by scoping to the list via `within(getByLabelText("Saved
+  signatures"))`, and by giving the list the label it should always have had.
+  The test was too loose from the start; the new UI only exposed it.
+
+Not covered by any test, unchanged from A2: that a real 2D context turns the
+recorded draw calls into the expected pixels. Decoding a saved PNG confirms it —
+the helper used for A2 works on typed signatures too.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

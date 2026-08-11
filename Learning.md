@@ -8659,6 +8659,67 @@ and under vitest there is no canvas at all.
 
 ---
 
+## P6.A3 — asking a machine what fonts it has, when it will not tell you
+
+### Problem
+Render a typed name in "one of several handwriting-style fonts", user's choice.
+The repo bundles no handwriting fonts, and the decision was to use system ones —
+which raises the question the whole step turns on: which of them exist here?
+
+### Concepts learned
+- **A missing font is not an error, it is a substitution.** `ctx.font = '48px
+  "Zapfino"'` on a machine without Zapfino does not throw, warn, or return
+  false. It silently renders Helvetica. Offering a picker built from a hardcoded
+  list would therefore let someone choose a font they will not get, and never
+  find out until they looked at the saved image. Nothing in the API tells you;
+  you have to infer it.
+- **Infer it by measuring.** Ask for `"Family", serif` and for plain `serif`; if
+  the family resolved, the glyph advances almost certainly differ. Identical
+  width is the tell that the request fell through. Two sentinels (serif and
+  monospace), because a family could coincidentally match one generic's metrics
+  but not both.
+- **Probe with the real input, not a sample.** Detection runs against the text
+  the user actually typed. A Latin-only script face "exists" by any name-based
+  check, but has no glyphs for a name in Devanagari — it falls back
+  per-character and measures like the fallback, so measuring the real string
+  reports it missing, which is the right answer. A canned probe string would
+  have offered the font and produced tofu.
+- **Never leave the picker empty, never substitute silently.** When no candidate
+  is detected the list falls back to the CSS generic `cursive` — labelled
+  "Default handwriting", with a note saying none were found. The user still gets
+  a working feature and an accurate account of what they are getting. Those two
+  are not in tension; hiding the fallback would be.
+- **Crop typed text by glyph bounds, not the advance width.**
+  `actualBoundingBoxLeft/Right/Ascent/Descent` describe the ink; `width`
+  describes layout. Script faces routinely overshoot their advance with swashes
+  and deep descenders, so cropping by `width` clips exactly the fonts this
+  feature exists to use. Those metrics are widely but not universally
+  implemented, so em-box estimates stand in — loose, never clipping.
+- **The seam paid for itself immediately.** A2 added `createCanvas` so a
+  recording stub could assert what gets drawn. A3 reused it unchanged for
+  `textToPng`, and added a second seam of the same shape (`MeasureFn`) for font
+  detection. Both are untestable-by-nature operations reduced to injectable
+  functions, and both are now covered without a canvas.
+- **A new control can break an old test without breaking the code.** Adding a
+  "type" mode button made `getByText("type")` ambiguous — it now matched the
+  button and the library entry's badge. The fix was to scope the query to the
+  list (and label the list, which it should have had anyway), not to rename
+  anything. Worth recognising the shape: a test failure that is really a query
+  that was always too loose.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src/tools/signature/fonts.ts` | Candidate families, width-comparison detection, generic fallback. |
+| `src/tools/signature/raster.ts` | `textToPng` — glyph-bounds crop, sharing A2's fit and canvas seam. |
+| `src/app/SignatureDialog.tsx` | Draw / Type mode switch, text field, font picker, live preview. |
+
+### Further reading
+- `TextMetrics.actualBoundingBox*` — MDN; note the support caveats.
+- The width-comparison font-detection trick predates the CSS Font Loading API and still outlives it for *system* fonts, which `document.fonts.check()` reports unreliably.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
