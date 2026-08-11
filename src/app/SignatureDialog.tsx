@@ -223,8 +223,24 @@ export function SignatureDialog({ open, onClose }: Props) {
             {/* Preview in the chosen family. The saved PNG is rendered
                 independently at 600px, so this is for choosing, not fidelity. */}
             <div
+              // Backspacing used to leave ghosts of the deleted glyphs, which
+              // cleared as soon as the font changed. Script faces paint ink well
+              // outside their layout box — Zapfino's swashes especially — and a
+              // shrinking string invalidates the layout rect, not the larger ink
+              // rect, so the overhang stayed on screen.
+              //
+              // `contain: paint` is the honest fix: the box already clips with
+              // overflow-hidden, so promising the engine that nothing paints
+              // outside it is true, and it makes the invalidation correct. The
+              // key is the belt to that braces — any change to the text or the
+              // family yields a fresh node, which is exactly the re-layout that
+              // was observed to clear the artifact.
+              key={`${family ?? "none"}:${typed}`}
               aria-label="Signature preview"
-              style={{ fontFamily: family ? `"${family}", cursive` : "cursive" }}
+              style={{
+                fontFamily: family ? `"${family}", cursive` : "cursive",
+                contain: "paint",
+              }}
               className="flex h-[120px] items-center justify-center overflow-hidden rounded border border-dashed border-neutral-400 bg-white text-4xl text-neutral-900"
             >
               {typed.trim() || <span className="text-base text-neutral-400">Type your name</span>}
