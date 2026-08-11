@@ -8603,6 +8603,62 @@ passing. Infrastructure, in the literal sense — the part that holds the parts.
 
 ---
 
+## P6.A2 — putting the untestable part where it can do least harm
+
+### Problem
+Capture a drawn signature "with smoothing" and save it to the library. The
+library (A1) stores PNG bytes, so somewhere between the pointer events and the
+IPC call, strokes have to become an image. In a browser that means a canvas —
+and under vitest there is no canvas at all.
+
+### Concepts learned
+- **Reuse the smoothing that already exists.** `tools/ink/ink.ts::smoothInk`
+  (simplify away sub-1pt jitter, then resample a Catmull-Rom spline at even
+  spacing) was written for P3-ANN-005 and is exactly what "with smoothing"
+  means here. Writing a second smoother would have been two implementations of
+  one idea, drifting apart at the first bug fix.
+- **When part of a feature cannot be tested, shrink it.** jsdom's
+  `getContext("2d")` returns null; the `canvas` package is a native build this
+  project does not carry for one drawing routine. So the untestable surface was
+  made as small as it could be: every *decision* — bounding box, trim, scale,
+  aspect ratio, what counts as ink — moved into `draw.ts` and is unit-tested,
+  and `raster.ts` became a transcription of that fit onto a context, with no
+  branch worth asserting. The honest framing is not "the rasteriser is tested"
+  but "there is almost nothing in the rasteriser to be wrong".
+- **Say which properties rest on manual verification.** Two things no test here
+  can see: that the background stays transparent, and that the crop is tight.
+  Both are written at the top of `raster.ts` and in the acceptance check, rather
+  than left implicit for someone to discover when a signature turns up with a
+  white box behind it.
+- **Degenerate geometry is a design case, not an edge case to guard at the call
+  site.** A single-point stroke is a deliberate dot; a perfectly straight line
+  has a zero-height box. Both reach `fitToRaster`, where `longest === 0` would
+  make `scale` Infinity. Handling them *inside* the pure function — dot renders
+  1:1, line scales by its other dimension — means no caller has to remember.
+- **A failed save must not cost the drawing.** The catch leaves `strokes`
+  untouched, so a transient encoder failure is a retry rather than starting
+  over. Cheap to write, and the kind of thing only noticed when it is missing.
+- **Quiet a noisy stub rather than living with it.** jsdom logs a ten-line "Not
+  implemented" trace every time a component calls `getContext`. The component
+  already handled the null correctly, so the behaviour was right and only the
+  output was wrong — and that output buries real failures. A null-returning stub
+  in `test-setup.ts` preserves the semantics and clears the noise, alongside the
+  PointerEvent and DOMMatrix stubs already there for the same reason.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src/tools/signature/draw.ts` | Pure geometry: bounds, trim-and-scale fit, projection, `hasInk`. |
+| `src/tools/signature/raster.ts` | The canvas shim — deliberately thin, explicitly untested. |
+| `src/app/SignatureDialog.tsx` | Pad, Clear, Save, library list. Structured so A3/A4 slot in as modes. |
+| `src/app/MarkupToolbar.tsx` | The **Sign** button; owns the dialog, since the library is document-independent. |
+| `src/test-setup.ts` | Quiet `getContext` stub. |
+
+### Further reading
+- Catmull-Rom splines — see the P3-ANN-005 notes for why interpolating beats approximating for ink.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

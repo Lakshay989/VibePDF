@@ -83,6 +83,19 @@ if (typeof (globalThis as { pdfjsWorker?: unknown }).pdfjsWorker === "undefined"
   (globalThis as unknown as { pdfjsWorker: unknown }).pdfjsWorker = worker;
 }
 
+// jsdom has no 2D canvas — `getContext` is a stub that logs a multi-line
+// "Not implemented" error to stderr and then returns null. Components that
+// draw already guard on the null (the signature pad, P6.A2), so the behaviour
+// is right; it is only the noise that is wrong, and it buries real failures in
+// the output. Returning null quietly preserves what jsdom already does.
+//
+// If a test ever needs to *read pixels back*, this is the line to revisit —
+// that needs the `canvas` npm package (a native build), which is why the
+// rasteriser is unit-tested through its pure geometry instead.
+if (typeof HTMLCanvasElement !== "undefined") {
+  HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
+}
+
 // Marker so TS treats this file as a module (top-level `await` requires
 // it). Adds no runtime behaviour.
 export {};

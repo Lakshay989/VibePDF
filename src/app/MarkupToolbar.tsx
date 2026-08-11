@@ -6,9 +6,10 @@
 // button collapses the page text selection before the click handler runs, so we
 // suppress it to keep the selection alive.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
+import { SignatureDialog } from "@/app/SignatureDialog";
 import { addTextMarkup, clearTextMarkup } from "@/ipc/annotations";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -43,6 +44,11 @@ const COLORS = [
 ];
 
 export function MarkupToolbar({ documentId }: { documentId: string }) {
+  // SPEC: P6-SEC-001 (P6.A2) — the signature library is document-independent
+  // (it writes to app data, not to the open PDF), so this toolbar owns the
+  // dialog outright instead of threading a callback through PdfViewer the way
+  // the page-operation dialogs do.
+  const [signOpen, setSignOpen] = useState(false);
   const color = useToolStore((s) => s.options.color);
   const opacity = useToolStore((s) => s.options.opacity);
   const setOptions = useToolStore((s) => s.setOptions);
@@ -446,6 +452,16 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
       >
         Add Link
       </button>
+      <button
+        type="button"
+        onClick={() => setSignOpen(true)}
+        title="Draw a signature and save it to your library"
+        aria-label="Signatures"
+        className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+      >
+        Sign
+      </button>
+      <SignatureDialog open={signOpen} onClose={() => setSignOpen(false)} />
       <button
         type="button"
         onClick={() => setActiveTool(createFieldActive ? null : "create-text-field")}

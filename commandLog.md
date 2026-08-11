@@ -3959,6 +3959,37 @@ each anchor before mutating, or write after each step.
 
 ---
 
+## P6.A2 — Draw signature (SPEC P6-SEC-001)
+
+No `npm install` / `cargo add`, and **no Rust changes at all** — A1's
+`signatures_add` already took PNG bytes, so this step is frontend-only. No new
+IPC command. No fixture (nothing opens a PDF).
+
+Verification gates + tests:
+
+```
+npx vitest run src/tools/signature/__tests__/draw.test.ts        # 11 ok
+npx vitest run src/app/__tests__/SignatureDialog.test.tsx        # 8 ok
+npx vitest run src/view/__tests__/render-page.test.ts            # re-run after the getContext stub — still ok
+npm run check                                                    # clean
+npm run test                                                     # 110 files, 529 passed
+```
+
+`npm run test:rust` not re-run: no Rust file was touched this step.
+
+**Not covered by any of the above:** `src/tools/signature/raster.ts`. jsdom has
+no canvas, so the rasteriser cannot execute under vitest. Its correctness rests
+on the acceptance check — open the stored PNG from
+`~/Library/Application Support/dev.vibepdf/signatures/` and confirm a
+transparent background and a tight crop.
+
+One test was wrong before the code was: the "pads without clipping" assertion
+used `toBeCloseTo` (0.005 tolerance) against a canvas size that is rounded to
+whole pixels, so it demanded fractional canvases. Relaxed to ±0.5px with the
+reason in a comment.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`
