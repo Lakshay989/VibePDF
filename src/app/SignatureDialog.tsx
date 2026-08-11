@@ -23,29 +23,16 @@ import type { InkPoint } from "@/tools/ink/ink";
 import { hasInk, type Stroke } from "@/tools/signature/draw";
 import { availableFonts, canvasMeasurer, type FontCandidate } from "@/tools/signature/fonts";
 import { imageToPng, strokesToPng, textToPng, type ImageRaster } from "@/tools/signature/raster";
+import { signatureStamp } from "@/tools/stamp/stamps";
 import { useSignatureStore } from "@/state/signature-store";
+import { useStampStore } from "@/state/stamp-store";
+import { useToolStore } from "@/state/tool-store";
+import { bytesToDataUrl } from "@/view/file-data-url";
 
 /** Pad size in CSS pixels. The stored PNG is rasterised independently at a
  *  fixed long edge, so this is a comfort choice, not a quality one. */
 const PAD_W = 480;
 const PAD_H = 180;
-
-/**
- * PNG bytes → a `data:` URL for the preview.
- *
- * Chunked because `String.fromCharCode(...bytes)` spreads every byte into the
- * argument list, which overflows the stack well below the size of a 600px
- * signature. A data URL rather than an object URL for the reason
- * `view/file-data-url.ts` already gives: nothing to revoke.
- */
-function pngDataUrl(bytes: Uint8Array): string {
-  const CHUNK = 0x8000;
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return `data:image/png;base64,${btoa(binary)}`;
-}
 
 interface Props {
   open: boolean;
@@ -56,6 +43,10 @@ export function SignatureDialog({ open, onClose }: Props) {
   const entries = useSignatureStore((s) => s.entries);
   const refresh = useSignatureStore((s) => s.refresh);
   const add = useSignatureStore((s) => s.add);
+  const thumbs = useSignatureStore((s) => s.thumbs);
+  const loadThumb = useSignatureStore((s) => s.loadThumb);
+  const arm = useStampStore((s) => s.arm);
+  const setActiveTool = useToolStore((s) => s.setActiveTool);
 
   const [mode, setMode] = useState<"draw" | "type" | "image">("draw");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -79,6 +70,14 @@ export function SignatureDialog({ open, onClose }: Props) {
   useEffect(() => {
     if (open) void refresh();
   }, [open, refresh]);
+
+  // P6.A5a — thumbnails for the picker. A row of kinds and dates is not
+  // something anyone can choose a signature from; the whole point of the list
+  // is to recognise your own handwriting. Each is fetched once and cached.
+  useEffect(() => {
+    if (!open) return;
+    for (const e of entries) void loadThumb(e.id);
+  }, [open, entries, loadThumb]);
 
   // Which families this machine can render *this text* in. Re-run as the text
   // changes: a Latin-only script face is available for "Ada" and not for a name
@@ -128,7 +127,7 @@ export function SignatureDialog({ open, onClose }: Props) {
       .then((res) => {
         if (cancelled) return;
         setImaged(res);
-        setPreview(pngDataUrl(res.png));
+        setPreview(bytesToDataUrl(res.png));
         setProblem(null);
       })
       .catch((err: unknown) => {
@@ -191,6 +190,15 @@ export function SignatureDialog({ open, onClose }: Props) {
 
   const onUp = () => {
     drawing.current = false;
+  };
+
+  // SPEC: P6-SEC-004 (P6.A5a) — arm a saved signature and get out of the way.
+  // Placement is a click on the page, so the dialog has to close for the user
+  // to make it; leaving it open would just be a modal in front of the target.
+  const place = (id: string) => {
+    arm(signatureStamp(id));
+    setActiveTool("stamp");
+    onClose();
   };
 
   const clearImage = () => {
@@ -461,13 +469,47 @@ export function SignatureDialog({ open, onClose }: Props) {
           {entries.length === 0 ? (
             <p className="text-xs text-neutral-500">None yet.</p>
           ) : (
-            <ul aria-label="Saved signatures" className="flex flex-col gap-0.5 text-xs">
+            <ul aria-label="Saved signatures" className="flex flex-col gap-1 text-xs">
               {entries.map((e) => (
-                <li key={e.id} className="flex items-center gap-2 text-neutral-600 dark:text-neutral-300">
+                <li
+                  key={e.id}
+                  className="flex items-center gap-2 rounded border border-neutral-200 p-1 text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+                >
+                  {/* Checkerboard here too — these are transparent PNGs, and on
+                      a white row a transparent one looks identical to a white
+                      one. */}
+                  <span
+                    className="flex h-10 w-28 shrink-0 items-center justify-center overflow-hidden rounded"
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(45deg,#ddd 25%,transparent 25%)," +
+                        "linear-gradient(-45deg,#ddd 25%,transparent 25%)," +
+                        "linear-gradient(45deg,transparent 75%,#ddd 75%)," +
+                        "linear-gradient(-45deg,transparent 75%,#ddd 75%)",
+                      backgroundSize: "10px 10px",
+                      backgroundPosition: "0 0, 0 5px, 5px -5px, -5px 0",
+                    }}
+                  >
+                    {thumbs[e.id] ? (
+                      <img
+                        src={thumbs[e.id]}
+                        alt={`${e.kind} signature`}
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : null}
+                  </span>
                   <span className="rounded bg-neutral-100 px-1 dark:bg-neutral-800">{e.kind}</span>
                   <span className="tabular-nums text-neutral-400">
                     {new Date(e.createdAt).toLocaleString()}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => place(e.id)}
+                    aria-label={`Place ${e.kind} signature`}
+                    className="ml-auto rounded bg-blue-600 px-2 py-1 text-xs text-white"
+                  >
+                    Place
+                  </button>
                 </li>
               ))}
             </ul>

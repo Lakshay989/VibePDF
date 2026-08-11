@@ -1789,6 +1789,67 @@ pub async fn pdf_add_image_stamp(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P6-SEC-004 (P6.A5a) — place a stored signature on the page as a
+/// `/Stamp`, aspect-correct around `(x, y)` at `height` points tall.
+///
+/// Takes a library **id**, not a path. Only the command layer knows where the
+/// library lives (P6.A1), and shipping ~30 KB of PNG out to the frontend purely
+/// to hand it straight back would cost 4× that as JSON for no benefit.
+///
+/// Reuses `ImageStampEdit` wholesale: the PNG's alpha becomes an `/SMask`, so a
+/// transparent signature composites rather than arriving in a white box. It
+/// reads back as kind `"stamp"` and inherits list/delete/undo.
+///
+/// The library lock is taken and dropped before the actor map is touched, so the
+/// two locks are never held at the same time.
+///
+/// This is the stamp half of P6-SEC-004. The other half — writing into an
+/// existing `/Sig` field as a PKCS#7 signature — needs certificate signing
+/// (P6.B1) and is not implemented; the frontend declines that case rather than
+/// stamping a picture over a signature field, which would look signed without
+/// being signed.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_place_signature(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    x: f32,
+    y: f32,
+    height: f32,
+    signature_id: String,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let png = {
+        let dir = crate::commands::signatures::library_dir(&app)?;
+        let _guard = state
+            .signatures_lock
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("signatures lock poisoned: {e}")))?;
+        crate::settings::signatures::bytes(&dir, &signature_id)?
+    };
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_image_stamp_request(page, x, y, height, png, None, opacity)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P3-ANN-007 — add a measurement annotation (`kind` =
 /// distance|perimeter|area) through `points` (PDF points, 0-based `page`). The
 /// `label` is the pre-computed value (computed against the user's calibration).

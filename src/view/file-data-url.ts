@@ -27,6 +27,24 @@ function imageMime(path: string): string {
   }
 }
 
+/**
+ * Encode raw bytes as a `data:` URL. Used where the bytes came from somewhere
+ * other than a file path — a signature fetched from the library (P6.A4/A5a),
+ * or one just rasterised in memory.
+ *
+ * Chunked because `String.fromCharCode(...bytes)` spreads every byte into the
+ * argument list, which overflows the stack well below the size of a signature
+ * PNG.
+ */
+export function bytesToDataUrl(bytes: Uint8Array, mime = "image/png"): string {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
 /** Read `path` and encode it as a `data:` URL suitable for an <img> `src`. */
 export async function fileToDataUrl(path: string): Promise<string> {
   const bytes = await readFile(path);

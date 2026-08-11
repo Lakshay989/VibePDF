@@ -35,6 +35,13 @@ export default defineConfig(async () => ({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // Every frontend test lives under `src/`. Saying so explicitly matters:
+    // vitest's default include is repo-wide, and an agent worktree under
+    // `.claude/worktrees/` is a full second checkout — so the suite silently
+    // collected a stale copy of every test file, roughly doubling the reported
+    // count. Worse, the `@` alias still resolved to *this* `src`, so old tests
+    // ran against new source and failed for reasons that no longer existed.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     // PDF.js explicitly tells you to use the `legacy` build in Node-ish
     // environments (jsdom counts). The default ESM build assumes a
     // browser runtime with DOMMatrix, `Uint8Array.prototype.toHex`,

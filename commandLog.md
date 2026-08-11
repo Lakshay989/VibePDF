@@ -4068,6 +4068,77 @@ the recorded calls.
 
 ---
 
+## P6.A5a — Place signature as a stamp (SPEC P6-SEC-004, first clause)
+
+No `npm install`, no `cargo add`, **no new PDF primitive**. `ImageStampEdit`
+(P3.C3b) already embeds a PNG with its alpha as an `/SMask` and returns an
+inverse, so the backend change is one command that resolves a library id to
+bytes and calls it.
+
+**A5b is not built.** The spec line's second clause — a PKCS#7 signature into a
+`/Sig` field — needs P6.B1. `steps/P6.md:113` orders A5 after B1 and B2, which
+is why the step splits. Clicking a signature field declines rather than stamping
+over it.
+
+Fixture generation (both git-ignored, under `Sample PDFs/signatures/`):
+
+```
+python3 gen_sigfield_pdf.py      # a hand-written PDF with 2 /Sig fields + 1 /Tx
+qlmanage -t -s 400 -o "$T" "Sample PDFs/signatures/sigfield-form.pdf"
+```
+
+The PDF is hand-written on purpose: one produced by our own P5.B2 field writer
+would only prove the code agrees with itself. `qlmanage` renders it through
+CoreGraphics — a parser sharing no code with ours — and it came out correct.
+
+Verification gates + tests:
+
+```
+cargo test --test signature_place                       # 4 ok
+cargo test --test signature_place -- --include-ignored  # 5 ok (writes the artifact)
+npm run check                                           # clean after one TS annotation fix
+npm run test                                            # 624 passed (115 files)
+npm run test:rust                                       # green
+```
+
+Artifact for the cross-reader ritual: `Sample PDFs/vibepdf-verify-signature.pdf`
+(two placements, one at full and one at half opacity).
+
+Mutation checks on the safety-critical guard:
+
+```
+# A. signatureFieldAt stops checking /FT      => 1 failed (ignores other kinds)
+# B. the decline reports but places anyway    => 1 failed (writes nothing)
+```
+
+Each failed only the test meant to catch it.
+
+**One config fix, and it mattered:** `npm run test` was silently collecting a
+second copy of every test file from `.claude/worktrees/`, an agent worktree that
+is a full checkout. The `@` alias still resolved to the main `src`, so stale
+tests ran against new source and produced unhandled rejections for reasons that
+no longer existed. `vite.config.ts` now says where tests live:
+
+```ts
+include: ["src/**/*.{test,spec}.{ts,tsx}"],
+```
+
+For the record, P6.A4's reported 607 was **not** affected — the worktree was
+created after that run, at A4's own commit.
+
+**Found in passing, not fixed here:** `add_image_stamp` clamps an over-wide
+image by truncating its width alone, so a 1200×40 source comes back 612×40 —
+squashed, contradicting its own "never stretched". Pre-existing P3 code. Pinned
+by `an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect`,
+whose name and comment say it records the behaviour rather than endorsing it,
+and raised as separate work.
+
+Not covered by any test: that the placed signature renders correctly in Acrobat,
+Preview and a third reader. That is the human ritual, and transparency is
+exactly the sort of thing one renderer gets right and another does not.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

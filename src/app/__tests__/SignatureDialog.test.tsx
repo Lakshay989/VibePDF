@@ -35,6 +35,8 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { reportError } from "@/app/report-error";
 import { SignatureDialog } from "@/app/SignatureDialog";
 import { useSignatureStore } from "@/state/signature-store";
+import { useStampStore } from "@/state/stamp-store";
+import { useToolStore } from "@/state/tool-store";
 import { imageToPng, strokesToPng, textToPng } from "@/tools/signature/raster";
 
 const mockPng = vi.mocked(strokesToPng);
@@ -46,6 +48,8 @@ const mockReport = vi.mocked(reportError);
 
 const refresh = vi.fn().mockResolvedValue(undefined);
 const add = vi.fn().mockResolvedValue({ id: "s1", kind: "draw", createdAt: 1 });
+// P6.A5a — the list fetches a thumbnail per entry; that is IPC, so it is stubbed.
+const loadThumb = vi.fn().mockResolvedValue(undefined);
 
 const dialog = () => <SignatureDialog open onClose={() => {}} />;
 
@@ -146,6 +150,8 @@ describe("SignatureDialog", () => {
       loading: false,
       refresh,
       add,
+      thumbs: {},
+      loadThumb,
     } as never);
     render(dialog());
 
@@ -333,6 +339,53 @@ describe("SignatureDialog", () => {
     await waitFor(() => expect(mockOpen).toHaveBeenCalled());
     expect(mockRead).not.toHaveBeenCalled();
     expect(mockImage).not.toHaveBeenCalled();
+  });
+
+  // SPEC: P6-SEC-004 (P6.A5a) — choosing a saved signature to place.
+
+  const twoEntries = () =>
+    useSignatureStore.setState({
+      entries: [
+        { id: "a", kind: "draw", createdAt: 1_700_000_000_000 },
+        { id: "b", kind: "image", createdAt: 1_700_000_001_000 },
+      ],
+      loading: false,
+      refresh,
+      add,
+      thumbs: { a: "data:image/png;base64,AAA" },
+      loadThumb,
+    } as never);
+
+  it("fetches a thumbnail for every saved signature", async () => {
+    twoEntries();
+    render(dialog());
+    // A list of kinds and dates is not something anyone can pick from.
+    await waitFor(() => expect(loadThumb).toHaveBeenCalledWith("a"));
+    expect(loadThumb).toHaveBeenCalledWith("b");
+  });
+
+  it("shows the thumbnail it has and leaves a placeholder for the rest", () => {
+    twoEntries();
+    render(dialog());
+    const list = screen.getByLabelText("Saved signatures");
+    const imgs = within(list).getAllByRole("img");
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]!.getAttribute("src")).toBe("data:image/png;base64,AAA");
+  });
+
+  it("Place arms the signature, switches to the stamp tool, and closes", () => {
+    twoEntries();
+    const onClose = vi.fn();
+    render(<SignatureDialog open onClose={onClose} />);
+    fireEvent.click(screen.getByLabelText("Place image signature"));
+
+    expect(useStampStore.getState().armed).toMatchObject({
+      kind: "signature",
+      signatureId: "b",
+    });
+    // Placement is a click on the page, so the modal has to get out of the way.
+    expect(useToolStore.getState().activeTool).toBe("stamp");
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("Clear discards the import but not the other drafts", async () => {

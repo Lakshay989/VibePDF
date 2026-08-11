@@ -9,6 +9,8 @@
 import { reportError } from "@/app/report-error";
 import { type PointerEvent as ReactPointerEvent } from "react";
 
+import { readPageFields } from "@/ipc/forms";
+import { placeSignature, signatureBytes } from "@/ipc/signatures";
 import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useHistoryStore } from "@/state/history-store";
@@ -16,8 +18,9 @@ import { useOptimisticEditStore, usePendingEdits } from "@/state/optimistic-edit
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, pdfToScreen, screenToPdf } from "@/tools/_framework";
+import { declineMessage, SIGNATURE_HEIGHT, signatureFieldAt } from "@/tools/signature/place";
 import { IMAGE_STAMP_HEIGHT, stampRectAt } from "@/tools/stamp/stamps";
-import { fileToDataUrl, imageAspect } from "@/view/file-data-url";
+import { bytesToDataUrl, fileToDataUrl, imageAspect } from "@/view/file-data-url";
 
 /** Optimistic-preview payload: a committed stamp awaiting bake (P4.HF29). */
 type StampHeld =
@@ -72,6 +75,63 @@ export function StampLayer({
     const oe = useOptimisticEditStore.getState();
     const tie = (key: string) =>
       oe.tie(documentId, key, (useEditEpochStore.getState().bakeByDoc[documentId] ?? 0) + 1);
+
+    // SPEC: P6-SEC-004 (P6.A5a) — a signature from the library. Same aspect-
+    // correct centring as an image stamp; what differs is the guard in front of
+    // it and that the backend resolves the bytes from an id.
+    if (armed.kind === "signature") {
+      const { signatureId } = armed;
+      void (async () => {
+        // The one thing that must not happen: a picture dropped over a /Sig
+        // widget renders as a signature to every reader and carries none.
+        // Declining is the honest answer until P6.B1 can actually sign.
+        try {
+          const hit = signatureFieldAt(await readPageFields(documentId, page), pdf.x, pdf.y);
+          if (hit) {
+            reportError("Can't place a signature there", new Error(declineMessage(hit.name)));
+            return;
+          }
+        } catch {
+          // No form, or the fields could not be read — there is no signature
+          // field to collide with, so placing is safe.
+        }
+
+        let key: string | null = null;
+        try {
+          const src = bytesToDataUrl(await signatureBytes(signatureId));
+          const aspect = await imageAspect(src);
+          const h = SIGNATURE_HEIGHT;
+          const w = h * aspect;
+          const rect: [number, number, number, number] = [
+            pdf.x - w / 2,
+            pdf.y - h / 2,
+            pdf.x + w / 2,
+            pdf.y + h / 2,
+          ];
+          key = oe.add(documentId, page, "stamp", { variant: "image", rect, src });
+        } catch {
+          // No preview available; still place it below.
+        }
+        try {
+          const done = await placeSignature(
+            documentId,
+            page,
+            pdf.x,
+            pdf.y,
+            SIGNATURE_HEIGHT,
+            signatureId,
+            options.opacity,
+          );
+          bumpEpoch(documentId);
+          if (key) tie(key);
+          setHistory(documentId, done);
+        } catch (err) {
+          if (key) oe.remove(documentId, key);
+          reportError("Couldn't place the signature", err);
+        }
+      })();
+      return;
+    }
 
     // Image stamps place aspect-correct around the click (the backend derives the
     // rect from the image's ratio); we mirror that centring for the preview.

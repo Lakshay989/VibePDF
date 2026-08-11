@@ -162,6 +162,7 @@ pub fn run() {
             commands::pdf::pdf_add_ink,
             commands::pdf::pdf_add_stamp,
             commands::pdf::pdf_add_image_stamp,
+            commands::pdf::pdf_place_signature,
             commands::pdf::pdf_add_measure,
             commands::pdf::pdf_read_measure_calibration,
             commands::pdf::pdf_extract_text_runs,

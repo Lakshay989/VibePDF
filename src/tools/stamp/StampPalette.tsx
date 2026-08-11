@@ -36,12 +36,12 @@ export function StampPalette() {
           type="button"
           onClick={() => arm(s)}
           aria-label={`Stamp: ${s.label}`}
-          aria-pressed={armed?.label === s.label}
+          aria-pressed={armed?.kind === "text" && armed.label === s.label}
           title={s.label}
           style={{ color: s.color, borderColor: s.color }}
           className={
             "rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none " +
-            (armed?.label === s.label ? "ring-2 ring-blue-500 ring-offset-1" : "")
+            (armed?.kind === "text" && armed.label === s.label ? "ring-2 ring-blue-500 ring-offset-1" : "")
           }
         >
           {s.label}

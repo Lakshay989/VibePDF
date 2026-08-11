@@ -8807,6 +8807,88 @@ Both guesses were wrong, and finding out why is most of what this step taught.
 
 ---
 
+## P6.A5a — the half of a spec line you can do honestly
+
+### Problem
+P6-SEC-004: place a signature "as a stamp annotation **or**, when a signature
+field is targeted, as a PKCS#7 digital signature". Two clauses. The second needs
+certificate signing, which is P6.B1 and does not exist. `steps/P6.md`'s own
+recommended ordering agrees — it lists A5 *after* B1 and B2.
+
+So the question was not how to build A5, but what half of it can be built now
+without lying about the other half.
+
+### Concepts learned
+- **Read the dependency graph before planning, not after.** The step doc carried
+  the answer in a line nobody had reason to look at (`P6.A4 → P6.B1 → P6.B2 →
+  P6.A5`). Splitting the step into A5a (stamp) and A5b (sign) took one minute
+  once that was noticed, and would have taken a wasted afternoon if it had been
+  noticed halfway through implementing.
+- **An invisible failure is worse than a missing feature.** The tempting version
+  of "targeting a signature field" is to stamp the picture over the widget: it
+  looks completely correct in every reader. It is also a document that presents
+  as signed and carries no signature. Nobody discovers that by looking. A
+  missing feature announces itself; this would not — which is why placement
+  declines, names the field, and explains, rather than doing the thing that
+  *appears* to work.
+- **Send the reference, not the payload.** `pdf_place_signature` takes a library
+  id. The alternative — the frontend fetching ~30 KB of PNG and handing it
+  straight back — costs 4× that as a JSON number array and, worse, would leak
+  the library's location into the frontend, undoing the one thing P6.A1 was
+  careful about. The backend already knows where the blobs are; let it look.
+- **Never hold two locks when one will do.** The signature-library lock is taken
+  and dropped to resolve the bytes *before* the actor map is touched. Nothing
+  currently deadlocks either way; the discipline is cheap and the alternative is
+  the kind of bug that only appears under a race.
+- **The best new feature adds no new primitive.** A5a writes no PDF code at all.
+  `ImageStampEdit` already embedded a PNG with its alpha as an `/SMask`, derived
+  an aspect-correct rect, and returned an inverse — so undo, list, delete and
+  transparent compositing all arrived for free. The whole backend change is one
+  command that resolves an id and calls something that already existed.
+- **A fixture built by the code under test proves only self-consistency.** The
+  `/Sig` field PDF for the decline check is hand-written, not produced by our own
+  P5.B2 field writer — the Phase 5 sweep made that lesson expensive enough to
+  remember. It was then verified with macOS's `qlmanage`, i.e. CoreGraphics,
+  which is a parser with no shared code or shared assumptions with ours.
+- **A test count you don't recognise is a signal.** The suite quietly grew by
+  six files: an agent worktree under `.claude/worktrees/` is a complete second
+  checkout, and vitest's default include is repo-wide. Worse than duplication —
+  the `@` alias still resolved to the *main* `src`, so a stale copy of a test ran
+  against new source and failed for a reason that no longer existed. Fixed by
+  saying where tests live (`include: ["src/**/*.{test,spec}.{ts,tsx}"]`). The
+  general shape: a config that works by omission works only until the directory
+  layout changes underneath it.
+- **Record behaviour you find wrong; don't quietly bless it.** Placing a very
+  wide image at the page edge revealed that `add_image_stamp` clamps by
+  truncating the width alone — a 1200×40 source comes back 612×40, squashed —
+  contradicting that function's own "never stretched". It is pre-existing P3
+  code and out of scope here, but a test that simply asserted "stays on the
+  page" would have made the defect look like intended behaviour. The test
+  instead pins the distortion and says in its name and comment that it records
+  rather than endorses it, so a later fix has something to change.
+- **A picker you cannot see is not a picker.** The library list showed a kind and
+  a date. Nobody chooses between two of their own signatures that way, so the
+  list now carries thumbnails — on a checkerboard, because a transparent PNG on
+  a white row is indistinguishable from a white one.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src/tools/signature/place.ts` | Pure: hit-test a `/Sig` field, the decline wording, the placement height. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_place_signature` — id → library bytes → the existing image-stamp edit. |
+| `src/ipc/signatures.ts` | `placeSignature` wrapper. |
+| `src/view/stamp-layer.tsx` | The signature branch, guarded by the field check, with an optimistic preview. |
+| `src/app/SignatureDialog.tsx` | Thumbnails and a **Place** button per saved signature. |
+| `src/state/signature-store.ts` | Thumbnail cache. |
+| `src/view/file-data-url.ts` | `bytesToDataUrl`, lifted out of the dialog now that two callers need it. |
+| `vite.config.ts` | Scope test discovery to `src/`. |
+
+### Further reading
+- PDF 32000-1 §12.7.4.5 — signature fields, and why a `/Sig` widget's appearance says nothing about whether the document is signed.
+- `/SMask` in §11.6.5.3 — the soft-mask mechanism carrying a PNG's alpha into PDF.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
