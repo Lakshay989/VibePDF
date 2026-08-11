@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RASTER_PAD, TARGET_LONG_EDGE, type Stroke } from "@/tools/signature/draw";
-import { strokesToPng, textToPng } from "@/tools/signature/raster";
+import { imageToPng, strokesToPng, textToPng } from "@/tools/signature/raster";
 
 interface Recorded {
   calls: string[];
@@ -303,5 +303,193 @@ describe("textToPng", () => {
     const createCanvas = () =>
       ({ getContext: () => null, width: 0, height: 0 }) as unknown as HTMLCanvasElement;
     await expect(textToPng("Ada", { createCanvas })).rejects.toThrow(/canvas is unavailable/);
+  });
+});
+
+// SPEC: P6-SEC-003 (P6.A4) — importing an image.
+//
+// Two seams here rather than one: `createCanvas` as above, and `decode`,
+// because `createImageBitmap` is a browser API jsdom does not implement. What
+// the threshold *decides* is covered properly in `threshold.test.ts` against
+// real pixels; what is left for this stub is the plumbing around it — the sizes
+// chosen, the crop taken, and the same never-fill rule as the other two.
+
+interface ImageRecorded {
+  /** One entry per canvas created, in order: working surface, then output. */
+  canvases: Array<{ width: number; height: number }>;
+  calls: string[];
+  /** Numeric arguments of each `drawImage`, source omitted. */
+  draws: number[][];
+}
+
+/** A frame the stub hands back from `getImageData`, built pixel by pixel. */
+function frameOf(
+  width: number,
+  height: number,
+  at: (x: number, y: number) => [number, number, number, number],
+) {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const [r, g, b, a] = at(x, y);
+      data[i] = r;
+      data[i + 1] = g;
+      data[i + 2] = b;
+      data[i + 3] = a;
+    }
+  }
+  return { width, height, data };
+}
+
+function imageRecorder(frame: ReturnType<typeof frameOf>): {
+  createCanvas: () => HTMLCanvasElement;
+  rec: ImageRecorded;
+} {
+  const rec: ImageRecorded = { canvases: [], calls: [], draws: [] };
+
+  const createCanvas = () => {
+    const size = { width: 0, height: 0 };
+    rec.canvases.push(size);
+    const ctx = {
+      drawImage: (_source: unknown, ...args: number[]) => {
+        rec.calls.push("drawImage");
+        rec.draws.push(args);
+      },
+      getImageData: () => frame,
+      putImageData: () => rec.calls.push("putImageData"),
+      // Present so a stray background fill is recorded rather than crashing.
+      fillRect: () => rec.calls.push("fillRect"),
+      clearRect: () => rec.calls.push("clearRect"),
+    };
+    return {
+      set width(v: number) {
+        size.width = v;
+      },
+      get width() {
+        return size.width;
+      },
+      set height(v: number) {
+        size.height = v;
+      },
+      get height() {
+        return size.height;
+      },
+      getContext: () => ctx,
+      toBlob: (cb: (b: Blob | null) => void) =>
+        cb({ arrayBuffer: async () => Uint8Array.from([9, 9]).buffer } as unknown as Blob),
+    } as unknown as HTMLCanvasElement;
+  };
+
+  return { createCanvas, rec };
+}
+
+/** A decoder that reports a natural size without touching any bytes. */
+const decoder = (width: number, height: number) => async () => ({
+  width,
+  height,
+  source: {} as CanvasImageSource,
+});
+
+const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+
+/** 10×10, with ink filling x∈[2,5], y∈[3,4] — a 4×2 box off-centre. */
+const inkAt = (x: number, y: number): [number, number, number, number] =>
+  x >= 2 && x <= 5 && y >= 3 && y <= 4 ? [10, 10, 10, 255] : [0, 0, 0, 0];
+
+describe("imageToPng", () => {
+  it("never fills a background — same transparency rule as the pad", async () => {
+    const { createCanvas, rec } = imageRecorder(frameOf(10, 10, inkAt));
+    await imageToPng(bytes, { createCanvas, decode: decoder(10, 10) });
+
+    expect(rec.calls).not.toContain("fillRect");
+    expect(rec.calls).toContain("drawImage");
+  });
+
+  it("sizes the output from the opaque pixels, not the source frame", async () => {
+    const { createCanvas, rec } = imageRecorder(frameOf(10, 10, inkAt));
+    await imageToPng(bytes, { createCanvas, decode: decoder(10, 10) });
+
+    // The working surface is the whole image…
+    expect(rec.canvases[0]).toEqual({ width: 10, height: 10 });
+    // …the output is the 4×2 of ink, plus padding on every side.
+    expect(rec.canvases[1]).toEqual({
+      width: 4 + 2 * RASTER_PAD,
+      height: 2 + 2 * RASTER_PAD,
+    });
+  });
+
+  it("crops to the ink and lands it inside the padding", async () => {
+    const { createCanvas, rec } = imageRecorder(frameOf(10, 10, inkAt));
+    await imageToPng(bytes, { createCanvas, decode: decoder(10, 10) });
+
+    // sx, sy, sw, sh, dx, dy, dw, dh — the source rect is the ink box, and the
+    // destination starts exactly one pad in.
+    expect(rec.draws[1]).toEqual([2, 3, 4, 2, RASTER_PAD, RASTER_PAD, 4, 2]);
+  });
+
+  it("downscales a large source before the threshold ever runs", async () => {
+    const { createCanvas, rec } = imageRecorder(frameOf(600, 450, () => [10, 10, 10, 255]));
+    await imageToPng(bytes, { createCanvas, decode: decoder(4000, 3000) });
+
+    // 12 megapixels would be ~48MB of RGBA to walk on every slider tick.
+    expect(rec.canvases[0]).toEqual({ width: TARGET_LONG_EDGE, height: 450 });
+  });
+
+  it("never upscales a small crop", async () => {
+    const { createCanvas, rec } = imageRecorder(frameOf(10, 10, inkAt));
+    await imageToPng(bytes, { createCanvas, decode: decoder(10, 10) });
+
+    // Blowing 4px of ink up to 600 would add blur and nothing else.
+    expect(rec.canvases[1]!.width).toBeLessThan(TARGET_LONG_EDGE);
+  });
+
+  it("reports what the threshold removed, so the UI can say so", async () => {
+    // Top row white, bottom row ink; a mid threshold takes the white.
+    const frame = frameOf(2, 2, (_x, y) =>
+      y === 0 ? [255, 255, 255, 255] : [10, 10, 10, 255],
+    );
+    const { createCanvas } = imageRecorder(frame);
+    const out = await imageToPng(bytes, { createCanvas, decode: decoder(2, 2), strength: 50 });
+
+    expect(out).toMatchObject({ erased: 2, total: 4, transparent: 2 });
+    expect(Array.from(out.png)).toEqual([9, 9]);
+  });
+
+  it("warns by way of `transparent` when an image has no alpha at all", async () => {
+    const { createCanvas } = imageRecorder(frameOf(2, 2, () => [10, 10, 10, 255]));
+    const out = await imageToPng(bytes, { createCanvas, decode: decoder(2, 2) });
+
+    // The JPEG case: placed as-is it would be a solid rectangle.
+    expect(out.transparent).toBe(0);
+    expect(out.erased).toBe(0);
+  });
+
+  it("refuses when the threshold erased the whole image", async () => {
+    const { createCanvas } = imageRecorder(frameOf(2, 2, () => [10, 10, 10, 255]));
+    await expect(
+      imageToPng(bytes, { createCanvas, decode: decoder(2, 2), strength: 100 }),
+    ).rejects.toThrow(/erased the whole image/);
+  });
+
+  it("refuses a file that did not decode to anything", async () => {
+    const { createCanvas } = imageRecorder(frameOf(2, 2, () => [10, 10, 10, 255]));
+    await expect(
+      imageToPng(bytes, { createCanvas, decode: decoder(0, 0) }),
+    ).rejects.toThrow(/could not be read as an image/);
+  });
+
+  it("surfaces a decoder failure rather than swallowing it", async () => {
+    const { createCanvas } = imageRecorder(frameOf(2, 2, () => [10, 10, 10, 255]));
+    const decode = () => Promise.reject(new Error("unsupported image format"));
+    await expect(imageToPng(bytes, { createCanvas, decode })).rejects.toThrow(/unsupported/);
+  });
+
+  it("surfaces a missing 2D context", async () => {
+    const createCanvas = () =>
+      ({ getContext: () => null, width: 0, height: 0 }) as unknown as HTMLCanvasElement;
+    await expect(
+      imageToPng(bytes, { createCanvas, decode: decoder(4, 4) }),
+    ).rejects.toThrow(/canvas is unavailable/);
   });
 });

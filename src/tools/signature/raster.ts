@@ -26,10 +26,17 @@ import { smoothInk } from "@/tools/ink/ink";
 import {
   fitToRaster,
   project,
+  RASTER_PAD,
   strokeBounds,
   TARGET_LONG_EDGE,
   type Stroke,
 } from "@/tools/signature/draw";
+import {
+  applyThreshold,
+  countTransparent,
+  opaqueBounds,
+  strengthToThreshold,
+} from "@/tools/signature/threshold";
 
 export interface RasterOptions {
   /** Long edge of the output, in pixels. */
@@ -198,4 +205,128 @@ export async function textToPng(
   );
   if (!blob) throw new Error("could not encode the signature as PNG");
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+/** Long edge the threshold runs over, before the crop. */
+const WORK_LONG_EDGE = TARGET_LONG_EDGE;
+
+/** A decoded image and its natural size. `source` is whatever `drawImage`
+ *  accepts — an `ImageBitmap` in the app, a stub under test. */
+export interface DecodedImage {
+  width: number;
+  height: number;
+  source: CanvasImageSource;
+}
+
+export interface ImageRasterOptions extends RasterOptions {
+  /** Background removal, 0 (leave the image alone) to 100 (erase everything). */
+  strength?: number;
+  /**
+   * How to turn encoded bytes into something drawable. The seam exists for the
+   * same reason `createCanvas` does — `createImageBitmap` is a browser API that
+   * jsdom does not implement.
+   */
+  decode?: (bytes: Uint8Array) => Promise<DecodedImage>;
+}
+
+/** The encoded signature plus what the threshold did, which the UI reports. */
+export interface ImageRaster {
+  png: Uint8Array;
+  /** Pixels the threshold removed. */
+  erased: number;
+  /** Pixels examined, so `erased` can be stated as a proportion. */
+  total: number;
+  /** Transparent pixels afterwards. Zero means a solid rectangle. */
+  transparent: number;
+}
+
+/**
+ * Decode with the engine's own image support — which is the whole argument for
+ * doing this here rather than in Rust. PNG, JPEG and BMP all arrive decoded
+ * without a single new dependency, and the format is sniffed from the bytes
+ * rather than trusted from the file extension.
+ */
+async function decodeImage(bytes: Uint8Array): Promise<DecodedImage> {
+  const bitmap = await createImageBitmap(new Blob([bytes as BlobPart]));
+  return { width: bitmap.width, height: bitmap.height, source: bitmap };
+}
+
+/**
+ * SPEC: P6-SEC-003 (P6.A4) — import `bytes` as a signature, optionally lifting
+ * its background out with a threshold.
+ *
+ * Same shape as its two siblings: the `createCanvas` seam, `fitToRaster`, and
+ * the never-fill rule that keeps the stored PNG transparent. The ink here comes
+ * from a file rather than from a pointer or a font.
+ *
+ * Order matters. The image is downscaled to the working size *before* the
+ * threshold runs — a 12-megapixel phone photo is ~48 MB of RGBA, and the loop
+ * would run twelve million times on every tick of the slider. At the working
+ * size it is ~0.2 MP no matter what was imported.
+ */
+export async function imageToPng(
+  bytes: Uint8Array,
+  {
+    target = TARGET_LONG_EDGE,
+    strength = 0,
+    createCanvas = () => document.createElement("canvas"),
+    decode = decodeImage,
+  }: ImageRasterOptions = {},
+): Promise<ImageRaster> {
+  const img = await decode(bytes);
+  if (img.width <= 0 || img.height <= 0) {
+    throw new Error("that file could not be read as an image");
+  }
+
+  const shrink = Math.min(1, WORK_LONG_EDGE / Math.max(img.width, img.height));
+  const workW = Math.max(1, Math.round(img.width * shrink));
+  const workH = Math.max(1, Math.round(img.height * shrink));
+
+  const work = createCanvas();
+  work.width = workW;
+  work.height = workH;
+  const wctx = work.getContext("2d");
+  if (!wctx) throw new Error("2D canvas is unavailable");
+  wctx.drawImage(img.source, 0, 0, workW, workH);
+
+  const frame = wctx.getImageData(0, 0, workW, workH);
+  const erased = applyThreshold(frame.data, strengthToThreshold(strength));
+  const transparent = countTransparent(frame.data);
+  const box = opaqueBounds(frame.data, workW, workH);
+  // Storing a blank PNG would be worse than refusing: the entry would look like
+  // a signature in the library and place as nothing.
+  if (!box) throw new Error("the background removal erased the whole image");
+  wctx.putImageData(frame, 0, 0);
+
+  // Never upscale. Blowing a 120px crop up to 600 adds no detail, only blur —
+  // so the target is capped at what the ink actually measures.
+  const longest = Math.max(box.width, box.height);
+  const fit = fitToRaster(box, Math.min(target, longest + 2 * RASTER_PAD));
+
+  const out = createCanvas();
+  out.width = fit.width;
+  out.height = fit.height;
+  const octx = out.getContext("2d");
+  if (!octx) throw new Error("2D canvas is unavailable");
+  // No fillRect, for the third time and the same reason.
+  octx.drawImage(
+    work,
+    box.x,
+    box.y,
+    box.width,
+    box.height,
+    RASTER_PAD,
+    RASTER_PAD,
+    box.width * fit.scale,
+    box.height * fit.scale,
+  );
+
+  const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("could not encode the signature as PNG");
+  return {
+    png: new Uint8Array(await blob.arrayBuffer()),
+    erased,
+    total: workW * workH,
+    transparent,
+  };
 }

@@ -7,24 +7,45 @@
 //
 // Structured so A3 (typed) and A4 (image) can be added as sibling modes without
 // reworking this: the pad is one branch, and everything around it — the library
-// list, Save, error handling — is mode-agnostic.
+// list, Save, error handling — is mode-agnostic. Both have since landed, and
+// the structure held.
 //
-// The UI here is deliberately plain; it is a working surface for A3–A5 rather
+// The UI here is deliberately plain; it is a working surface for A5 rather
 // than a finished design.
 
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { readFile } from "@tauri-apps/plugin-fs";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 
+import { basename } from "@/app/paths";
 import { reportError } from "@/app/report-error";
 import type { InkPoint } from "@/tools/ink/ink";
 import { hasInk, type Stroke } from "@/tools/signature/draw";
 import { availableFonts, canvasMeasurer, type FontCandidate } from "@/tools/signature/fonts";
-import { strokesToPng, textToPng } from "@/tools/signature/raster";
+import { imageToPng, strokesToPng, textToPng, type ImageRaster } from "@/tools/signature/raster";
 import { useSignatureStore } from "@/state/signature-store";
 
 /** Pad size in CSS pixels. The stored PNG is rasterised independently at a
  *  fixed long edge, so this is a comfort choice, not a quality one. */
 const PAD_W = 480;
 const PAD_H = 180;
+
+/**
+ * PNG bytes → a `data:` URL for the preview.
+ *
+ * Chunked because `String.fromCharCode(...bytes)` spreads every byte into the
+ * argument list, which overflows the stack well below the size of a 600px
+ * signature. A data URL rather than an object URL for the reason
+ * `view/file-data-url.ts` already gives: nothing to revoke.
+ */
+function pngDataUrl(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return `data:image/png;base64,${btoa(binary)}`;
+}
 
 interface Props {
   open: boolean;
@@ -36,12 +57,20 @@ export function SignatureDialog({ open, onClose }: Props) {
   const refresh = useSignatureStore((s) => s.refresh);
   const add = useSignatureStore((s) => s.add);
 
-  const [mode, setMode] = useState<"draw" | "type">("draw");
+  const [mode, setMode] = useState<"draw" | "type" | "image">("draw");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [typed, setTyped] = useState("");
   const [family, setFamily] = useState<string | null>(null);
   const [fonts, setFonts] = useState<FontCandidate[]>([]);
   const [saving, setSaving] = useState(false);
+  // SPEC: P6-SEC-003 (P6.A4) — the imported file, what the threshold made of
+  // it, and why it failed if it did.
+  const [picked, setPicked] = useState<{ name: string; bytes: Uint8Array } | null>(null);
+  const [strength, setStrength] = useState(0);
+  const [imaged, setImaged] = useState<ImageRaster | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
 
@@ -83,6 +112,40 @@ export function SignatureDialog({ open, onClose }: Props) {
       ctx.stroke();
     }
   }, [strokes]);
+
+  // SPEC: P6-SEC-003 (P6.A4) — re-run the threshold whenever the file or the
+  // slider changes. What this produces is the exact PNG that Save stores, so
+  // the preview is the artifact rather than an impression of it.
+  //
+  // Failures land inline rather than in a toast: dragging the slider to the top
+  // erases the whole image, which is a legitimate thing to do on the way to a
+  // good value, and toasting it would fire on every tick of the drag.
+  useEffect(() => {
+    if (mode !== "image" || !picked) return undefined;
+    let cancelled = false;
+    setWorking(true);
+    void imageToPng(picked.bytes, { strength })
+      .then((res) => {
+        if (cancelled) return;
+        setImaged(res);
+        setPreview(pngDataUrl(res.png));
+        setProblem(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // The file stays selected. Re-picking the same image to undo a slider
+        // drag would be a ridiculous thing to ask of anyone.
+        setImaged(null);
+        setPreview(null);
+        setProblem(err instanceof Error ? err.message : "that image could not be read");
+      })
+      .finally(() => {
+        if (!cancelled) setWorking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, picked, strength]);
 
   if (!open) return null;
 
@@ -130,7 +193,34 @@ export function SignatureDialog({ open, onClose }: Props) {
     drawing.current = false;
   };
 
-  const clear = () => (mode === "draw" ? setStrokes([]) : setTyped(""));
+  const clearImage = () => {
+    setPicked(null);
+    setImaged(null);
+    setPreview(null);
+    setProblem(null);
+  };
+
+  // SPEC: P6-SEC-003 (P6.A4) — the three formats the spec names. The engine
+  // sniffs the actual bytes when decoding, so this filter is only about which
+  // files the picker offers.
+  const pickImage = () => {
+    void openFileDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "bmp"] }],
+    })
+      .then(async (path) => {
+        if (typeof path !== "string") return;
+        setPicked({ name: basename(path), bytes: await readFile(path) });
+      })
+      .catch((err: unknown) => reportError("Couldn't open that image", err));
+  };
+
+  const clear = () => {
+    if (mode === "draw") setStrokes([]);
+    else if (mode === "type") setTyped("");
+    else clearImage();
+  };
 
   const save = () => {
     void (async () => {
@@ -139,9 +229,14 @@ export function SignatureDialog({ open, onClose }: Props) {
         if (mode === "draw") {
           await add("draw", await strokesToPng(strokes));
           setStrokes([]);
-        } else {
+        } else if (mode === "type") {
           await add("type", await textToPng(typed, family ? { family } : {}));
           setTyped("");
+        } else if (imaged) {
+          // Already encoded by the preview effect — what was on screen is
+          // byte-for-byte what goes into the library.
+          await add("image", imaged.png);
+          clearImage();
         }
         // Clearing the input is the signal that the save landed.
       } catch (err) {
@@ -153,9 +248,16 @@ export function SignatureDialog({ open, onClose }: Props) {
     })();
   };
 
-  const canSave = (mode === "draw" ? hasInk(strokes) : typed.trim().length > 0) && !saving;
-  // Switching modes keeps both drafts; only an explicit Clear discards one.
-  const clearable = mode === "draw" ? hasInk(strokes) : typed.length > 0;
+  const ready =
+    mode === "draw"
+      ? hasInk(strokes)
+      : mode === "type"
+        ? typed.trim().length > 0
+        : imaged !== null && !working;
+  const canSave = ready && !saving;
+  // Switching modes keeps every draft; only an explicit Clear discards one.
+  const clearable =
+    mode === "draw" ? hasInk(strokes) : mode === "type" ? typed.length > 0 : picked !== null;
 
   return (
     <div
@@ -165,7 +267,7 @@ export function SignatureDialog({ open, onClose }: Props) {
     >
       <div className="w-[560px] rounded-lg bg-white p-4 shadow-xl dark:bg-neutral-900">
         <div className="mb-3 flex items-center gap-1" role="tablist" aria-label="Signature source">
-          {(["draw", "type"] as const).map((m) => (
+          {(["draw", "type", "image"] as const).map((m) => (
             <button
               key={m}
               type="button"
@@ -244,6 +346,69 @@ export function SignatureDialog({ open, onClose }: Props) {
               className="flex h-[120px] items-center justify-center overflow-hidden rounded border border-dashed border-neutral-400 bg-white text-4xl text-neutral-900"
             >
               {typed.trim() || <span className="text-base text-neutral-400">Type your name</span>}
+            </div>
+          </div>
+        ) : null}
+
+        {/* SPEC: P6-SEC-003 (P6.A4) — import an image and lift its background. */}
+        {mode === "image" ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={pickImage}
+                className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+              >
+                Choose image…
+              </button>
+              <span className="min-w-0 truncate text-xs text-neutral-500">
+                {picked ? picked.name : "PNG, JPG or BMP"}
+              </span>
+            </div>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-xs text-neutral-500">Background removal — {strength}%</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                aria-label="Background removal"
+                value={strength}
+                disabled={!picked}
+                onChange={(e) => setStrength(Number(e.target.value))}
+                className="w-full disabled:opacity-40"
+              />
+            </label>
+            {imaged && imaged.transparent === 0 ? (
+              <p className="text-xs text-amber-700 dark:text-amber-500">
+                Nothing in this image is transparent, so it will be placed as a solid rectangle.
+                Raise Background removal to drop the paper out from behind the ink.
+              </p>
+            ) : null}
+            {problem ? <p className="text-xs text-red-600 dark:text-red-400">{problem}</p> : null}
+            {/* On a checkerboard, because a transparent PNG against a white
+                panel looks exactly like a white one — and against a dark
+                viewer it looks black, which is the confusion A2 ran into. */}
+            <div
+              aria-label="Imported signature preview"
+              style={{
+                backgroundImage:
+                  "linear-gradient(45deg,#ccc 25%,transparent 25%)," +
+                  "linear-gradient(-45deg,#ccc 25%,transparent 25%)," +
+                  "linear-gradient(45deg,transparent 75%,#ccc 75%)," +
+                  "linear-gradient(-45deg,transparent 75%,#ccc 75%)",
+                backgroundSize: "16px 16px",
+                backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0",
+              }}
+              className="flex h-[160px] items-center justify-center overflow-hidden rounded border border-dashed border-neutral-400"
+            >
+              {preview ? (
+                <img src={preview} alt="" className="max-h-full max-w-full object-contain" />
+              ) : (
+                <span className="rounded bg-white/80 px-1 text-xs text-neutral-600">
+                  {picked ? (working ? "Working…" : "Nothing to show") : "No image chosen"}
+                </span>
+              )}
             </div>
           </div>
         ) : null}

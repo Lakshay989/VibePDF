@@ -11,7 +11,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 vi.mock("@/tools/signature/raster", () => ({
   strokesToPng: vi.fn(),
   textToPng: vi.fn(),
+  imageToPng: vi.fn(),
 }));
+// The file picker and the file read are the two things the dialog cannot do
+// under test; everything between them is real.
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@tauri-apps/plugin-fs", () => ({ readFile: vi.fn() }));
 // Font detection needs a canvas to measure with; jsdom has none, so the set of
 // available families is supplied directly.
 vi.mock("@/tools/signature/fonts", async (orig) => ({
@@ -24,13 +29,19 @@ vi.mock("@/tools/signature/fonts", async (orig) => ({
 }));
 vi.mock("@/app/report-error", () => ({ reportError: vi.fn() }));
 
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { readFile } from "@tauri-apps/plugin-fs";
+
 import { reportError } from "@/app/report-error";
 import { SignatureDialog } from "@/app/SignatureDialog";
 import { useSignatureStore } from "@/state/signature-store";
-import { strokesToPng, textToPng } from "@/tools/signature/raster";
+import { imageToPng, strokesToPng, textToPng } from "@/tools/signature/raster";
 
 const mockPng = vi.mocked(strokesToPng);
 const mockText = vi.mocked(textToPng);
+const mockImage = vi.mocked(imageToPng);
+const mockOpen = vi.mocked(openFileDialog);
+const mockRead = vi.mocked(readFile);
 const mockReport = vi.mocked(reportError);
 
 const refresh = vi.fn().mockResolvedValue(undefined);
@@ -49,6 +60,15 @@ beforeEach(() => {
   useSignatureStore.setState({ entries: [], loading: false, refresh, add } as never);
   mockPng.mockResolvedValue(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]));
   mockText.mockResolvedValue(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]));
+  // Default: an opaque import, which is what a JPEG photo looks like.
+  mockImage.mockResolvedValue({
+    png: Uint8Array.from([1, 2]),
+    erased: 0,
+    total: 100,
+    transparent: 0,
+  });
+  mockOpen.mockResolvedValue("/tmp/sig.png" as never);
+  mockRead.mockResolvedValue(Uint8Array.from([0x89, 0x50]));
   vi.clearAllMocks();
 });
 afterEach(cleanup);
@@ -207,5 +227,123 @@ describe("SignatureDialog", () => {
 
     await waitFor(() => expect(mockReport).toHaveBeenCalled());
     expect((screen.getByLabelText("Signature text") as HTMLInputElement).value).toBe("Ada");
+  });
+
+  // SPEC: P6-SEC-003 (P6.A4) — image signatures.
+
+  /** Switch to Image mode and pick a file, waiting for the threshold to run. */
+  const pickImage = async () => {
+    fireEvent.click(screen.getByRole("tab", { name: "image" }));
+    fireEvent.click(screen.getByText("Choose image…"));
+    await waitFor(() => expect(mockImage).toHaveBeenCalled());
+  };
+
+  it("offers the three formats the spec names", async () => {
+    render(dialog());
+    await pickImage();
+    expect(mockOpen.mock.calls[0]![0]).toMatchObject({
+      multiple: false,
+      filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "bmp"] }],
+    });
+  });
+
+  it("keeps Save and the slider inert until an image is chosen", () => {
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "image" }));
+
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(true);
+    expect((screen.getByLabelText("Background removal") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText("No image chosen")).toBeTruthy();
+  });
+
+  it("runs the chosen file through the threshold and previews the result", async () => {
+    render(dialog());
+    await pickImage();
+
+    expect(mockRead).toHaveBeenCalledWith("/tmp/sig.png");
+    expect(mockImage.mock.calls[0]![0]).toBeInstanceOf(Uint8Array);
+    await waitFor(() => expect(screen.queryByText("No image chosen")).toBeNull());
+    // The file name stays visible, so it is clear what is being worked on.
+    expect(screen.getByText("sig.png")).toBeTruthy();
+  });
+
+  it("saves the imported image as an image signature", async () => {
+    render(dialog());
+    await pickImage();
+    await waitFor(() =>
+      expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByText("Save to library"));
+
+    await waitFor(() => expect(add).toHaveBeenCalledTimes(1));
+    const [kind, png] = add.mock.calls[0]!;
+    expect(kind).toBe("image");
+    // Byte-for-byte what the preview showed — the preview is the artifact,
+    // not an impression of it.
+    expect(Array.from(png as Uint8Array)).toEqual([1, 2]);
+  });
+
+  it("re-runs the threshold when the slider moves", async () => {
+    render(dialog());
+    await pickImage();
+
+    fireEvent.change(screen.getByLabelText("Background removal"), { target: { value: "60" } });
+    await waitFor(() => expect(mockImage).toHaveBeenCalledTimes(2));
+    expect(mockImage.mock.calls[1]![1]).toMatchObject({ strength: 60 });
+  });
+
+  it("warns when the import has no transparency to place", async () => {
+    render(dialog());
+    await pickImage();
+    // A JPEG placed as-is is an opaque rectangle sitting on the page.
+    await waitFor(() => expect(screen.getByText(/solid rectangle/)).toBeTruthy());
+  });
+
+  it("says nothing about solid rectangles once the background is gone", async () => {
+    mockImage.mockResolvedValue({
+      png: Uint8Array.from([1, 2]),
+      erased: 40,
+      total: 100,
+      transparent: 40,
+    });
+    render(dialog());
+    await pickImage();
+
+    await waitFor(() => expect(screen.queryByText("No image chosen")).toBeNull());
+    expect(screen.queryByText(/solid rectangle/)).toBeNull();
+  });
+
+  it("keeps the chosen file when the threshold leaves nothing", async () => {
+    mockImage.mockRejectedValue(new Error("the background removal erased the whole image"));
+    render(dialog());
+    await pickImage();
+
+    await waitFor(() => expect(screen.getByText(/erased the whole image/)).toBeTruthy());
+    // Re-picking the same file to undo a slider drag would be absurd.
+    expect(screen.getByText("sig.png")).toBeTruthy();
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("does nothing when the picker is dismissed", async () => {
+    mockOpen.mockResolvedValue(null as never);
+    render(dialog());
+    fireEvent.click(screen.getByRole("tab", { name: "image" }));
+    fireEvent.click(screen.getByText("Choose image…"));
+
+    await waitFor(() => expect(mockOpen).toHaveBeenCalled());
+    expect(mockRead).not.toHaveBeenCalled();
+    expect(mockImage).not.toHaveBeenCalled();
+  });
+
+  it("Clear discards the import but not the other drafts", async () => {
+    render(dialog());
+    draw(screen.getByLabelText("Signature pad"));
+    await pickImage();
+
+    fireEvent.click(screen.getByText("Clear"));
+    expect(screen.getByText("No image chosen")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "draw" }));
+    expect(screen.getByText("Save to library").hasAttribute("disabled")).toBe(false);
   });
 });

@@ -4024,6 +4024,50 @@ the helper used for A2 works on typed signatures too.
 
 ---
 
+## P6.A4 — Image signature (SPEC P6-SEC-003)
+
+**No `npm install`, no `cargo add`, no Rust changes, no new IPC.** That was the
+decision of the step: the Rust side deliberately cannot decode JPEG or BMP
+(`Cargo.toml` takes `png` alone, with the reason written beside it), so doing
+this there would have meant adding the `image` crate to duplicate a decoder the
+WebView already ships. `@tauri-apps/plugin-fs` and `@tauri-apps/plugin-dialog`
+were already dependencies.
+
+Verification gates + tests:
+
+```
+npx vitest run src/tools/signature src/app/__tests__/SignatureDialog.test.tsx   # 96 ok
+npm run check                                                                   # clean after 4 eslint globals
+npm run test                                                                    # 607 passed (114 files)
+npm run test:rust                                                               # green — unchanged, run to confirm
+```
+
+New: `threshold.test.ts` 23; `raster.test.ts` 18 → 29; `SignatureDialog.test.tsx` 14 → 24.
+
+Mutation checks — the new assertions were confirmed to bite before being
+trusted, since all 96 passed on the first run:
+
+```
+# 1. opaqueBounds inclusive extents -> exclusive   => 7 failed
+# 2. applyThreshold cutoff >= -> >                 => 2 failed
+# 3. dialog stops passing `strength` to imageToPng => 1 failed
+```
+
+Each was applied with `perl -0pi -e`, run, and reverted from a `/tmp` copy. All
+three were caught by the test that was supposed to catch them, and by no others.
+
+`npm run check` needed four additions to the `globals` allowlist in
+`eslint.config.js`: `btoa`, `BlobPart`, `CanvasImageSource`, `createImageBitmap`.
+That list is hand-maintained; new browser APIs always cost one entry.
+
+Not covered by any test: that WebKit decodes BMP at all. `createImageBitmap`
+sniffs the bytes and BMP is the least-exercised of the three formats the spec
+names — it is called out in the acceptance check for exactly that reason. Also
+unchanged from A2/A3: that a real 2D context produces the expected pixels from
+the recorded calls.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

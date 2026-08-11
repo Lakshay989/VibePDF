@@ -8720,6 +8720,93 @@ which raises the question the whole step turns on: which of them exist here?
 
 ---
 
+## P6.A4 — the dependency we didn't add, and the test coverage that bought
+
+### Problem
+Accept a PNG, JPG or BMP as a signature and lift its background out with a
+threshold (P6-SEC-003). Thresholding means reading pixels back — the one
+operation the recording stub used by A2 and A3 fundamentally cannot fake. Going
+in, the expectation was that this step would finally justify a native canvas
+dev-dependency, or push the work to Rust.
+
+Both guesses were wrong, and finding out why is most of what this step taught.
+
+### Concepts learned
+- **A dependency file records decisions, not just versions.** `Cargo.toml`
+  carries `png = "0.17"` with a written justification for taking it *instead of*
+  the `image` crate: "we don't want decoders or manipulation routines we'll
+  never call." `pdf/image_xobject.rs` says the same thing from the other side —
+  JPEG is embedded **verbatim** as a `/DCTDecode` stream and never decoded, and
+  BMP is explicitly unsupported. So the Rust half of this app cannot read a JPEG
+  pixel, by design. Doing A4 there meant reversing a documented decision to
+  duplicate a decoder the WebView already ships. Reading the *reasoning* beside
+  a dependency, rather than just checking whether a crate is present, is what
+  turned a "which side?" question into a settled one.
+- **Purity is not a consolation prize here — it is better coverage than A2 or
+  A3 got.** Those two could only assert *drawing commands*, because turning
+  commands into pixels needs a canvas. A threshold is a loop over an RGBA
+  buffer, and a `Uint8ClampedArray` is exactly as real under vitest as it is in
+  the app. `threshold.test.ts` therefore makes claims about actual pixel values
+  — which pixel survives, what alpha it ends with, where the crop box lands.
+  Third use of the same split (`draw.ts` / `raster.ts`, `fonts.ts` / measure
+  seam, now `threshold.ts` / canvas shim), and the first time it yields real
+  coverage rather than a good approximation of it.
+- **Brightness is not the mean of the channels.** Rec. 601 weights green at
+  0.587, red at 0.299, blue at 0.114, because the eye is not equally sensitive
+  to them. A saturated blue and a mid grey can share a numeric average of 85 and
+  differ in perceived brightness by a factor of three. Averaging would call them
+  the same pixel — which matters the moment someone photographs a signature
+  under a colour cast, i.e. the normal case.
+- **Pixels have area; points do not.** `strokeBounds` returns `max - min`
+  because a captured point is a position. `opaqueBounds` returns `max - min + 1`
+  because a pixel occupies a cell. Copying the first convention into the second
+  shaves a row and a column off every imported signature — a bug that would look
+  like a rendering artifact and be hunted in entirely the wrong place. The two
+  functions sit next to each other and now say so in their doc comments.
+- **Order of operations can be a performance decision wearing a correctness
+  face.** Downscale first, then threshold. A 12-megapixel phone photo is ~48 MB
+  of RGBA; the threshold loop would run twelve million times *per tick of the
+  slider*. Doing it in the other order gives identical output and an unusable
+  control.
+- **Make the preview the artifact, not a picture of it.** The effect that
+  redraws the preview produces the exact PNG bytes that Save stores, and Save
+  re-uses them rather than re-encoding. There is then no second code path that
+  could disagree with what the user is looking at — the class of bug where the
+  saved file differs subtly from the preview simply has nowhere to live.
+- **Not every failure deserves a toast.** Dragging the slider to full strength
+  erases the whole image, which is a legitimate thing to do on the way to a good
+  value. Routing that through `reportError` would fire a toast on every frame of
+  the drag. It reports inline instead, where it persists and can be read; the
+  file-read failure, which happens once, still toasts.
+- **Only ever subtract transparency.** `applyThreshold` writes alpha and nothing
+  else, and skips pixels that are already transparent. Two consequences worth
+  having: an already-transparent PNG round-trips untouched, and every slider
+  position is recoverable by dragging back, because no colour information was
+  destroyed to get there.
+- **"Off" has to mean untouched.** The cutoff runs 0–256 rather than 0–255, so
+  that strength 0 leaves even a pure-white pixel alone. An off switch that still
+  rewrites one value is not an off switch, and the case it would have broken —
+  importing a PNG that is already clean — is the most common one.
+- **The eslint `globals` list is a hand-maintained allowlist.** `btoa`,
+  `createImageBitmap`, `CanvasImageSource` and `BlobPart` all had to be added.
+  Mildly annoying, quietly useful: the list is an accurate inventory of which
+  platform APIs this codebase actually reaches for.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src/tools/signature/threshold.ts` | Pure: luminance, strength→cutoff, alpha-only erase, transparent count, inclusive opaque bounds. |
+| `src/tools/signature/raster.ts` | `imageToPng` — decode seam, downscale, threshold, crop, never upscale, never fill. |
+| `src/app/SignatureDialog.tsx` | Third mode: picker, strength slider, checkerboard preview, solid-rectangle warning. |
+| `eslint.config.js` | Four browser globals this step started using. |
+
+### Further reading
+- Rec. ITU-R BT.601 — where the 0.299 / 0.587 / 0.114 luma coefficients come from.
+- `createImageBitmap` — MDN; sniffs the format from the bytes, which is why the picker's extension filter is a convenience and not the decision.
+- Otsu's method — the usual answer when a single global threshold isn't enough. Out of scope here: the spec says "simple threshold", and a live preview plus a slider lets the user outperform a bad automatic guess.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
