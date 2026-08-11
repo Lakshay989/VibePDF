@@ -158,6 +158,7 @@ describe("StampLayer", () => {
 
   it("places an armed signature at the click point, by id", async () => {
     useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
     const { container } = render(layer());
     clickAt(container, 300, 400);
 
@@ -174,6 +175,7 @@ describe("StampLayer", () => {
     // signature to every viewer and is not one. Until P6.B1 can sign, decline.
     mockFields.mockResolvedValue([sigField]);
     useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
     const { container } = render(layer());
     // PDF (200, 530) is inside the field → screen y = 792 − 530 = 262.
     clickAt(container, 200, 262);
@@ -185,9 +187,40 @@ describe("StampLayer", () => {
     expect(String((err as Error).message)).toContain("Signature1");
   });
 
+  it("disarms and leaves the mode once the signature is placed", async () => {
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 300, 400);
+
+    // Nobody signs the same document eight times. Staying armed means the next
+    // stray click drops a second signature.
+    await vi.waitFor(() => expect(useStampStore.getState().armed).toBeNull());
+    expect(useToolStore.getState().activeTool).toBeNull();
+  });
+
+  it("stays armed when a rubber stamp is placed — that one is meant to repeat", () => {
+    const { container } = render(layer());
+    clickAt(container, 300, 400);
+    expect(useStampStore.getState().armed).toEqual(APPROVED);
+  });
+
+  it("ignores a rubber stamp armed while in signature mode", () => {
+    // The modes share this layer, so a mismatch must be inert rather than
+    // dropping an APPROVED stamp on someone expecting their signature.
+    useStampStore.setState({ armed: APPROVED });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 300, 400);
+
+    expect(mockAddStamp).not.toHaveBeenCalled();
+    expect(mockPlace).not.toHaveBeenCalled();
+  });
+
   it("places normally when the click misses the signature field", async () => {
     mockFields.mockResolvedValue([sigField]);
     useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
     const { container } = render(layer());
     // PDF (400, 392) — same page, well clear of the field.
     clickAt(container, 400, 400);
@@ -201,6 +234,7 @@ describe("StampLayer", () => {
     // must not block placement, because there is no field to collide with.
     mockFields.mockRejectedValue(new Error("no form"));
     useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
     const { container } = render(layer());
     clickAt(container, 300, 400);
 

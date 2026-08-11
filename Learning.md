@@ -8883,6 +8883,27 @@ without lying about the other half.
 | `src/view/file-data-url.ts` | `bytesToDataUrl`, lifted out of the dialog now that two callers need it. |
 | `vite.config.ts` | Scope test discovery to `src/`. |
 
+### Follow-up: two things in-app use found immediately
+Both were mine, and both came from reusing the stamp flow a little too
+faithfully.
+
+- **Reusing a mechanism is not the same as reusing a mode.** Placing a signature
+  set `activeTool: "stamp"`, which was true of the *layer* doing the work and
+  false of the user's intent: it opened the rubber-stamp tool with the
+  APPROVED/DRAFT palette showing. A separate `"signature"` tool id fixes it, and
+  the layer now requires the mode and the armed kind to agree — otherwise a
+  rubber stamp armed in signature mode would drop while the user believed they
+  were placing their signature.
+- **How often you repeat an action is part of its design.** A rubber stamp stays
+  armed because you stamp a batch of pages with it. Nobody signs the same
+  document eight times, so staying armed only means the next stray click costs
+  you a second signature. Placement now disarms and leaves the mode. The general
+  question worth asking of any armed tool: *is repeating this the common case,
+  or the mistake?*
+- **A mode with no UI needs a way out.** Signature mode has no palette — there
+  is nothing left to choose. That makes it invisible, so it carries a hint and a
+  Cancel button, and Escape works, because that is the key everyone tries first.
+
 ### Further reading
 - PDF 32000-1 §12.7.4.5 — signature fields, and why a `/Sig` widget's appearance says nothing about whether the document is signed.
 - `/SMask` in §11.6.5.3 — the soft-mask mechanism carrying a PNG's alpha into PDF.

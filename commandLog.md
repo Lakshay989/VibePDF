@@ -4137,6 +4137,38 @@ Not covered by any test: that the placed signature renders correctly in Acrobat,
 Preview and a third reader. That is the human ritual, and transparency is
 exactly the sort of thing one renderer gets right and another does not.
 
+### Follow-up — two flow bugs found in the first minute of in-app use
+
+Reported: the stamp tab opens with its palette when you place a signature, and
+the tool stays armed afterwards. Both mine, both from reusing the stamp flow
+too faithfully. No Rust change.
+
+- New `"signature"` ToolId, so the rubber-stamp palette and the pressed Stamp
+  button stay out of it. `StampLayer` now requires the mode and the armed kind
+  to agree.
+- Placement disarms and returns to no tool. A rubber stamp repeats by design; a
+  signature does not.
+- The mode has no palette, so it carries a hint, a Cancel button, and Escape.
+
+```
+npm run check                                    # clean
+npx vitest src/view stamp-layer + SignatureDialog  # 38 ok (11 + 27)
+npm run test                                     # 627 passed (115 files)
+```
+
+`npm run test:rust` not re-run — no Rust file touched.
+
+Mutations, both caught:
+
+```
+# A. mode no longer has to match the armed kind => 1 failed
+# B. stays armed after placing                   => 1 failed
+```
+
+Still open, deliberately: the annotation panel lists a placed signature as
+**Stamp**, because that is its `/Subtype`. Changing it needs a marker written on
+the annotation and read back — see the note in the handover.
+
 ---
 
 ## How this file evolves

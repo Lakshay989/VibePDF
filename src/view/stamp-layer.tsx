@@ -55,7 +55,13 @@ export function StampLayer({
   // Soft bump: overlay is the display; no main-view reload until the next bake.
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
 
-  const active = activeTool === "stamp" && armed !== null;
+  // Two modes share this layer. `"signature"` (P6.A5a) exists so that placing a
+  // signature does not switch the user into the rubber-stamp tool; the kinds
+  // must match the mode, or an armed rubber stamp would drop while the user
+  // believes they are placing a signature.
+  const active =
+    armed !== null &&
+    (activeTool === "signature" ? armed.kind === "signature" : activeTool === "stamp");
 
   const swapped = (((rotation % 180) + 180) % 180) === 90;
   const geo: PageGeometry = {
@@ -125,6 +131,12 @@ export function StampLayer({
           bumpEpoch(documentId);
           if (key) tie(key);
           setHistory(documentId, done);
+          // One signature, once. A rubber stamp stays armed because you stamp
+          // a batch of pages with it; nobody signs the same document eight
+          // times, and leaving the tool armed means the next stray click drops
+          // a second signature.
+          useStampStore.getState().arm(null);
+          useToolStore.getState().setActiveTool(null);
         } catch (err) {
           if (key) oe.remove(documentId, key);
           reportError("Couldn't place the signature", err);

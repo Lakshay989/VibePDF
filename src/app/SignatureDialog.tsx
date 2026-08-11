@@ -197,7 +197,9 @@ export function SignatureDialog({ open, onClose }: Props) {
   // to make it; leaving it open would just be a modal in front of the target.
   const place = (id: string) => {
     arm(signatureStamp(id));
-    setActiveTool("stamp");
+    // Its own mode, not `"stamp"` — that put the user in the rubber-stamp tool
+    // with the APPROVED/DRAFT palette open, which is not what they chose.
+    setActiveTool("signature");
     onClose();
   };
 

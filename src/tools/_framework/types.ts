@@ -37,6 +37,10 @@ export type ToolId =
   | "polygon"
   | "ink"
   | "stamp"
+  // SPEC: P6-SEC-004 (P6.A5a) — placing a signature reuses the stamp *layer*
+  // but is its own mode. Sharing `"stamp"` put the user in the rubber-stamp
+  // tool, palette and all, which is not what they asked for.
+  | "signature"
   | "measure"
   | "edit-text"
   | "add-text"

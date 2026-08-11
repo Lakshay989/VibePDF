@@ -373,7 +373,7 @@ describe("SignatureDialog", () => {
     expect(imgs[0]!.getAttribute("src")).toBe("data:image/png;base64,AAA");
   });
 
-  it("Place arms the signature, switches to the stamp tool, and closes", () => {
+  it("Place arms the signature in its own mode, and closes", () => {
     twoEntries();
     const onClose = vi.fn();
     render(<SignatureDialog open onClose={onClose} />);
@@ -383,8 +383,10 @@ describe("SignatureDialog", () => {
       kind: "signature",
       signatureId: "b",
     });
+    // Not "stamp": that opened the rubber-stamp tool and its APPROVED/DRAFT
+    // palette, which is not what the user picked.
+    expect(useToolStore.getState().activeTool).toBe("signature");
     // Placement is a click on the page, so the modal has to get out of the way.
-    expect(useToolStore.getState().activeTool).toBe("stamp");
     expect(onClose).toHaveBeenCalled();
   });
 
