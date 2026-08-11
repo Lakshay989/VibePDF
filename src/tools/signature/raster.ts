@@ -1,19 +1,26 @@
 // SPEC: P6-SEC-001 (P6.A2) — rasterise captured strokes to a transparent PNG,
 // which is what the signature library stores (P6.A1).
 //
-// **This file is not unit-tested, and that is a deliberate trade.** jsdom has no
-// canvas implementation — `getContext("2d")` returns null — and `canvas` is a
-// native dependency this project does not carry for one drawing routine. So
-// every *decision* lives in `draw.ts` (bounds, trim, scale, aspect, what counts
-// as ink), all of it tested, and what remains here is a straight transcription
-// of that fit onto a 2D context with no branching worth asserting. Its
-// correctness rests on the acceptance check: open the stored PNG and look at it.
+// jsdom has no canvas implementation — `getContext("2d")` returns null — and
+// `canvas` is a native dependency this project does not carry for one drawing
+// routine. That shaped the design: every *decision* lives in `draw.ts` (bounds,
+// trim, scale, aspect, what counts as ink), so what remains here is a
+// transcription of that fit onto a 2D context.
 //
-// Two properties it must hold, neither visible to a unit test:
-//   - the background stays **transparent** (never fill), or every placed
-//     signature carries a white box with it;
-//   - the ink is trimmed to its own extent, so the stored image is the
-//     signature and not the pad it was drawn on.
+// It shipped with no tests at all on those grounds, which was an overstatement.
+// The *pixels* need a canvas; the *drawing commands* do not. `RasterOptions
+// .createCanvas` is a seam a recording stub can occupy, and
+// `__tests__/raster.test.ts` uses it to pin the two properties that were
+// previously left to manual inspection:
+//   - the background is never filled, so the PNG stays **transparent** — else
+//     every placed signature carries a white box with it;
+//   - the ink is trimmed to its own extent with even padding, so the stored
+//     image is the signature and not the pad it was drawn on.
+//
+// What is still unproven here is that a real 2D context turns those commands
+// into the pixels expected. Closing that needs a canvas implementation; a
+// hand-decode of a saved PNG confirmed it once (RGBA, corner alpha 0, 10px
+// margins on all four sides).
 
 import { smoothInk } from "@/tools/ink/ink";
 import {
@@ -31,6 +38,16 @@ export interface RasterOptions {
   lineWidth?: number;
   /** CSS colour for the ink. */
   color?: string;
+  /**
+   * How to obtain the drawing surface. Defaults to a real `<canvas>`.
+   *
+   * The seam exists so tests can pass a recording stub and assert what this
+   * function *draws* — that it never fills a background, that the surface is
+   * the size the fit asked for, that every point lands inside the padding.
+   * That is not the same as asserting pixels, but it covers the decisions,
+   * and it needs no canvas implementation to do it.
+   */
+  createCanvas?: () => HTMLCanvasElement;
 }
 
 /**
@@ -46,13 +63,18 @@ export interface RasterOptions {
  */
 export async function strokesToPng(
   strokes: readonly Stroke[],
-  { target = TARGET_LONG_EDGE, lineWidth = 3, color = "#111" }: RasterOptions = {},
+  {
+    target = TARGET_LONG_EDGE,
+    lineWidth = 3,
+    color = "#111",
+    createCanvas = () => document.createElement("canvas"),
+  }: RasterOptions = {},
 ): Promise<Uint8Array> {
   const bounds = strokeBounds(strokes);
   if (!bounds) throw new Error("nothing drawn");
 
   const fit = fitToRaster(bounds, target);
-  const canvas = document.createElement("canvas");
+  const canvas = createCanvas();
   canvas.width = fit.width;
   canvas.height = fit.height;
 
