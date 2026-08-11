@@ -58,6 +58,9 @@ vibepdf/
 │   │   │   └── embed.rs
 │   │   ├── convert/              # Format conversions
 │   │   └── settings/             # Persisted settings
+│   │       ├── recents.rs        # Last 20 opened files (P1-VIEW-012)
+│   │       ├── session.rs        # Restored tabs/scroll (P1-VIEW-011)
+│   │       └── signatures.rs     # Signature library: index.json + PNG blobs (P6.A1)
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
 │   └── capabilities/             # Tauri 2 capability files
@@ -953,6 +956,38 @@ Settings live in two places:
 - **Per-document** (last zoom, last page, sidebar state): keyed by the SHA-256 hash of the document path, stored in IndexedDB on the frontend.
 
 The Rust side owns app-wide settings; frontend reads them via a one-shot command on startup. Changes propagate via events.
+
+### The signature library — and why it is *not* in `security/` (P6.A1)
+
+`<app_data_dir>/signatures/` holds `index.json` (versioned metadata: id, kind,
+created-at) plus one `<id>.png` blob per entry. It is the store `P6-SEC-001`
+calls "the local signature library", written by P6.A2–A4.
+
+The module tree reserves `security/` for "Crypto, signatures, redaction", and
+`steps/P6.md` puts every change under that directory behind a per-change human
+review, because crypto bugs fail silently. **The signature library is none of
+that**: PNG bytes the user drew, an id, a timestamp. No keys, no certificates,
+no signing. It is structurally `recents.rs` — versioned JSON index in
+`app_data_dir`, atomic write, defensive read — and reuses the `read_json` /
+`write_atomic` helpers `settings/mod.rs` exists to provide.
+
+Filing it under `security/` would put a picture store behind the crypto gate
+without making anything safer, and would dilute that gate where it does matter:
+the PKCS#7 work in P6.B1. The rule stays narrow so it stays meaningful. What
+*will* live in `security/`: `sign.rs`, `encrypt.rs`, `redact.rs` — none of which
+exist yet.
+
+Two shape decisions worth keeping:
+
+- **Blobs sit beside the index, not base64 inside it.** The index stays small,
+  and one corrupt blob fails only its own entry rather than the whole library.
+- **Write blob first, then index.** A crash between the two leaves an orphaned
+  file — invisible and harmless. The reverse would leave an index row pointing
+  at a file that does not exist.
+
+A signature image is personal data, stored unencrypted, exactly as `recents.json`
+stores file paths. That is a deliberate accepted risk: encrypting it would need
+a key with nowhere to live in an offline, account-less app.
 
 ---
 

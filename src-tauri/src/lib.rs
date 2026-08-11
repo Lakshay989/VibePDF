@@ -28,6 +28,9 @@ pub struct AppState {
     /// The mutex protects the *file*, not in-memory data, so it holds
     /// `()`.
     pub recents_lock: Mutex<()>,
+    /// Serialises signature-library writes: `add` is a read-modify-write of the
+    /// index plus a blob write, so concurrent adds could otherwise lose an entry.
+    pub signatures_lock: Mutex<()>,
     /// SPEC: P1-VIEW-011 — guards `session.json` writes the same way.
     pub session_lock: Mutex<()>,
     /// SPEC: P1-VIEW-001 (CLI-arg clause) — PDF paths parsed from
@@ -42,6 +45,7 @@ impl AppState {
         Self {
             actors: Mutex::new(HashMap::new()),
             recents_lock: Mutex::new(()),
+            signatures_lock: Mutex::new(()),
             session_lock: Mutex::new(()),
             cli_pending: Mutex::new(Vec::new()),
         }
@@ -130,6 +134,10 @@ pub fn run() {
             commands::pdf::pdf_export_form_data,
             commands::pdf::pdf_import_form_data,
             commands::pdf::pdf_flatten_form,
+            commands::signatures::signatures_list,
+            commands::signatures::signatures_add,
+            commands::signatures::signatures_remove,
+            commands::signatures::signatures_bytes,
             commands::pdf::pdf_delete_text_box,
             commands::pdf::pdf_add_image,
             commands::pdf::pdf_add_link,

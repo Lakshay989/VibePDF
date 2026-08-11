@@ -3929,6 +3929,36 @@ watcher exits. Run one or the other.
 
 ---
 
+## P6.A1 — Signature library infrastructure (no spec line; supports P6-SEC-001/-002/-003)
+
+No `npm install` / `cargo add` — `uuid`, `serde`, `serde_json` were already in
+use. No fixture: the tests build their own PNGs and run against a temp dir that
+is removed on drop, so nothing touches `app_data_dir`.
+
+Verification gates + tests:
+
+```
+cargo check --all-targets                    # after the module + command wiring
+cargo test --test signature_library          # 12 ok
+npx vitest run src/ipc/__tests__/signatures.test.ts        # 4 ok
+npx vitest run src/state/__tests__/signature-store.test.ts # 4 ok
+npm run check                                # clean first time
+npm run test                                 # 510 passed
+npm run test:rust                            # 74 binaries (was 73), every one 0 failed
+```
+
+No PDF write path in this step — the library never opens a document — so there
+is **no cross-reader verification artifact** to produce.
+
+One stumble worth recording: the `docs/04_ARCHITECTURE.md` edit was scripted as
+two `str.replace` calls followed by one write, and the second anchor did not
+match. Because the exception fired before the write, the *first* replacement was
+silently discarded too — the file was left untouched while `npm run check`
+(running after the `;`) passed and made it look like the edit had landed. Assert
+each anchor before mutating, or write after each step.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

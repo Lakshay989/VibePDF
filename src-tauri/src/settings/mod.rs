@@ -26,6 +26,7 @@ use crate::error::CommandError;
 
 pub mod recents;
 pub mod session;
+pub mod signatures;
 
 /// Deserialize JSON of type `T` from `file`. `None` when the file is
 /// absent or fails to parse — callers fall back to a default. Never

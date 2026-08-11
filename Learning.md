@@ -8541,6 +8541,68 @@ stopped blocking the path.
 
 ---
 
+## P6.A1 — where a thing lives is a design decision
+
+### Problem
+Phase 6 needs somewhere to keep signatures the user has drawn, typed, or
+imported, so A2–A4 have a place to write and A5 has a place to read. No spec
+line describes it; `P6-SEC-001` only names "the local signature library" in
+passing. Infrastructure, in the literal sense — the part that holds the parts.
+
+### Concepts learned
+- **A review gate is only useful if it is narrow.** `steps/P6.md` puts every
+  change under `src-tauri/src/security/` behind per-change human review, because
+  crypto bugs fail silently. `docs/04` lists "signatures" under that directory,
+  so the obvious move was to put the library there. But this library stores PNG
+  bytes, an id, and a timestamp — no keys, no certificates, nothing that can be
+  cryptographically wrong. Filing it there would have made every future tweak to
+  a picture store cost a security review, and taught everyone that the gate is
+  bureaucratic rather than load-bearing. A gate you route trivia through is a
+  gate people stop reading carefully. It went in `settings/` instead, and the
+  reasoning is written into `docs/04` so the next person sees a decision rather
+  than an inconsistency.
+- **"Signatures" is two different nouns.** The word covers both a picture of
+  someone's name and a PKCS#7 cryptographic object. They share a label and
+  nothing else — different risk, different review, different module. Worth
+  noticing when a directory name is doing double duty.
+- **Blob-beside-index, not blob-inside-index.** Base64 in the JSON would have
+  been fewer moving parts, but it makes the index grow with the *content*, and a
+  single corrupt entry takes the whole library with it. Separate files mean the
+  index stays small and one bad blob fails alone — `bytes()` returns `NotFound`
+  for that id while every other entry keeps working. There is a test for exactly
+  that, because it is the failure mode nobody would notice until it mattered.
+- **Crash ordering is a design choice you make once and write down.** Blob first,
+  then index. A crash between the two leaves an orphaned file: invisible, costs
+  disk, harmless. The reverse leaves an index row pointing at nothing — a broken
+  entry the UI must then defend against forever. Same two writes, opposite
+  failure modes; picking the harmless one is free if you think about it before
+  writing the code.
+- **The store re-reads instead of patching.** Every mutation in
+  `signature-store.ts` calls back for the whole list. It costs a round-trip and
+  buys the guarantee that what the picker shows is what is on disk — which
+  matters here because `add` can *prune*, so the backend's post-write list is
+  not derivable from the pre-write list plus the new entry. Same reason
+  `commands/recents.rs` returns the list rather than an acknowledgement.
+- **Reject unknown enum strings at the boundary.** `SignatureKind::parse`
+  refuses anything that is not draw/type/image rather than defaulting. A typo
+  that silently files a signature under the wrong kind is the kind of bug that
+  surfaces three features later as "why is my drawn signature in the images tab".
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/settings/signatures.rs` | Types, pure list logic (push/prune/remove), disk IO, PNG magic check. |
+| `src-tauri/src/commands/signatures.rs` | Four commands; resolves `app_data_dir`, holds the library lock. |
+| `src-tauri/src/lib.rs` | `signatures_lock` in `AppState` — `add` is a read-modify-write plus a blob write. |
+| `src/ipc/signatures.ts` | Typed wrappers; `Uint8Array` ↔ number-array marshalling. |
+| `src/state/signature-store.ts` | zustand cache that re-reads after every mutation. |
+| `docs/04_ARCHITECTURE.md` | The `settings/` vs `security/` decision, written down. |
+
+### Further reading
+- PNG file signature (the 8-byte magic): RFC 2083 §3.1.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section
