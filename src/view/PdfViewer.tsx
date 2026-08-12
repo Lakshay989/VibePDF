@@ -17,6 +17,7 @@ import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
+import { ProtectDialog } from "@/app/ProtectDialog";
 import { WatermarkDialog } from "@/app/WatermarkDialog";
 import { BackgroundDialog } from "@/app/BackgroundDialog";
 import { HeaderFooterDialog } from "@/app/HeaderFooterDialog";
@@ -198,6 +199,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const setHistory = useHistoryStore((s) => s.setHistory);
   const [insertFromOpen, setInsertFromOpen] = useState(false);
   const [watermarkOpen, setWatermarkOpen] = useState(false);
+  const [protectOpen, setProtectOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false);
   const [pageNumbersOpen, setPageNumbersOpen] = useState(false);
@@ -506,6 +508,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onMerge={doc ? () => setMergeOpen(true) : undefined}
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
         onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
+        onProtect={doc ? () => setProtectOpen(true) : undefined}
         onBackground={doc ? () => setBackgroundOpen(true) : undefined}
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
         onPageNumbers={doc ? () => setPageNumbersOpen(true) : undefined}
@@ -542,6 +545,12 @@ export function PdfViewer({ documentId, path }: Props) {
         destPageCount={doc?.numPages ?? 0}
         onInsert={(args) => void handleInsertFromPdf(args)}
         onClose={() => setInsertFromOpen(false)}
+      />
+      <ProtectDialog
+        open={protectOpen}
+        documentId={documentId}
+        documentName={path}
+        onClose={() => setProtectOpen(false)}
       />
       <WatermarkDialog
         open={watermarkOpen}

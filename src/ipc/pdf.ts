@@ -113,3 +113,26 @@ export async function getPdfBytes(id: DocumentId): Promise<Uint8Array> {
   const buf = await invoke<ArrayBuffer>("pdf_get_bytes", { id });
   return new Uint8Array(buf);
 }
+
+/**
+ * SPEC: P6-SEC-007 (P6.C1) — write a password-protected copy of `id` to `path`,
+ * with AES-256 encryption.
+ *
+ * **Protect-on-export.** The open document is untouched: this produces an
+ * encrypted copy and leaves the current file, its undo history and its password
+ * alone. Encrypting in place would silently change the password the open
+ * document needs, which is a good way to lock someone out of their own work.
+ *
+ * Both passwords are optional and mean different things — user gates *opening*,
+ * owner gates *permissions* — but at least one is required; the backend rejects
+ * a request with neither. The passwords go straight to the Rust side and are
+ * never stored, logged, or echoed back.
+ */
+export async function protectPdf(
+  id: DocumentId,
+  path: string,
+  userPassword: string | null,
+  ownerPassword: string | null,
+): Promise<void> {
+  return invoke<void>("pdf_protect", { id, path, userPassword, ownerPassword });
+}

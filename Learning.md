@@ -9008,6 +9008,63 @@ annotation** and calls it signing.
 
 ---
 
+## P6.C1 — the library had the crypto, and one line of it was wrong
+
+### Problem
+Password-protect a PDF with AES-256 (P6-SEC-007). The first step into
+`src-tauri/src/security/`, the directory the roadmap singles out as needing a
+human review pass on every diff because its mistakes are silent.
+
+### Concepts learned
+- **Look for the implementation before planning one.** `lopdf` 0.36 already
+  ships the standard security handler — `EncryptionVersion::V5` (PDF 2.0,
+  AES-256, R6 derivation) and a `Permissions` bitflag set covering the whole of
+  P6-SEC-009. The step turned out to be parameter choice and wiring. Writing
+  AES-256 with R6 key derivation by hand would have been the most dangerous
+  code in the project, and it was never necessary.
+- **A "shall" in a spec is not the same as what readers enforce, in either
+  direction.** ISO 32000-2 makes `/Length` *optional* for V5; several readers
+  want it anyway. It also says a document with `/Encrypt` *shall* carry an
+  `/ID`, which `hello.pdf` lacks and `lopdf` does not add. Both were real
+  changes; neither was the actual bug.
+- **The bug was upstream, and it was an aliasing mistake.** lopdf's Algorithm 10
+  does `encrypt_block_mut(&mut bytes.into())` — `into()` materialises a
+  *temporary* `GenericArray`, the encryption lands in the temporary, and the
+  function returns the untouched plaintext. `/Perms` goes out with `'T'` and
+  `"adb"` in the clear. `PDFium` validates that entry and refuses the whole
+  document with a **password error on a correct password**; `pypdf` logs
+  "ignore '/Perms' verify failed" and opens it anyway. A file that some readers
+  accept and others reject, with nothing on screen to say which.
+- **Differential testing found it; four rounds of guessing did not.** The move
+  that worked was generating the same thing with an independent implementation
+  and diffing the structure — `V`, `R`, `CFM`, and the byte lengths of `O`, `U`,
+  `OE`, `UE`, `Perms` — until one entry disagreed. When a format is rejected by
+  a parser you do not control, get a known-good artifact from a different
+  producer before theorising. It is faster than reading the spec and it tells
+  you which part of the spec to read.
+- **`'adb'` visible in a hex dump is what "not encrypted" looks like.** The
+  regression test asserts on exactly that: bytes 9–11 of `/Perms` must not be
+  the literal marker, and byte 8 must not be `'T'` or `'F'`. Cheap, specific,
+  and it fails the instant the workaround stops being applied.
+- **Protect on export, not in place.** Encrypting the open document would mean
+  the actor holding a file whose open-password had silently changed, every
+  later render needing it, and undo having to restore the old one. Three ways
+  to lock someone out of their own work, for nothing the spec line asks for.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/mod.rs` | The module the architecture doc reserved on day one. |
+| `src-tauri/src/security/encrypt.rs` | V5 parameters, CSPRNG key, `/ID`, and the `/Perms` workaround. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_protect` — encrypt a copy, re-open it, keep it only if it opens. |
+| `src/app/ProtectDialog.tsx` | Two passwords that do different jobs, and copy that says which. |
+
+### Further reading
+- ISO 32000-2 Algorithms 8–10 — `/U`, `/O` and `/Perms` for revision 6.
+- The distinction the dialog turns on: a *user* password gates opening; an *owner* password gates permissions and leaves the document readable by anyone.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

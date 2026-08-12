@@ -35,6 +35,20 @@ pdfium-render = "0.9"
 # routines we'll never call.
 png = "0.17"
 uuid = { version = "1", features = ["v4", "serde"] }
+# P6.C1 (SPEC P6-SEC-007): the OS CSPRNG, for AES-256 file encryption keys.
+# Key material must not come from a seeded PRNG — `getrandom` is the thinnest
+# wrapper over getrandom(2)/BCryptGenRandom and holds no state of its own. It
+# was already in Cargo.lock transitively, so this adds a direct edge and no new
+# supply-chain surface. lopdf supplies the cryptography itself.
+getrandom = "0.3"
+# P6.C1 (SPEC P6-SEC-007): one AES-256-ECB block, to write the /Perms entry
+# that lopdf 0.36.0 leaves in plaintext (its compute_permissions encrypts a
+# temporary copy and returns the original). PDFium validates /Perms and refuses
+# the document, so without this our "protected" files open in some readers and
+# not others. Not a cryptographic design: no key derivation, no mode choice —
+# the key is already in hand and the block is fixed by ISO 32000-2 Algorithm 10.
+# Same version lopdf already resolves to, so no second copy in the tree.
+aes = "0.8"
 # COS / object-model layer for the structural edits PDFium's high-level API
 # can't do: rewriting /Outlines, /AcroForm, the page tree, and indirect refs.
 # Pure Rust, MIT. Operates on serialized bytes *between* PDFium passes — never

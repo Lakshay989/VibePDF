@@ -4330,6 +4330,78 @@ reporter's own account, no longer reproducing.
 
 ---
 
+## P6.C1 — Password protect, AES-256 (SPEC P6-SEC-007)
+
+Two new dependencies, both justified in `Cargo.toml` beside the entry:
+
+```
+getrandom = "0.3"   # OS CSPRNG for the 256-bit file encryption key
+aes = "0.8"         # one ECB block, to fix lopdf's /Perms (see below)
+```
+
+Neither is new supply-chain surface: both were already in `Cargo.lock`
+transitively, and `aes` is pinned to the version lopdf already resolves.
+**No cryptography is implemented here** — lopdf 0.36 ships the V5/R6 handler.
+
+Investigation tooling (venv, not committed):
+
+```
+python3 -m venv /tmp/pdfvenv && /tmp/pdfvenv/bin/pip install pypdf cryptography
+```
+
+### The bug: lopdf 0.36.0 writes /Perms unencrypted
+
+`compute_permissions` (ISO 32000-2 Algorithm 10) does
+`encrypt_block_mut(&mut bytes.into())`. `into()` builds a temporary
+`GenericArray`; the encryption lands there and is dropped; the function returns
+the plaintext. Evidence:
+
+```
+lopdf  /Perms = fcffffffffffffff 54 616462 7a3cf393   <- 'T', "adb" in the clear
+pypdf  /Perms = 6e3442ad2ecc91e0ea11b0201a81c205      <- ciphertext
+```
+
+PDFium validates `/Perms` and refuses the document — `PasswordError` on the
+*correct* password. pypdf prints "ignore '/Perms' verify failed" and continues.
+Worked around in `permissions_entry`; regression-tested by asserting bytes 9–11
+are not `"adb"`. **Worth reporting upstream.**
+
+Found by differential testing after four wrong guesses (missing `/ID`, a
+`%PDF-1.4` header, a missing `/Length`, PDFium lacking R6 support). What
+actually worked: produce the same artifact with pypdf, confirm PDFium opens it,
+then diff the two `/Encrypt` dictionaries entry by entry.
+
+Two of those guesses left real improvements and are kept — the `/ID` (ISO
+32000-1 §7.5.5 requires one alongside `/Encrypt`) and `/Length`. The PDF 2.0
+header bump was reverted: pypdf writes `%PDF-1.4` with AESV3 and every reader
+tested accepts it.
+
+Verification gates + tests:
+
+```
+cargo test --test encrypt                                # 8 ok
+cargo test --test encrypt -- --include-ignored           # 9 ok (3 artifacts)
+npx vitest run src/app/__tests__/ProtectDialog.test.tsx  # 9 ok
+npm run check                                            # clean
+npm run test                                             # 653 passed
+npm run test:rust                                        # green
+```
+
+Mutations, all caught:
+
+```
+# leave lopdf's plaintext /Perms          => 4 failed
+# send the open password as the owner one => 1 failed
+# enable Protect with no password at all  => 2 failed
+```
+
+Artifacts for the cross-reader ritual: `Sample PDFs/vibepdf-verify-encrypted-{user,owner,both}.pdf`.
+
+Also corrected: `tests/fixtures/acceptance/README.md` claimed `p1-encrypted.pdf`
+was "256-bit AES per the PDF 2.0 spec"; it is RC4-128 (`/V 2 /R 3`).
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

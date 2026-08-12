@@ -35,6 +35,8 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-009 — open the watermark dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onWatermark?: (() => void) | undefined;
+  /** SPEC: P6-SEC-007 (P6.C1) — open the password-protect dialog. */
+  onProtect?: (() => void) | undefined;
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
@@ -55,6 +57,7 @@ export function ZoomToolbar({
   onMerge,
   onInsertFromPdf,
   onWatermark,
+  onProtect,
   onBackground,
   onHeaderFooter,
   onPageNumbers,
@@ -225,6 +228,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Watermark…
+        </button>
+      ) : null}
+
+      {onProtect ? (
+        <button
+          type="button"
+          onClick={onProtect}
+          title="Write a password-protected copy (AES-256)"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Protect…
         </button>
       ) : null}
 

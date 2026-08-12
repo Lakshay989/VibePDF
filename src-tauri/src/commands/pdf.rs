@@ -1789,6 +1789,74 @@ pub async fn pdf_add_image_stamp(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P6-SEC-007 (P6.C1) — write a password-protected copy of the open
+/// document to `path`, with AES-256 encryption.
+///
+/// **Protect-on-export, not protect-in-place.** The open document is untouched:
+/// this writes an encrypted copy and leaves the actor's state, undo history and
+/// current password exactly as they were. Encrypting in place would mean the
+/// actor holding a document whose open-password had silently changed, every
+/// later render needing it, and undo having to restore the old one — three ways
+/// to lock someone out of their own file, for no gain the spec line asks for.
+///
+/// The output is re-opened with the password before this returns, so a file
+/// that cannot be opened is reported here rather than discovered later.
+#[tauri::command]
+pub async fn pdf_protect(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    user_password: Option<String>,
+    owner_password: Option<String>,
+) -> Result<(), CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    // Passwords stay in this frame. They are never logged, never put into a
+    // `CommandError` message, and never reach the actor — which logs its path
+    // on every message.
+    let opts = crate::security::encrypt::EncryptOptions {
+        user_password,
+        owner_password,
+    };
+    let encrypted = crate::security::encrypt::encrypt_document(&bytes, &opts)?;
+
+    let out = PathBuf::from(&path);
+    std::fs::write(&out, &encrypted)
+        .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
+
+    // The round-trip rule, with the password the file now needs. An owner-only
+    // document opens with none, so try that first and fall back.
+    let open_with = opts_open_password(&opts);
+    if let Err(e) = crate::pdf::document::open_pdf(&out, open_with) {
+        let _ = std::fs::remove_file(&out);
+        return Err(CommandError::PdfError(format!(
+            "the protected file could not be re-opened, so it was not kept: {e}"
+        )));
+    }
+    Ok(())
+}
+
+/// Which password re-opens the file we just wrote: the user password when there
+/// is one, otherwise none (an owner-only document opens freely).
+fn opts_open_password(opts: &crate::security::encrypt::EncryptOptions) -> Option<&str> {
+    opts.user_password.as_deref().filter(|p| !p.is_empty())
+}
+
 /// SPEC: P6-SEC-004 (P6.A5a) — place a stored signature on the page as a
 /// `/Stamp`, aspect-correct around `(x, y)` at `height` points tall.
 ///
