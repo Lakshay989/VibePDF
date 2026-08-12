@@ -3,7 +3,7 @@
 // tool or no armed stamp = no-op. IPC is mocked.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("@/ipc/stamps", () => ({
   addStamp: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
@@ -185,6 +185,57 @@ describe("StampLayer", () => {
     // The message has to name the field and explain, not just say "no".
     const [, err] = mockReport.mock.calls[0]!;
     expect(String((err as Error).message)).toContain("Signature1");
+  });
+
+  // SPEC: P6-SEC-004 (P6.A5a) — say where it can't go *before* the click.
+  //
+  // The refusal was correct from the first commit and still read as a broken
+  // feature: the ruled line marked "Signature:" is the obvious place to sign,
+  // and the toast that followed did not register. These pin the affordance that
+  // makes the refusal predictable instead of surprising.
+  it("marks out the signature fields while a signature is armed", async () => {
+    mockFields.mockResolvedValue([sigField]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    render(layer());
+
+    const marker = await screen.findByLabelText(/Signature field Signature1/);
+    // Advisory only — it must never eat the click that produces the explanation.
+    expect(marker.style.pointerEvents).toBe("none");
+  });
+
+  it("marks nothing when no signature is armed", async () => {
+    mockFields.mockResolvedValue([sigField]);
+    render(layer()); // rubber stamp armed, from beforeEach
+    await vi.waitFor(() => expect(mockAddStamp).not.toHaveBeenCalled());
+    expect(screen.queryByLabelText(/Signature field/)).toBeNull();
+    // No point reading the form for a rubber stamp, which can go anywhere.
+    expect(mockFields).not.toHaveBeenCalled();
+  });
+
+  it("marks only signature fields, not every widget on the page", async () => {
+    mockFields.mockResolvedValue([
+      sigField,
+      { name: "PrintedName", kind: "text" as const, rect: [170, 592, 400, 612] as [number, number, number, number] },
+    ]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    render(layer());
+
+    await screen.findByLabelText(/Signature field Signature1/);
+    // Stamping over a text field is harmless; only /Sig would be misread.
+    expect(screen.queryByLabelText(/Signature field PrintedName/)).toBeNull();
+  });
+
+  it("clears the markers when placement is cancelled", async () => {
+    mockFields.mockResolvedValue([sigField]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    render(layer());
+    await screen.findByLabelText(/Signature field Signature1/);
+
+    useToolStore.setState({ activeTool: null });
+    await vi.waitFor(() => expect(screen.queryByLabelText(/Signature field/)).toBeNull());
   });
 
   it("disarms and leaves the mode once the signature is placed", async () => {

@@ -7,9 +7,9 @@
 // doesn't fit `stepTool`'s drag lifecycle.
 
 import { reportError } from "@/app/report-error";
-import { type PointerEvent as ReactPointerEvent } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
-import { readPageFields } from "@/ipc/forms";
+import { readPageFields, type PageField } from "@/ipc/forms";
 import { placeSignature, signatureBytes } from "@/ipc/signatures";
 import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
@@ -73,6 +73,40 @@ export function StampLayer({
   };
   const cssWidth = displayedWidth * scale;
   const cssHeight = displayedHeight * scale;
+
+  // SPEC: P6-SEC-004 (P6.A5a) — show where a signature *cannot* go, before the
+  // click rather than after it.
+  //
+  // The refusal on a `/Sig` field was correct from the first commit, and it was
+  // still a bad experience: the ruled line labelled "Signature:" is the most
+  // obvious place in the document to sign, and clicking it produced a toast
+  // that did not register. A guard whose message arrives too late, or not at
+  // all, is indistinguishable from a broken feature — it cost an hour of
+  // someone's evening to establish that the code was working.
+  //
+  // Advisory only. The click handler re-reads the fields and decides for
+  // itself, so a stale outline can never let a signature through.
+  const [blockedFields, setBlockedFields] = useState<PageField[]>([]);
+  const armedSignature = active && armed?.kind === "signature";
+
+  useEffect(() => {
+    if (!armedSignature) {
+      setBlockedFields([]);
+      return undefined;
+    }
+    let cancelled = false;
+    void readPageFields(documentId, page)
+      .then((fields) => {
+        if (!cancelled) setBlockedFields(fields.filter((f) => f.kind === "signature"));
+      })
+      .catch(() => {
+        // No form on this page. Nothing to warn about.
+        if (!cancelled) setBlockedFields([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [armedSignature, documentId, page]);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!active || !armed || e.button !== 0) return;
@@ -232,6 +266,36 @@ export function StampLayer({
       }}
       onPointerDown={onPointerDown}
     >
+      {/* SPEC: P6-SEC-004 (P6.A5a) — the signature fields, marked out while a
+          signature is armed. `pointerEvents: none` so the click still reaches
+          the layer and still gets the explanation; this only means the refusal
+          is no longer a surprise. */}
+      {blockedFields.map((f) => {
+        const r = stampScreenRect(f.rect);
+        return (
+          <div
+            key={`sigfield-${f.name}`}
+            aria-label={`Signature field ${f.name} — needs a certificate`}
+            className="absolute flex items-center justify-center rounded border-2 border-dashed border-amber-500 bg-amber-100/40"
+            style={{
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              height: r.height,
+              pointerEvents: "none",
+            }}
+          >
+            {/* Only when it fits — a small witness box would otherwise be all
+                label and no box. */}
+            {r.width > 110 && r.height > 16 ? (
+              <span className="rounded bg-amber-500 px-1 text-[10px] leading-tight text-white">
+                Needs a certificate
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
+
       {/* Optimistic preview: committed stamps not yet baked into the page (P4.HF29). */}
       {pendingStamps.map(({ key, data }) => {
         const r = stampScreenRect(data.rect);

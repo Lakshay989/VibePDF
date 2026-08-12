@@ -4169,6 +4169,53 @@ Still open, deliberately: the annotation panel lists a placed signature as
 **Stamp**, because that is its `/Subtype`. Changing it needs a marker written on
 the annotation and read back — see the note in the handover.
 
+### Follow-up 2 — "draw and image won't place, typed works" (not a bug)
+
+It was the decline guard, working. Diagnosed by tracing the click path and
+comparing the logged coordinates against the fixture's field rects:
+
+```
+click            x       y   outcome    inside which /Sig field?
+typed        279.3   616.5   placed     — none —
+image        263.5   532.6   declined   Signature1   (170 512 400 545)
+image        177.1   621.2   placed     — none —
+draw         231.0   448.1   declined   WitnessSig   (190 432 280 452)
+draw         230.6   448.1   declined   WitnessSig
+draw         208.7   531.2   declined   Signature1
+draw         164.7   338.7   placed     — none —
+```
+
+Both draw and image place correctly when the click is clear of a field. The
+kind correlation was coincidence. Four `Can't place a signature there` warnings
+are in the dev log, one per decline — the toasts fired and were not noticed.
+
+**The real defect was the timing of the message**, so the fix is an affordance:
+while a signature is armed, every `/Sig` field on the page is outlined in amber
+with "Needs a certificate". Advisory only — `pointerEvents: none`, and the click
+handler still re-reads the fields and decides for itself, so a stale outline can
+never let a signature through onto a signature widget.
+
+```
+npx vitest run src/view/__tests__/stamp-layer.test.tsx   # 15 ok (4 new)
+npm run check                                            # clean
+npm run test                                             # 631 passed (115 files)
+```
+
+Mutations, both caught:
+
+```
+# A. marker stops filtering by /FT   => 1 failed (marks only signature fields)
+# B. marker takes pointer events     => 1 failed (must never eat the click)
+```
+
+`npm run test:rust` not re-run — no Rust file touched.
+
+Diagnostics used and removed: temporary `console.warn` tracing in
+`stamp-layer.tsx` and `SignatureDialog.tsx`, plus a throwaway
+`src-tauri/tests/zz_tmp_probe.rs` that ran every PNG in the real library through
+`add_image_stamp` (all five embedded fine, which is what ruled the backend out).
+None of it is committed.
+
 ---
 
 ## How this file evolves

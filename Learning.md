@@ -8904,6 +8904,37 @@ faithfully.
   is nothing left to choose. That makes it invisible, so it carries a hint and a
   Cancel button, and Escape works, because that is the key everyone tries first.
 
+### Follow-up: the correct refusal that read as a broken feature
+Reported as "draw and image signatures won't place; typed works". Neither the
+kind nor the code was the variable. Every failed click had landed **inside a
+`/Sig` field** and been declined exactly as designed; the successful ones had
+not. The typed one worked because it happened to be clicked somewhere blank.
+
+- **A guard whose message does not land is indistinguishable from a bug.** The
+  decline fired four times and toasted four times, and the person doing the
+  clicking experienced silence. From where they sat, the feature was broken —
+  and they were right to say so, because the thing they were trying to do (sign
+  on the line marked "Signature:") did not work and the reason never reached
+  them. Correct-but-unexplained is a defect, not a misunderstanding.
+- **Fix the timing, not the volume.** A louder toast still arrives after the
+  click. Marking the `/Sig` fields *while a signature is armed* moves the
+  information to before the decision, which is the only place it can prevent
+  the confusion rather than explain it afterwards.
+- **Advisory UI must not become authoritative UI.** The markers are
+  `pointerEvents: none` and the click handler still re-reads the fields and
+  decides for itself. If the outline were the gate, a stale one would let a
+  signature through onto a `/Sig` widget — the exact failure the guard exists
+  to prevent. Two tests pin both halves: the marker never eats the click, and
+  the marker only ever covers `/FT /Sig`.
+- **Debugging lesson, and it cost an hour of someone else's evening.** Three
+  wrong theories in a row — the PNG decoder, then an HMR store split, then the
+  page's overlay stack — each plausible, none checked against evidence that was
+  already available. The trace that solved it printed a coordinate; comparing
+  that coordinate against the field rects took one short script and would have
+  worked at the first report. **When a bug correlates with a category (kind,
+  file type, user), check whether the category is real before explaining it.**
+  Here it was pure coincidence in where the clicks landed.
+
 ### Further reading
 - PDF 32000-1 §12.7.4.5 — signature fields, and why a `/Sig` widget's appearance says nothing about whether the document is signed.
 - `/SMask` in §11.6.5.3 — the soft-mask mechanism carrying a PNG's alpha into PDF.
