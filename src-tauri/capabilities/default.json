@@ -9,7 +9,6 @@
     "core:default",
     "dialog:default",
     "dialog:allow-open",
-    "dialog:allow-ask",
     "fs:default",
     "fs:allow-read-file",
     "fs:scope-home-recursive"
