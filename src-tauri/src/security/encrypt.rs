@@ -33,15 +33,13 @@ const KEY_BYTES: usize = 32;
 /// choice and what every reader expects to find.
 const FILTER_NAME: &[u8] = b"StdCF";
 
-/// Key length in bits, written into `/Encrypt` as `/Length`.
-///
-/// PDF 2.0 makes this entry *optional* for V5 — the crypt filter's `/AESV3`
-/// already implies 256 bits — and `lopdf` duly omits it. **`PDFium` then refuses
-/// the file**, reporting a password error even when the password is correct.
-/// `pypdf` writes `/Length 256` and `PDFium` opens its output happily; that
-/// comparison is what identified this, and it is the only structural
-/// difference between the two dictionaries.
-const KEY_BITS: i64 = 256;
+// No `/Length` is written. PDF 2.0 makes it optional for V5 — `/AESV3` already
+// states the key size — and adding it does active harm: `lopdf`'s own decrypt
+// derives `n = Length / 8`, hits its `n > 16` guard (the legacy MD5 path caps
+// at 128 bits) and fails with `InvalidKeyLength`. A `/Length 256` was briefly
+// added here on a guess while chasing an unrelated problem; it was never needed
+// — `PDFium` opens these files without it — and it made our own output
+// undecryptable by the very library that wrote it, which P6.C2 depends on.
 
 /// What to protect a document with.
 ///
@@ -135,9 +133,8 @@ fn permissions_entry(key: &[u8; KEY_BYTES], permissions: Permissions) -> Result<
     Ok(out.to_vec())
 }
 
-/// Patch the `/Encrypt` dictionary lopdf just produced: a correct `/Perms`, and
-/// `/Length`, which PDF 2.0 makes optional for V5 but readers expect to find.
-fn fix_encrypt_dict(
+/// Replace the `/Perms` entry lopdf just produced with a correctly encrypted one.
+fn fix_permissions_entry(
     doc: &mut Document,
     key: &[u8; KEY_BYTES],
     permissions: Permissions,
@@ -153,7 +150,6 @@ fn fix_encrypt_dict(
         .and_then(Object::as_dict_mut)
         .map_err(|e| CommandError::PdfError(format!("/Encrypt is not a dictionary: {e}")))?;
     dict.set("Perms", Object::String(perms, StringFormat::Literal));
-    dict.set("Length", KEY_BITS);
     Ok(())
 }
 
@@ -220,7 +216,7 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     doc.encrypt(&state)
         .map_err(|e| CommandError::PdfError(format!("could not encrypt the document: {e}")))?;
 
-    fix_encrypt_dict(&mut doc, &key, Permissions::all())?;
+    fix_permissions_entry(&mut doc, &key, Permissions::all())?;
 
     let mut out = Vec::new();
     doc.save_to(&mut out)

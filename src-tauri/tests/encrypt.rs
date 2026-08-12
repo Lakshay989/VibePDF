@@ -87,6 +87,12 @@ fn encrypts_with_aes_256() {
     );
     assert_eq!(dict.get(b"StmF").and_then(Object::as_name).unwrap(), b"StdCF");
     assert_eq!(dict.get(b"StrF").and_then(Object::as_name).unwrap(), b"StdCF");
+
+    // …and no `/Length`. Optional for V5, and actively harmful: lopdf's own
+    // decrypt derives `n = Length / 8` and rejects `n > 16`, so writing it makes
+    // our output undecryptable by the library that produced it — which is what
+    // P6.C2 needs to do.
+    assert!(dict.get(b"Length").is_err(), "/Length must not be written for V5");
 }
 
 // The regression test for the upstream defect this module works around.
@@ -203,6 +209,17 @@ fn refuses_a_document_that_is_already_protected() {
     let once = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some("pw"), None)).expect("first");
     let err = encrypt_document(&once, &opts(Some("other"), None)).unwrap_err();
     assert!(matches!(err, CommandError::InvalidInput(_)), "got {err:?}");
+}
+
+// SPEC: P6-SEC-008 (P6.C2) depends on this: whatever we encrypt, we must be
+// able to decrypt again. Cheap to assert here, and it is the property that a
+// stray `/Length` silently destroyed.
+#[test]
+fn our_own_output_can_be_decrypted_again() {
+    let out = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some("pw"), None)).expect("encrypt");
+    let mut doc = Document::load_mem(&out).expect("load");
+    assert!(doc.is_encrypted());
+    doc.decrypt("pw").expect("lopdf must be able to decrypt what it wrote");
 }
 
 /// SPEC: P6-SEC-007 — a file to open in Acrobat / Preview / a third reader.

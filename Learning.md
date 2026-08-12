@@ -9059,6 +9059,16 @@ human review pass on every diff because its mistakes are silent.
 | `src-tauri/src/commands/pdf.rs` | `pdf_protect` — encrypt a copy, re-open it, keep it only if it opens. |
 | `src/app/ProtectDialog.tsx` | Two passwords that do different jobs, and copy that says which. |
 
+- **Revert what you changed on a guess once it is not the fix.** Chasing the
+  `/Perms` bug produced four hypotheses. One was right; two (`/ID`, the PDF 2.0
+  header) were harmless and one was kept. `/Length 256` was neither needed nor
+  neutral: `lopdf`'s decrypt derives `n = Length / 8` and rejects `n > 16`, so
+  writing it made our own output undecryptable **by the library that wrote it**
+  — the operation P6.C2 exists to perform. It survived because the suite went
+  green for an unrelated reason, which is precisely when a speculative change
+  is most likely to be kept. Found only by checking C2's premise before
+  planning it.
+
 ### Further reading
 - ISO 32000-2 Algorithms 8–10 — `/U`, `/O` and `/Perms` for revision 6.
 - The distinction the dialog turns on: a *user* password gates opening; an *owner* password gates permissions and leaves the document readable by anyone.

@@ -4400,6 +4400,37 @@ Artifacts for the cross-reader ritual: `Sample PDFs/vibepdf-verify-encrypted-{us
 Also corrected: `tests/fixtures/acceptance/README.md` claimed `p1-encrypted.pdf`
 was "256-bit AES per the PDF 2.0 spec"; it is RC4-128 (`/V 2 /R 3`).
 
+### C1 follow-up — removing the `/Length` I added on a guess
+
+Found while checking C2's premise, before planning it. `/Length 256` was one of
+the four wrong guesses during the `/Perms` hunt and was kept even though it was
+not the fix. It is optional for V5 and it does active harm:
+
+```
+lopdf decrypt: n = Length / 8 = 32, and its `n > 16` guard rejects that
+               (the legacy MD5 path caps at 128 bits) -> InvalidKeyLength
+```
+
+So our own AES-256 output could not be decrypted by the library that wrote it —
+which is exactly what P6.C2 must do. Removed; all 8 encrypt tests still pass
+(PDFium never needed it), and a 9th now pins the property:
+`our_own_output_can_be_decrypted_again`.
+
+Confirmed by contrast: pypdf writes `/Length 256` and lopdf fails on *its*
+output too, while the RC4-128 fixture (where `n = 16`) decrypts fine.
+
+```
+cargo test --test encrypt   # 9 ok
+npm run check               # clean
+npm run test                # 653 passed
+```
+
+**The lesson is about the guess, not the entry.** Four hypotheses were tried
+during C1; one was right, two were harmless improvements, and this one was
+harmful and kept anyway because the suite went green for an unrelated reason.
+A change made on a guess should be reverted when it turns out not to be the
+fix, not retained because nothing complained.
+
 ---
 
 ## How this file evolves
