@@ -4289,6 +4289,36 @@ The "asks only once" test needed `act()` around the re-arm between its two
 clicks, or React had not re-rendered and the second click hit an inert layer.
 Second time in one session.
 
+### Follow-up 5 — the warning could never appear (shipped broken, same day)
+
+`dialog:default` does **not** include `allow-ask` — it grants `allow-message`,
+`allow-save`, `allow-open` only (`tauri-plugin-dialog-2.7.1/permissions/
+default.toml`). So the modal added in follow-up 4 was rejected by the ACL in the
+real app every time, while passing every test, because the tests mock the
+plugin. Added `dialog:allow-ask` to `src-tauri/capabilities/default.json`.
+
+Worse than the missing capability: the rejection was **swallowed**. The field
+read and the modal shared one `try`/`catch`, so a rejected `ask` fell through
+and placed the picture silently — warning bypassed, nothing logged. The two
+failures are not alike and no longer share a handler:
+
+- fields unreadable (no AcroForm — the common case) -> carry on and place
+- warning could not be shown -> report and place nothing
+
+```
+npx vitest run src/view/__tests__/stamp-layer.test.tsx   # 20 ok (2 new)
+npm run check                                            # clean
+npm run test                                             # 644 passed
+```
+
+Mutation: reinstating the shared catch (swallow, place anyway) fails exactly
+the new test.
+
+**A test suite that mocks a capability-gated API cannot see the capability.**
+Nothing in `npm run check` or `npm run test` would ever have caught this; it
+took reading the plugin's own `default.toml`. Any future `plugin-*` call needs
+its permission checked against that file by hand.
+
 ---
 
 ## How this file evolves

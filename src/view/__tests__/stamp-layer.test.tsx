@@ -225,6 +225,35 @@ describe("StampLayer", () => {
     expect(mockAsk).toHaveBeenCalledTimes(1);
   });
 
+  it("places nothing when the warning itself cannot be shown", async () => {
+    // The first version wrapped the field read and the modal in one try/catch,
+    // so a rejected `ask` — which is what a missing `dialog:allow-ask`
+    // capability produces — was swallowed and the picture went down silently,
+    // warning and all bypassed. Failing to warn must not mean proceeding.
+    mockAsk.mockRejectedValue(new Error("dialog.ask not allowed"));
+    mockFields.mockResolvedValue([sigField]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 200, 262);
+
+    await vi.waitFor(() => expect(mockReport).toHaveBeenCalled());
+    expect(mockPlace).not.toHaveBeenCalled();
+  });
+
+  it("still places when the page has no form to check", async () => {
+    // The benign half of that pair: an unreadable field list is ordinary (most
+    // PDFs have no AcroForm) and must not block placement.
+    mockFields.mockRejectedValue(new Error("no form"));
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 200, 262);
+
+    await vi.waitFor(() => expect(mockPlace).toHaveBeenCalled());
+    expect(mockAsk).not.toHaveBeenCalled();
+  });
+
   it("never warns for a click clear of every signature field", async () => {
     mockFields.mockResolvedValue([sigField]);
     useStampStore.setState({ armed: SIG });

@@ -138,20 +138,34 @@ export function StampLayer({
         // sign — but it must not be mistaken for signing. Warned once per run,
         // through a modal rather than a toast, because a toast is exactly what
         // went unnoticed when this used to refuse outright.
+        //
+        // The two failures here are not alike, and wrapping both in one `try`
+        // was a bug: a page with no form is ordinary and placement should carry
+        // on, but a warning that *could not be shown* must not be followed by
+        // doing the thing it was meant to warn about. The first version of this
+        // swallowed a rejected `ask` and placed anyway — silently, which is the
+        // worst of both.
+        let hit: PageField | null = null;
         try {
-          const hit = signatureFieldAt(await readPageFields(documentId, page), pdf.x, pdf.y);
-          if (hit && !hasSeenPictureWarning()) {
-            const go = await ask(pictureWarning(hit.name), {
+          hit = signatureFieldAt(await readPageFields(documentId, page), pdf.x, pdf.y);
+        } catch {
+          // No form on this page. Nothing to warn about; carry on.
+        }
+        if (hit && !hasSeenPictureWarning()) {
+          let go: boolean;
+          try {
+            go = await ask(pictureWarning(hit.name), {
               title: "Not a digital signature",
               kind: "warning",
               okLabel: "Place picture",
               cancelLabel: "Cancel",
             });
-            if (!go) return;
-            notePictureWarningSeen();
+          } catch (err) {
+            reportError("Couldn't show the signature-field warning", err);
+            return;
           }
-        } catch {
-          // No form, or the fields could not be read — nothing to warn about.
+          if (!go) return;
+          notePictureWarningSeen();
         }
 
         let key: string | null = null;
