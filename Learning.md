@@ -8935,6 +8935,41 @@ not. The typed one worked because it happened to be clicked somewhere blank.
   file type, user), check whether the category is real before explaining it.**
   Here it was pure coincidence in where the clicks landed.
 
+### Follow-up: one fact in two places, and only one of them updated
+Reported as "every signature needs selecting twice". First Place armed nothing;
+second Place worked.
+
+The toolbar has always carried `if (activeTool !== "stamp") armStamp(null)` —
+leave the stamp tool, drop the armed stamp. Adding `"signature"` as a second
+tool that drives the same layer updated the *layer* and not the *toolbar*, so
+the toolbar read signature mode as "left the stamp tool" and cleared the
+signature the dialog had armed a moment earlier.
+
+- **Two sites encoding one fact will disagree eventually; the only fix is to
+  stop having two.** "Which tools place through the stamp layer" now lives in
+  `usesStampLayer`, used by both the layer and the toolbar. Noticing the
+  duplication at the time would have taken seconds — the pairing was three
+  lines apart in the diff.
+- **Why the second attempt worked, and why that made it hard to see.** The
+  disarming effect is keyed on `activeTool`. The first Place changes it
+  (`null → "signature"`), so the effect runs and wipes the arm. The second
+  Place sets it to `"signature"` again — no change, no re-run, the arm
+  survives. An intermittent-looking bug that is in fact perfectly
+  deterministic, and whose "works on retry" shape is precisely what makes
+  people stop reporting it.
+- **The evidence was already in a log I had read.** The trace printed
+  `after arm, store = null` on the first attempt and a populated store on the
+  second, four lines apart. I was scanning for coordinates at the time and read
+  straight past it. Second time in one session that the answer was in hand
+  before the theorising started.
+- **A test that passes for the wrong reason is worse than no test.** The first
+  version of the regression test mutated the zustand stores outside `act()`, so
+  React never flushed the effect — it passed happily against the broken code.
+  Wrapping each mutation in `act()` made it fail, and reinstating the shipped
+  condition confirmed it fails on exactly the bug being fixed. This is the same
+  trap as the useless source guard in A2; the discipline that catches it is
+  always to watch the new test fail first.
+
 ### Further reading
 - PDF 32000-1 §12.7.4.5 — signature fields, and why a `/Sig` widget's appearance says nothing about whether the document is signed.
 - `/SMask` in §11.6.5.3 — the soft-mask mechanism carrying a PNG's alpha into PDF.

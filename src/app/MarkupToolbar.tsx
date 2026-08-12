@@ -21,6 +21,7 @@ import type { FontFamily, MarkupSubtype } from "@/tools/_framework";
 import { FONT_FAMILIES } from "@/tools/free-text/free-text";
 import { MeasureControls } from "@/tools/measure/MeasureControls";
 import { StampPalette } from "@/tools/stamp/StampPalette";
+import { usesStampLayer } from "@/tools/stamp/stamps";
 import { applyMarkupToSelection } from "@/tools/text-markup/apply-markup";
 
 const SUBTYPES: { id: MarkupSubtype; label: string; title: string }[] = [
@@ -101,8 +102,11 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [activeTool, armStamp, setActiveTool]);
+  // Disarm when the stamp layer is no longer driving. `"signature"` counts as
+  // driving it (P6.A5a) — treating it as "left the stamp tool" cleared the
+  // signature the dialog had just armed.
   useEffect(() => {
-    if (activeTool !== "stamp") armStamp(null);
+    if (!usesStampLayer(activeTool)) armStamp(null);
   }, [activeTool, armStamp]);
 
   // Disarm the picked image whenever the Add Image tool is left.

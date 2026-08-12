@@ -4216,6 +4216,36 @@ Diagnostics used and removed: temporary `console.warn` tracing in
 `add_image_stamp` (all five embedded fine, which is what ruled the backend out).
 None of it is committed.
 
+### Follow-up 3 — "every signature needs selecting twice"
+
+Regression from the mode split in `dcf4e2e`. `MarkupToolbar` carried
+`if (activeTool !== "stamp") armStamp(null)` since P3; adding `"signature"` as a
+second tool driving the same layer updated the layer and not the toolbar, so the
+toolbar treated signature mode as "left the stamp tool" and cleared the arm the
+dialog had just set. The second Place worked because `activeTool` was already
+`"signature"` — no dependency change, no effect re-run.
+
+The fact now lives once, in `usesStampLayer` (`tools/stamp/stamps.ts`), used by
+both the toolbar's disarm effect and the layer's `active` computation.
+
+```
+npx vitest run src/app/__tests__/MarkupToolbar.test.tsx   # 6 ok (new file)
+npm run check                                             # clean after one missing import
+npm run test                                              # 637 passed (115 files)
+```
+
+`npm run test:rust` not re-run — no Rust file touched.
+
+Two things worth remembering:
+
+- The first version of the regression test mutated the zustand stores **outside
+  `act()`**, so React never flushed the effect and it passed against the broken
+  code. Wrapping each mutation in `act()` fixed it; reinstating the shipped
+  condition then failed exactly one test, which is the only proof that matters.
+- The trace from follow-up 2 had already printed `after arm, store = null` on
+  the first attempt and a populated store on the second. The answer was in a log
+  that had been read.
+
 ---
 
 ## How this file evolves

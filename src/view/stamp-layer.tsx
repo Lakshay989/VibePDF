@@ -19,7 +19,7 @@ import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
 import { type PageGeometry, pdfToScreen, screenToPdf } from "@/tools/_framework";
 import { declineMessage, SIGNATURE_HEIGHT, signatureFieldAt } from "@/tools/signature/place";
-import { IMAGE_STAMP_HEIGHT, stampRectAt } from "@/tools/stamp/stamps";
+import { IMAGE_STAMP_HEIGHT, stampRectAt, usesStampLayer } from "@/tools/stamp/stamps";
 import { bytesToDataUrl, fileToDataUrl, imageAspect } from "@/view/file-data-url";
 
 /** Optimistic-preview payload: a committed stamp awaiting bake (P4.HF29). */
@@ -56,12 +56,17 @@ export function StampLayer({
   const bumpEpoch = useEditEpochStore((s) => s.bumpEpochSoft);
 
   // Two modes share this layer. `"signature"` (P6.A5a) exists so that placing a
-  // signature does not switch the user into the rubber-stamp tool; the kinds
-  // must match the mode, or an armed rubber stamp would drop while the user
-  // believes they are placing a signature.
+  // signature does not switch the user into the rubber-stamp tool. The mode and
+  // the armed kind must agree, or an armed rubber stamp would drop while the
+  // user believes they are placing a signature.
+  //
+  // `usesStampLayer` is shared with the toolbar's disarm-on-leave effect. They
+  // were separate once, and the day they disagreed the toolbar wiped every
+  // freshly armed signature.
   const active =
     armed !== null &&
-    (activeTool === "signature" ? armed.kind === "signature" : activeTool === "stamp");
+    usesStampLayer(activeTool) &&
+    (armed.kind === "signature") === (activeTool === "signature");
 
   const swapped = (((rotation % 180) + 180) % 180) === 90;
   const geo: PageGeometry = {
