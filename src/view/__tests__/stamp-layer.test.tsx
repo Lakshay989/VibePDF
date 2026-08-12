@@ -3,7 +3,7 @@
 // tool or no armed stamp = no-op. IPC is mocked.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("@/ipc/stamps", () => ({
   addStamp: vi.fn().mockResolvedValue({ canUndo: true, canRedo: false }),
@@ -17,6 +17,7 @@ vi.mock("@/ipc/signatures", () => ({
   signatureBytes: vi.fn().mockResolvedValue(Uint8Array.from([1, 2, 3])),
 }));
 vi.mock("@/ipc/forms", () => ({ readPageFields: vi.fn().mockResolvedValue([]) }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn() }));
 vi.mock("@/app/report-error", () => ({ reportError: vi.fn() }));
 
 // Image stamps read the picked file for an optimistic <img> preview (P4.HF29);
@@ -28,13 +29,15 @@ vi.mock("@/view/file-data-url", () => ({
 }));
 
 import { reportError } from "@/app/report-error";
+import { ask } from "@tauri-apps/plugin-dialog";
+
 import { readPageFields } from "@/ipc/forms";
 import { placeSignature } from "@/ipc/signatures";
 import { addImageStamp, addStamp } from "@/ipc/stamps";
 import { useEditEpochStore } from "@/state/edit-epoch-store";
 import { useStampStore } from "@/state/stamp-store";
 import { useToolStore } from "@/state/tool-store";
-import { SIGNATURE_HEIGHT } from "@/tools/signature/place";
+import { resetPictureWarning, SIGNATURE_HEIGHT } from "@/tools/signature/place";
 import { StampLayer } from "@/view/stamp-layer";
 
 const DOC = "doc-1";
@@ -43,6 +46,7 @@ const mockAddImageStamp = vi.mocked(addImageStamp);
 const mockPlace = vi.mocked(placeSignature);
 const mockFields = vi.mocked(readPageFields);
 const mockReport = vi.mocked(reportError);
+const mockAsk = vi.mocked(ask);
 
 // Letter (612×792), 1× scale → screen (x,y) maps to PDF (x, 792−y).
 const layer = () => (
@@ -73,6 +77,8 @@ beforeEach(() => {
   useStampStore.setState({ armed: APPROVED });
   useEditEpochStore.setState({ byDoc: {}, edited: {} });
   mockFields.mockResolvedValue([]);
+  mockAsk.mockResolvedValue(true);
+  resetPictureWarning();
 });
 
 /** Click the overlay at a screen point. Letter at 1×, so PDF y = 792 − y. */
@@ -170,9 +176,9 @@ describe("StampLayer", () => {
     expect(mockAddImageStamp).not.toHaveBeenCalled();
   });
 
-  it("refuses to stamp over a signature field, and writes nothing", async () => {
-    // The whole point of the guard: a picture on a /Sig widget reads as a
-    // signature to every viewer and is not one. Until P6.B1 can sign, decline.
+  it("warns before placing on a signature field, then places", async () => {
+    // Allowed — it is where the form asks you to sign — but nobody should end
+    // up with a picture there believing it is a signature.
     mockFields.mockResolvedValue([sigField]);
     useStampStore.setState({ armed: SIG });
     useToolStore.setState({ activeTool: "signature" });
@@ -180,11 +186,54 @@ describe("StampLayer", () => {
     // PDF (200, 530) is inside the field → screen y = 792 − 530 = 262.
     clickAt(container, 200, 262);
 
-    await vi.waitFor(() => expect(mockReport).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockAsk).toHaveBeenCalled());
+    const [message] = mockAsk.mock.calls[0]!;
+    expect(String(message)).toContain("Signature1");
+    expect(String(message)).toMatch(/not a digital signature/i);
+    await vi.waitFor(() => expect(mockPlace).toHaveBeenCalled());
+  });
+
+  it("places nothing when the warning is declined", async () => {
+    mockAsk.mockResolvedValue(false);
+    mockFields.mockResolvedValue([sigField]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 200, 262);
+
+    await vi.waitFor(() => expect(mockAsk).toHaveBeenCalled());
     expect(mockPlace).not.toHaveBeenCalled();
-    // The message has to name the field and explain, not just say "no".
-    const [, err] = mockReport.mock.calls[0]!;
-    expect(String((err as Error).message)).toContain("Signature1");
+  });
+
+  it("asks only once per run, not once per field", async () => {
+    // A five-signature form should not interrogate you five times.
+    mockFields.mockResolvedValue([sigField]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 200, 262);
+    await vi.waitFor(() => expect(mockPlace).toHaveBeenCalledTimes(1));
+
+    // Re-arm through act(), or React has not re-rendered and the layer is
+    // still inert when the second click lands.
+    act(() => {
+      useStampStore.setState({ armed: SIG });
+      useToolStore.setState({ activeTool: "signature" });
+    });
+    clickAt(container, 200, 262);
+    await vi.waitFor(() => expect(mockPlace).toHaveBeenCalledTimes(2));
+    expect(mockAsk).toHaveBeenCalledTimes(1);
+  });
+
+  it("never warns for a click clear of every signature field", async () => {
+    mockFields.mockResolvedValue([sigField]);
+    useStampStore.setState({ armed: SIG });
+    useToolStore.setState({ activeTool: "signature" });
+    const { container } = render(layer());
+    clickAt(container, 400, 400);
+
+    await vi.waitFor(() => expect(mockPlace).toHaveBeenCalled());
+    expect(mockAsk).not.toHaveBeenCalled();
   });
 
   // SPEC: P6-SEC-004 (P6.A5a) — say where it can't go *before* the click.
@@ -193,7 +242,7 @@ describe("StampLayer", () => {
   // feature: the ruled line marked "Signature:" is the obvious place to sign,
   // and the toast that followed did not register. These pin the affordance that
   // makes the refusal predictable instead of surprising.
-  it("marks out the signature fields while a signature is armed", async () => {
+  it("marks the signature fields while a signature is armed", async () => {
     mockFields.mockResolvedValue([sigField]);
     useStampStore.setState({ armed: SIG });
     useToolStore.setState({ activeTool: "signature" });
@@ -278,6 +327,7 @@ describe("StampLayer", () => {
 
     await vi.waitFor(() => expect(mockPlace).toHaveBeenCalled());
     expect(mockReport).not.toHaveBeenCalled();
+    expect(mockAsk).not.toHaveBeenCalled();
   });
 
   it("still places when the page's fields cannot be read", async () => {

@@ -1,15 +1,21 @@
-// SPEC: P6-SEC-004 (P6.A5a) — the guard in front of signature placement.
+// SPEC: P6-SEC-004 (P6.A5a) — the warning in front of signature placement.
 //
-// P6-SEC-004 has two clauses and only one is built. Until P6.B1 can sign with a
-// certificate, clicking a `/Sig` field must not drop a picture on it: that
-// yields a document which reads as signed to every human who opens it and
-// carries no signature at all. These tests are about detecting that case
-// reliably — a miss here is not a cosmetic bug.
+// Placing on a `/Sig` field is allowed — it is where the form asks you to sign
+// — but until P6.B1 it is a picture and not a signature, and that must be said
+// once, plainly. These tests are about detecting the case reliably and wording
+// it honestly; a miss here means someone believes they signed something.
 
 import { describe, expect, it } from "vitest";
 
 import type { PageField } from "@/ipc/forms";
-import { declineMessage, SIGNATURE_HEIGHT, signatureFieldAt } from "@/tools/signature/place";
+import {
+  hasSeenPictureWarning,
+  notePictureWarningSeen,
+  pictureWarning,
+  resetPictureWarning,
+  SIGNATURE_HEIGHT,
+  signatureFieldAt,
+} from "@/tools/signature/place";
 
 const field = (
   kind: PageField["kind"],
@@ -67,18 +73,36 @@ describe("signatureFieldAt", () => {
   });
 });
 
-describe("declineMessage", () => {
-  it("names the field and says why, not just that it failed", () => {
-    const msg = declineMessage("Signature1");
+describe("pictureWarning", () => {
+  it("names the field and states plainly what this is not", () => {
+    const msg = pictureWarning("Signature1");
     expect(msg).toContain("Signature1");
-    expect(msg).toMatch(/certificate/i);
-    // The crux: someone must understand that a stamp here would be a lie, not
-    // that the app is being awkward.
-    expect(msg).toMatch(/without being signed/i);
+    expect(msg).toMatch(/not a digital signature/i);
   });
 
-  it("says what to do instead", () => {
-    expect(declineMessage("x")).toMatch(/elsewhere/i);
+  it("says the field stays empty, which is the verifiable consequence", () => {
+    // "It's only a picture" is abstract; "the field stays empty" is the thing
+    // a recipient's reader will actually show them.
+    expect(pictureWarning("x")).toMatch(/stays empty/i);
+  });
+
+  it("does not describe the act as signing", () => {
+    // The whole point is that the word does not apply here. "signature field"
+    // is the field's name, so only the verb forms are out.
+    expect(pictureWarning("x")).not.toMatch(/\bsigns?\b|\bsigning\b(?! is not built)/i);
+  });
+});
+
+describe("the once-per-run warning", () => {
+  it("starts unseen and latches", () => {
+    resetPictureWarning();
+    expect(hasSeenPictureWarning()).toBe(false);
+    notePictureWarningSeen();
+    expect(hasSeenPictureWarning()).toBe(true);
+    // Idempotent: a second field in the same form must not un-latch it.
+    notePictureWarningSeen();
+    expect(hasSeenPictureWarning()).toBe(true);
+    resetPictureWarning();
   });
 });
 

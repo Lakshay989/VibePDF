@@ -4246,6 +4246,49 @@ Two things worth remembering:
   the first attempt and a populated store on the second. The answer was in a log
   that had been read.
 
+### Follow-up 4 — placing on a /Sig field is now allowed, with a warning
+
+Prompted by Preview offering to sign the same fields we refused. Inspecting the
+saved file showed what Preview's feature actually is:
+
+```
+/ByteRange      absent   -> no cryptographic signature
+/Adobe.PPKLite  absent   -> no signature handler
+/FT /Sig x2     present, no /V -> both fields still unsigned
+```
+
+So the refusal blocked the most natural action in the document without
+preventing the harm it was justified by — that same picture one pixel outside
+the box was always allowed, and produces an identical document. Replaced with
+a `plugin-dialog` `ask()` modal, once per run:
+
+  "…is a signature field. This places a picture of your signature. It is not a
+   digital signature — nothing in the document can be verified, and the field
+   itself stays empty."
+
+`declineMessage` -> `pictureWarning`; the amber markers now read
+"Picture, not signed".
+
+```
+npx vitest run src/tools/signature src/view/__tests__/stamp-layer.test.tsx  # ok
+npm run check                                            # clean
+npm run test                                             # 642 passed (115 files)
+```
+
+Mutations, all three caught by the right test:
+
+```
+# A. warning never shown              => 3 failed
+# B. declining the warning still places => 1 failed
+# C. warns on every click               => 1 failed
+```
+
+`npm run test:rust` not re-run — no Rust file touched.
+
+The "asks only once" test needed `act()` around the re-arm between its two
+clicks, or React had not re-rendered and the second click hit an inert layer.
+Second time in one session.
+
 ---
 
 ## How this file evolves

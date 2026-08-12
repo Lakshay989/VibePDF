@@ -8970,8 +8970,40 @@ signature the dialog had armed a moment earlier.
   trap as the useless source guard in A2; the discipline that catches it is
   always to watch the new test fail first.
 
+### Follow-up: the refusal was wrong, and a real document proved it
+Opening the fixture in macOS Preview showed Preview happily offering to put a
+signature on the same `/Sig` fields VibePDF was refusing. Inspecting the saved
+file settled what that means: no `/ByteRange`, no `/Adobe.PPKLite`, both `/Sig`
+fields still without a `/V`. Preview's signature feature places an **image
+annotation** and calls it signing.
+
+- **Check whether a rule prevents the harm it was justified by.** The argument
+  for refusing was "a picture on a `/Sig` widget produces a document that reads
+  as signed and isn't". True — and equally true of the same picture two inches
+  lower on the ruled line, which was always allowed. Nothing here writes `/V`,
+  so a reader that checks sees an unsigned field either way. The rule blocked
+  the most natural action in the document and prevented nothing. A restriction
+  that does not reduce the risk is not caution, it is friction.
+- **The real requirement was honesty, not permission.** What is worth
+  protecting is that nobody believes they signed something. That is a labelling
+  problem. Placement is now allowed with a modal, once per run, that says what
+  it is and — the part that matters — that *the field stays empty*, because
+  that is the consequence a recipient's reader will actually show them.
+- **A modal, deliberately, where a toast failed.** The previous refusal
+  explained itself in a toast and went unnoticed for an hour. Reaching for the
+  heavier interruption is right exactly when the message is one the user must
+  not miss, and wrong everywhere else.
+- **Once per run, not once per click.** A five-signature form should not
+  interrogate anyone five times. Not persisted either: a fresh run is a fresh
+  chance to notice, at a cost of one dialog.
+- **`act()` again.** The "asks only once" test re-arms the stores between two
+  clicks; without `act()` React had not re-rendered and the second click landed
+  on an inert layer. Second time today. When a test drives a component through
+  a store rather than through the DOM, every mutation needs the flush.
+
 ### Further reading
 - PDF 32000-1 §12.7.4.5 — signature fields, and why a `/Sig` widget's appearance says nothing about whether the document is signed.
+- ETSI EN 319 102-1 vs. "electronic signature" in common use — the distinction the modal exists to make: a picture of a signature is legally an e-signature in many jurisdictions, and cryptographically nothing.
 - `/SMask` in §11.6.5.3 — the soft-mask mechanism carrying a PNG's alpha into PDF.
 
 ---

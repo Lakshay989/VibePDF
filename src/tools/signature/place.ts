@@ -7,11 +7,19 @@
 // — when a signature field is targeted — as a PKCS#7 digital signature. The
 // second needs certificate signing (P6.B1), which does not exist yet.
 //
-// That leaves a choice about what to do when someone clicks a `/Sig` widget
-// today, and only one of the answers is safe. Stamping the picture over the
-// field would produce a document that *looks* signed to every human who opens
-// it and carries no signature at all — worse than a missing feature, because
-// the absence is invisible. So placement declines there and says why.
+// This originally *refused* on a `/Sig` field, reasoning that a picture over a
+// signature widget yields a document that reads as signed and is not. The
+// reasoning did not survive contact with a real document. That same picture two
+// inches lower, on the ruled line, produces exactly the same document — and
+// that was always allowed. The `/Sig` rectangle is not what makes it look
+// signed; the picture is. Nothing here ever writes `/V`, so a reader that
+// checks sees an unsigned field either way. macOS Preview's signature feature
+// does precisely this and calls it signing.
+//
+// So refusing blocked the most natural action in the document — signing on the
+// line marked "Signature:" — without preventing the harm it was justified by.
+// What is worth protecting is that nobody is *misled*, which is a labelling
+// problem: place it, and say once, unmissably, that it is a picture.
 
 import type { PageField } from "@/ipc/forms";
 
@@ -52,12 +60,41 @@ export function signatureFieldAt(
   return null;
 }
 
-/** What to tell someone who clicked a signature field. Named so the wording
- *  lives next to the reasoning above rather than buried in a layer component. */
-export function declineMessage(fieldName: string): string {
+/**
+ * What to tell someone aiming at a signature field. The wording lives next to
+ * the reasoning above rather than buried in a layer component.
+ *
+ * It says what *will* happen rather than what is forbidden, and it avoids the
+ * word "sign" for the thing it is not.
+ */
+export function pictureWarning(fieldName: string): string {
   return (
-    `"${fieldName}" is a signature field. Signing it needs a certificate, ` +
-    `which isn't built yet — and placing a picture over it would look signed ` +
-    `without being signed. Click elsewhere on the page to place it as a stamp.`
+    `"${fieldName}" is a signature field.\n\n` +
+    `This places a picture of your signature. It is not a digital signature — ` +
+    `nothing in the document can be verified, and the field itself stays empty. ` +
+    `Certificate signing is not built yet.`
   );
+}
+
+/**
+ * Whether the warning has been shown yet in this session.
+ *
+ * Once per run, not once per click: the point is that nobody places one of
+ * these *unaware*, and someone filling in a five-signature form already knows
+ * by the second field. Deliberately not persisted — a fresh run is a fresh
+ * chance to notice, and it costs one dialog.
+ */
+let warned = false;
+
+export function hasSeenPictureWarning(): boolean {
+  return warned;
+}
+
+export function notePictureWarningSeen(): void {
+  warned = true;
+}
+
+/** Test seam — module state would otherwise leak between cases. */
+export function resetPictureWarning(): void {
+  warned = false;
 }
