@@ -10,18 +10,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
-vi.mock("@/ipc/pdf", () => ({ protectPdf: vi.fn() }));
+vi.mock("@/ipc/pdf", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/ipc/pdf")>()),
+  protectPdf: vi.fn(),
+}));
 vi.mock("@/app/report-error", () => ({ reportError: vi.fn() }));
 
 import { save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 
 import { ProtectDialog } from "@/app/ProtectDialog";
 import { reportError } from "@/app/report-error";
-import { protectPdf } from "@/ipc/pdf";
+import { ALL_PERMISSIONS, protectPdf } from "@/ipc/pdf";
 
 const mockSave = vi.mocked(saveFileDialog);
 const mockProtect = vi.mocked(protectPdf);
 const mockReport = vi.mocked(reportError);
+
+/** The labels the dialog renders, paired with the field each one sets. */
+const PERMISSIONS: ReadonlyArray<[keyof typeof ALL_PERMISSIONS, string]> = [
+  ["print", "Printing"],
+  ["copy", "Copying text and graphics"],
+  ["modify", "Changing the document"],
+  ["fillForms", "Filling in form fields"],
+  ["annotate", "Adding comments and annotations"],
+  ["extract", "Extracting for accessibility"],
+  ["assemble", "Assembling pages"],
+];
 
 const onClose = vi.fn();
 const dialog = () => (
@@ -76,6 +90,7 @@ describe("ProtectDialog", () => {
       "/tmp/report-protected.pdf",
       "hunter2",
       null,
+      ALL_PERMISSIONS,
     );
   });
 
@@ -104,6 +119,7 @@ describe("ProtectDialog", () => {
       "/tmp/report-protected.pdf",
       "open-me",
       "let-me-in",
+      ALL_PERMISSIONS,
     );
   });
 
@@ -140,6 +156,65 @@ describe("ProtectDialog", () => {
     ]) {
       expect((screen.getByLabelText(label) as HTMLInputElement).type).toBe("password");
     }
+  });
+
+  // SPEC: P6-SEC-009 (P6.C3) — permissions.
+  //
+  // The checkbox sense is the thing to get wrong here: ticked means *allowed*.
+  // An inverted box would send the opposite of what the user saw, and nothing
+  // downstream could tell — a document restricting everything is as valid as
+  // one restricting nothing.
+  it("starts with every permission granted", () => {
+    render(dialog());
+    for (const [, label] of PERMISSIONS) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(true);
+    }
+  });
+
+  it("sends a cleared box as a withheld permission", async () => {
+    render(dialog());
+    type("Password to open", "pw");
+    type("Confirm password to open", "pw");
+    fireEvent.click(screen.getByLabelText("Printing"));
+    fireEvent.click(screen.getByLabelText("Copying text and graphics"));
+    fireEvent.click(screen.getByText("Protect…"));
+
+    await waitFor(() => expect(mockProtect).toHaveBeenCalled());
+    expect(mockProtect.mock.calls[0]?.[4]).toEqual({
+      ...ALL_PERMISSIONS,
+      print: false,
+      copy: false,
+    });
+  });
+
+  it("covers all seven permissions the spec names", () => {
+    render(dialog());
+    expect(PERMISSIONS).toHaveLength(7);
+    for (const [, label] of PERMISSIONS) {
+      expect(screen.getByLabelText(label)).toBeTruthy();
+    }
+  });
+
+  // Restrictions with no distinct owner password can be lifted by anyone who
+  // can open the file. Saying so is the difference between a feature and a
+  // false sense of security.
+  it("warns that restrictions are liftable without a permissions password", () => {
+    render(dialog());
+    expect(screen.queryByText(/can also lift these restrictions/i)).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Printing"));
+    expect(screen.getByText(/can also lift these restrictions/i)).toBeTruthy();
+
+    type("Password to change permissions", "owner-only");
+    expect(screen.queryByText(/can also lift these restrictions/i)).toBeNull();
+  });
+
+  it("does not keep the permissions after cancelling", () => {
+    render(dialog());
+    fireEvent.click(screen.getByLabelText("Printing"));
+    fireEvent.click(screen.getByText("Cancel"));
+
+    expect((screen.getByLabelText("Printing") as HTMLInputElement).checked).toBe(true);
   });
 
   it("does not keep the passwords after cancelling", () => {

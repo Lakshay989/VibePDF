@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use lopdf::{Document, Object};
 use vibepdf_lib::error::CommandError;
 use vibepdf_lib::pdf::document::open_pdf;
-use vibepdf_lib::security::encrypt::{encrypt_document, EncryptOptions};
+use vibepdf_lib::security::encrypt::{encrypt_document, DocumentPermissions, EncryptOptions};
 
 fn fixture_bytes(name: &str) -> Vec<u8> {
     let p = PathBuf::from("../tests/fixtures/basic").join(name);
@@ -50,6 +50,7 @@ fn opts(user: Option<&str>, owner: Option<&str>) -> EncryptOptions {
     EncryptOptions {
         user_password: user.map(str::to_string),
         owner_password: owner.map(str::to_string),
+        permissions: DocumentPermissions::default(),
     }
 }
 
@@ -249,10 +250,121 @@ fn writes_verification_artifacts() {
     for (name, o) in [
         ("vibepdf-verify-encrypted-user.pdf", opts(Some("open-me"), None)),
         ("vibepdf-verify-encrypted-both.pdf", opts(Some("open-me"), Some("owner-only"))),
+        // SPEC: P6-SEC-009 — the acceptance demo from the roadmap: "open with
+        // the user password: print is blocked". Printing and copying are the two
+        // restrictions a reader is most likely to actually enforce, so they are
+        // the ones worth putting in front of Acrobat.
+        ("vibepdf-verify-no-print.pdf", {
+            let mut o = opts(Some("open-me"), Some("owner-only"));
+            o.permissions = DocumentPermissions {
+                print: false,
+                copy: false,
+                ..DocumentPermissions::default()
+            };
+            o
+        }),
     ] {
         let out = encrypt_document(&src, &o).expect("encrypt");
         let path = dir.join(name);
         std::fs::write(&path, &out).expect("write");
         eprintln!("wrote {}", path.display());
     }
+}
+
+// ---------------------------------------------------------------------------
+// P6.C3 — permissions (SPEC: P6-SEC-009)
+// ---------------------------------------------------------------------------
+//
+// "WHEN the user sets permissions, THE system SHALL allow restricting: print,
+// copy, modify, fill forms, annotate, extract, assemble."
+//
+// What these can check is that the *document says* what the user chose. What
+// they cannot check is that any reader obeys it — nothing in a PDF enforces
+// permissions, PDFium largely ignores them, and Acrobat is the only honest
+// acceptance test. That is a sweep item, not a unit test, and pretending
+// otherwise here would be the more dangerous mistake.
+
+/// The seven, one restricted at a time, against the bit each should clear.
+fn one_restriction(f: impl Fn(&mut DocumentPermissions)) -> lopdf::Dictionary {
+    let mut perms = DocumentPermissions::default();
+    f(&mut perms);
+    let mut o = opts(Some("open-me"), Some("owner-only"));
+    o.permissions = perms;
+    encrypt_dict(&encrypt_document(&fixture_bytes("hello.pdf"), &o).expect("encrypt"))
+}
+
+#[test]
+fn p_records_the_permissions_that_were_chosen() {
+    let perms = DocumentPermissions {
+        print: false,
+        copy: false,
+        ..DocumentPermissions::default()
+    };
+
+    let mut o = opts(Some("open-me"), Some("owner-only"));
+    o.permissions = perms;
+    let dict = encrypt_dict(&encrypt_document(&fixture_bytes("hello.pdf"), &o).expect("encrypt"));
+
+    // Compared against `p_value()` rather than a literal: the reserved bits are
+    // the standard's business, and hard-coding them here would pin our own
+    // arithmetic rather than the requirement.
+    assert_eq!(int(&dict, b"P"), perms.to_flags().p_value() as i64);
+}
+
+#[test]
+fn an_unrestricted_document_grants_everything() {
+    let dict = encrypt_dict(
+        &encrypt_document(
+            &fixture_bytes("hello.pdf"),
+            &opts(Some("open-me"), Some("owner-only")),
+        )
+        .expect("encrypt"),
+    );
+    assert_eq!(int(&dict, b"P"), lopdf::Permissions::all().p_value() as i64);
+}
+
+#[test]
+fn every_restriction_in_the_spec_reaches_the_document() {
+    use lopdf::Permissions as F;
+    /// One spec-named restriction: how to switch it off, the bit it clears, and
+    /// what to call it when it does not.
+    type Case = (fn(&mut DocumentPermissions), F, &'static str);
+    let cases: [Case; 7] = [
+        (|p| p.print = false, F::PRINTABLE, "print"),
+        (|p| p.copy = false, F::COPYABLE, "copy"),
+        (|p| p.modify = false, F::MODIFIABLE, "modify"),
+        (|p| p.fill_forms = false, F::FILLABLE, "fill forms"),
+        (|p| p.annotate = false, F::ANNOTABLE, "annotate"),
+        (
+            |p| p.extract = false,
+            F::COPYABLE_FOR_ACCESSIBILITY,
+            "extract",
+        ),
+        (|p| p.assemble = false, F::ASSEMBLABLE, "assemble"),
+    ];
+
+    for (restrict, bit, name) in cases {
+        let p = int(&one_restriction(restrict), b"P") as u64;
+        assert_eq!(p & bit.bits(), 0, "restricting {name} left its bit set");
+    }
+}
+
+// A restricted document must still *open*, and still be undoable by P6.C2.
+// Permissions ride in the same `/Encrypt` dictionary as the passwords, and a
+// wrong `/P` is one of the things that can make a reader reject the lot.
+#[test]
+fn a_restricted_document_still_opens_and_still_unlocks() {
+    let mut o = opts(Some("open-me"), Some("owner-only"));
+    o.permissions = DocumentPermissions {
+        print: false,
+        copy: false,
+        ..DocumentPermissions::default()
+    };
+    let encrypted = encrypt_document(&fixture_bytes("hello.pdf"), &o).expect("encrypt");
+
+    let temp = TempPdf::new(&encrypted);
+    open_pdf(&temp.0, Some("open-me")).expect("PDFium opens a restricted document");
+
+    vibepdf_lib::security::decrypt::remove_protection(&encrypted, "owner-only")
+        .expect("P6.C2 can still undo it");
 }

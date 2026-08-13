@@ -30,6 +30,13 @@ Two diffs: `8e8394b`, `f7384e3`, `536510b`.
       path on every message).
 - [ ] `security/decrypt.rs` — the two named failures are honest about what went
       wrong rather than blaming the password.
+- [ ] `security/encrypt.rs::fix_permissions_entry` (C3) — `/Perms` is built from
+      the `/P` read back out of the document, not from a second copy of the
+      permission set. Two values that must agree are one value here; check it
+      stayed that way.
+- [ ] `DocumentPermissions::default()` — hand-written, granting everything. The
+      derived `Default` would clear every bit and silently produce the most
+      restricted document possible.
 
 ## 2. Cross-reader: encryption (blocking)
 
@@ -41,6 +48,25 @@ Password to open: `open-me`. Permissions password on the second: `owner-only`.
 - [ ] Preview — same *(already done 2026-08-12: renders correctly)*
 - [ ] **Unlock** one in-app, then open the result in all three: opens with **no**
       password anywhere
+
+## 2b. Cross-reader: permissions (C3, blocking)
+
+File: `Sample PDFs/vibepdf-verify-no-print.pdf` — printing and copying withheld.
+Opens with `open-me`; permissions password `owner-only`.
+
+This is the roadmap's own acceptance demo, and **the only way to check C3 at
+all**: the tests assert what the document *says*, and nothing in a PDF makes a
+reader obey it. A green suite here means the bits are right, not that the
+feature works.
+
+- [ ] **Acrobat**, opened with `open-me`: **printing is blocked** (greyed out or
+      refused), and copying text is blocked
+- [ ] **Acrobat**, opened with `owner-only`: printing works
+- [ ] A **third reader**: note what it does. Ignoring `/P` entirely is a legitimate
+      reader choice, not a defect in our file — record which readers honour it so
+      the dialog's wording can stay honest.
+- [ ] The other two encrypted files still print and copy freely (that the
+      restriction is *ours* and not an accident of encrypting at all)
 
 > The one that would matter most: a file some readers open and others reject is
 > the exact failure the `/Perms` bug produced, and it looked fine locally.

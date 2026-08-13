@@ -9119,6 +9119,78 @@ Remove password protection (P6-SEC-008), the mirror of C1.
 ### Further reading
 - ISO 32000-2 Algorithms 11 and 12 — user and owner authentication for revision 6. Only the second works in lopdf 0.36.
 
+## P6.C3 — Set permissions (SPEC P6-SEC-009)
+
+### Problem
+
+An encrypted PDF can also say *what a reader may do with it*: print, copy,
+change, fill forms, annotate, extract for accessibility, assemble pages. C1
+wrote `Permissions::all()` — protection with no restrictions. C3 makes it a
+choice.
+
+### Concepts learned
+
+- **`/P` is a bit field in a signed integer.** Each permission is one bit, `1`
+  meaning *granted*, and the bits the standard reserves must be `1` too. The
+  result, read as a 32-bit signed number, is almost always negative — which is
+  why `/P -3904` in a PDF is normal rather than a corrupt file.
+
+- **The same bits are written twice.** They appear in `/P`, and again inside the
+  16-byte `/Perms` block that Algorithm 10 encrypts. A reader that validates
+  `/Perms` compares them; if they disagree, it may reject the document, and the
+  error it shows will be about passwords rather than permissions.
+
+  The instinct is to pass the permission set to both writers and add a test that
+  they match. That test is weaker than it looks: it can only check that *the
+  same input produces the same output*, which was never in doubt. The fix is to
+  remove the second value — `fix_permissions_entry` now reads `/P` back out of
+  the document it just encrypted and derives `/Perms` from that. **A value that
+  cannot be represented wrongly does not need a test to say it is right**, and
+  the test that would have been written here would have passed against the bug.
+
+- **A `Default` that is not `#[derive(Default)]`.** `DocumentPermissions` is
+  seven `bool`s where `true` means *allowed*, so the derived default — `false`
+  everywhere — would give a caller who set nothing the most restricted document
+  possible. Written by hand, it grants everything. Worth checking whenever
+  `Default` lands on a struct of flags: the derive is only correct when zero is
+  the harmless value.
+
+- **Permissions are advisory, and saying so is part of the feature.** Nothing in
+  a PDF enforces them: the content is decrypted either way, PDFium largely
+  ignores `/P`, and if the permissions password equals the open password then
+  anyone who can read the file can lift its restrictions. The dialog says this
+  when it applies. Shipping a checkbox that quietly means less than it appears
+  to is the failure mode worth avoiding here.
+
+- **`as u64` versus reinterpreting bits.** `/P` comes back as `i64` and Algorithm
+  10 wants those 64 bits verbatim. `as u64` says "convert this number" and trips
+  `clippy::cast_sign_loss`; `i64::cast_unsigned` says exactly the right thing but
+  postdates our MSRV (1.80); `u64::from_ne_bytes(x.to_ne_bytes())` is the
+  MSRV-safe way to say "same bits, different type".
+
+### A process note: `cargo fmt` is not scoped to your changes
+
+Running `cargo fmt` on the crate reformatted **101 files this step did not
+touch**, because the repo is not crate-wide `rustfmt`-clean — formatting runs
+per-file as a hook. The commit would have been 3,000 lines of noise around a
+200-line change, and the `security/` diff a human has to review by hand would
+have been buried in it. Reverted with `git checkout --` on everything outside
+the step. Whole-repo formatters belong in their own commit, if at all.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/encrypt.rs` | `DocumentPermissions`, the bit mapping, and `/Perms` derived from `/P`. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_protect` takes an optional permission set. |
+| `src/ipc/pdf.ts` | `DocumentPermissions` + `ALL_PERMISSIONS`. |
+| `src/app/ProtectDialog.tsx` | Seven checkboxes, and the caveat about when they mean little. |
+
+### Further reading
+- ISO 32000-2 §7.6.4.2, Table 22 — the `/P` bit assignments.
+- ISO 32000-2 Algorithm 10 — the `/Perms` block layout.
+
+---
+
 ---
 
 ## How this file evolves

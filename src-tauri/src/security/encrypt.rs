@@ -64,6 +64,84 @@ const FILTER_NAME: &[u8] = b"StdCF";
 pub struct EncryptOptions {
     pub user_password: Option<String>,
     pub owner_password: Option<String>,
+    pub permissions: DocumentPermissions,
+}
+
+/// SPEC: P6-SEC-009 (P6.C3) — what a reader may do with the protected document.
+///
+/// The seven the spec names, in its own words rather than the standard's, and
+/// each `true` meaning *allowed*. The mapping to `lopdf`'s bitflags is in
+/// [`DocumentPermissions::to_flags`]; that is the only place the PDF bit
+/// numbering appears, so the rest of the codebase never has to reason about a
+/// value where clearing a bit removes a right.
+///
+/// **These restrictions are advisory.** Nothing in a PDF enforces them
+/// cryptographically — the content is decrypted either way, and a reader is
+/// free to ignore `/P` entirely (`PDFium` largely does). They express intent to
+/// readers that choose to honour it. Worse, if the owner password equals the
+/// user password — which is what an omitted owner password gives you — then
+/// anyone who can open the document can also lift the restrictions, so the
+/// setting is close to meaningless without a *distinct* permissions password.
+/// The UI says so; this comment is here so the next reader of this file does
+/// not mistake it for security.
+// `struct_excessive_bools` wants a state machine or two-variant enums. Not
+// here: these are seven independent flags fixed by the PDF standard and named
+// one-for-one by P6-SEC-009, not states of one thing. An enum per field would
+// add fourteen type names to say what `bool` already says.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentPermissions {
+    pub print: bool,
+    pub copy: bool,
+    pub modify: bool,
+    pub fill_forms: bool,
+    pub annotate: bool,
+    pub extract: bool,
+    pub assemble: bool,
+}
+
+/// Everything allowed — a protected document that restricts nothing.
+///
+/// Deliberately not `#[derive(Default)]`: that would give `false` for every
+/// field, so a caller who left the permissions off would silently produce the
+/// most restricted document possible instead of the least.
+impl Default for DocumentPermissions {
+    fn default() -> Self {
+        Self {
+            print: true,
+            copy: true,
+            modify: true,
+            fill_forms: true,
+            annotate: true,
+            extract: true,
+            assemble: true,
+        }
+    }
+}
+
+impl DocumentPermissions {
+    /// Translate to the `/P` bitflags.
+    ///
+    /// `PRINTABLE_IN_HIGH_QUALITY` (bit 12) follows `print` rather than being a
+    /// separate switch: on its own it only selects *degraded* printing when
+    /// bit 3 is also set, which is a distinction worth neither a checkbox nor
+    /// the explanation it would need.
+    #[must_use]
+    pub fn to_flags(self) -> Permissions {
+        let mut p = Permissions::empty();
+        p.set(
+            Permissions::PRINTABLE | Permissions::PRINTABLE_IN_HIGH_QUALITY,
+            self.print,
+        );
+        p.set(Permissions::COPYABLE, self.copy);
+        p.set(Permissions::MODIFIABLE, self.modify);
+        p.set(Permissions::FILLABLE, self.fill_forms);
+        p.set(Permissions::ANNOTABLE, self.annotate);
+        p.set(Permissions::COPYABLE_FOR_ACCESSIBILITY, self.extract);
+        p.set(Permissions::ASSEMBLABLE, self.assemble);
+        p
+    }
 }
 
 /// A fresh 256-bit file encryption key from the operating system.
@@ -122,10 +200,13 @@ fn ensure_file_id(doc: &mut Document) -> Result<(), CommandError> {
 /// key that is already in hand. Note the deliberate shape of the call below —
 /// a *named* block encrypted in place, then read back — which is the mistake
 /// upstream made.
-fn permissions_entry(key: &[u8; KEY_BYTES], permissions: Permissions) -> Result<Vec<u8>, CommandError> {
+///
+/// `p_value` is read back out of the `/P` that was actually written, rather
+/// than passed in alongside it — see `fix_permissions_entry`.
+fn permissions_entry(key: &[u8; KEY_BYTES], p_value: u64) -> Result<Vec<u8>, CommandError> {
     let mut block = [0u8; 16];
     // 0–7: the permission bits, low byte first.
-    block[..8].copy_from_slice(&permissions.p_value().to_le_bytes());
+    block[..8].copy_from_slice(&p_value.to_le_bytes());
     // 8: 'T' or 'F' for EncryptMetadata — we always encrypt it.
     block[8] = b'T';
     // 9–11: the literal marker a reader checks for after decrypting.
@@ -141,17 +222,37 @@ fn permissions_entry(key: &[u8; KEY_BYTES], permissions: Permissions) -> Result<
 }
 
 /// Replace the `/Perms` entry lopdf just produced with a correctly encrypted one.
-fn fix_permissions_entry(
-    doc: &mut Document,
-    key: &[u8; KEY_BYTES],
-    permissions: Permissions,
-) -> Result<(), CommandError> {
-    let perms = permissions_entry(key, permissions)?;
+///
+/// **The permission bits come from the document's own `/P`, not from a
+/// parameter.** They are written twice — once as `/P`, once encrypted inside
+/// `/Perms` — and a reader that validates `/Perms` compares the two. Taking
+/// them as an argument alongside the set handed to `lopdf` would leave two
+/// values that are *supposed* to be equal free to drift apart, and the symptom
+/// would be a document some readers reject with nothing to say why. Deriving
+/// one from the other makes that unrepresentable rather than merely tested.
+fn fix_permissions_entry(doc: &mut Document, key: &[u8; KEY_BYTES]) -> Result<(), CommandError> {
     let id = doc
         .trailer
         .get(b"Encrypt")
         .and_then(Object::as_reference)
         .map_err(|e| CommandError::PdfError(format!("no /Encrypt after encrypting: {e}")))?;
+    let dict = doc
+        .get_object_mut(id)
+        .and_then(Object::as_dict_mut)
+        .map_err(|e| CommandError::PdfError(format!("/Encrypt is not a dictionary: {e}")))?;
+
+    // `lopdf` writes `/P` as `p_value() as i64`. Going through the raw bytes
+    // reinterprets those 64 bits rather than converting the number, which is
+    // the point: `/P` is a bit field the standard happens to store in a signed
+    // integer, and Algorithm 10 wants the bits verbatim in bytes 0–7.
+    // (`i64::cast_unsigned` says this more directly but postdates our MSRV.)
+    let signed = dict
+        .get(b"P")
+        .and_then(Object::as_i64)
+        .map_err(|e| CommandError::PdfError(format!("no /P after encrypting: {e}")))?;
+    let p_value = u64::from_ne_bytes(signed.to_ne_bytes());
+
+    let perms = permissions_entry(key, p_value)?;
     let dict = doc
         .get_object_mut(id)
         .and_then(Object::as_dict_mut)
@@ -166,10 +267,7 @@ fn fix_permissions_entry(
 /// encrypted file is refused rather than guessed at (removing the existing
 /// protection first is P6.C2, and needs its owner password).
 ///
-/// Permissions are left wide open here. Restricting them is P6-SEC-009 (C3),
-/// and shipping a half-applied permission set would be worse than none — a
-/// user who saw a "printing" checkbox that did nothing would reasonably assume
-/// the rest worked too.
+/// SPEC: P6-SEC-009 — `opts.permissions` decides what the document allows.
 pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, CommandError> {
     let user = opts.user_password.as_deref().unwrap_or("");
     // An omitted owner password becomes the user password, so the document
@@ -206,6 +304,14 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     let key = file_encryption_key()?;
     let filter: Arc<dyn CryptFilter> = Arc::new(Aes256CryptFilter);
 
+    // Computed once and used twice, on purpose. The permission bits are written
+    // in two places — `/P`, and encrypted inside the `/Perms` block below — and
+    // a reader that validates `/Perms` compares the two. Two calls to
+    // `Permissions::all()` used to sit here instead; the moment the value stops
+    // being a constant, that shape is a disagreement waiting to happen, and the
+    // symptom would be a document some readers reject with no clue why.
+    let permissions = opts.permissions.to_flags();
+
     let version = EncryptionVersion::V5 {
         // Encrypting the metadata too. Leaving it in the clear is permitted by
         // the spec and leaks title, author and producer out of a document whose
@@ -217,7 +323,7 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
         string_filter: FILTER_NAME.to_vec(),
         owner_password: owner,
         user_password: user,
-        permissions: Permissions::all(),
+        permissions,
     };
 
     let state = EncryptionState::try_from(version)
@@ -225,10 +331,151 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     doc.encrypt(&state)
         .map_err(|e| CommandError::PdfError(format!("could not encrypt the document: {e}")))?;
 
-    fix_permissions_entry(&mut doc, &key, Permissions::all())?;
+    fix_permissions_entry(&mut doc, &key)?;
 
     let mut out = Vec::new();
     doc.save_to(&mut out)
         .map_err(|e| CommandError::PdfError(format!("could not write the encrypted PDF: {e}")))?;
     Ok(out)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use aes::cipher::BlockDecrypt;
+
+    /// Undo `permissions_entry`, so a test can read the bits a reader would.
+    fn decode_perms(key: &[u8; KEY_BYTES], entry: &[u8]) -> [u8; 16] {
+        let cipher = Aes256::new(GenericArray::from_slice(key));
+        let mut block = GenericArray::clone_from_slice(entry);
+        cipher.decrypt_block(&mut block);
+        block.into()
+    }
+
+    fn restricted() -> DocumentPermissions {
+        DocumentPermissions {
+            print: false,
+            copy: false,
+            ..DocumentPermissions::default()
+        }
+    }
+
+    // SPEC: P6-SEC-009 — the bits inside `/Perms` are the bits handed to it.
+    //
+    // This is the encoding only. That `/Perms` agrees with `/P` is not tested
+    // here and does not need to be: `fix_permissions_entry` reads the value out
+    // of `/P` itself, so there is no second value to disagree with. A test
+    // passing the same flags to both sides would have proved nothing.
+    #[test]
+    fn perms_carries_the_bits_it_was_given() {
+        let key = [7u8; KEY_BYTES];
+        let p = restricted().to_flags().p_value();
+        let block = decode_perms(&key, &permissions_entry(&key, p).expect("build /Perms"));
+
+        assert_eq!(
+            u64::from_le_bytes(block[..8].try_into().expect("8 bytes")),
+            p
+        );
+        assert_eq!(block[8], b'T', "metadata is encrypted");
+        assert_eq!(&block[9..12], b"adb");
+    }
+
+    // The upstream bug this whole function exists to work around: `lopdf`
+    // returns the block unencrypted, so the marker survives in the clear.
+    #[test]
+    fn perms_is_actually_encrypted() {
+        let key = [7u8; KEY_BYTES];
+        let entry = permissions_entry(&key, restricted().to_flags().p_value()).expect("build");
+        assert_ne!(&entry[9..12], b"adb");
+    }
+
+    // Not `#[derive(Default)]`: that would clear every bit and produce the most
+    // restricted document possible for a caller who set nothing.
+    #[test]
+    fn the_default_allows_everything() {
+        assert_eq!(
+            DocumentPermissions::default().to_flags().p_value(),
+            Permissions::all().p_value(),
+        );
+    }
+
+    #[test]
+    fn each_restriction_clears_its_own_bit_and_no_other() {
+        let all = DocumentPermissions::default();
+        let cases: [(DocumentPermissions, Permissions); 7] = [
+            (
+                DocumentPermissions {
+                    print: false,
+                    ..all
+                },
+                Permissions::PRINTABLE,
+            ),
+            (
+                DocumentPermissions { copy: false, ..all },
+                Permissions::COPYABLE,
+            ),
+            (
+                DocumentPermissions {
+                    modify: false,
+                    ..all
+                },
+                Permissions::MODIFIABLE,
+            ),
+            (
+                DocumentPermissions {
+                    fill_forms: false,
+                    ..all
+                },
+                Permissions::FILLABLE,
+            ),
+            (
+                DocumentPermissions {
+                    annotate: false,
+                    ..all
+                },
+                Permissions::ANNOTABLE,
+            ),
+            (
+                DocumentPermissions {
+                    extract: false,
+                    ..all
+                },
+                Permissions::COPYABLE_FOR_ACCESSIBILITY,
+            ),
+            (
+                DocumentPermissions {
+                    assemble: false,
+                    ..all
+                },
+                Permissions::ASSEMBLABLE,
+            ),
+        ];
+
+        for (perms, bit) in cases {
+            let flags = perms.to_flags();
+            assert!(
+                !flags.contains(bit),
+                "{perms:?} should have cleared {bit:?}"
+            );
+            // Everything else this document does not restrict is still granted.
+            // High-quality printing is the one deliberate exception: it follows
+            // `print`, so it is excluded from the comparison.
+            let others = Permissions::all() - bit - Permissions::PRINTABLE_IN_HIGH_QUALITY;
+            assert_eq!(
+                flags & others,
+                others,
+                "{perms:?} cleared more than {bit:?}"
+            );
+        }
+    }
+
+    // Bit 12 selects *faithful* printing; on its own it only means "degraded
+    // printing allowed", which is not a distinction worth a checkbox.
+    #[test]
+    fn high_quality_printing_follows_printing() {
+        assert!(!restricted()
+            .to_flags()
+            .contains(Permissions::PRINTABLE_IN_HIGH_QUALITY));
+    }
 }

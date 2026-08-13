@@ -4475,6 +4475,38 @@ npm run test:rust           # green
 Not verified: the three-reader ritual on an unlocked file. Same standing item
 as C1.
 
+## P6.C3 — Set permissions (commit TBD)
+
+No new dependencies. `aes` and `getrandom` were already present from C1.
+
+```bash
+# Verification gates
+npm run check                      # tsc + eslint + cargo clippy --all-targets
+npm run test                       # 666 frontend tests, 118 files
+npm run test:rust                  # full Rust suite, no failures
+
+# Focused runs while building
+cargo test --lib security::        # the encrypt/decrypt unit modules
+cargo test --test encrypt --test decrypt
+
+# Regenerate the verification artifacts (writes to the git-ignored Sample PDFs/)
+cargo test --test encrypt -- --ignored
+```
+
+Mutating: only the last one, which rewrites
+`Sample PDFs/vibepdf-verify-encrypted-{user,both}.pdf` and adds
+`vibepdf-verify-no-print.pdf` (printing and copying withheld; opens with
+`open-me`, permissions password `owner-only`).
+
+A `cargo fmt` run early in this step reformatted 101 unrelated files — the repo
+is not crate-wide fmt-clean. Reverted with `git checkout --` on everything
+outside the step; do not repeat it.
+
+Not verified: whether any reader actually *enforces* the restrictions. That is
+an Acrobat check and is on the P6 sweep.
+
+---
+
 ---
 
 ## How this file evolves

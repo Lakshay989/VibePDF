@@ -15,7 +15,25 @@ import { useState } from "react";
 
 import { basename } from "@/app/paths";
 import { reportError } from "@/app/report-error";
-import { type DocumentId, protectPdf } from "@/ipc/pdf";
+import { ALL_PERMISSIONS, type DocumentId, type DocumentPermissions, protectPdf } from "@/ipc/pdf";
+
+/**
+ * SPEC: P6-SEC-009 — the seven the spec names, in the order it names them.
+ *
+ * Labelled as what they *allow*, matching the checked-means-permitted sense of
+ * the boxes. Phrasing them as restrictions would invert the checkbox and make
+ * "all boxes ticked" the most locked-down document, which is the opposite of
+ * what a glance suggests.
+ */
+const PERMISSION_LABELS: ReadonlyArray<[keyof DocumentPermissions, string]> = [
+  ["print", "Printing"],
+  ["copy", "Copying text and graphics"],
+  ["modify", "Changing the document"],
+  ["fillForms", "Filling in form fields"],
+  ["annotate", "Adding comments and annotations"],
+  ["extract", "Extracting for accessibility"],
+  ["assemble", "Assembling pages"],
+];
 
 interface Props {
   open: boolean;
@@ -29,6 +47,7 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
   const [userPassword, setUserPassword] = useState("");
   const [ownerPassword, setOwnerPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [permissions, setPermissions] = useState<DocumentPermissions>(ALL_PERMISSIONS);
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
@@ -40,6 +59,14 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
   const nothingSet = userPassword.length === 0;
   const canProtect = !nothingSet && !mismatch && !busy;
 
+  // Restrictions with no distinct owner password are close to meaningless: an
+  // omitted one becomes the open password, so everyone who can read the file
+  // can also change what it permits. Worth saying plainly at the moment the
+  // boxes are unticked, rather than leaving the user with a false impression of
+  // what they just set.
+  const restricted = PERMISSION_LABELS.some(([key]) => !permissions[key]);
+  const restrictionsAreAdvisory = restricted && ownerPassword.length === 0;
+
   const reset = () => {
     // Passwords do not outlive the dialog. Nothing here is stored, and a stale
     // one sitting in state through the next open would be both a surprise and
@@ -47,6 +74,7 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
     setUserPassword("");
     setOwnerPassword("");
     setConfirmPassword("");
+    setPermissions(ALL_PERMISSIONS);
   };
 
   const protect = () => {
@@ -64,6 +92,7 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
           path,
           userPassword.length > 0 ? userPassword : null,
           ownerPassword.length > 0 ? ownerPassword : null,
+          permissions,
         );
         reset();
         onClose();
@@ -130,6 +159,33 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
         <p className="mb-3 text-xs text-neutral-500">
           Optional. Restricts changing permissions; it does not gate opening.
         </p>
+
+        {/* SPEC: P6-SEC-009 — permissions. */}
+        <fieldset className="mb-3">
+          <legend className="mb-1 text-xs text-neutral-500">Allow the reader to</legend>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {PERMISSION_LABELS.map(([key, label]) => (
+              <label key={key} className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  aria-label={label}
+                  checked={permissions[key]}
+                  onChange={(e) =>
+                    setPermissions((prev) => ({ ...prev, [key]: e.target.checked }))
+                  }
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          {restrictionsAreAdvisory ? (
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-500">
+              Without a separate permissions password, anyone who can open the document
+              can also lift these restrictions. Readers are not required to enforce them
+              in any case.
+            </p>
+          ) : null}
+        </fieldset>
 
         {mismatch ? (
           <p className="mb-2 text-xs text-red-600 dark:text-red-400">

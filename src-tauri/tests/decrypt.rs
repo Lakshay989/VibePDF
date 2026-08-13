@@ -45,6 +45,7 @@ fn protected(user: &str) -> Vec<u8> {
         &EncryptOptions {
             user_password: Some(user.to_string()),
             owner_password: None,
+            permissions: Default::default(),
         },
     )
     .expect("encrypt")
@@ -93,6 +94,7 @@ fn requires_the_owner_password_not_the_user_one() {
         &EncryptOptions {
             user_password: Some("open-me".into()),
             owner_password: Some("owner-only".into()),
+            permissions: Default::default(),
         },
     )
     .expect("encrypt");

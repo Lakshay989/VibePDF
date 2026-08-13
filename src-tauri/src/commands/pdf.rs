@@ -21,6 +21,7 @@ use crate::pdf::split::{SplitMode, SplitOutcome};
 use crate::pdf::background::BackgroundKind;
 use crate::pdf::undo::HistoryState;
 use crate::pdf::watermark::WatermarkKind;
+use crate::security::encrypt::DocumentPermissions;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -1808,6 +1809,7 @@ pub async fn pdf_protect(
     path: String,
     user_password: Option<String>,
     owner_password: Option<String>,
+    permissions: Option<DocumentPermissions>,
 ) -> Result<(), CommandError> {
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
@@ -1832,6 +1834,9 @@ pub async fn pdf_protect(
     let opts = crate::security::encrypt::EncryptOptions {
         user_password,
         owner_password,
+        // SPEC: P6-SEC-009 — an omitted set restricts nothing, which is what a
+        // caller that predates C3 means and what `Default` gives.
+        permissions: permissions.unwrap_or_default(),
     };
     let encrypted = crate::security::encrypt::encrypt_document(&bytes, &opts)?;
 

@@ -128,13 +128,49 @@ export async function getPdfBytes(id: DocumentId): Promise<Uint8Array> {
  * a request with neither. The passwords go straight to the Rust side and are
  * never stored, logged, or echoed back.
  */
+/**
+ * SPEC: P6-SEC-009 (P6.C3) — what a reader may do with the protected copy.
+ *
+ * Every field means *allowed*, so `true` everywhere is an unrestricted
+ * document. Note that these are advisory: no PDF enforces them, readers may
+ * ignore them, and a document whose permissions password equals its open
+ * password can have them lifted by anyone who can open it.
+ */
+export interface DocumentPermissions {
+  print: boolean;
+  copy: boolean;
+  modify: boolean;
+  fillForms: boolean;
+  annotate: boolean;
+  extract: boolean;
+  assemble: boolean;
+}
+
+/** Everything allowed — the shape a caller that sets nothing should send. */
+export const ALL_PERMISSIONS: DocumentPermissions = {
+  print: true,
+  copy: true,
+  modify: true,
+  fillForms: true,
+  annotate: true,
+  extract: true,
+  assemble: true,
+};
+
 export async function protectPdf(
   id: DocumentId,
   path: string,
   userPassword: string | null,
   ownerPassword: string | null,
+  permissions: DocumentPermissions = ALL_PERMISSIONS,
 ): Promise<void> {
-  return invoke<void>("pdf_protect", { id, path, userPassword, ownerPassword });
+  return invoke<void>("pdf_protect", {
+    id,
+    path,
+    userPassword,
+    ownerPassword,
+    permissions,
+  });
 }
 
 /**
