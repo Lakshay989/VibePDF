@@ -18,6 +18,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { ProtectDialog } from "@/app/ProtectDialog";
+import { UnlockDialog } from "@/app/UnlockDialog";
 import { WatermarkDialog } from "@/app/WatermarkDialog";
 import { BackgroundDialog } from "@/app/BackgroundDialog";
 import { HeaderFooterDialog } from "@/app/HeaderFooterDialog";
@@ -200,6 +201,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [insertFromOpen, setInsertFromOpen] = useState(false);
   const [watermarkOpen, setWatermarkOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
+  const [unlockOpen, setUnlockOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false);
   const [pageNumbersOpen, setPageNumbersOpen] = useState(false);
@@ -509,6 +511,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
         onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
         onProtect={doc ? () => setProtectOpen(true) : undefined}
+        onUnlock={doc ? () => setUnlockOpen(true) : undefined}
         onBackground={doc ? () => setBackgroundOpen(true) : undefined}
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
         onPageNumbers={doc ? () => setPageNumbersOpen(true) : undefined}
@@ -551,6 +554,12 @@ export function PdfViewer({ documentId, path }: Props) {
         documentId={documentId}
         documentName={path}
         onClose={() => setProtectOpen(false)}
+      />
+      <UnlockDialog
+        open={unlockOpen}
+        documentId={documentId}
+        documentName={path}
+        onClose={() => setUnlockOpen(false)}
       />
       <WatermarkDialog
         open={watermarkOpen}

@@ -140,20 +140,36 @@ fn the_user_password_is_required_to_open() {
     drop(doc);
 }
 
-// SPEC: P6-SEC-007 — the owner password is the *permissions* password; a
-// document carrying only one still opens for anybody.
+// A deliberate narrowing of P6-SEC-007, not an oversight. The spec allows a
+// document with only an owner password — opens for anyone, restricted — and we
+// refuse to write one, because P6.C2 cannot unlock it: lopdf tries the empty
+// user password while parsing and its R6 user authentication does not work, so
+// the file cannot even be loaded.
+//
+// Producing files we cannot undo is a worse failure than a missing option, and
+// the user would meet it later, on a document they can no longer change.
 #[test]
-fn an_owner_only_document_opens_without_a_password() {
-    let out = encrypt_document(&fixture_bytes("hello.pdf"), &opts(None, Some("let-me-change-it")))
+fn refuses_owner_only_protection_because_it_could_not_be_undone() {
+    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(None, Some("let-me-change-it")))
+        .unwrap_err();
+    let CommandError::InvalidInput(msg) = &err else { panic!("got {err:?}") };
+    assert!(
+        msg.contains("remove that protection"),
+        "the message must say why, not just refuse: {msg}"
+    );
+}
+
+// Both passwords still work together, and the owner one is a real credential.
+#[test]
+fn supports_a_distinct_owner_password() {
+    let out = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some("open-me"), Some("owner")))
         .expect("encrypt");
     let file = TempPdf::new(&out);
 
-    let (doc, meta) = open_pdf(&file.0, None).expect("opens freely");
-    assert_eq!(meta.page_count, 1);
+    assert!(open_pdf(&file.0, None).is_err(), "still gated on opening");
+    let (doc, _) = open_pdf(&file.0, Some("open-me")).expect("user opens it");
     drop(doc);
-    // …and the owner password opens it too, which is what makes it a credential
-    // rather than a label.
-    let (doc, _) = open_pdf(&file.0, Some("let-me-change-it")).expect("owner opens it");
+    let (doc, _) = open_pdf(&file.0, Some("owner")).expect("owner opens it too");
     drop(doc);
 }
 
@@ -198,7 +214,7 @@ fn refuses_when_no_password_was_given() {
     let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(None, None)).unwrap_err();
     assert!(matches!(err, CommandError::InvalidInput(_)), "got {err:?}");
     // Empty strings are the same thing arriving from a form.
-    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some(""), Some(""))).unwrap_err();
+    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some(""), Some("owner"))).unwrap_err();
     assert!(matches!(err, CommandError::InvalidInput(_)), "got {err:?}");
 }
 
@@ -232,7 +248,6 @@ fn writes_verification_artifacts() {
 
     for (name, o) in [
         ("vibepdf-verify-encrypted-user.pdf", opts(Some("open-me"), None)),
-        ("vibepdf-verify-encrypted-owner.pdf", opts(None, Some("owner-only"))),
         ("vibepdf-verify-encrypted-both.pdf", opts(Some("open-me"), Some("owner-only"))),
     ] {
         let out = encrypt_document(&src, &o).expect("encrypt");

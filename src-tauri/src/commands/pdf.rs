@@ -1851,6 +1851,54 @@ pub async fn pdf_protect(
     Ok(())
 }
 
+/// SPEC: P6-SEC-008 (P6.C2) — write an unprotected copy of the open document.
+///
+/// The mirror of `pdf_protect`, and an export for the same reasons. `password`
+/// is the document's owner password; see `security::decrypt` for why that is
+/// what `lopdf` enforces for AES-256.
+///
+/// The output is re-opened **with no password** before this returns. That is
+/// the whole assertion: a file that is still encrypted and a file that is not
+/// look identical from here, and only a reader can tell them apart.
+#[tauri::command]
+pub async fn pdf_remove_protection(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    password: String,
+) -> Result<(), CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    let unlocked = crate::security::decrypt::remove_protection(&bytes, &password)?;
+
+    let out = PathBuf::from(&path);
+    std::fs::write(&out, &unlocked)
+        .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
+
+    if let Err(e) = crate::pdf::document::open_pdf(&out, None) {
+        let _ = std::fs::remove_file(&out);
+        return Err(CommandError::PdfError(format!(
+            "the unlocked file still needs a password, so it was not kept: {e}"
+        )));
+    }
+    Ok(())
+}
+
 /// Which password re-opens the file we just wrote: the user password when there
 /// is one, otherwise none (an owner-only document opens freely).
 fn opts_open_password(opts: &crate::security::encrypt::EncryptOptions) -> Option<&str> {

@@ -37,6 +37,8 @@ export interface ZoomToolbarProps {
   onWatermark?: (() => void) | undefined;
   /** SPEC: P6-SEC-007 (P6.C1) — open the password-protect dialog. */
   onProtect?: (() => void) | undefined;
+  /** SPEC: P6-SEC-008 (P6.C2) — open the remove-protection dialog. */
+  onUnlock?: (() => void) | undefined;
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
@@ -58,6 +60,7 @@ export function ZoomToolbar({
   onInsertFromPdf,
   onWatermark,
   onProtect,
+  onUnlock,
   onBackground,
   onHeaderFooter,
   onPageNumbers,
@@ -239,6 +242,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Protect…
+        </button>
+      ) : null}
+
+      {onUnlock ? (
+        <button
+          type="button"
+          onClick={onUnlock}
+          title="Write a copy with the password protection removed"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Unlock…
         </button>
       ) : null}
 

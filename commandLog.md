@@ -4433,6 +4433,50 @@ fix, not retained because nothing complained.
 
 ---
 
+## P6.C2 — Remove password protection (SPEC P6-SEC-008)
+
+No new dependencies. `lopdf`'s `Document::decrypt` authenticates, decrypts every
+string and stream, and removes both the `/Encrypt` trailer entry and the
+encryption dictionary, so a plain `save_to` afterwards writes an ordinary PDF.
+
+**Checked before planning, and it changed the plan twice.**
+
+```
+lopdf decrypt, RC4-128 fixture            -> works
+lopdf decrypt, our AES-256 (after f7384e3) -> works
+lopdf decrypt, pypdf AES-256 (/Length)     -> InvalidKeyLength
+PDFium open-with-password then save_to_file -> /Encrypt SURVIVES
+```
+
+That last row is the trap: the obvious route (open through PDFium, re-save)
+does not remove protection at all.
+
+**The approved option (A, "accept either password") was not available.** For R6,
+lopdf authenticates the *owner* password and rejects the user one — measured on
+a file with user `open-me` and owner `owner-only`. So P6-SEC-008's "SHALL
+require the owner password" is enforced by the library. The "user-only" case
+appears to work only because C1 defaults the owner password to the user one.
+
+**C1 narrowed as a consequence** (option 2 of three, chosen by the human):
+owner-only protection is now refused at encrypt time, because lopdf cannot load
+such a document at all and C2 therefore could not undo it. Producing files we
+cannot unlock is worse than a missing option.
+
+```
+cargo test --test decrypt   # 5 ok
+cargo test --test encrypt   # 10 ok
+cargo test --lib            # 132 ok (2 new unit tests in security::decrypt)
+npx vitest run …Unlock/Protect dialogs   # 17 ok
+npm run check               # clean
+npm run test                # 661 passed (118 files)
+npm run test:rust           # green
+```
+
+Not verified: the three-reader ritual on an unlocked file. Same standing item
+as C1.
+
+---
+
 ## How this file evolves
 
 Every step commit appends a `### P<n>.<id> — <name> (commit <sha>)`

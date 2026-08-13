@@ -10,8 +10,8 @@
 //! What *is* decided here, and is worth reviewing carefully:
 //!
 //! - the key comes from the OS CSPRNG (`getrandom`) and nowhere else;
-//! - both passwords empty is refused, because it produces a file that
-//!   announces itself as encrypted and opens for anyone;
+//! - a user password is **required**, because P6.C2 cannot unlock a document
+//!   that has only an owner password — see the note on `EncryptOptions`;
 //! - an omitted owner password falls back to the user password, so the
 //!   document always has a credential that can change its permissions.
 
@@ -50,9 +50,16 @@ const FILTER_NAME: &[u8] = b"StdCF";
 /// - **owner password** — required to change permissions; the document still
 ///   opens without it.
 ///
-/// Supplying only an owner password is a legitimate and common choice: the
-/// document opens freely but is restricted. Supplying only a user password is
-/// the ordinary "this file is private" case.
+/// **A user password is currently required.** The spec permits owner-only
+/// protection — a document that opens for anyone but is restricted — and this
+/// deliberately does not, because P6.C2 cannot remove protection from such a
+/// file: `lopdf` tries the empty user password while parsing and its R6 user
+/// authentication does not work, so the document cannot even be loaded.
+///
+/// Writing files we cannot subsequently unlock is a worse failure than a
+/// missing option, and it is one the user would only discover later, on a
+/// document they can no longer change. Recorded in `steps/P6.md`; revisit when
+/// the upstream R6 user-authentication path is fixed.
 #[derive(Debug, Clone, Default)]
 pub struct EncryptOptions {
     pub user_password: Option<String>,
@@ -170,9 +177,11 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     // only an open password is set.
     let owner = opts.owner_password.as_deref().unwrap_or(user);
 
-    if user.is_empty() && owner.is_empty() {
+    if user.is_empty() {
         return Err(CommandError::InvalidInput(
-            "Set a password to open the document, a password to change permissions, or both."
+            "Set a password to open the document. Protecting a file with only a \
+             permissions password isn't supported yet — VibePDF would not be able to \
+             remove that protection afterwards."
                 .into(),
         ));
     }

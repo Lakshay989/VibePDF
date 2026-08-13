@@ -50,7 +50,7 @@ describe("ProtectDialog", () => {
     render(dialog());
     expect(screen.getByText("Protect…").hasAttribute("disabled")).toBe(true);
     // …and says why, rather than leaving a dead button.
-    expect(screen.getByText(/at least one password/i)).toBeTruthy();
+    expect(screen.getByText(/Set a password to open the document/i)).toBeTruthy();
   });
 
   it("blocks on a mismatched confirmation", () => {
@@ -79,13 +79,32 @@ describe("ProtectDialog", () => {
     );
   });
 
-  it("supports an owner password on its own", async () => {
+  it("refuses an owner password on its own", () => {
+    // A deliberate narrowing of P6-SEC-007: P6.C2 cannot unlock a document that
+    // has only a permissions password, so we do not write one. Producing files
+    // we cannot undo is worse than a missing option, and the user would meet it
+    // later, on a document they can no longer change.
     render(dialog());
+    type("Password to change permissions", "let-me-in");
+
+    expect(screen.getByText("Protect…").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/could not be removed afterwards/i)).toBeTruthy();
+  });
+
+  it("sends both passwords when both are given", async () => {
+    render(dialog());
+    type("Password to open", "open-me");
+    type("Confirm password to open", "open-me");
     type("Password to change permissions", "let-me-in");
     fireEvent.click(screen.getByText("Protect…"));
 
     await waitFor(() => expect(mockProtect).toHaveBeenCalled());
-    expect(mockProtect).toHaveBeenCalledWith("doc-1", "/tmp/report-protected.pdf", null, "let-me-in");
+    expect(mockProtect).toHaveBeenCalledWith(
+      "doc-1",
+      "/tmp/report-protected.pdf",
+      "open-me",
+      "let-me-in",
+    );
   });
 
   it("does nothing when the save dialog is dismissed", async () => {

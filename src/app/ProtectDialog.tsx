@@ -34,7 +34,10 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
   if (!open) return null;
 
   const mismatch = userPassword.length > 0 && confirmPassword !== userPassword;
-  const nothingSet = userPassword.length === 0 && ownerPassword.length === 0;
+  // A user password is required: P6.C2 cannot unlock a document that has only
+  // an owner password, and writing files we cannot undo is worse than a missing
+  // option. See `security/encrypt.rs`.
+  const nothingSet = userPassword.length === 0;
   const canProtect = !nothingSet && !mismatch && !busy;
 
   const reset = () => {
@@ -86,7 +89,7 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
         </p>
 
         <label className="mb-2 flex flex-col gap-0.5">
-          <span className="text-xs text-neutral-500">Password to open (optional)</span>
+          <span className="text-xs text-neutral-500">Password to open</span>
           <input
             type="password"
             aria-label="Password to open"
@@ -125,7 +128,7 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
           />
         </label>
         <p className="mb-3 text-xs text-neutral-500">
-          With only this one set, the document opens for anyone but is restricted.
+          Optional. Restricts changing permissions; it does not gate opening.
         </p>
 
         {mismatch ? (
@@ -135,8 +138,9 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
         ) : null}
         {nothingSet ? (
           <p className="mb-2 text-xs text-amber-700 dark:text-amber-500">
-            Set at least one password. A file with neither would say it was encrypted and
-            open for anyone.
+            Set a password to open the document. Protecting with only a permissions
+            password isn&rsquo;t supported yet — the protection could not be removed
+            afterwards.
           </p>
         ) : null}
 

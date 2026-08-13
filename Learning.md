@@ -9075,6 +9075,52 @@ human review pass on every diff because its mistakes are silent.
 
 ---
 
+## P6.C2 — when the library decides your API for you
+
+### Problem
+Remove password protection (P6-SEC-008), the mirror of C1.
+
+### Concepts learned
+- **Check the premise before writing the plan, not after.** Before planning I
+  asked one question — can `lopdf` decrypt what we encrypt? — and the answer
+  changed the step three times over: it exposed a C1 defect (`/Length`), ruled
+  out the obvious PDFium route, and invalidated the option the human had
+  already approved. Every one of those would have been discovered mid-
+  implementation otherwise, when reversing costs more.
+- **The obvious route was wrong in the quiet way.** PDFium opens an encrypted
+  document with its password and `save_to_file` writes it back out *still
+  encrypted*. Nothing errors. A "remove protection" built on it would report
+  success and hand back a protected file.
+- **A library can enforce a spec line you meant to implement yourself.** The
+  plan offered "accept either password"; `lopdf`'s R6 accepts only the owner
+  password, which is what the spec demanded in the first place. The behaviour is
+  now pinned by a test, because a future version that accepts both would
+  silently widen what the command permits — an enforcement regression nothing
+  else would catch.
+- **Do not ship a create that its own delete cannot undo.** C1 could write
+  owner-only documents; C2 cannot load them, because `Document::load_mem` tries
+  the empty user password while parsing and R6 user authentication is broken. So
+  C1 now refuses to write them. A missing option is a visible cost; a file you
+  cannot unlock is one the user meets much later, on a document they can no
+  longer change.
+- **Name the limitation you cannot fix.** Two failures here are neither wrong
+  passwords nor bugs we can reach: the `/Length` variant, and owner-only files
+  from other tools. Both are detected and described. `InvalidKeyLength` reaching
+  a user has them retyping a password that was correct all along.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/decrypt.rs` | `remove_protection`, plus the two failures worth naming. |
+| `src-tauri/src/commands/pdf.rs` | `pdf_remove_protection` — export, then re-open with no password. |
+| `src/app/UnlockDialog.tsx` | One field, and a line saying which password AES-256 wants. |
+| `src/app/ProtectDialog.tsx` | The open password is now required; copy says why. |
+
+### Further reading
+- ISO 32000-2 Algorithms 11 and 12 — user and owner authentication for revision 6. Only the second works in lopdf 0.36.
+
+---
+
 ## How this file evolves
 
 Every commit that ships a `steps/P<n>.md` step also appends a new section

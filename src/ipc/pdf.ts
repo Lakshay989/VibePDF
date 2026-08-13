@@ -136,3 +136,21 @@ export async function protectPdf(
 ): Promise<void> {
   return invoke<void>("pdf_protect", { id, path, userPassword, ownerPassword });
 }
+
+/**
+ * SPEC: P6-SEC-008 (P6.C2) — write an unprotected copy of `id` to `path`.
+ *
+ * `password` is the document's **owner** password. For AES-256 that is what
+ * lopdf enforces; the user password is refused. See `security/decrypt.rs`.
+ *
+ * The open document is untouched — this is an export, mirroring `protectPdf`.
+ * The backend re-opens the output with no password before returning, so a file
+ * that is still encrypted never reaches the user.
+ */
+export async function removePdfProtection(
+  id: DocumentId,
+  path: string,
+  password: string,
+): Promise<void> {
+  return invoke<void>("pdf_remove_protection", { id, path, password });
+}
