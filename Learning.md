@@ -9396,6 +9396,63 @@ a key out of a `.pfx`.
 
 ---
 
+## P6.B1a-UI — Wiring signing to the app (SPEC P6-SEC-005)
+
+### Problem
+
+Put the signing core behind a dialog. Ordinary plumbing, with one decision in it
+that is not ordinary at all.
+
+### Concepts learned
+
+- **Some features cannot be edits.** Every other write in VibePDF goes through
+  the document actor and is undoable. Signing cannot: the actor produces bytes
+  by asking `PDFium` to re-serialise the document, which rewrites every object
+  and every byte offset — and a signature covers *exact bytes*. Sign in place
+  and the next Save silently invalidates it, leaving a file that still shows a
+  signature and no longer has a valid one.
+
+  So signing is export-only, like protect and unlock. The general lesson: before
+  choosing where a feature lives in an architecture, ask what the surrounding
+  machinery does to its output. The answer here changed the design.
+
+- **Send a path, not the bytes.** The certificate crosses IPC as a file path and
+  the backend reads it. Private key material has no reason to sit in a command
+  payload, where it can end up in a log, a crash dump, or a serialisation
+  buffer that outlives the call.
+
+- **Nine positional arguments is a bug waiting to happen.** Clippy flagged
+  `too_many_arguments` on the command, and the honest fix was not an `allow`:
+  four of the nine were strings, and a transposition would have sent a password
+  where a path belongs — with no type error and no runtime error, just a
+  certificate that fails to load. Grouping them into `SignatureDetails` makes
+  the wrong call not compile. The dialog test that checks each field arrives in
+  its own role covers the rest.
+
+- **`getTimezoneOffset` is inverted.** It returns minutes to *add to local time
+  to reach UTC*, so UTC+1 comes back as `-60` and the PDF date wants `+01'00'`.
+  Reversing the sign gives a timestamp that is plausible and wrong by twice the
+  offset, which nothing downstream flags. Its own test, with a half-hour zone
+  (`+05'45'`) so integer-hour assumptions show up too.
+
+- **Two dialogs, deliberately not one.** `SignatureDialog` manages pictures of
+  signatures; `SignDialog` signs cryptographically. Merging them would be the
+  most misleading thing in the app — a drawn squiggle and a certificate make
+  entirely different claims, and only one of them survives the document being
+  edited.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/commands/pdf.rs` | `pdf_sign_document` — export, then re-open to verify. |
+| `src/tools/sign/pdf-date.ts` | `D:YYYYMMDDHHmmSS+HH'mm'`, offset sign and all. |
+| `src/app/SignDialog.tsx` | Certificate picker, password, reason/location/name. |
+
+### Further reading
+- ISO 32000-1 §7.9.4 — PDF date strings.
+
+---
+
 ---
 
 ## How this file evolves

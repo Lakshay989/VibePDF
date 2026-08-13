@@ -4631,6 +4631,28 @@ Not verified: what Acrobat makes of the signed file. Sweep §6a.
 
 ---
 
+## P6.B1a-UI — signing in the app (commit TBD)
+
+No new dependencies.
+
+```bash
+npm run check
+npm run test                       # 692 frontend tests, 121 files
+npm run test:rust                  # full suite, no failures
+npx vitest run src/app/__tests__/SignDialog.test.tsx src/tools/sign
+```
+
+Two mutations run by hand and reverted, confirming the dialog tests bite:
+swapping the `certificate` and `password` arguments (fails "sends each field in
+its own role") and dropping the `reset()` after a successful sign (fails "does
+not keep them after a successful signing either").
+
+Not verified: signing through the real UI. Sweep §6c — the item worth doing is
+confirming the *open* document is left unsigned, since sign-on-export is the
+whole design.
+
+---
+
 ---
 
 ## How this file evolves

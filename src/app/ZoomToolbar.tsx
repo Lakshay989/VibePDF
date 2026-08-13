@@ -41,6 +41,8 @@ export interface ZoomToolbarProps {
   onUnlock?: (() => void) | undefined;
   /** SPEC: P6-SEC-012 (P6.D3) — open the clean-document dialog. */
   onClean?: (() => void) | undefined;
+  /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
+  onSign?: (() => void) | undefined;
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
@@ -63,6 +65,7 @@ export function ZoomToolbar({
   onWatermark,
   onProtect,
   onClean,
+  onSign,
   onUnlock,
   onBackground,
   onHeaderFooter,
@@ -256,6 +259,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Unlock…
+        </button>
+      ) : null}
+
+      {onSign ? (
+        <button
+          type="button"
+          onClick={onSign}
+          title="Write a copy signed with a certificate"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Sign…
         </button>
       ) : null}
 

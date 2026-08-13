@@ -136,6 +136,7 @@ pub fn run() {
             commands::pdf::pdf_import_form_data,
             commands::pdf::pdf_flatten_form,
             commands::pdf::pdf_clean_document,
+            commands::pdf::pdf_sign_document,
             commands::signatures::signatures_list,
             commands::signatures::signatures_add,
             commands::signatures::signatures_remove,

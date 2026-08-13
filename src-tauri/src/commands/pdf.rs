@@ -1890,6 +1890,70 @@ pub async fn pdf_protect(
     Ok(())
 }
 
+/// SPEC: P6-SEC-005 (P6.B1a) — write a certificate-signed copy of the open
+/// document to `path`.
+///
+/// **Sign-on-export, and it has to be.** The actor hands out bytes by asking
+/// `PDFium` to re-serialise the document, which rewrites every object and every
+/// offset. A signature covers exact bytes, so signing in place would produce a
+/// document that the very next Save silently un-signs — the worst possible
+/// failure for this feature, because the file would still *look* signed until
+/// somebody checked. The signed copy therefore leaves this command as a file
+/// and never goes back into the actor.
+///
+/// `certificate` is a path rather than bytes: private key material has no
+/// reason to cross the IPC boundary, and the backend can read the file itself.
+/// Neither the key nor `password` is logged or put into a `CommandError`.
+#[tauri::command]
+pub async fn pdf_sign_document(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    certificate: String,
+    password: String,
+    details: crate::security::sign::SignatureDetails,
+) -> Result<(), CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    // Read the certificate here rather than in the frontend. The error names the
+    // file, never its contents.
+    let pfx = std::fs::read(&certificate).map_err(|e| {
+        CommandError::InvalidInput(format!("could not read the certificate file: {e}"))
+    })?;
+
+    let spec = details.into_spec("Signature1");
+    let signed = crate::security::sign::sign_document(&bytes, &spec, &pfx, &password)?;
+
+    let out = PathBuf::from(&path);
+    std::fs::write(&out, &signed)
+        .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
+
+    // The round-trip rule. A signature is worth nothing if the file it is in
+    // will not open, and finding that out here is better than shipping it.
+    if let Err(e) = crate::pdf::document::open_pdf(&out, None) {
+        let _ = std::fs::remove_file(&out);
+        return Err(CommandError::PdfError(format!(
+            "the signed file could not be re-opened, so it was not kept: {e}"
+        )));
+    }
+    Ok(())
+}
+
 /// SPEC: P6-SEC-008 (P6.C2) — write an unprotected copy of the open document.
 ///
 /// The mirror of `pdf_protect`, and an export for the same reasons. `password`

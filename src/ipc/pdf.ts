@@ -253,3 +253,41 @@ export async function cleanDocument(
 ): Promise<CleanReport> {
   return invoke<CleanReport>("pdf_clean_document", { id, options });
 }
+
+/** What goes in the signature dictionary alongside the signature itself. */
+export interface SignatureDetails {
+  /** PDF date string — use `pdfDate(new Date())`. */
+  signedAt: string;
+  reason: string | null;
+  location: string | null;
+  /** Display name. Not a security claim; the certificate is. */
+  name: string | null;
+}
+
+/**
+ * SPEC: P6-SEC-005 (P6.B1a) — write a certificate-signed copy of `id` to `path`.
+ *
+ * **Sign-on-export, and necessarily so.** Saving a document re-serialises it,
+ * which rewrites every byte offset — and a signature covers exact bytes. Signing
+ * in place would give you a file that the next Save silently un-signs, still
+ * looking signed until someone checked. So the signed copy is written to disk
+ * and the open document is left alone.
+ *
+ * `certificatePath` is a path, not bytes: the private key has no reason to cross
+ * the IPC boundary. Neither it nor `password` is logged anywhere.
+ */
+export async function signPdf(
+  id: DocumentId,
+  path: string,
+  certificatePath: string,
+  password: string,
+  details: SignatureDetails,
+): Promise<void> {
+  return invoke<void>("pdf_sign_document", {
+    id,
+    path,
+    certificate: certificatePath,
+    password,
+    details,
+  });
+}

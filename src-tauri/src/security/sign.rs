@@ -85,6 +85,36 @@ pub struct SignatureSpec {
     pub name: Option<String>,
 }
 
+/// The parts of a signature a user fills in, as they arrive over IPC.
+///
+/// Separate from [`SignatureSpec`] because the field name is ours to choose,
+/// not the user's — and because a command taking nine positional arguments is
+/// one transposition away from sending a password where a path belongs.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureDetails {
+    /// PDF date string: `D:YYYYMMDDHHmmSS+HH'mm'`.
+    pub signed_at: String,
+    pub reason: Option<String>,
+    pub location: Option<String>,
+    pub name: Option<String>,
+}
+
+impl SignatureDetails {
+    /// Fill in the field name and become a [`SignatureSpec`].
+    #[must_use]
+    pub fn into_spec(self, field_name: &str) -> SignatureSpec {
+        SignatureSpec {
+            field_name: field_name.to_owned(),
+            signed_at: self.signed_at,
+            reason: self.reason,
+            location: self.location,
+            contact: None,
+            name: self.name,
+        }
+    }
+}
+
 /// A document with a signature-shaped hole in it, ready to be hashed.
 ///
 /// `Debug` deliberately omits `bytes`: printing a whole PDF into a test failure

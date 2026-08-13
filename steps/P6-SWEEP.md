@@ -135,6 +135,20 @@ makes of the container around it, which is the thing the roadmap asks for.
       covering less than it should.)
 - [ ] Preview and a third reader open it without complaint
 
+## 6c. Signing in-app (B1a)
+
+Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
+
+- [ ] **Sign…** → choose the certificate, type the password, save a copy. The
+      copy opens in Acrobat with a valid signature
+- [ ] The **open document is unchanged** — no dirty marker, no signature in it.
+      Save it and confirm the saved file has no signature either
+- [ ] A **wrong certificate password** is refused with a message about the
+      password, and no file is written
+- [ ] The **legacy** certificate (`signer-legacy.pfx`) signs too
+- [ ] Cancel the dialog, reopen it: the password field is empty and no
+      certificate is remembered
+
 ## 6b. Signature container (B1a, part one)
 
 File: `Sample PDFs/vibepdf-verify-sig-placeholder.pdf` — a signature field with
