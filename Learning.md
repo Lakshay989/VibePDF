@@ -9331,6 +9331,71 @@ around it**, and check it against a real artefact rather than its README.
 
 ---
 
+## P6.B1a-crypto — Signing with a certificate (SPEC P6-SEC-005)
+
+### Problem
+
+Fill the gap B1a-container reserved with a real PKCS#7/CMS signature, made with
+a key out of a `.pfx`.
+
+### Concepts learned
+
+- **A PDF signature is a detached CMS.** The signature does not cover the
+  document directly. It covers a set of *signed attributes*, one of which is
+  `message-digest` — a SHA-256 over the bytes `/ByteRange` names. So:
+  `document bytes → SHA-256 → message-digest attribute → SignedAttributes (DER)
+  → RSA → /Contents`. Every link is a place a wrong byte yields "invalid
+  signature" and nothing more, which is why the digest is computed once and
+  threaded through.
+
+- **A `.pfx` is four nested containers, and the password is used three ways.**
+  MAC key, safe decryption, key decryption — each with a different KDF `id`
+  byte. Get one right and another wrong and the user sees "wrong password" for
+  a password that is correct.
+
+- **The same format, two eras.** OpenSSL 3 writes PBES2/AES-256 with a SHA-256
+  MAC; older files use a PKCS#12 PBE with SHA-1/3DES. `pkcs8`'s
+  `EncryptedPrivateKeyInfo` parses its algorithm field *as a PKCS#5 scheme*, so
+  a legacy file fails to **parse** and reports itself as malformed rather than
+  as old. Reading the two fields directly and dispatching on the OID lets both
+  go down one path. The general shape: when a library's type is stricter than
+  the format, decode the format and dispatch yourself.
+
+- **DEFAULT means absent in DER.** `ESSCertIDv2.hashAlgorithm` defaults to
+  SHA-256, and DER requires a field equal to its default to be omitted.
+  Writing it out is a non-canonical encoding that strict verifiers reject.
+
+- **Self-consistency proves nothing about cryptography.** A signature computed
+  over the wrong bytes, verified by a verifier that makes the same mistake,
+  passes every test you can write inside one codebase. So the load-bearing test
+  hands the blob to `openssl cms -verify`, which has never seen this repo —
+  plus a counter-test that flips one byte and requires openssl to *reject* it,
+  because otherwise a command that always succeeds would make both tests
+  worthless. Mutating the digest to cover `message[..len-1]` fails the first
+  and not the second, which is what says they discriminate.
+
+  This is the same move that found the `/Perms` bug in C1: **verify against an
+  implementation that does not share your assumptions.**
+
+- **`Debug` is an exfiltration path.** `SigningCredential` implements it by
+  hand to print the subject and the chain length and never the key. A `{:?}` in
+  a log line or a test failure is exactly how private key material escapes,
+  and the derived impl would have printed the primes.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/credential.rs` | `.pfx` → key + certificate chain, both eras. |
+| `src-tauri/src/security/cms.rs` | Detached `SignedData` + `signing-certificate-v2`. |
+| `src-tauri/src/security/sign.rs` | `sign_document` — the four steps in one place, so the order cannot be got wrong. |
+| `tests/fixtures/certs/` | A self-signed test certificate, in both `.pfx` flavours. |
+
+### Further reading
+- RFC 5652 — CMS. RFC 5035 — the ESS signing-certificate-v2 attribute.
+- RFC 7292 — PKCS#12, including the Appendix B KDF.
+
+---
+
 ---
 
 ## How this file evolves

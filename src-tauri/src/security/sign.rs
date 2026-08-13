@@ -489,3 +489,27 @@ fn find_byte_range_array(bytes: &[u8]) -> Result<Range<usize>, CommandError> {
         + open;
     Ok(open..close + 1)
 }
+
+/// SPEC: P6-SEC-005 — sign `bytes` with the certificate in `pfx`.
+///
+/// The whole sequence in one place, because the order is the correctness
+/// argument and splitting it across callers would let someone hash before
+/// patching:
+///
+/// 1. [`prepare`] appends the field and reserves the gap;
+/// 2. `/ByteRange` is already written, so the message is final;
+/// 3. the CMS blob is built over that message;
+/// 4. [`PreparedSignature::embed`] drops it into the gap.
+///
+/// The password never leaves this frame and never enters an error.
+pub fn sign_document(
+    bytes: &[u8],
+    spec: &SignatureSpec,
+    pfx: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, CommandError> {
+    let credential = crate::security::credential::load_pkcs12(pfx, password)?;
+    let prepared = prepare(bytes, spec)?;
+    let blob = crate::security::cms::sign_detached(&prepared.message(), &credential)?;
+    prepared.embed(&blob)
+}

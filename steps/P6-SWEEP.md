@@ -116,7 +116,26 @@ is still well-formed after seven kinds of surgery.
 - [ ] In-app: clean, then **Undo** → everything comes back. Then save, reopen,
       and confirm undo no longer offers it (documented behaviour, not a bug)
 
-## 6. Signature container (B1a, part one)
+## 6a. Signed document (B1a) — the roadmap's acceptance demo
+
+File: `Sample PDFs/vibepdf-verify-signed.pdf` — `hello.pdf` signed with the test
+certificate in `tests/fixtures/certs/`.
+
+`openssl cms -verify` already accepts this signature and rejects a tampered
+copy, so the cryptography is checked. What is not checked is what **Acrobat**
+makes of the container around it, which is the thing the roadmap asks for.
+
+- [ ] **Acrobat**: the signature panel shows a signature, and it is
+      **cryptographically valid**. It will say the identity is *unknown* — the
+      certificate is self-signed, which is correct and expected, not a failure
+- [ ] The **certificate chain** is shown, with `CN=VibePDF Test Signer`
+- [ ] Acrobat reports **no changes since signing**
+- [ ] Change one byte of the file in a hex editor and reopen: Acrobat now says
+      the document has been modified. (If it does not, the `/ByteRange` is
+      covering less than it should.)
+- [ ] Preview and a third reader open it without complaint
+
+## 6b. Signature container (B1a, part one)
 
 File: `Sample PDFs/vibepdf-verify-sig-placeholder.pdf` — a signature field with
 the gap reserved and nothing in it.

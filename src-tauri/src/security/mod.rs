@@ -11,6 +11,8 @@
 //! which stores pictures. See the note in `docs/04_ARCHITECTURE.md` on why a
 //! picture store behind the crypto gate helps nobody.
 
+pub mod cms;
+pub mod credential;
 pub mod decrypt;
 pub mod encrypt;
 pub mod sign;

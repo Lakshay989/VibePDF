@@ -63,6 +63,47 @@ lopdf = { version = "0.36.0", default-features = false }
 # transitive dependencies**, read/produce font bytes only (no PDF render/edit, no
 # overlap with PDFium/lopdf). `subsetter` pinned to 0.1 on purpose — 0.2.x pulls
 # the whole fontations stack (11 crates) and requires rustc 1.85 > our MSRV.
+# P6.B1 (SPEC P6-SEC-005): certificate-based signing. **No cryptography is
+# implemented in this repo** — these are the RustCrypto crates that own the
+# primitives and the formats, and `security/` only wires them together. Same
+# stance as P6.C1, where lopdf owns AES-256.
+#
+#   cms       — the PKCS#7/CMS SignedData structure a PDF signature *is*
+#   x509-cert — certificate parsing, for the chain we embed and the issuer
+#               + serial a verifier matches on
+#   rsa       — RSASSA-PKCS1-v1_5 signing with the key from the .pfx
+#   sha2      — SHA-256, the digest PAdES requires
+#   der       — encoding the signed attributes; already transitive via all four
+#   const-oid — algorithm identifiers, ditto
+#
+# PKCS#12 (.pfx) is the spec's named input and takes three crates because no
+# single one does it: `pkcs12` supplies the DER types and the RFC 7292 KDF,
+# `pkcs5` decrypts the PBES2-protected safe contents, `pkcs8` parses the
+# private key that falls out. The obvious one-call alternative, `p12` 0.6.3,
+# was tried and rejected: it hard-asserts a SHA-1 MAC and *panics* on any .pfx
+# OpenSSL 3 produces by default (SHA-256). Recorded in steps/P6.md.
+#
+# MSRV 1.80 pins x509-cert to 0.2.x; 0.3 requires 1.85.
+cms = { version = "0.2.3", features = ["builder"] }
+x509-cert = "0.2.5"
+# `sha2` feature: supplies RsaSignatureAssociatedOid, so a SHA-256 signing key
+# can name its own algorithm in the CMS structure.
+rsa = { version = "0.9", features = ["sha2"] }
+sha2 = { version = "0.10", features = ["oid"] }
+der = { version = "0.7", features = ["alloc", "oid"] }
+const-oid = { version = "0.9", features = ["db"] }
+pkcs12 = { version = "0.1.0", features = ["kdf"] }
+pkcs5 = { version = "0.7", features = ["alloc", "pbes2"] }
+pkcs8 = { version = "0.10", features = ["alloc", "encryption"] }
+# Legacy PKCS#12 encryption (pbeWithSHAAnd3-KeyTripleDES-CBC): the KDF comes
+# from `pkcs12`, these supply the cipher and the MAC it feeds. SHA-1 and 3DES
+# are here only to *read* existing certificate files — never to produce a
+# signature, which is SHA-256 per PAdES.
+cbc = { version = "0.1", features = ["alloc"] }
+des = "0.8"
+sha1 = "0.10"
+hmac = "0.12"
+digest = "0.10"
 ttf-parser = "0.25.1"       # RazrFalcon; read-only: codepoint → glyph-id lookup
 subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
 

@@ -4582,6 +4582,55 @@ slice. Acrobat showing an unsigned signature field is sweep §6.
 
 ---
 
+## P6.B1a-crypto — certificate signing (commit TBD)
+
+**New dependencies, approved 2026-08-13.** Justification is in `Cargo.toml`
+beside each. No cryptography is implemented in this repo; these crates own it.
+
+```bash
+cargo add cms --features builder
+cargo add x509-cert rsa sha2 der const-oid
+cargo add pkcs12 --features kdf
+cargo add pkcs5 --features alloc,pbes2
+cargo add pkcs8 --features alloc,encryption
+cargo add cbc des sha1 hmac digest   # legacy PKCS#12 PBE only
+```
+
+Feature notes worth keeping: `rsa/sha2` supplies `RsaSignatureAssociatedOid`
+(without it a SHA-256 signing key cannot name its own algorithm), `sha2/oid`
+supplies `AssociatedOid`, and `pkcs12/kdf` is off by default.
+
+```bash
+# Test certificate fixtures (mutates tests/fixtures/certs/)
+bash tests/fixtures/certs/generate-test-cert.sh
+
+# Gates
+npm run check
+npm run test:rust
+cargo test --test sign_credential --test sign_pades --test sign_container
+
+# Signed artifact for Acrobat (git-ignored Sample PDFs/)
+cargo test --test sign_pades -- --ignored
+```
+
+The differential check, which is the one that matters:
+
+```bash
+openssl cms -verify -binary -inform DER -in sig.der -content message.bin -noverify
+```
+
+`-noverify` skips **chain** trust only — the certificate is self-signed, so
+there is no chain to trust. The signature itself is fully checked.
+
+Confirmed by mutation, then reverted: signing over `message[..len-1]` fails
+`openssl_verifies_our_signature` and leaves `openssl_rejects_a_tampered_document`
+passing, so the two discriminate rather than both being vacuous. Also confirmed
+openssl is actually found and run (no "skipping" line under `--nocapture`).
+
+Not verified: what Acrobat makes of the signed file. Sweep §6a.
+
+---
+
 ---
 
 ## How this file evolves
