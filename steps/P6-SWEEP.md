@@ -116,6 +116,20 @@ is still well-formed after seven kinds of surgery.
 - [ ] In-app: clean, then **Undo** → everything comes back. Then save, reopen,
       and confirm undo no longer offers it (documented behaviour, not a bug)
 
+## 6. Signature container (B1a, part one)
+
+File: `Sample PDFs/vibepdf-verify-sig-placeholder.pdf` — a signature field with
+the gap reserved and nothing in it.
+
+Not a signed document, and not meant to look like one. What is worth confirming
+is that the *container* is well-formed before any crypto goes near it.
+
+- [ ] **Acrobat** opens it and shows an **unsigned signature field** in the
+      signature panel — not a broken signature, and not an error
+- [ ] Preview and a third reader open it and render the page normally
+- [ ] The file still opens after the placeholder is there (an append, so the
+      original revision should also still open on its own)
+
 ---
 
 ## Known and accepted, not defects
@@ -130,6 +144,7 @@ Listed so a sweep does not re-report them.
 | Flattened form text is top-anchored; `/Q` not honoured | Carried from P5. |
 | Cleaning **hidden text** makes a scanned page unsearchable | That layer *is* the searchability. Off by default; the dialog says so. |
 | Clean does not remove hidden **layers** (OCGs) | P6-SEC-012 does not name them. Revisit if a real file needs it. |
+| Signing a document that is **already signed** is refused | B1a-container. Needs a second incremental update; would otherwise corrupt the first signature. |
 
 ## Upstream
 

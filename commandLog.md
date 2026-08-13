@@ -4541,6 +4541,47 @@ Preview are on the P6 sweep (§5).
 
 ---
 
+## P6.B1a — signature container (commit TBD)
+
+**No new dependencies.** That is the point of this slice: the container is
+identical whichever crypto stack we settle on.
+
+```bash
+# Verification gates
+npm run check
+npm run test:rust                  # full suite, no failures
+cargo test --test sign_container
+
+# Verification artifact (git-ignored Sample PDFs/)
+cargo test --test sign_container -- --ignored
+```
+
+Dependency investigation, run in the scratchpad and **not** added to the repo:
+
+```bash
+# Two test certificates, modern and legacy PKCS#12
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 \
+  -nodes -subj "/CN=VibePDF Test Signer/O=VibePDF" -sha256
+openssl pkcs12 -export -out modern.pfx -inkey key.pem -in cert.pem -passout pass:test123
+openssl pkcs12 -export -out legacy.pfx -inkey key.pem -in cert.pem -passout pass:test123 \
+  -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+
+# Dependency size, measured rather than guessed
+cargo add --dry-run cms x509-cert rsa      # MSRV 1.80 pins x509-cert to 0.2.5
+cargo tree --prefix none --no-dedupe       # diffed against ours: 26 new crates
+```
+
+Result: `p12` 0.6.3 panics on `modern.pfx` (hard-asserts SHA-1 MAC); opens
+`legacy.pfx` fine. Recorded in `steps/P6.md`.
+
+Two mutations were run by hand and reverted, confirming the tests bite: an
+off-by-one in `byte_range[1]` (4 failures) and a non-incremental save (5).
+
+Not verified: anything cryptographic — there is nothing cryptographic in this
+slice. Acrobat showing an unsigned signature field is sweep §6.
+
+---
+
 ---
 
 ## How this file evolves

@@ -9265,6 +9265,72 @@ independent toggles.
 
 ---
 
+## P6.B1a — The signature container (SPEC P6-SEC-005, part one)
+
+### Problem
+
+A PDF signature has to sign the file it lives in. That is circular, and the
+whole design of PDF signing is the workaround. This step builds the container —
+the hole the signature sits in, and the declaration of exactly which bytes it
+covers — with no cryptography in it at all.
+
+### Concepts learned
+
+- **`/ByteRange` and the gap.** A signature dictionary's `/Contents` holds the
+  signature; `/ByteRange [a b c d]` says the signature covers bytes `a..a+b` and
+  `c..c+d` — everything except `/Contents` itself. So signing goes: reserve a
+  gap of zeros, serialise (offsets only exist once bytes do), find the gap,
+  write the real offsets, hash everything outside the gap, drop the signature in.
+
+- **The ordering trap.** `/ByteRange` is *inside* the signed region. Patch it
+  after hashing and you get a file whose signature is invalid — and invalid in
+  the specific way that means "someone edited this after signing". Likewise the
+  patch must not change the file's length, or every offset it just declared
+  becomes wrong. The array is therefore written as fixed-width `9999999999`
+  placeholders and overwritten with space-padded numbers; PDF treats the extra
+  spaces as ordinary separators.
+
+- **Incremental update.** Signing **appends** a new revision instead of
+  re-serialising the document. `lopdf::IncrementalDocument` writes the original
+  bytes verbatim and adds objects after them. This is not a nicety: rewriting
+  would invalidate any signature already present, because that signature covers
+  the old bytes and they no longer exist. The test that pins it is one line —
+  the original file must be an exact prefix of the output.
+
+- **A test suite for arithmetic.** Every bug available here is an off-by-one,
+  and an off-by-one produces a file that opens perfectly and reports the
+  signature as invalid, with nothing to say which of four numbers is wrong. So
+  the tests assert the *relationships*: ranges start at 0 and end at EOF, the
+  message length equals the two ranges, the gap is exactly what the ranges leave
+  out, and the gap contains only hex digits. Mutating `byte_range[1]` by one
+  failed four of them; making the save non-incremental failed five.
+
+- **API shape as a safety rail.** `message()` returns a copy of the two ranges
+  concatenated rather than handing out slices, because a caller who hashed only
+  the first range would get a signature that verifies against nothing. Making
+  the wrong thing inconvenient is cheaper than documenting it.
+
+### On dependency choices
+
+The PKCS#12 half is deliberately *not* here, and finding out why was the useful
+part: `p12`, the obvious one-call crate, **panics** on a `.pfx` produced by
+OpenSSL 3 defaults, because it hard-asserts a SHA-1 MAC and OpenSSL 3 uses
+SHA-256. Two files and ten minutes of spike settled it. The general lesson is
+the one from C1: **check whether the library does what you need before designing
+around it**, and check it against a real artefact rather than its README.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/sign.rs` | `prepare`, `PreparedSignature`, the `/ByteRange` patch. |
+| `src-tauri/tests/sign_container.rs` | The arithmetic invariants, plus the append and refusal cases. |
+
+### Further reading
+- ISO 32000-1 §12.8 — digital signatures, `/ByteRange` and `/Contents`.
+- ETSI EN 319 142 — `PAdES` profiles, and what `/ETSI.CAdES.detached` commits to.
+
+---
+
 ---
 
 ## How this file evolves
