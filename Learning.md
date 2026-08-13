@@ -9191,6 +9191,80 @@ the step. Whole-repo formatters belong in their own commit, if at all.
 
 ---
 
+## P6.D3 — Clean document (SPEC P6-SEC-012)
+
+### Problem
+
+"Clean document" removes what a PDF carries besides its visible page: metadata,
+hidden text, comments, attachments, bookmarks, form data, embedded files. Seven
+independent toggles.
+
+### Concepts learned
+
+- **Deleting a reference is not deleting the data.** A PDF is a graph of numbered
+  objects; a dictionary key holds a *reference* to one. `dict.remove(b"Info")`
+  detaches the key and leaves object 16 sitting in the file with the author's
+  name in it, findable by anything that reads the raw bytes. The operation looks
+  successful from every angle except the one that matters. Every removal here is
+  a detach **plus** `doc.objects.remove(&id)`.
+
+- **A test can be written so it cannot pass against the bug.** "The `/Info` key is
+  gone" passes against the orphan-object version. "The string `SECRETAUTHOR` does
+  not appear anywhere in the saved file" does not. The fixture plants a marker in
+  each of the seven categories precisely so the assertions can be phrased the
+  second way. Whenever the thing you care about is *absence*, assert on the
+  absence of the value, never on the mechanism you used to remove it.
+
+  This costs something: the fixture becomes load-bearing, because "this string is
+  gone" passes trivially if the string was never there. Hence
+  `the_fixture_carries_every_marker`, which fails if the fixture stops being a
+  good test subject.
+
+- **Compression can fake a passing test.** A raw byte search for a marker inside a
+  content stream finds nothing once lopdf deflates it on save — which reads as
+  "removed". The `leaks` helper therefore walks every object *and* decompresses
+  every stream *and* scans the raw file. A verification method that returns the
+  right answer for the wrong reason is worse than no verification.
+
+- **Metadata is stored twice.** `/Info` (the classic dictionary) and XMP (an
+  XML packet in the catalog's `/Metadata` stream). Real files carry both, they
+  disagree, and readers differ on which wins — Preview's Inspector shows XMP,
+  many tools show `/Info`. Clearing one is the standard way a "cleaned" document
+  still names its author, so the fixture puts the same name in both.
+
+- **Text rendering mode 3 is invisible text**, and it is not a trick: it is how a
+  scanned page is made searchable, with OCR output laid under the image. So
+  "remove hidden text" and "keep this scan searchable" are the same switch.
+  Nothing about the file tells you which one the user wants — the honest move is
+  to default it off and say plainly what it costs.
+
+- **Two seven-checkbox dialogs, opposite senses.** In `ProtectDialog` a tick
+  *grants*; in `CleanDialog` a tick *removes*. Both defaults follow from that:
+  permissions default to all-granted, cleaning to nothing-removed. Each dialog
+  has a test pinning its direction, because an inverted checkbox produces a
+  plausible screen that does the opposite of what it says and nothing downstream
+  can tell.
+
+- **Graphics state is a stack.** `q`/`Q` save and restore the rendering mode, and
+  `BT`/`ET` do not reset it. Tracking `Tr` without honouring `q`/`Q` mis-attributes
+  runs to the wrong mode. The `'` and `"` operators also *move to the next line*
+  as well as painting, so dropping them whole shifts every following line up —
+  they are replaced with the movement alone (`T*`, and `Tw`/`Tc` for `"`).
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/pdf/clean.rs` | The seven removals, `clean_document`, and the `clean_into` actor seam. |
+| `src-tauri/tests/clean.rs` | Marker-absence tests, including the `leaks` scanner. |
+| `tests/fixtures/basic/metadata.pdf` | One document carrying all seven categories. |
+| `src/app/CleanDialog.tsx` | Seven opt-in checkboxes, the OCR warning, and the counts. |
+
+### Further reading
+- ISO 32000-1 §14.3 — document information dictionary and metadata streams.
+- ISO 32000-1 §9.3.6 — text rendering mode, including the invisible ones.
+
+---
+
 ---
 
 ## How this file evolves

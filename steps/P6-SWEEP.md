@@ -95,6 +95,27 @@ opacity.
       "select twice" bug (`1d20da3`) was invisible to every test until it was
       reported
 
+## 5. Cross-reader: clean document (D3)
+
+Files: `Sample PDFs/vibepdf-verify-dirty.pdf` and `…-cleaned.pdf` — the same
+document before and after every toggle.
+
+The automated tests prove the strings are gone from the bytes, which is the part
+that matters most. What they cannot show is whether a *reader* agrees the file
+is still well-formed after seven kinds of surgery.
+
+- [ ] Open **both** in Acrobat: Document Properties on the dirty one shows
+      `SECRETAUTHOR`; on the cleaned one shows nothing. Same in Preview's
+      Inspector, which reads XMP rather than `/Info` — the one that catches a
+      half-done metadata clean.
+- [ ] The cleaned file still renders `VisibleBodyText`, still has one page, and
+      the bookmarks/comments panels are empty
+- [ ] Search the cleaned file for `SECRETHIDDEN` in a reader: no hit
+- [ ] The cleaned form field is **still fillable** — the value is gone, the field
+      is not
+- [ ] In-app: clean, then **Undo** → everything comes back. Then save, reopen,
+      and confirm undo no longer offers it (documented behaviour, not a bug)
+
 ---
 
 ## Known and accepted, not defects
@@ -107,6 +128,8 @@ Listed so a sweep does not re-report them.
 | **Owner-only protection is refused** | C2 cannot undo it. Revisit when lopdf's R6 user auth is fixed. |
 | AES-256 files carrying `/Length` cannot be unlocked | Other tools' files, including pypdf's. Named in the error. |
 | Flattened form text is top-anchored; `/Q` not honoured | Carried from P5. |
+| Cleaning **hidden text** makes a scanned page unsearchable | That layer *is* the searchability. Off by default; the dialog says so. |
+| Clean does not remove hidden **layers** (OCGs) | P6-SEC-012 does not name them. Revisit if a real file needs it. |
 
 ## Upstream
 

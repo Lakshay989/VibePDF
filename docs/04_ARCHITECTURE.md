@@ -32,6 +32,7 @@ vibepdf/
 │   │   │   ├── annotation.rs     # Annotations
 │   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
 │   │   │   ├── flatten.rs        # Flatten annotations into page content (P3.E2)
+│   │   │   ├── clean.rs         # Strip metadata/hidden text/comments/attachments/bookmarks/form data/embedded files (P6.D3)
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
@@ -317,6 +318,28 @@ on output, clean failure on malformed input. Commands: `pdf_export_annotations` 
 `pdf_import_annotations`; the frontend `src/ipc/interchange.ts` wrappers drive the
 `AnnotationPanel` header's ⬆/⬇ actions through the native save/open dialogs. **FDF
 (the spec's other half) is deferred to E1b.**
+
+**Cleaning (P6.D3, P6-SEC-012)** lives in **`pdf/clean.rs`** — another COS
+transform, on bytes, with a `CleanOptions` of seven independent toggles and a
+`CleanReport` of what each removed. Two decisions are worth knowing before
+touching it:
+
+- **Every removal deletes the object, not just the reference.** `dict.remove(key)`
+  leaves an orphan in the saved file holding the same data, which is a clean that
+  reports success and ships the author's name. `clean.rs` pairs every detach with
+  a `doc.objects.remove(&id)`, and `tests/clean.rs` asserts on marker strings
+  being absent from the saved bytes — walking objects and decompressing streams,
+  because lopdf compresses content on save and a raw byte search alone would
+  report a false pass.
+- **Metadata lives in two places.** `/Info` and the catalog's XMP `/Metadata`
+  stream (plus, rarely, page-level `/Metadata`). They disagree in the wild and
+  readers differ on which they trust, so all of them go together.
+
+Unlike protect/unlock (P6.C1/C2, which export a copy), cleaning is an **in-place
+edit** through the actor: `clean_into` mirrors `form_import::import_into`,
+returning a `RestoreDocEdit` byte-snapshot inverse alongside the report, because
+`Edit::apply` can return only the inverse and the counts are the sole visible
+result of the operation.
 
 **Flattening (P3.E2, P3-ANN-011)** lives in **`pdf/flatten.rs`** — a COS transform
 (not PDFium's native `FPDFPage_Flatten`, which would need a shared live handle +

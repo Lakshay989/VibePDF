@@ -62,6 +62,7 @@ use crate::pdf::form::{
     SetButtonFieldEdit, SetChoiceFieldEdit, SetTabOrderEdit, StripXfaEdit, UpdateFieldPropertiesEdit,
 };
 use crate::pdf::form_flatten::FlattenFormEdit;
+use crate::pdf::clean::{clean_into, CleanOptions, CleanOutcome};
 use crate::pdf::form_import::{import_into, ImportOutcome};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -490,6 +491,13 @@ pub enum Message {
     /// `AcroForm`. Undoable in-session only (byte-snapshot inverse).
     FlattenForm {
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P6-SEC-012 — strip metadata, hidden text, comments, attachments,
+    /// bookmarks, form data and embedded files, per `opts`. Undoable in-session
+    /// only (byte-snapshot inverse).
+    CleanDocument {
+        opts: CleanOptions,
+        reply: oneshot::Sender<Result<CleanOutcome, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
@@ -1867,6 +1875,24 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::FlattenForm { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P6-SEC-012 — clean the document. Await-holding for tests.
+    pub async fn clean_document(&self, opts: CleanOptions) -> Result<CleanOutcome, CommandError> {
+        let rx = self.clean_document_request(opts)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn clean_document_request(
+        &self,
+        opts: CleanOptions,
+    ) -> Result<oneshot::Receiver<Result<CleanOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::CleanDocument { opts, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3734,6 +3760,15 @@ fn run_worker(
                         history.record(inverse);
                         ImportOutcome { report, history: history.state() }
                     });
+                let _ = reply.send(result);
+            }
+            Message::CleanDocument { opts, reply } => {
+                // SPEC: P6-SEC-012 — the report is the only visible result, so
+                // it travels back with the history state.
+                let result = clean_into(&mut doc, &opts).map(|(inverse, report)| {
+                    history.record(inverse);
+                    CleanOutcome { report, history: history.state() }
+                });
                 let _ = reply.send(result);
             }
             Message::FlattenForm { reply } => {

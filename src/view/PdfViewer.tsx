@@ -17,6 +17,7 @@ import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
+import { CleanDialog } from "@/app/CleanDialog";
 import { ProtectDialog } from "@/app/ProtectDialog";
 import { UnlockDialog } from "@/app/UnlockDialog";
 import { WatermarkDialog } from "@/app/WatermarkDialog";
@@ -201,6 +202,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [insertFromOpen, setInsertFromOpen] = useState(false);
   const [watermarkOpen, setWatermarkOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
+  const [cleanOpen, setCleanOpen] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false);
@@ -511,6 +513,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
         onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
         onProtect={doc ? () => setProtectOpen(true) : undefined}
+        onClean={doc ? () => setCleanOpen(true) : undefined}
         onUnlock={doc ? () => setUnlockOpen(true) : undefined}
         onBackground={doc ? () => setBackgroundOpen(true) : undefined}
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
@@ -554,6 +557,11 @@ export function PdfViewer({ documentId, path }: Props) {
         documentId={documentId}
         documentName={path}
         onClose={() => setProtectOpen(false)}
+      />
+      <CleanDialog
+        open={cleanOpen}
+        documentId={documentId}
+        onClose={() => setCleanOpen(false)}
       />
       <UnlockDialog
         open={unlockOpen}

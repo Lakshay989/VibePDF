@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@/ipc/invoke";
+import type { HistoryState } from "@/ipc/history";
 
 export type DocumentId = string;
 
@@ -189,4 +190,66 @@ export async function removePdfProtection(
   password: string,
 ): Promise<void> {
   return invoke<void>("pdf_remove_protection", { id, path, password });
+}
+
+/**
+ * SPEC: P6-SEC-012 (P6.D3) — what "Clean document" should remove.
+ *
+ * Every field is a *removal*, so all-false is the document untouched. That is
+ * the opposite sense to `DocumentPermissions`, where a field means "allowed" —
+ * worth keeping straight, because both are seven booleans on a dialog.
+ */
+export interface CleanOptions {
+  /** `/Info`, the XMP packet, and any page-level metadata. */
+  metadata: boolean;
+  /** Text drawn invisibly — including the OCR layer of a scanned page. */
+  hiddenText: boolean;
+  /** Markup annotations. Not links, form fields, or attachments. */
+  comments: boolean;
+  attachments: boolean;
+  bookmarks: boolean;
+  /** Field values; the empty form stays. */
+  formData: boolean;
+  embeddedFiles: boolean;
+}
+
+/** Nothing removed — the starting state of the dialog. */
+export const CLEAN_NOTHING: CleanOptions = {
+  metadata: false,
+  hiddenText: false,
+  comments: false,
+  attachments: false,
+  bookmarks: false,
+  formData: false,
+  embeddedFiles: false,
+};
+
+/**
+ * What a clean removed. The visible page is unchanged by design, so these
+ * counts are the only evidence the command did anything.
+ */
+export interface CleanReport {
+  infoKeys: number;
+  xmpPackets: number;
+  hiddenTextRuns: number;
+  comments: number;
+  attachments: number;
+  bookmarks: number;
+  formFields: number;
+  embeddedFiles: number;
+  history: HistoryState;
+}
+
+/**
+ * SPEC: P6-SEC-012 (P6.D3) — clean the open document in place. Undoable
+ * in-session; permanent once the file is saved and reopened.
+ *
+ * In place rather than on export, unlike protect/unlock: you want to watch the
+ * comments go, and you want Undo if you cleaned more than you meant to.
+ */
+export async function cleanDocument(
+  id: DocumentId,
+  options: CleanOptions,
+): Promise<CleanReport> {
+  return invoke<CleanReport>("pdf_clean_document", { id, options });
 }

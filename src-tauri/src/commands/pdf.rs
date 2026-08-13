@@ -5,6 +5,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
+use crate::pdf::clean::{CleanOptions, CleanOutcome};
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
 use crate::pdf::form::{
@@ -1209,6 +1210,39 @@ pub async fn pdf_flatten_form(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.flatten_form_request()?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P6-SEC-012 (P6.D3) — remove everything `opts` names from the open
+/// document: metadata, hidden text, comments, attachments, bookmarks, form
+/// data, embedded files.
+///
+/// **In place, not on export**, unlike P6.C1/C2. Cleaning is an edit to the
+/// document you are looking at — you want to see the comments disappear, and
+/// you want Undo if you cleaned more than you meant to. The inverse is a
+/// pre-clean byte snapshot, so undo works until the file is saved and reopened.
+///
+/// Returns the per-category counts: the page is unchanged by design, so without
+/// them a clean is indistinguishable from having done nothing.
+#[tauri::command]
+pub async fn pdf_clean_document(
+    state: State<'_, AppState>,
+    id: String,
+    options: CleanOptions,
+) -> Result<CleanOutcome, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.clean_document_request(options)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

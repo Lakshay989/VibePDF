@@ -1,0 +1,99 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Outlines 10 0 R /Names << /EmbeddedFiles << /Names [ (secret.txt) 8 0 R ] >> >> /AcroForm 13 0 R /Metadata 15 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R /Annots [6 0 R 7 0 R 14 0 R] >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<<  /Length 96 >>
+stream
+BT /F1 18 Tf 72 700 Td (VisibleBodyText) Tj ET
+BT /F1 12 Tf 3 Tr 72 650 Td (SECRETHIDDEN) Tj ET
+
+endstream
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Text /Rect [200 700 224 724] /Contents (SECRETCOMMENT) /T (Reviewer) >>
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /FileAttachment /Rect [300 700 320 720] /FS 8 0 R /Contents (SECRETATTACHMENT note) >>
+endobj
+8 0 obj
+<< /Type /Filespec /F (secret.txt) /UF (secret.txt) /EF << /F 9 0 R >> >>
+endobj
+9 0 obj
+<< /Type /EmbeddedFile /Subtype /text#2Fplain /Length 25 >>
+stream
+SECRETATTACHMENT payload
+
+endstream
+endobj
+10 0 obj
+<< /Type /Outlines /First 11 0 R /Last 12 0 R /Count 2 >>
+endobj
+11 0 obj
+<< /Title (SECRETBOOKMARK1) /Parent 10 0 R /Next 12 0 R /Dest [3 0 R /Fit] >>
+endobj
+12 0 obj
+<< /Title (SECRETBOOKMARK2) /Parent 10 0 R /Prev 11 0 R /Dest [3 0 R /Fit] >>
+endobj
+13 0 obj
+<< /Fields [14 0 R] /DA (/Helv 0 Tf 0 g) >>
+endobj
+14 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Tx /T (secret_field) /V (SECRETFORMVALUE) /DV (SECRETFORMVALUE) /Rect [72 600 300 620] /F 4 /P 3 0 R >>
+endobj
+15 0 obj
+<< /Type /Metadata /Subtype /XML /Length 577 >>
+stream
+<?xpacket begin="Ôªø" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/">
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">SECRETXMP Title</rdf:li></rdf:Alt></dc:title>
+   <dc:creator><rdf:Seq><rdf:li>SECRETAUTHOR</rdf:li></rdf:Seq></dc:creator>
+   <xmp:CreatorTool>SECRETXMP Tool</xmp:CreatorTool>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>
+
+endstream
+endobj
+16 0 obj
+<< /Title (SECRETTITLE) /Author (SECRETAUTHOR) /Creator (SECRETCREATOR) /Producer (SECRETPRODUCER) /Subject (SECRETSUBJECT) /Keywords (SECRETKEYWORD) /VibeCustomKey (SECRETCUSTOM) /CreationDate (D:20260101000000Z) >>
+endobj
+xref
+0 17
+0000000000 65535 f 
+0000000015 00000 n 
+0000000179 00000 n 
+0000000236 00000 n 
+0000000391 00000 n 
+0000000461 00000 n 
+0000000608 00000 n 
+0000000721 00000 n 
+0000000848 00000 n 
+0000000937 00000 n 
+0000001055 00000 n 
+0000001129 00000 n 
+0000001223 00000 n 
+0000001317 00000 n 
+0000001377 00000 n 
+0000001535 00000 n 
+0000002194 00000 n 
+trailer
+<< /Size 17 /Root 1 0 R /Info 16 0 R /ID [<0123456789ABCDEF0123456789ABCDEF> <0123456789ABCDEF0123456789ABCDEF>] >>
+startxref
+2427
+%%EOF

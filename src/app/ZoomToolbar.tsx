@@ -39,6 +39,8 @@ export interface ZoomToolbarProps {
   onProtect?: (() => void) | undefined;
   /** SPEC: P6-SEC-008 (P6.C2) — open the remove-protection dialog. */
   onUnlock?: (() => void) | undefined;
+  /** SPEC: P6-SEC-012 (P6.D3) — open the clean-document dialog. */
+  onClean?: (() => void) | undefined;
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
@@ -60,6 +62,7 @@ export function ZoomToolbar({
   onInsertFromPdf,
   onWatermark,
   onProtect,
+  onClean,
   onUnlock,
   onBackground,
   onHeaderFooter,
@@ -253,6 +256,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Unlock…
+        </button>
+      ) : null}
+
+      {onClean ? (
+        <button
+          type="button"
+          onClick={onClean}
+          title="Remove metadata, comments, attachments and other non-visible data"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Clean…
         </button>
       ) : null}
 

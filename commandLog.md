@@ -4507,6 +4507,40 @@ an Acrobat check and is on the P6 sweep.
 
 ---
 
+## P6.D3 — Clean document (commit TBD)
+
+No new dependencies.
+
+```bash
+# Generate the fixture (mutates tests/fixtures/basic/metadata.pdf)
+python3 tests/fixtures/basic/generate-metadata.py
+
+# Verification gates
+npm run check                      # tsc + eslint + cargo clippy --all-targets
+npm run test                       # 675 frontend tests, 119 files
+npm run test:rust                  # full Rust suite, no failures
+
+# Focused
+cargo test --test clean
+npx vitest run src/app/__tests__/CleanDialog.test.tsx
+
+# Regenerate the verification artifacts (writes to the git-ignored Sample PDFs/)
+cargo test --test clean -- --ignored
+```
+
+Mutating: the fixture generator (committed output), and the artifact test, which
+writes `Sample PDFs/vibepdf-verify-dirty.pdf` and `…-cleaned.pdf` — the same
+document before and after every toggle.
+
+Two mutation checks were run by hand and reverted, to confirm the tests bite:
+detaching `/Info` without deleting the object, and skipping the XMP packet. Each
+failed `metadata_clears_both_stores` and the full-clean test, and nothing else.
+
+Not verified: that a reader agrees the cleaned file is well-formed. Acrobat and
+Preview are on the P6 sweep (§5).
+
+---
+
 ---
 
 ## How this file evolves
