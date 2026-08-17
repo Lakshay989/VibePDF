@@ -4723,6 +4723,38 @@ signature is invalid.
 
 ---
 
+## P6.D1a — true redaction (commit TBD)
+
+No new dependencies.
+
+```bash
+# Fixture (mutates tests/fixtures/acceptance/p6-document.pdf)
+python3 tests/fixtures/acceptance/generate-p6-document.py
+
+npm run check
+npm run test:rust
+cargo test --test redact_region
+cargo test --test redact_region -- --ignored   # + Sample PDFs/vibepdf-verify-redacted.pdf
+```
+
+Three mutations run by hand and reverted:
+
+1. keep the show operators and rely on the black box — 4 failures, including
+   `the_black_box_is_not_the_mechanism`;
+2. drop the `XObject` refusal — 1 failure, precisely the right one;
+3. measure unknown fonts as Helvetica — 1 failure, *after* the test was fixed.
+
+(3) is the one worth remembering: the first version of that test passed under
+the mutation, because its region sat over the run's start where both the correct
+and the broken path remove everything. Moving the region to the tail made them
+diverge. The mutation found the weak test.
+
+`pdftotext` is still not installed; verification is PDFium extraction plus a
+byte scan that decompresses streams. `brew install poppler` if the roadmap's
+literal command is wanted — sweep §8.
+
+---
+
 ---
 
 ## How this file evolves

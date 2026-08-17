@@ -208,6 +208,7 @@ does not have to reconstruct it. All in `Sample PDFs/` (git-ignored).
 | `vibepdf-verify-sig-placeholder.pdf` | B1a | Signature field, gap reserved, empty | — |
 | `vibepdf-verify-signed.pdf` | B1a | Certificate-signed | — |
 | `vibepdf-verify-certified.pdf` | B1b | Certified, no changes allowed | — |
+| `vibepdf-verify-redacted.pdf` | D1a | SSN removed, `SSN:` label kept | — |
 
 Regenerate any of them with the `--ignored` test in the matching suite:
 
@@ -220,6 +221,22 @@ cd src-tauri && cargo test --test encrypt --test clean --test sign_container \
 reads XMP, so it catches a half-done metadata clean that every `/Info`-reading
 tool would call clean), and the byte-flip on the signed file (§6a), which is the
 only check that `/ByteRange` covers what it claims.
+
+## 8. Redaction (D1a)
+
+File: `Sample PDFs/vibepdf-verify-redacted.pdf`.
+
+The tests already prove the string is gone from the bytes and from PDFium's
+extractor. What a human adds is a different reader's opinion and a look at the
+result.
+
+- [ ] **Acrobat**: select the redacted area and copy — nothing comes out. Search
+      for `123-45-6789` — no hit
+- [ ] The black box sits where the number was, and `SSN:` is still readable
+      beside it
+- [ ] A third reader (Preview, Chrome) — same
+- [ ] Optional, if `brew install poppler` is wanted: `pdftotext` on the file,
+      as the roadmap literally specifies, and confirm the SSN is absent
 
 ---
 

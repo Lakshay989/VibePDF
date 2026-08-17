@@ -39,6 +39,37 @@ fn table_for(base: &str) -> Option<&'static [u16; 256]> {
     }
 }
 
+/// Do we have *exact* advances for this base font, or would `text_width` be
+/// guessing?
+///
+/// `table_for` deliberately falls back to Helvetica for any unrecognised name,
+/// which is right for the writers — they choose the font, so the name is always
+/// one of these — and wrong for anyone measuring text they did not write. A
+/// caller cutting a string at a measured offset must know the difference:
+/// Helvetica widths applied to an unknown font put the cut in the wrong place,
+/// and in `security/redact.rs` the wrong place can leave half of what was meant
+/// to be removed.
+///
+/// The Courier family has no table because it is monospaced — every advance is
+/// the average, which makes the fallback exact rather than approximate.
+pub(crate) fn has_exact_metrics(base: &str) -> bool {
+    matches!(
+        base,
+        "Helvetica"
+            | "Helvetica-Bold"
+            | "Helvetica-Oblique"
+            | "Helvetica-BoldOblique"
+            | "Times-Roman"
+            | "Times-Bold"
+            | "Times-Italic"
+            | "Times-BoldItalic"
+            | "Courier"
+            | "Courier-Bold"
+            | "Courier-Oblique"
+            | "Courier-BoldOblique"
+    )
+}
+
 /// Total advance width of `text` set in the base-14 font `base` at `size`
 /// points. Exact for `WinAnsi` text in the standard fonts (Adobe AFM widths).
 /// Characters outside `WinAnsiEncoding` — which the writers gate out before

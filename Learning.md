@@ -9621,6 +9621,63 @@ The spec says *display*. Verification that nobody sees satisfies nothing.
 
 ---
 
+## P6.D1a — True redaction (SPEC P6-SEC-010)
+
+### Problem
+
+Remove text inside a region from the content stream, so it is gone rather than
+covered.
+
+### Concepts learned
+
+- **Pick the failure direction on purpose.** Redaction can fail two ways:
+  remove too much, or remove too little. They are not symmetric — over-removal
+  is visible and undoable, under-removal is a permanent leak in a document
+  already sent. So every ambiguous case resolves toward removal, and the report
+  counts how often that happened. Naming the asymmetry once, at the top of the
+  module, decided a dozen small questions further down.
+
+- **A helper that is safe for writing can be unsafe for reading.**
+  `font_metrics::table_for` falls back to Helvetica's widths for any
+  unrecognised font. That is correct for the writers — *they* choose the font,
+  so the name is always one it knows — and dangerous here, where the text was
+  written by someone else. A Helvetica-derived cut point in an unknown font can
+  land mid-number and leave half the secret. Hence `has_exact_metrics`: the
+  question "do we actually know this?" had no answer before, because nobody had
+  needed to ask it.
+
+- **Refusing is a feature.** Text inside a Form `XObject` is invisible to a
+  page-content walk. Redacting the page and reporting success would leave the
+  text in the file *and tell the user it was gone* — strictly worse than doing
+  nothing. So such a page is refused, with a message saying why and what to do.
+  The check is deliberately coarse, because the precise version (does the form
+  overlap the region?) fails toward leaking when it is wrong.
+
+- **A test that passes for the wrong reason is worse than no test.** The
+  unmeasurable-font case initially placed its region over the *start* of the
+  run. Both the correct implementation and a broken one removed everything
+  there — the surviving tail is not a prefix, so neither could split — and the
+  test passed under a mutation that should have failed it. Moving the region to
+  the run's *tail* made the two paths diverge. Found by mutating, not by
+  reading.
+
+- **Verification must not be able to pass vacuously.** `confirm_removed` takes
+  both what must be gone *and* what must survive. An extractor returning nothing
+  satisfies "the SSN is absent" perfectly. Same lesson as the D3 fixture, met
+  from a different direction.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/redact.rs` | The walk, the decision, the splice, the box. |
+| `src-tauri/src/pdf/font_metrics.rs` | `has_exact_metrics` — do we know this font, or are we guessing? |
+| `tests/fixtures/acceptance/p6-document.pdf` | Three pages: measurable, hidden-in-a-form, unmeasurable. |
+
+### Further reading
+- ISO 32000-1 §9.4.2–9.4.4 — text object operators, and how `Tm`/`Td`/`TJ` move the pen.
+
+---
+
 ---
 
 ## How this file evolves
