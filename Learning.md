@@ -9571,6 +9571,56 @@ cryptographically valid, chain-trusted, modified-after-signing, expired.
 
 ---
 
+## P6.B2b — Showing signature status (SPEC P6-SEC-006)
+
+### Problem
+
+The spec says *display*. Verification that nobody sees satisfies nothing.
+
+### Concepts learned
+
+- **The same trap, from the other side.** B1a made signing an export because the
+  actor re-serialises through `PDFium` and moves every byte offset. Verification
+  hits the identical wall: verifying the actor's bytes would report every
+  signature as broken, because they are not the bytes that were signed. So
+  verification reads the **file on disk**. Worth noticing that one architectural
+  fact — *our save rewrites offsets* — determined the design of two features in
+  opposite directions.
+
+- **Wording is a correctness concern, not a polish concern.** A signature panel
+  is read by someone deciding whether to believe a document, and it can fail
+  them in two opposite ways: overstate, and they trust a forgery; understate,
+  and they learn the panel cries wolf and ignore it the once it matters. That
+  makes the phrasing testable, and worth testing — `status.ts` is a pure module
+  with tests asserting that the word "trusted" never appears, that a changed
+  document and a forged signature get different sentences, and that an expired
+  certificate is described as not undoing the signature.
+
+- **Order the findings by what they invalidate.** A tampered certificate has to
+  outrank a valid signature, because it makes the *name* unreliable and the name
+  is what a reader actually goes by. "Signed by Alice — certificate altered"
+  leads with the reassuring half and is close to the worst thing the panel could
+  say.
+
+- **Say "claimed" when it is claimed.** `/M` is whatever the signer's clock said;
+  without a timestamp token nothing corroborates it. The panel says "Claimed
+  signing time" — one word, and it is the difference between reporting and
+  asserting.
+
+- **Severity in words, not only in colour.** The banner's label changes with the
+  finding ("Signed" / "Signed, with caveats" / "Signature problem") rather than
+  relying on green-amber-red, which a lot of readers cannot use.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/commands/pdf.rs` | `pdf_verify_signatures` — reads the file, not the actor. |
+| `src/tools/sign/status.ts` | Report → words. Pure, and where the honesty lives. |
+| `src/app/SignatureBanner.tsx` | The banner and the per-signature detail. |
+| `src/app/use-signatures.ts` | Verifies on open; never blocks it. |
+
+---
+
 ---
 
 ## How this file evolves

@@ -308,3 +308,47 @@ export async function signPdf(
     details,
   });
 }
+
+/**
+ * SPEC: P6-SEC-006 (P6.B2b) — what VibePDF can say about a certificate's issuer.
+ *
+ * There is deliberately no `trusted`. We have no trust anchors and none we can
+ * bundle, so the claim is not representable rather than merely undocumented.
+ * See `security/verify.rs`.
+ */
+export type ChainStatus = "selfSigned" | "issuerNotChecked" | "incomplete" | "broken";
+
+/** SPEC: P6-SEC-006 — the per-signature status. */
+export interface SignatureReport {
+  fieldName: string | null;
+  /** The signing certificate's subject. */
+  signer: string;
+  issuer: string;
+  /** `/M` — the *claimed* signing time. Nothing here proves it. */
+  signedAt: string | null;
+  reason: string | null;
+  /** The signature over the signed attributes checks out. */
+  signatureValid: boolean;
+  /** The document still hashes to what was signed. */
+  digestMatches: boolean;
+  /** Nothing was appended after this signature. */
+  coversWholeDocument: boolean;
+  certificateExpired: boolean;
+  chain: ChainStatus;
+  /** DocMDP `/P`, when this signature certifies the document. */
+  certificationLevel: number | null;
+  /** Anything that stopped a check from running. */
+  problems: string[];
+}
+
+/**
+ * SPEC: P6-SEC-006 — verify every signature on the open document.
+ *
+ * Reports on the file **as saved**: a signature covers exact byte offsets, and
+ * the in-memory document would have to be re-serialised to inspect, which moves
+ * every one of them. Unsaved edits are therefore not reflected — and saving
+ * would invalidate the signature anyway.
+ */
+export async function verifySignatures(id: DocumentId): Promise<SignatureReport[]> {
+  return invoke<SignatureReport[]>("pdf_verify_signatures", { id });
+}

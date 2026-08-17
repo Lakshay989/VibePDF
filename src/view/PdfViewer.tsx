@@ -28,9 +28,11 @@ import { PageNumbersDialog } from "@/app/PageNumbersDialog";
 import { BatesDialog } from "@/app/BatesDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
+import { SignatureBanner } from "@/app/SignatureBanner";
 import { XfaNotice } from "@/app/XfaNotice";
 import { FieldPropertiesPanel } from "@/app/FieldPropertiesPanel";
 import { useFontReport } from "@/app/use-font-report";
+import { useSignatures } from "@/app/use-signatures";
 import { useFormStore } from "@/state/form-store";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
@@ -121,6 +123,8 @@ export function PdfViewer({ documentId, path }: Props) {
   // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
   // embedded or installed, so the user knows editing it will substitute.
   const fontReport = useFontReport(documentId);
+  // SPEC: P6-SEC-006 (P6.B2b) — verified on open, not on request.
+  const signatures = useSignatures(documentId);
 
   // SPEC: P5-FORM-006b (P5.B3) — the page whose fields the properties panel
   // lists. `getCurrentPage` is imperative (no re-render signal), so we snap it
@@ -525,6 +529,11 @@ export function PdfViewer({ documentId, path }: Props) {
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
+      <SignatureBanner
+        reports={signatures.reports}
+        dismissed={signatures.dismissed}
+        onDismiss={signatures.dismiss}
+      />
       <FontFallbackBanner
         report={fontReport.report}
         dismissed={fontReport.dismissed}

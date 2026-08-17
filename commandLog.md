@@ -4705,6 +4705,24 @@ thing until then.
 
 ---
 
+## P6.B2b — signature status in the app (commit TBD)
+
+No new dependencies.
+
+```bash
+npm run check
+npm run test                       # 715 frontend tests, 123 files
+npm run test:rust
+npx vitest run src/tools/sign src/app/__tests__/SignatureBanner.test.tsx
+```
+
+Not verified: the banner against a real signed document in the running app.
+Sweep §6e — the item that matters is opening a hex-edited signed file and
+confirming the banner says the *document changed* rather than that the
+signature is invalid.
+
+---
+
 ---
 
 ## How this file evolves

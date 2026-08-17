@@ -149,6 +149,21 @@ Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
 - [ ] Cancel the dialog, reopen it: the password field is empty and no
       certificate is remembered
 
+## 6e. Signature status in-app (B2b)
+
+- [ ] Open `Sample PDFs/vibepdf-verify-signed.pdf` → a green **Signed** banner
+      naming the test signer, with a note that the certificate vouches for
+      itself
+- [ ] **Details** lists the signature, its claimed signing time and its reason
+- [ ] Open `vibepdf-verify-certified.pdf` → the same, plus the certification level
+- [ ] Edit a byte of a signed file in a hex editor, open it → a red
+      **Signature problem** banner saying the *document changed*, not that the
+      signature is invalid
+- [ ] Open any unsigned document → **no banner at all**
+- [ ] Open a signed file, edit it in-app without saving: the banner still
+      reports on the file as saved. (Known and intended — it says so in
+      `steps/P6.md`. Worth confirming it does not report nonsense.)
+
 ## 6d. Certification (B1b)
 
 File: `Sample PDFs/vibepdf-verify-certified.pdf` — certified at "no changes".

@@ -23,6 +23,7 @@ use crate::pdf::background::BackgroundKind;
 use crate::pdf::undo::HistoryState;
 use crate::pdf::watermark::WatermarkKind;
 use crate::security::encrypt::DocumentPermissions;
+use crate::security::verify::SignatureReport;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -1888,6 +1889,46 @@ pub async fn pdf_protect(
         )));
     }
     Ok(())
+}
+
+/// SPEC: P6-SEC-006 (P6.B2b) — verify every signature on the open document.
+///
+/// **Reads the file from disk, not the actor's bytes.** The actor produces
+/// bytes by asking `PDFium` to re-serialise, which rewrites every offset — and
+/// a signature covers exact offsets. Verifying that would report every
+/// signature as broken, which is the same trap that made signing an export in
+/// P6.B1a, arriving from the other direction.
+///
+/// So this reports on the document **as saved**. Unsaved edits are not
+/// reflected, and that is the truthful thing to report: the signature covers
+/// what is on disk. (Saving would break it regardless — see `pdf_sign_document`.)
+///
+/// Read-only, and never fails the open: a document whose signatures cannot be
+/// read is still a document.
+#[tauri::command]
+pub async fn pdf_verify_signatures(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<SignatureReport>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let path = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?
+            .path()
+            .clone()
+    };
+
+    let bytes = std::fs::read(&path).map_err(|e| {
+        CommandError::Internal(format!("could not read {}: {e}", path.display()))
+    })?;
+    crate::security::verify::verify_signatures(&bytes, std::time::SystemTime::now())
 }
 
 /// SPEC: P6-SEC-005 (P6.B1a) — write a certificate-signed copy of the open
