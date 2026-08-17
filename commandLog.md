@@ -4755,6 +4755,23 @@ literal command is wanted — sweep §8.
 
 ---
 
+## P6.D1b — images and metadata (commit TBD)
+
+No new dependencies.
+
+```bash
+python3 tests/fixtures/acceptance/generate-p6-document.py   # now four pages
+npm run check
+npm run test:rust
+cargo test --test redact_region
+```
+
+One mutation, reverted: keep the image object after dropping its `Do`. Fails
+`a_redacted_image_leaves_no_pixels_behind` and nothing else, which is the
+discrimination the test was written for.
+
+---
+
 ---
 
 ## How this file evolves

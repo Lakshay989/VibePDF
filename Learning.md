@@ -9678,6 +9678,48 @@ covered.
 
 ---
 
+## P6.D1b — Redacting images (SPEC P6-SEC-010)
+
+### Problem
+
+The spec says "text, images". D1a did the text.
+
+### Concepts learned
+
+- **The same bug wears different clothes.** In P6.D3 it was `dict.remove(b"Info")`
+  leaving the dictionary object in the file. Here it is dropping the `Do`
+  operator: the image stops rendering, and its pixels sit in the file exactly as
+  before, findable by anything that reads bytes. A test phrased "the image no
+  longer renders" passes against it. The test that does not is the one that
+  greps the output — and the fixture's image data spells `SECRETPIXELDATA` so it
+  can.
+
+  Worth generalising: **whenever a feature removes something, ask what holds the
+  bytes and whether that object is gone too.** Detaching is not deleting, in any
+  format with indirection.
+
+- **An image occupies the unit square.** PDF images are always drawn into
+  (0,0)–(1,1) transformed by the current matrix, so the placed rectangle is the
+  CTM applied to those four corners. That is why the CTM tracking from D1a was
+  reusable here without change.
+
+- **Partial overlap removes the whole image**, for the same reason D1a removes an
+  unmeasurable run whole: cropping raster data is a different feature, and the
+  uncovered remainder is exactly the part that would leak.
+
+- **Reuse the module that already got it right.** Clause (b) — "optionally
+  remove or rewrite metadata" — is `clean_document` with one flag. Reimplementing
+  it here would have meant rediscovering the `/Info`-versus-XMP problem D3
+  already solved, and probably getting it wrong the first time.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/redact.rs` | `redact_region`, `RedactOptions`, image geometry and deletion. |
+| `tests/fixtures/acceptance/p6-document.pdf` | Gains page 4: an image whose bytes are readable. |
+
+---
+
 ---
 
 ## How this file evolves

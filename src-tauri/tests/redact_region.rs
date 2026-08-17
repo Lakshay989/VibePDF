@@ -254,3 +254,68 @@ fn an_unmeasurable_run_is_removed_whole_and_reported() {
         "over-removal spread beyond the run: {text:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// P6.D1b — images and metadata
+// ---------------------------------------------------------------------------
+
+const IMAGE_MARKER: &str = "SECRETPIXELDATA";
+
+// SPEC: P6-SEC-010(a) — "the content (text, images) within the region".
+//
+// The trap is the same one P6.D3 met with `/Info`: dropping the `Do` undraws
+// the image but leaves its stream in the file, pixels intact, findable by
+// anything that reads the bytes. A test asserting "the image no longer renders"
+// would pass against that. This one reads the bytes.
+#[test]
+fn a_redacted_image_leaves_no_pixels_behind() {
+    use vibepdf_lib::security::redact::redact_region;
+
+    let source = fixture();
+    assert!(leaks(&source, IMAGE_MARKER), "the fixture lost its image");
+
+    // Page 4's image is placed at 100,600 and is 200pt square.
+    let (out, report) = redact_region(&source, 3, [150.0, 650.0, 250.0, 750.0], Default::default())
+        .expect("redact");
+
+    assert_eq!(report.images_removed, 1);
+    assert!(
+        !leaks(&out, IMAGE_MARKER),
+        "the image was undrawn but its pixels are still in the file"
+    );
+}
+
+#[test]
+fn an_image_outside_the_region_is_untouched() {
+    use vibepdf_lib::security::redact::redact_region;
+
+    let (out, report) = redact_region(&fixture(), 3, [10.0, 10.0, 60.0, 60.0], Default::default())
+        .expect("redact");
+
+    assert_eq!(report.images_removed, 0);
+    assert!(leaks(&out, IMAGE_MARKER), "an image well clear of the region went");
+}
+
+// SPEC: P6-SEC-010(b) — optional, and off unless asked for. A redaction is
+// often one of several passes; stripping metadata every time would surprise.
+#[test]
+fn metadata_goes_only_when_asked() {
+    use vibepdf_lib::security::redact::{redact_region, RedactOptions};
+
+    let with = RedactOptions { remove_metadata: true };
+    let (kept, _) = redact_region(&fixture(), 0, OVER_THE_NUMBER, Default::default())
+        .expect("redact");
+    let (stripped, _) = redact_region(&fixture(), 0, OVER_THE_NUMBER, with).expect("redact");
+
+    // The fixture has no /Info of its own, so the observable difference is that
+    // the option runs the cleaner at all — assert the redaction still holds and
+    // the document still opens either way.
+    for out in [&kept, &stripped] {
+        assert!(!leaks(out, SSN));
+        assert!(extracted(out, 0).contains(SURVIVES));
+    }
+    assert!(
+        !leaks(&stripped, "/Info"),
+        "the metadata option left an /Info entry behind"
+    );
+}

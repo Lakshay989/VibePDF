@@ -62,6 +62,21 @@ pub struct RedactReport {
     pub split: usize,
     /// Runs partly inside that could not be measured, so went whole.
     pub removed_whole_for_safety: usize,
+    /// Images whose placed rectangle touched the region.
+    pub images_removed: usize,
+}
+
+/// SPEC: P6-SEC-010 — what a redaction should take out.
+///
+/// Clause (b) — "optionally remove or rewrite metadata" — is a toggle rather
+/// than automatic. A redaction is often one of several on a document, and
+/// stripping the metadata on each pass would be surprising; it is also exactly
+/// what `P6.D3` already does, so this delegates rather than reimplements.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactOptions {
+    /// Also strip `/Info` and the XMP packet, via `pdf::clean`.
+    pub remove_metadata: bool,
 }
 
 impl RedactReport {
@@ -149,16 +164,41 @@ pub fn redact_text_in_region(
     page: usize,
     rect: [f32; 4],
 ) -> Result<(Vec<u8>, RedactReport), CommandError> {
+    redact_region(bytes, page, rect, RedactOptions::default())
+}
+
+/// SPEC: P6-SEC-010 — remove the text *and* images inside `rect` on `page`.
+pub fn redact_region(
+    bytes: &[u8],
+    page: usize,
+    rect: [f32; 4],
+    options: RedactOptions,
+) -> Result<(Vec<u8>, RedactReport), CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(redact_err)?;
     let page_id = nth_page(&doc, page)?;
 
     refuse_if_text_hides_in_an_xobject(&doc, page_id)?;
 
     let fonts = page_fonts(&doc, page_id);
+    let images = page_images(&doc, page_id);
     let content = doc.get_page_content(page_id).map_err(redact_err)?;
     let parsed = Content::decode(&content).map_err(redact_err)?;
 
-    let (operations, report) = rewrite(parsed.operations, &fonts, normalise(rect));
+    let doomed = images_in_region(&parsed.operations, &images, normalise(rect));
+    let (mut operations, mut report) = rewrite(parsed.operations, &fonts, normalise(rect));
+
+    if !doomed.is_empty() {
+        operations.retain(|op| {
+            op.operator != "Do"
+                || !op
+                    .operands
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .is_some_and(|n| doomed.contains(&String::from_utf8_lossy(n).into_owned()))
+        });
+        report.images_removed = doomed.len();
+    }
+
     if report.is_empty() {
         // Nothing intersected. Returning the input unchanged is more honest
         // than re-encoding it and calling that a redaction.
@@ -167,12 +207,65 @@ pub fn redact_text_in_region(
 
     let encoded = Content { operations }.encode().map_err(redact_err)?;
     doc.change_page_content(page_id, encoded).map_err(redact_err)?;
+
+    // Dropping the `Do` undraws the image; it does not remove it. The stream
+    // stays in the file with its pixels intact, findable by anything that reads
+    // the bytes — the same trap as detaching `/Info` in P6.D3. Both the
+    // resource entry and the object itself have to go.
+    for name in &doomed {
+        if let Some(id) = images.get(name) {
+            drop_image_resource(&mut doc, page_id, name.as_bytes());
+            doc.objects.remove(id);
+        }
+    }
+
     cover(&mut doc, page_id, normalise(rect))?;
 
     let mut out = Vec::new();
     doc.save_to(&mut out)
         .map_err(|e| CommandError::PdfError(format!("redact: lopdf save: {e}")))?;
+
+    // SPEC: P6-SEC-010(b) — optional, and delegated. P6.D3 already does this
+    // properly, including the XMP packet that an `/Info`-only sweep misses.
+    if options.remove_metadata {
+        let opts = crate::pdf::clean::CleanOptions {
+            metadata: true,
+            ..crate::pdf::clean::CleanOptions::default()
+        };
+        let (cleaned, _) = crate::pdf::clean::clean_document(&out, &opts)?;
+        return Ok((cleaned, report));
+    }
     Ok((out, report))
+}
+
+/// Remove one name from the page's `/XObject` resources.
+fn drop_image_resource(doc: &mut Document, page_id: ObjectId, name: &[u8]) {
+    // The resources may be a direct dictionary on the page or an indirect
+    // object shared with other pages; only the first is ours to edit here.
+    let via_ref = doc
+        .get_object(page_id)
+        .and_then(Object::as_dict)
+        .ok()
+        .and_then(|p| p.get(b"Resources").ok())
+        .and_then(|o| o.as_reference().ok());
+
+    let target = via_ref.unwrap_or(page_id);
+    let Ok(dict) = doc.get_object_mut(target).and_then(Object::as_dict_mut) else {
+        return;
+    };
+    let resources = if via_ref.is_some() {
+        Some(dict)
+    } else {
+        dict.get_mut(b"Resources").ok().and_then(|o| match o {
+            Object::Dictionary(d) => Some(d),
+            _ => None,
+        })
+    };
+    if let Some(res) = resources {
+        if let Ok(Object::Dictionary(xobjects)) = res.get_mut(b"XObject") {
+            xobjects.remove(name);
+        }
+    }
 }
 
 fn normalise([x0, y0, x1, y1]: [f32; 4]) -> [f32; 4] {
@@ -413,6 +506,89 @@ fn track(op: &Operation, ctm: &mut Matrix, ctms: &mut Vec<Matrix>, ts: &mut Text
         "Tw" => ts.word_spacing = num(&op.operands, 0),
         _ => {}
     }
+}
+
+/// Every image `XObject` drawn wholly or partly inside `rect`, by resource name.
+///
+/// An image occupies the unit square transformed by the current matrix, so its
+/// placed rectangle is the CTM applied to (0,0)–(1,1). Partial overlap removes
+/// the whole image: cropping raster data to a rectangle is a different feature,
+/// and leaving the uncovered part would be under-redaction.
+fn images_in_region(
+    operations: &[Operation],
+    images: &std::collections::HashMap<String, ObjectId>,
+    rect: [f32; 4],
+) -> BTreeSet<String> {
+    let mut hit = BTreeSet::new();
+    let mut ctm = Matrix::IDENTITY;
+    let mut ctms: Vec<Matrix> = Vec::new();
+    let mut ts = TextState::default();
+    let mut tss: Vec<TextState> = Vec::new();
+
+    for op in operations {
+        if op.operator != "Do" {
+            track(op, &mut ctm, &mut ctms, &mut ts, &mut tss);
+            continue;
+        }
+        let Some(name) = op
+            .operands
+            .first()
+            .and_then(|o| o.as_name().ok())
+            .map(|n| String::from_utf8_lossy(n).into_owned())
+        else {
+            continue;
+        };
+        if !images.contains_key(&name) {
+            continue; // a form, which `refuse_if_text_hides_in_an_xobject` handled
+        }
+
+        // The unit square's four corners, transformed.
+        let corners = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)].map(|(x, y): (f32, f32)| {
+            (
+                x * ctm.a + y * ctm.c + ctm.e,
+                x * ctm.b + y * ctm.d + ctm.f,
+            )
+        });
+        let xs = corners.map(|(x, _)| x);
+        let ys = corners.map(|(_, y)| y);
+        let (x0, x1) = (xs.iter().copied().fold(f32::MAX, f32::min), xs.iter().copied().fold(f32::MIN, f32::max));
+        let (y0, y1) = (ys.iter().copied().fold(f32::MAX, f32::min), ys.iter().copied().fold(f32::MIN, f32::max));
+
+        if x1 > rect[0] && x0 < rect[2] && y1 > rect[1] && y0 < rect[3] {
+            hit.insert(name);
+        }
+    }
+    hit
+}
+
+/// The page's image `XObject` resources, by name.
+fn page_images(doc: &Document, page_id: ObjectId) -> std::collections::HashMap<String, ObjectId> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(page) = doc.get_object(page_id).and_then(Object::as_dict) else {
+        return out;
+    };
+    let Some(xobjects) = resources_of(doc, page)
+        .and_then(|r| r.get(b"XObject").ok())
+        .and_then(|o| resolve_dict(doc, o))
+    else {
+        return out;
+    };
+    for (name, entry) in xobjects {
+        let Ok(id) = entry.as_reference() else { continue };
+        let is_image = doc
+            .get_object(id)
+            .and_then(|o| o.as_stream())
+            .is_ok_and(|s| {
+                s.dict
+                    .get(b"Subtype")
+                    .and_then(Object::as_name)
+                    .is_ok_and(|n| n == b"Image")
+            });
+        if is_image {
+            out.insert(String::from_utf8_lossy(name).into_owned(), id);
+        }
+    }
+    out
 }
 
 /// The rewrite pass: walk the operators, decide each run, rebuild.
