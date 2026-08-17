@@ -163,6 +163,34 @@ is that the *container* is well-formed before any crypto goes near it.
 - [ ] The file still opens after the placeholder is there (an append, so the
       original revision should also still open on its own)
 
+## 7. Artifact inventory
+
+Everything Phase 6 has produced for a human to open, in one place, so a sweep
+does not have to reconstruct it. All in `Sample PDFs/` (git-ignored).
+
+| File | Step | What it is | Password |
+|---|---|---|---|
+| `vibepdf-verify-encrypted-user.pdf` | C1 | AES-256, open password only | `open-me` |
+| `vibepdf-verify-encrypted-both.pdf` | C1 | …plus a distinct permissions password | `open-me` / `owner-only` |
+| `vibepdf-verify-no-print.pdf` | C3 | Printing and copying withheld | `open-me` / `owner-only` |
+| `vibepdf-verify-dirty.pdf` | D3 | Carries all seven cleanable categories | — |
+| `vibepdf-verify-cleaned.pdf` | D3 | The same document, everything removed | — |
+| `vibepdf-verify-signature.pdf` | A5a | Two placed signature *pictures* | — |
+| `vibepdf-verify-sig-placeholder.pdf` | B1a | Signature field, gap reserved, empty | — |
+| `vibepdf-verify-signed.pdf` | B1a | Certificate-signed | — |
+
+Regenerate any of them with the `--ignored` test in the matching suite:
+
+```bash
+cd src-tauri && cargo test --test encrypt --test clean --test sign_container \
+  --test sign_pades --test signature_place -- --ignored
+```
+
+**The two that catch the most:** Preview's Inspector on the cleaned file (it
+reads XMP, so it catches a half-done metadata clean that every `/Info`-reading
+tool would call clean), and the byte-flip on the signed file (§6a), which is the
+only check that `/ByteRange` covers what it claims.
+
 ---
 
 ## Known and accepted, not defects
