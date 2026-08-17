@@ -222,7 +222,7 @@ reads XMP, so it catches a half-done metadata clean that every `/Info`-reading
 tool would call clean), and the byte-flip on the signed file (§6a), which is the
 only check that `/ByteRange` covers what it claims.
 
-## 8. Redaction (D1a)
+## 8. Redaction (D1a–c)
 
 File: `Sample PDFs/vibepdf-verify-redacted.pdf`.
 
@@ -237,6 +237,17 @@ result.
 - [ ] A third reader (Preview, Chrome) — same
 - [ ] Optional, if `brew install poppler` is wanted: `pdftotext` on the file,
       as the roadmap literally specifies, and confirm the SSN is absent
+
+In-app (D1c), against `tests/fixtures/acceptance/p6-document.pdf`:
+
+- [ ] **Redact** on the markup bar → drag over the SSN digits → the confirmation
+      appears and says the content is deleted rather than covered
+- [ ] Confirm → the number is gone, `SSN:` remains, a black box sits over it
+- [ ] **Undo** brings it back; save, reopen, and confirm undo no longer offers it
+- [ ] Drag on **page 2** (text inside a form) → refused, with a message naming
+      the form and suggesting Flatten
+- [ ] Drag on **page 4** (the image) → the image goes
+- [ ] Tick "Also remove document metadata" and confirm it still works
 
 ---
 

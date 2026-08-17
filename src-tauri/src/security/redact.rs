@@ -821,3 +821,55 @@ pub fn confirm_removed(
     }
     Ok(())
 }
+
+/// SPEC: P6-SEC-010 — redact the live document, handing back the inverse and
+/// the report.
+///
+/// Same shape as `clean_into` and `form_import::import_into`: an `Edit` can
+/// return only its inverse, and the report is the sole evidence of what
+/// happened — the page afterwards is *supposed* to look like a black box, and a
+/// black box is exactly what a failed redaction looks like too.
+///
+/// The inverse is a pre-redaction byte snapshot, so this is undoable in-session
+/// and permanent once the file is saved and reopened. That is the same contract
+/// as flatten, and for redaction it is the point rather than a limitation.
+pub fn redact_into<'a>(
+    doc: &mut pdfium_render::prelude::PdfDocument<'a>,
+    page: usize,
+    rect: [f32; 4],
+    options: RedactOptions,
+) -> Result<
+    (
+        Box<dyn crate::pdf::undo::Edit<pdfium_render::prelude::PdfDocument<'a>>>,
+        RedactReport,
+    ),
+    CommandError,
+> {
+    use crate::pdf::document::{pdfium, pdfium_lock};
+
+    let pre_bytes = {
+        let _guard = pdfium_lock()?;
+        doc.save_to_bytes().map_err(CommandError::from)?
+    };
+    let (new_bytes, report) = redact_region(&pre_bytes, page, rect, options)?;
+    {
+        let _guard = pdfium_lock()?;
+        *doc = pdfium()?
+            .load_pdf_from_byte_vec(new_bytes, None)
+            .map_err(CommandError::from)?;
+    }
+    Ok((
+        Box::new(crate::pdf::restore::RestoreDocEdit { bytes: pre_bytes }),
+        report,
+    ))
+}
+
+/// What `pdf_redact_region` hands back: the counts plus the post-redaction
+/// history state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedactOutcome {
+    #[serde(flatten)]
+    pub report: RedactReport,
+    pub history: crate::pdf::undo::HistoryState,
+}

@@ -63,6 +63,7 @@ use crate::pdf::form::{
 };
 use crate::pdf::form_flatten::FlattenFormEdit;
 use crate::pdf::clean::{clean_into, CleanOptions, CleanOutcome};
+use crate::security::redact::{redact_into, RedactOptions, RedactOutcome};
 use crate::pdf::form_import::{import_into, ImportOutcome};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -498,6 +499,14 @@ pub enum Message {
     CleanDocument {
         opts: CleanOptions,
         reply: oneshot::Sender<Result<CleanOutcome, CommandError>>,
+    },
+    /// SPEC: P6-SEC-010 — remove the content inside `rect` on `page`. Undoable
+    /// in-session only (byte-snapshot inverse); permanent once saved.
+    RedactRegion {
+        page: usize,
+        rect: [f32; 4],
+        opts: RedactOptions,
+        reply: oneshot::Sender<Result<RedactOutcome, CommandError>>,
     },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
@@ -1875,6 +1884,31 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::FlattenForm { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P6-SEC-010 — redact a region. Await-holding for tests.
+    pub async fn redact_region(
+        &self,
+        page: usize,
+        rect: [f32; 4],
+        opts: RedactOptions,
+    ) -> Result<RedactOutcome, CommandError> {
+        let rx = self.redact_region_request(page, rect, opts)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn redact_region_request(
+        &self,
+        page: usize,
+        rect: [f32; 4],
+        opts: RedactOptions,
+    ) -> Result<oneshot::Receiver<Result<RedactOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RedactRegion { page, rect, opts, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3760,6 +3794,15 @@ fn run_worker(
                         history.record(inverse);
                         ImportOutcome { report, history: history.state() }
                     });
+                let _ = reply.send(result);
+            }
+            Message::RedactRegion { page, rect, opts, reply } => {
+                // SPEC: P6-SEC-010 — the counts are the only visible result;
+                // the page afterwards looks the same whether it worked or not.
+                let result = redact_into(&mut doc, page, rect, opts).map(|(inverse, report)| {
+                    history.record(inverse);
+                    RedactOutcome { report, history: history.state() }
+                });
                 let _ = reply.send(result);
             }
             Message::CleanDocument { opts, reply } => {

@@ -9720,6 +9720,49 @@ The spec says "text, images". D1a did the text.
 
 ---
 
+## P6.D1c — The redact tool (SPEC P6-SEC-010)
+
+### Problem
+
+Put the redaction engine behind a drag-a-region tool.
+
+### Concepts learned
+
+- **Confirmation is for information, not permission.** "Are you sure?" tells a
+  user nothing they did not already know — they clicked the thing. What they
+  cannot know is *when this stops being undoable*, which for redaction is the
+  moment they save and reopen. So the confirmation says that, in those words,
+  and a test asserts the wording. A dialog that only slows you down trains you
+  to click through it.
+
+- **The one irreversible edit should not look like the others.** Every other
+  tool on the markup bar adds something and is undoable forever. Redaction is
+  red rather than blue, and it is its own `ToolId` rather than a mode of an
+  existing tool — the same reasoning that separated `"signature"` from
+  `"stamp"` back in A5a. Visual and structural distinctness for the same reason:
+  the app should not make two different claims look identical.
+
+- **A stray click is not a small redaction.** `link-layer` gives a zero-size
+  drag a default box, because a link needs *some* area. Redaction copies the
+  drag mechanics but not that: a tiny region removes nothing, so confirming it
+  would be asking about nothing. Copying a pattern means deciding which parts of
+  it apply.
+
+- **Coordinate conversion deserves a literal.** The test asserts the exact
+  rectangle, `[100, 652, 200, 692]`, rather than that *a* rectangle arrived —
+  PDF's y-axis grows upward, so the screen drag inverts, and an inverted
+  redaction would remove a region the user never selected. That is one of the
+  few numbers worth hard-coding.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/commands/pdf.rs` | `pdf_redact_region` — undoable through the actor. |
+| `src/view/redact-layer.tsx` | Drag, confirm, apply. |
+| `src/app/MarkupToolbar.tsx` | The Redact entry, deliberately not styled like its neighbours. |
+
+---
+
 ---
 
 ## How this file evolves

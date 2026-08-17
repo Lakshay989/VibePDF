@@ -82,6 +82,7 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const addImageActive = activeTool === "add-image";
   const editImageActive = activeTool === "edit-image";
   const addLinkActive = activeTool === "add-link";
+  const redactActive = activeTool === "redact";
   const createFieldActive = activeTool === "create-text-field";
   const fillable = shapeActive || polygonActive;
 
@@ -490,6 +491,22 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Add Link
+      </button>
+      {/* SPEC: P6-SEC-010 (P6.D1c). Styled apart from the markup tools on
+          purpose: everything else on this bar adds something, and this one
+          deletes irreversibly. */}
+      <button
+        type="button"
+        onClick={() => setActiveTool(redactActive ? null : "redact")}
+        title="Redact an area — the text and images under it are deleted, not covered"
+        aria-label="Redact tool"
+        aria-pressed={redactActive}
+        className={
+          "rounded px-2 py-0.5 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 " +
+          (redactActive ? "bg-red-200 dark:bg-red-300/30" : "")
+        }
+      >
+        Redact
       </button>
       <button
         type="button"

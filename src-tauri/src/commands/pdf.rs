@@ -23,6 +23,7 @@ use crate::pdf::background::BackgroundKind;
 use crate::pdf::undo::HistoryState;
 use crate::pdf::watermark::WatermarkKind;
 use crate::security::encrypt::DocumentPermissions;
+use crate::security::redact::{RedactOptions, RedactOutcome};
 use crate::security::verify::SignatureReport;
 use crate::AppState;
 
@@ -1889,6 +1890,35 @@ pub async fn pdf_protect(
         )));
     }
     Ok(())
+}
+
+/// SPEC: P6-SEC-010 (P6.D1c) — remove the content inside `rect` on `page`.
+///
+/// `rect` is `[x0, y0, x1, y1]` in PDF points. Undoable in-session, and
+/// **permanent once the file is saved and reopened** — which is the point of
+/// redaction, not a shortcoming. The UI says so before applying.
+#[tauri::command]
+pub async fn pdf_redact_region(
+    state: State<'_, AppState>,
+    id: String,
+    page: usize,
+    rect: [f32; 4],
+    options: RedactOptions,
+) -> Result<RedactOutcome, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.redact_region_request(page, rect, options)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
 /// SPEC: P6-SEC-006 (P6.B2b) — verify every signature on the open document.

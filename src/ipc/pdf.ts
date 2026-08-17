@@ -352,3 +352,40 @@ export interface SignatureReport {
 export async function verifySignatures(id: DocumentId): Promise<SignatureReport[]> {
   return invoke<SignatureReport[]>("pdf_verify_signatures", { id });
 }
+
+/** SPEC: P6-SEC-010 (P6.D1c) — what a redaction should take out. */
+export interface RedactOptions {
+  /** Also strip `/Info` and the XMP packet. Off by default. */
+  removeMetadata: boolean;
+}
+
+/**
+ * What a redaction removed.
+ *
+ * `removedWholeForSafety` is the number worth surfacing: runs only *partly*
+ * inside the region whose font could not be measured, so the whole run went.
+ * Over-removal is the deliberate price of never leaving half a secret behind.
+ */
+export interface RedactReport {
+  removed: number;
+  split: number;
+  removedWholeForSafety: number;
+  imagesRemoved: number;
+  history: HistoryState;
+}
+
+/**
+ * SPEC: P6-SEC-010 — remove the content inside `rect` on `page`.
+ *
+ * `rect` is `[x0, y0, x1, y1]` in PDF points. Undoable in-session and
+ * **permanent once the file is saved and reopened** — which is the point of
+ * redaction rather than a limitation of it.
+ */
+export async function redactRegion(
+  id: DocumentId,
+  page: number,
+  rect: [number, number, number, number],
+  options: RedactOptions = { removeMetadata: false },
+): Promise<RedactReport> {
+  return invoke<RedactReport>("pdf_redact_region", { id, page, rect, options });
+}

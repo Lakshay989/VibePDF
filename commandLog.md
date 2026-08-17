@@ -4772,6 +4772,23 @@ discrimination the test was written for.
 
 ---
 
+## P6.D1c — the redact tool (commit TBD)
+
+No new dependencies.
+
+```bash
+npm run check
+npm run test                       # 723 frontend tests, 124 files
+npm run test:rust
+npx vitest run src/view/__tests__/redact-layer.test.tsx
+```
+
+Not verified: redacting through the running app. Sweep §8 — the items that
+matter are undo-then-save-then-reopen, and dragging on page 2 to see the form
+refusal surface as a message rather than a silent no-op.
+
+---
+
 ---
 
 ## How this file evolves

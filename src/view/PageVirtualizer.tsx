@@ -20,6 +20,7 @@ import { TextBoxLayer } from "@/view/text-box-layer";
 import { ImageAddLayer } from "@/view/image-add-layer";
 import { ImageEditLayer } from "@/view/image-edit-layer";
 import { LinkLayer } from "@/view/link-layer";
+import { RedactLayer } from "@/view/redact-layer";
 import { InkLayer } from "@/view/ink-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PolygonLayer } from "@/view/polygon-layer";
@@ -651,6 +652,14 @@ function PageSlot({
         documentId={documentId}
         page={natural.pageNumber - 1}
         pageCount={doc.numPages}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <RedactLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
         displayedWidth={natural.width}
         displayedHeight={natural.height}
         scale={scale}
