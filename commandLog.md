@@ -4679,6 +4679,32 @@ signature is then reported invalid.
 
 ---
 
+## P6.B2a — signature verification (commit TBD)
+
+No new dependencies — the crates B1 added already cover reading.
+
+```bash
+npm run check
+npm run test:rust
+cargo test --test sign_verify
+```
+
+No mutation runs needed this time: nine of the eleven tests *are* mutations —
+each breaks one thing about a genuinely signed document and requires the report
+to notice that thing and not the others.
+
+One of them found a real gap rather than confirming behaviour: altering a byte
+of the embedded certificate left the whole report reading "valid". Fixed by
+verifying each certificate against its issuer's key; `ChainStatus::Broken` now
+covers it.
+
+Not verified: agreement with another verifier on *someone else's* signed PDF.
+We only have documents we produced. Worth revisiting if a real signed file turns
+up — the sweep's Acrobat check on `vibepdf-verify-signed.pdf` is the nearest
+thing until then.
+
+---
+
 ---
 
 ## How this file evolves

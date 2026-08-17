@@ -9507,6 +9507,70 @@ reader may change without invalidating the signature.
 
 ---
 
+## P6.B2a — Verifying signatures (SPEC P6-SEC-006)
+
+### Problem
+
+Read back what B1 writes, and report the four things the spec names:
+cryptographically valid, chain-trusted, modified-after-signing, expired.
+
+### Concepts learned
+
+- **Verification is two independent checks, not one.** The signature is over the
+  *signed attributes*; one of those attributes is a digest of the document. So
+  editing the document breaks the **digest** and leaves the **signature** valid,
+  and corrupting the signature does the opposite. A verifier that reports one
+  boolean can't tell a user which happened — and those are very different
+  events. Two fields, and two tests that are mirror images.
+
+- **A verifier must check every claim it displays.** This is the one the tests
+  caught. The signature commits to the attributes, *not* to the certificate
+  carried alongside them — so I flipped a byte inside the embedded certificate
+  and the report still said valid, with the signer's name read out of a
+  certificate nobody had checked. An attacker could put any name they liked
+  next to a perfectly valid signature.
+
+  The fix is to verify each certificate against its issuer's key, and a
+  self-signed one against itself. The general form: **if you show it, verify it
+  — or say you didn't.**
+
+- **The honest answer to "is this trusted?" is often "I can't tell."** Trust
+  means checking against a list of roots someone vouches for. For document
+  signing that's Adobe's AATL or the EU trust list; neither is redistributable,
+  and neither is the TLS root store you already have. So `ChainStatus` has no
+  `Trusted` variant at all — the type makes the claim unrepresentable rather
+  than leaving it to a comment. Every self-signed certificate has an internally
+  consistent chain of one, and a verifier that called that "trusted" would be
+  actively dangerous.
+
+- **Unchecked is not failed.** An unsupported signature algorithm on an issuer
+  certificate returns "not checked", not "broken". Reporting a chain as broken
+  because we cannot read it would be its own false alarm, and false alarms teach
+  people to ignore the real ones.
+
+- **Find things by shape, not by the tidy path.** Signatures are located by
+  looking for `/ByteRange` + `/Contents` on any object, not by walking
+  `/AcroForm /Fields`. A signature reachable only through `/Perms /DocMDP`, or
+  one a producer wired oddly, still has to be reported: **a signature you fail
+  to notice is one you silently fail to check.**
+
+- **Tests for a verifier are almost all negative.** Something that returns
+  "valid" unconditionally passes every happy-path test you can write. So each
+  test breaks exactly one thing and demands the report notice *that thing* and
+  not the others.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/verify.rs` | `verify_signatures`, `SignatureReport`, `ChainStatus`. |
+| `src-tauri/tests/sign_verify.rs` | Eleven cases, nine of them breaking something on purpose. |
+
+### Further reading
+- RFC 5652 §5.4 — what a `SignedData` signature actually covers.
+- ETSI TS 119 172 — why trust lists exist and what they contain.
+
+---
+
 ---
 
 ## How this file evolves

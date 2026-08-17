@@ -16,3 +16,4 @@ pub mod credential;
 pub mod decrypt;
 pub mod encrypt;
 pub mod sign;
+pub mod verify;
