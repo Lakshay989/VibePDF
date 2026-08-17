@@ -28,6 +28,7 @@ fn spec() -> SignatureSpec {
         location: Some("Manchester".into()),
         contact: None,
         name: Some("VibePDF Test Signer".into()),
+        certify: None,
     }
 }
 

@@ -9453,6 +9453,60 @@ that is not ordinary at all.
 
 ---
 
+## P6.B1b — Certifying a document (SPEC P6-SEC-005, third clause)
+
+### Problem
+
+"Lock the signed content per the signature's permission level" — say how much a
+reader may change without invalidating the signature.
+
+### Concepts learned
+
+- **`DocMDP` is detection, not prevention.** PDF 32000-1 §12.8.2.2 lets the
+  first signature declare a permission level: no changes (`/P 1`), form filling
+  (`2`), or form filling plus annotations (`3`). Nothing *enforces* it. A reader
+  that ignores it can change whatever it likes; what a conforming reader does is
+  notice afterwards and report the signature as invalid.
+
+  The spec line says "lock", and that word is doing more work than the mechanism
+  supports. A user who believes the document cannot be changed is worse off than
+  one who knows changes will be spotted — so the dialog says "detects changes
+  rather than preventing them", with a test pinning that wording. This is the
+  same honesty problem as C3's permissions, and the same answer.
+
+- **A feature spread across two places is two chances to be half-done.**
+  Certification is a `/Reference` inside the signature *and* a `/Perms /DocMDP`
+  entry in the catalog. Either alone is meaningless-or-malformed. The test
+  asserts both, and follows the catalog reference to check it lands on a
+  dictionary whose `/Type` is `/Sig` — not merely that a key exists.
+
+- **The dangerous default is the one that claims more.** Certifying by accident
+  makes a statement about the whole document that the signer never made, so the
+  default is a plain approval signature and there is a test for *that* rather
+  than a glance at the code.
+
+- **The same key name, two unrelated meanings.** The catalog's `/Perms` (this
+  step) and the `/Encrypt` dictionary's `/Perms` (P6.C1's Algorithm 10 block)
+  have nothing to do with each other, and both live under `security/`. Noted in
+  the code where the collision is, because the second person to meet it will
+  otherwise assume they are related.
+
+- **New structure lands inside the signed bytes.** The `/Reference` and the
+  catalog entry are both covered by `/ByteRange`, so `openssl` verifying a
+  *certified* document is a distinct test from verifying a signed one — it is
+  what would catch certification being written after the digest was taken.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/sign.rs` | `DocMdpLevel`, `doc_mdp_reference`, `certify_in_catalog`. |
+| `src/app/SignDialog.tsx` | "After signing", defaulting to sign-only. |
+
+### Further reading
+- ISO 32000-1 §12.8.2.2 — `DocMDP`, and Table 254 for the `/P` values.
+
+---
+
 ---
 
 ## How this file evolves

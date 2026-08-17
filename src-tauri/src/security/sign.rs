@@ -65,6 +65,41 @@ fn sign_err(e: lopdf::Error) -> CommandError {
     CommandError::PdfError(format!("sign: {e}"))
 }
 
+/// SPEC: P6-SEC-005 — "lock the signed content per the signature's permission
+/// level": how much a reader may change without invalidating the signature.
+///
+/// This is PDF 32000-1 §12.8.2.2 **`DocMDP`** — a *certification* signature, and
+/// only the first signature on a document may be one. The numbers are the
+/// standard's, not ours.
+///
+/// **Advisory, like the encryption permissions in P6.C3.** Nothing enforces
+/// this; a reader that ignores it can change whatever it likes. What `DocMDP`
+/// buys is detection rather than prevention: a conforming reader that makes a
+/// disallowed change reports the signature as invalid afterwards, so the
+/// tampering shows. Worth being clear about, because "lock" sounds like
+/// prevention and is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DocMdpLevel {
+    /// `/P 1` — no changes at all. Any edit breaks the signature.
+    NoChanges,
+    /// `/P 2` — filling in form fields and adding signatures.
+    FormFilling,
+    /// `/P 3` — the above, plus annotations and comments.
+    FormFillingAndAnnotations,
+}
+
+impl DocMdpLevel {
+    /// The `/P` value the standard assigns.
+    fn p_value(self) -> i64 {
+        match self {
+            Self::NoChanges => 1,
+            Self::FormFilling => 2,
+            Self::FormFillingAndAnnotations => 3,
+        }
+    }
+}
+
 /// What goes in the signature dictionary besides the signature.
 ///
 /// `signed_at` is supplied by the caller rather than read from the clock here:
@@ -83,6 +118,9 @@ pub struct SignatureSpec {
     /// Human-readable signer name (`/Name`). Not a security claim — the
     /// certificate is what actually says who signed.
     pub name: Option<String>,
+    /// `Some` makes this a **certification** signature (`DocMDP`); `None` an
+    /// ordinary approval signature, which is the common case.
+    pub certify: Option<DocMdpLevel>,
 }
 
 /// The parts of a signature a user fills in, as they arrive over IPC.
@@ -98,6 +136,8 @@ pub struct SignatureDetails {
     pub reason: Option<String>,
     pub location: Option<String>,
     pub name: Option<String>,
+    /// `Some` certifies the document at that level; `None` signs it.
+    pub certify: Option<DocMdpLevel>,
 }
 
 impl SignatureDetails {
@@ -111,6 +151,7 @@ impl SignatureDetails {
             location: self.location,
             contact: None,
             name: self.name,
+            certify: self.certify,
         }
     }
 }
@@ -210,6 +251,9 @@ pub fn prepare(bytes: &[u8], spec: &SignatureSpec) -> Result<PreparedSignature, 
     let widget_id = add_widget(&mut doc, spec, sig_id, page_id);
     attach_to_page(&mut doc, page_id, widget_id)?;
     register_in_acroform(&mut doc, widget_id)?;
+    if spec.certify.is_some() {
+        certify_in_catalog(&mut doc, sig_id)?;
+    }
 
     let mut out = Vec::new();
     doc.save_to(&mut out)
@@ -263,12 +307,64 @@ fn add_signature_dict(doc: &mut IncrementalDocument, spec: &SignatureSpec) -> Ob
         "M",
         Object::String(spec.signed_at.as_bytes().to_vec(), StringFormat::Literal),
     );
+    if let Some(level) = spec.certify {
+        sig.set("Reference", Object::Array(vec![doc_mdp_reference(level)]));
+    }
     text_entry(&mut sig, "Reason", spec.reason.as_ref());
     text_entry(&mut sig, "Location", spec.location.as_ref());
     text_entry(&mut sig, "ContactInfo", spec.contact.as_ref());
     text_entry(&mut sig, "Name", spec.name.as_ref());
 
     doc.new_document.add_object(sig)
+}
+
+/// The `/SigRef` that says this is a `DocMDP` signature.
+///
+/// `/V /1.2` is the `DocMDP` transform's own version number, fixed by the
+/// standard — not a PDF version and not ours to choose.
+fn doc_mdp_reference(level: DocMdpLevel) -> Object {
+    let mut params = Dictionary::new();
+    params.set("Type", Object::Name(b"TransformParams".to_vec()));
+    params.set("P", Object::Integer(level.p_value()));
+    params.set("V", Object::Name(b"1.2".to_vec()));
+
+    let mut sig_ref = Dictionary::new();
+    sig_ref.set("Type", Object::Name(b"SigRef".to_vec()));
+    sig_ref.set("TransformMethod", Object::Name(b"DocMDP".to_vec()));
+    sig_ref.set("TransformParams", Object::Dictionary(params));
+    sig_ref.set("DigestMethod", Object::Name(b"SHA256".to_vec()));
+    Object::Dictionary(sig_ref)
+}
+
+/// Point the catalog at the certifying signature.
+///
+/// **This `/Perms` is not the `/Perms` in `security/encrypt.rs`.** Same key
+/// name, unrelated meanings: that one is the encrypted Algorithm 10 permissions
+/// block inside `/Encrypt`; this one is a catalog entry naming the signature
+/// that certifies the document. Both live under `security/`, so the collision
+/// is worth stating rather than discovering.
+fn certify_in_catalog(
+    doc: &mut IncrementalDocument,
+    sig_id: ObjectId,
+) -> Result<(), CommandError> {
+    let root = doc
+        .get_prev_documents()
+        .trailer
+        .get(b"Root")
+        .and_then(Object::as_reference)
+        .map_err(|e| CommandError::PdfError(format!("sign: no /Root: {e}")))?;
+    doc.opt_clone_object_to_new_document(root).map_err(sign_err)?;
+
+    let mut perms = Dictionary::new();
+    perms.set("DocMDP", Object::Reference(sig_id));
+
+    let catalog = doc
+        .new_document
+        .get_object_mut(root)
+        .and_then(Object::as_dict_mut)
+        .map_err(sign_err)?;
+    catalog.set("Perms", Object::Dictionary(perms));
+    Ok(())
 }
 
 /// The widget annotation that is also the form field — the single-widget shape,

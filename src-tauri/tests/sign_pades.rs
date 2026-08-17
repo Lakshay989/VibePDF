@@ -37,6 +37,7 @@ fn spec() -> SignatureSpec {
         location: Some("Manchester".into()),
         contact: None,
         name: Some("VibePDF Test Signer".into()),
+        certify: None,
     }
 }
 
@@ -237,5 +238,182 @@ fn writes_verification_artifact() {
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let path = dir.join("vibepdf-verify-signed.pdf");
     std::fs::write(&path, sign("signer.pfx")).expect("write");
+    eprintln!("wrote {}", path.display());
+}
+
+// ---------------------------------------------------------------------------
+// P6.B1b — DocMDP certification (SPEC: P6-SEC-005, "lock the signed content
+// per the signature's permission level")
+// ---------------------------------------------------------------------------
+
+use vibepdf_lib::security::sign::DocMdpLevel;
+
+fn certified(level: DocMdpLevel) -> Vec<u8> {
+    let mut s = spec();
+    s.certify = Some(level);
+    sign_document(&fixture("hello.pdf"), &s, &cert("signer.pfx"), "test123").expect("sign")
+}
+
+/// The `/Encrypt`-free catalog of a saved document.
+fn catalog(bytes: &[u8]) -> lopdf::Dictionary {
+    let doc = lopdf::Document::load_mem(bytes).expect("load");
+    let root = doc
+        .trailer
+        .get(b"Root")
+        .and_then(lopdf::Object::as_reference)
+        .expect("/Root");
+    doc.get_object(root)
+        .and_then(lopdf::Object::as_dict)
+        .expect("catalog")
+        .clone()
+}
+
+// A certification signature is the one the catalog names, and it carries a
+// /Reference saying what it permits. Both halves are required: a /Reference
+// with no catalog entry certifies nothing, and a catalog entry pointing at a
+// signature with no /Reference is malformed.
+#[test]
+fn certifying_writes_both_halves() {
+    let signed = certified(DocMdpLevel::FormFilling);
+
+    let perms = catalog(&signed)
+        .get(b"Perms")
+        .and_then(lopdf::Object::as_dict)
+        .expect("catalog /Perms")
+        .clone();
+    let doc_mdp = perms
+        .get(b"DocMDP")
+        .and_then(lopdf::Object::as_reference)
+        .expect("/Perms /DocMDP");
+
+    // …and it points at a signature dictionary, not at anything else.
+    let doc = lopdf::Document::load_mem(&signed).expect("load");
+    let sig = doc
+        .get_object(doc_mdp)
+        .and_then(lopdf::Object::as_dict)
+        .expect("the signature it names");
+    assert_eq!(
+        sig.get(b"Type").and_then(lopdf::Object::as_name).ok(),
+        Some(b"Sig".as_slice())
+    );
+    assert!(sig.has(b"Reference"), "the signature carries no /Reference");
+}
+
+#[test]
+fn each_level_writes_its_own_p_value() {
+    for (level, expected) in [
+        (DocMdpLevel::NoChanges, 1),
+        (DocMdpLevel::FormFilling, 2),
+        (DocMdpLevel::FormFillingAndAnnotations, 3),
+    ] {
+        let signed = certified(level);
+        let doc = lopdf::Document::load_mem(&signed).expect("load");
+        let root = doc
+            .trailer
+            .get(b"Root")
+            .and_then(lopdf::Object::as_reference)
+            .expect("/Root");
+        let sig_ref = doc
+            .get_object(root)
+            .and_then(lopdf::Object::as_dict)
+            .and_then(|c| c.get(b"Perms"))
+            .and_then(lopdf::Object::as_dict)
+            .and_then(|p| p.get(b"DocMDP"))
+            .and_then(lopdf::Object::as_reference)
+            .expect("/DocMDP");
+        let reference = doc
+            .get_object(sig_ref)
+            .and_then(lopdf::Object::as_dict)
+            .and_then(|s| s.get(b"Reference"))
+            .and_then(lopdf::Object::as_array)
+            .expect("/Reference")
+            .first()
+            .and_then(|o| o.as_dict().ok())
+            .expect("a /SigRef");
+
+        assert_eq!(
+            reference
+                .get(b"TransformMethod")
+                .and_then(lopdf::Object::as_name)
+                .ok(),
+            Some(b"DocMDP".as_slice())
+        );
+        let p = reference
+            .get(b"TransformParams")
+            .and_then(lopdf::Object::as_dict)
+            .and_then(|t| t.get(b"P"))
+            .and_then(lopdf::Object::as_i64)
+            .expect("/P");
+        assert_eq!(p, expected, "{level:?} wrote /P {p}");
+    }
+}
+
+// An ordinary approval signature must not certify. Certifying by accident is
+// the more dangerous direction: it makes a claim about the whole document that
+// the signer never made.
+#[test]
+fn an_ordinary_signature_does_not_certify() {
+    let signed = sign("signer.pfx");
+    assert!(
+        catalog(&signed).get(b"Perms").is_err(),
+        "an approval signature wrote a /Perms entry"
+    );
+    let doc = lopdf::Document::load_mem(&signed).expect("load");
+    assert!(
+        !doc.objects
+            .values()
+            .filter_map(|o| o.as_dict().ok())
+            .any(|d| d.has(b"Reference")),
+        "an approval signature wrote a /Reference"
+    );
+}
+
+// The /Reference and the catalog entry are both inside the signed byte range,
+// so the signature has to still verify with them there. This is the test that
+// would catch certification being written *after* the digest was taken.
+#[test]
+fn openssl_still_verifies_a_certified_document() {
+    let Some(openssl) = openssl_path() else {
+        eprintln!("openssl not found; skipping the differential check");
+        return;
+    };
+    let signed = certified(DocMdpLevel::NoChanges);
+    let (der, message) = extract(&signed);
+
+    let sig = Temp::new("der", &der);
+    let content = Temp::new("bin", &message);
+    let out = Command::new(openssl)
+        .args(["cms", "-verify", "-binary", "-inform", "DER", "-in"])
+        .arg(&sig.0)
+        .arg("-content")
+        .arg(&content.0)
+        .args(["-noverify", "-out", "/dev/null"])
+        .output()
+        .expect("run openssl");
+
+    assert!(
+        out.status.success(),
+        "openssl rejected a certified document:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn a_certified_document_still_opens() {
+    let signed = certified(DocMdpLevel::FormFilling);
+    let file = Temp::new("pdf", &signed);
+    let (doc, meta) = open_pdf(&file.0, None).expect("PDFium opens a certified file");
+    assert_eq!(meta.page_count, 1);
+    drop(doc);
+}
+
+/// SPEC: P6-SEC-005 — a certified file for Acrobat.
+#[test]
+#[ignore = "produces a verification artifact; run on demand"]
+fn writes_certified_artifact() {
+    let dir = PathBuf::from("../Sample PDFs");
+    std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
+    let path = dir.join("vibepdf-verify-certified.pdf");
+    std::fs::write(&path, certified(DocMdpLevel::NoChanges)).expect("write");
     eprintln!("wrote {}", path.display());
 }

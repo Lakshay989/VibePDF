@@ -254,6 +254,17 @@ export async function cleanDocument(
   return invoke<CleanReport>("pdf_clean_document", { id, options });
 }
 
+/**
+ * SPEC: P6-SEC-005 (P6.B1b) — how much a reader may change a *certified*
+ * document without invalidating the signature (PDF 32000-1 §12.8.2.2, DocMDP).
+ *
+ * Advisory, like the encryption permissions in P6.C3: nothing enforces it. What
+ * it buys is detection, not prevention — a conforming reader that makes a
+ * disallowed change afterwards reports the signature as invalid, so the change
+ * shows. "Lock" sounds like prevention and is not.
+ */
+export type DocMdpLevel = "noChanges" | "formFilling" | "formFillingAndAnnotations";
+
 /** What goes in the signature dictionary alongside the signature itself. */
 export interface SignatureDetails {
   /** PDF date string — use `pdfDate(new Date())`. */
@@ -262,6 +273,12 @@ export interface SignatureDetails {
   location: string | null;
   /** Display name. Not a security claim; the certificate is. */
   name: string | null;
+  /**
+   * Non-null makes this a **certification** signature — a claim about the whole
+   * document, and only the first signature on one may make it. `null` is an
+   * ordinary approval signature, which is the common case.
+   */
+  certify: DocMdpLevel | null;
 }
 
 /**

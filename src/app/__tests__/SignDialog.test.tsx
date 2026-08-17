@@ -103,6 +103,45 @@ describe("SignDialog", () => {
     expect(details?.signedAt).toMatch(/^D:\d{14}(Z|[+-]\d{2})'\d{2}'$/);
   });
 
+  // SPEC: P6-SEC-005 (P6.B1b) — certification.
+  //
+  // Certifying by accident is the dangerous direction: it makes a claim about
+  // the whole document that the signer never made. So the default has to be a
+  // plain approval signature, and that is worth a test rather than a glance.
+  it("signs without certifying unless asked", async () => {
+    render(dialog());
+    await readyToSign();
+    fireEvent.click(screen.getByText("Sign…"));
+
+    await waitFor(() => expect(mockSign).toHaveBeenCalled());
+    expect(mockSign.mock.calls[0]?.[4]?.certify).toBeNull();
+  });
+
+  it("sends the chosen certification level", async () => {
+    render(dialog());
+    await readyToSign();
+    fireEvent.change(screen.getByLabelText("After signing"), {
+      target: { value: "formFilling" },
+    });
+    fireEvent.click(screen.getByText("Sign…"));
+
+    await waitFor(() => expect(mockSign).toHaveBeenCalled());
+    expect(mockSign.mock.calls[0]?.[4]?.certify).toBe("formFilling");
+  });
+
+  // "Lock" sounds like prevention. It is not, and the dialog should not imply
+  // it is — a user who believes the document cannot be changed is worse off
+  // than one who knows changes will be detected.
+  it("describes certification as detecting changes, not preventing them", () => {
+    render(dialog());
+    expect(screen.getByText(/says nothing about later changes/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("After signing"), {
+      target: { value: "noChanges" },
+    });
+    expect(screen.getByText(/detects changes rather than preventing them/i)).toBeTruthy();
+  });
+
   it("sends empty optional fields as null rather than empty strings", async () => {
     render(dialog());
     await readyToSign();
@@ -113,6 +152,7 @@ describe("SignDialog", () => {
       reason: null,
       location: null,
       name: null,
+      certify: null,
     });
   });
 

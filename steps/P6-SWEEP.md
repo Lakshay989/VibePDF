@@ -149,6 +149,20 @@ Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
 - [ ] Cancel the dialog, reopen it: the password field is empty and no
       certificate is remembered
 
+## 6d. Certification (B1b)
+
+File: `Sample PDFs/vibepdf-verify-certified.pdf` — certified at "no changes".
+
+- [ ] **Acrobat** says the document is **certified**, not merely signed, and
+      names the level
+- [ ] Add a comment in Acrobat and save: the signature is now reported as
+      invalid, or the change is refused. Either is a pass — what matters is that
+      it is not silently accepted
+- [ ] `vibepdf-verify-signed.pdf` (uncertified) shows as an ordinary signature
+      with no certification claim
+- [ ] In-app: the "After signing" default is **Sign only**, and a plain signature
+      produces a file with no certification
+
 ## 6b. Signature container (B1a, part one)
 
 File: `Sample PDFs/vibepdf-verify-sig-placeholder.pdf` — a signature field with
@@ -178,6 +192,7 @@ does not have to reconstruct it. All in `Sample PDFs/` (git-ignored).
 | `vibepdf-verify-signature.pdf` | A5a | Two placed signature *pictures* | — |
 | `vibepdf-verify-sig-placeholder.pdf` | B1a | Signature field, gap reserved, empty | — |
 | `vibepdf-verify-signed.pdf` | B1a | Certificate-signed | — |
+| `vibepdf-verify-certified.pdf` | B1b | Certified, no changes allowed | — |
 
 Regenerate any of them with the `--ignored` test in the matching suite:
 

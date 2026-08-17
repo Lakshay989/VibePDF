@@ -4653,6 +4653,32 @@ whole design.
 
 ---
 
+## P6.B1b — certification (commit TBD)
+
+No new dependencies.
+
+```bash
+npm run check
+npm run test                       # 695 frontend tests
+npm run test:rust
+cargo test --test sign_pades --test sign_container
+cargo test --test sign_pades -- --ignored   # + Sample PDFs/vibepdf-verify-certified.pdf
+```
+
+Two mutations run by hand and reverted: dropping the `spec.certify.is_some()`
+guard so every signature certifies (fails `an_ordinary_signature_does_not_certify`
+and nothing else), and removing the `/Reference` while keeping the catalog entry
+(fails `certifying_writes_both_halves` and `each_level_writes_its_own_p_value`).
+
+Dev run this session was clean — opened `Sample PDFs/signatures/sigfield-form.pdf`,
+no errors or warnings in the log.
+
+Not verified: whether Acrobat honours the certification. Sweep §6d — the item
+that matters is adding a comment to the certified file and confirming the
+signature is then reported invalid.
+
+---
+
 ---
 
 ## How this file evolves

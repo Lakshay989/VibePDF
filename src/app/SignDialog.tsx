@@ -18,8 +18,22 @@ import { useState } from "react";
 
 import { basename } from "@/app/paths";
 import { reportError } from "@/app/report-error";
-import { type DocumentId, signPdf } from "@/ipc/pdf";
+import { type DocMdpLevel, type DocumentId, signPdf } from "@/ipc/pdf";
 import { pdfDate } from "@/tools/sign/pdf-date";
+
+/**
+ * SPEC: P6-SEC-005 — the certification levels, plainest-language first.
+ *
+ * "Approval" is the default and the common case: it says *this person signed
+ * this*, and says nothing about what may happen next. Certification says
+ * something stronger about the whole document, so it is opt-in.
+ */
+const CERTIFY_CHOICES: ReadonlyArray<{ value: DocMdpLevel | ""; label: string }> = [
+  { value: "", label: "Sign only — don't restrict later changes" },
+  { value: "formFillingAndAnnotations", label: "Certify: allow form filling and comments" },
+  { value: "formFilling", label: "Certify: allow form filling only" },
+  { value: "noChanges", label: "Certify: allow no changes at all" },
+];
 
 interface Props {
   open: boolean;
@@ -35,6 +49,7 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
   const [reason, setReason] = useState("");
   const [location, setLocation] = useState("");
   const [name, setName] = useState("");
+  const [certify, setCertify] = useState<DocMdpLevel | "">("");
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
@@ -49,6 +64,7 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
     setReason("");
     setLocation("");
     setName("");
+    setCertify("");
   };
 
   const chooseCertificate = () => {
@@ -82,6 +98,7 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
           reason: reason.length > 0 ? reason : null,
           location: location.length > 0 ? location : null,
           name: name.length > 0 ? name : null,
+          certify: certify === "" ? null : certify,
         });
         reset();
         onClose();
@@ -170,6 +187,28 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
         </label>
         <p className="mb-3 text-xs text-neutral-500">
           A display name only. Who actually signed is decided by the certificate.
+        </p>
+
+        <label className="mb-1 flex flex-col gap-0.5">
+          <span className="text-xs text-neutral-500">After signing</span>
+          <select
+            aria-label="After signing"
+            value={certify}
+            onChange={(e) => setCertify(e.target.value as DocMdpLevel | "")}
+            className="w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+          >
+            {CERTIFY_CHOICES.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="mb-3 text-xs text-neutral-500">
+          {certify === ""
+            ? "Records that you signed. Says nothing about later changes."
+            : "Readers that honour this will report the signature as invalid if a " +
+              "disallowed change is made. It detects changes rather than preventing them."}
         </p>
 
         {certificate === null ? (
