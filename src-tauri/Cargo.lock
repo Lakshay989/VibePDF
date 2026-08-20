@@ -4586,6 +4586,7 @@ dependencies = [
  "pkcs5",
  "pkcs8",
  "png 0.17.16",
+ "regex",
  "rsa",
  "serde",
  "serde_json",

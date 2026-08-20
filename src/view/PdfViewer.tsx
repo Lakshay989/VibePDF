@@ -18,6 +18,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { CleanDialog } from "@/app/CleanDialog";
+import { FindRedactDialog } from "@/app/FindRedactDialog";
 import { ProtectDialog } from "@/app/ProtectDialog";
 import { SignDialog } from "@/app/SignDialog";
 import { UnlockDialog } from "@/app/UnlockDialog";
@@ -209,6 +210,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [protectOpen, setProtectOpen] = useState(false);
   const [cleanOpen, setCleanOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
+  const [findRedactOpen, setFindRedactOpen] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false);
@@ -521,6 +523,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onProtect={doc ? () => setProtectOpen(true) : undefined}
         onClean={doc ? () => setCleanOpen(true) : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}
+        onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}
         onUnlock={doc ? () => setUnlockOpen(true) : undefined}
         onBackground={doc ? () => setBackgroundOpen(true) : undefined}
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
@@ -575,6 +578,11 @@ export function PdfViewer({ documentId, path }: Props) {
         documentId={documentId}
         documentName={path}
         onClose={() => setSignOpen(false)}
+      />
+      <FindRedactDialog
+        open={findRedactOpen}
+        documentId={documentId}
+        onClose={() => setFindRedactOpen(false)}
       />
       <CleanDialog
         open={cleanOpen}

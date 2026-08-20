@@ -4789,6 +4789,30 @@ refusal surface as a message rather than a silent no-op.
 
 ---
 
+## P6.D2 — pattern redaction (commit TBD)
+
+```bash
+cargo add regex          # direct edge only — already in Cargo.lock transitively
+npm run check
+npm run test             # 733 frontend tests, 125 files
+npm run test:rust
+cargo test --test redact_region
+cargo test --lib security::patterns
+```
+
+`regex` adds **no new crates**: `tracing-subscriber`'s env-filter already pulls
+it (via `matchers`). Verified by grepping `Cargo.lock` before adding, the same
+check as `getrandom` in C1.
+
+Two frontend mutations run by hand and reverted: pre-selecting every match
+(fails "selects nothing by default" and "redacts only what was ticked"), and
+treating unsearchable pages as ordinary matches (fails "says which pages could
+not be searched").
+
+Not verified: the dialog against a real document. Sweep §9.
+
+---
+
 ---
 
 ## How this file evolves

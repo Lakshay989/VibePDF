@@ -873,3 +873,192 @@ pub struct RedactOutcome {
     pub report: RedactReport,
     pub history: crate::pdf::undo::HistoryState,
 }
+
+// ---------------------------------------------------------------------------
+// P6.D2a — finding matches (SPEC P6-SEC-011)
+// ---------------------------------------------------------------------------
+
+/// One show operator, with where it landed and how to slice it.
+///
+/// The geometry comes from the same walk the redactor uses, so a rectangle
+/// produced here can be handed straight back to [`redact_region`]. Deriving it
+/// from `PDFium`'s extractor instead would reintroduce exactly the index
+/// mismatch this module was written to avoid.
+pub struct PlacedRun {
+    pub text: String,
+    /// The whole run's box, `[x0, y0, x1, y1]`.
+    pub rect: [f32; 4],
+    /// x of each byte boundary, length `text.len() + 1`. Empty when the font's
+    /// advances are unknown.
+    offsets: Vec<f32>,
+}
+
+impl PlacedRun {
+    /// The box around `range` of the run's bytes.
+    ///
+    /// Falls back to the **whole run** when the font could not be measured —
+    /// the same bias as everywhere else here: a rectangle that is too big
+    /// removes extra text the user can see going, and one that is too small
+    /// leaves part of the match behind.
+    #[must_use]
+    pub fn sub_rect(&self, range: &std::ops::Range<usize>) -> [f32; 4] {
+        let (Some(&x0), Some(&x1)) = (self.offsets.get(range.start), self.offsets.get(range.end))
+        else {
+            return self.rect;
+        };
+        [x0, self.rect[1], x1, self.rect[3]]
+    }
+}
+
+/// SPEC: P6-SEC-011 — every text run on `page`, with its geometry.
+pub fn placed_runs(bytes: &[u8], page: usize) -> Result<Vec<PlacedRun>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(redact_err)?;
+    let page_id = nth_page(&doc, page)?;
+    placed_runs_in(&doc, page_id)
+}
+
+/// The same, against an already-loaded document — so scanning a hundred pages
+/// parses the file once rather than a hundred times.
+fn placed_runs_in(doc: &Document, page_id: ObjectId) -> Result<Vec<PlacedRun>, CommandError> {
+    let fonts = page_fonts(doc, page_id);
+    let content = doc.get_page_content(page_id).map_err(redact_err)?;
+    let parsed = Content::decode(&content).map_err(redact_err)?;
+
+    let mut out = Vec::new();
+    let mut ctm = Matrix::IDENTITY;
+    let mut ctms: Vec<Matrix> = Vec::new();
+    let mut ts = TextState::default();
+    let mut tss: Vec<TextState> = Vec::new();
+
+    for op in &parsed.operations {
+        if !is_show_operator(&op.operator) {
+            track(op, &mut ctm, &mut ctms, &mut ts, &mut tss);
+            continue;
+        }
+        let Some(raw) = shown_bytes(op) else { continue };
+        let metrics = ts
+            .font
+            .as_deref()
+            .and_then(|f| fonts.get(f))
+            .unwrap_or(&Metrics::Unknown);
+
+        let effective = ts.tm.then(ctm);
+        if !effective.is_upright() {
+            continue; // rotated text: no axis-aligned box to offer
+        }
+        let (x0, y0) = (effective.e, effective.f);
+        let size = ts.size * effective.a.abs().max(1e-6);
+
+        // Byte boundaries in page space, when the font allows it.
+        let mut offsets = Vec::with_capacity(raw.len() + 1);
+        let mut x = x0;
+        offsets.push(x);
+        let mut measurable = true;
+        for byte in &raw {
+            let Some(per_mille) = advance_per_mille(metrics, *byte) else {
+                measurable = false;
+                break;
+            };
+            let mut advance = per_mille * ts.size / 1000.0 + ts.char_spacing;
+            if *byte == b' ' {
+                advance += ts.word_spacing;
+            }
+            x += advance * ts.scale * effective.a.abs();
+            offsets.push(x);
+        }
+
+        out.push(PlacedRun {
+            text: String::from_utf8_lossy(&raw).into_owned(),
+            rect: [x0, y0, if measurable { x } else { x0 + size * 40.0 }, y0 + size],
+            offsets: if measurable { offsets } else { Vec::new() },
+        });
+    }
+    Ok(out)
+}
+
+/// SPEC: P6-SEC-011 — one thing found, ready to show in a confirm list.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchHit {
+    /// 0-based.
+    pub page: usize,
+    /// The box to redact, in PDF points.
+    pub rect: [f32; 4],
+    pub kind: crate::security::patterns::PatternKind,
+    /// What was matched. The user is looking at the document anyway, and a list
+    /// that will not show what it found cannot be reviewed.
+    pub preview: String,
+    /// The font could not be measured, so `rect` covers the whole run and
+    /// confirming this will remove more than the match. Surfaced rather than
+    /// hidden — see the module note on over-removal.
+    pub covers_whole_run: bool,
+    /// This page could not be searched at all. Not a match — a gap in the
+    /// search, listed because "we found nothing here" and "we could not look
+    /// here" are answers a user must be able to tell apart.
+    pub unreadable: bool,
+}
+
+/// SPEC: P6-SEC-011 — find, but do not touch.
+///
+/// Applying is a separate call made only after the user confirms; that
+/// separation *is* the requirement, so this function deliberately has no way to
+/// change the document.
+///
+/// Scans every page. The caller does not choose a range because a caller that
+/// got the range wrong would report a clean document with the sensitive page
+/// left out of the search — a false negative that looks exactly like success.
+pub fn find_matches(
+    bytes: &[u8],
+    set: &crate::security::patterns::PatternSet,
+) -> Result<Vec<MatchHit>, CommandError> {
+    let matcher = crate::security::patterns::Matcher::new(set)?;
+    let doc = Document::load_mem(bytes).map_err(redact_err)?;
+    let mut hits = Vec::new();
+
+    for (page, page_id) in doc.get_pages().into_values().enumerate() {
+        // A page whose text lives in a form is one we cannot search. Left out,
+        // it reports as clean — so a user asking "find every SSN" would be told
+        // there is one when there are two, which is worse than telling them
+        // nothing. `redact_region` refuses these pages; the finder has to say
+        // the same thing rather than quietly skipping them.
+        if refuse_if_text_hides_in_an_xobject(&doc, page_id).is_err() {
+            hits.push(MatchHit {
+                page,
+                rect: [0.0, 0.0, 0.0, 0.0],
+                kind: crate::security::patterns::PatternKind::Custom,
+                preview: String::new(),
+                covers_whole_run: false,
+                unreadable: true,
+            });
+            continue;
+        }
+
+        // A page whose content will not parse is not a page with nothing on it.
+        // Reporting it as clean is the failure mode that matters here, so it
+        // becomes a visible entry rather than a silent skip.
+        let Ok(runs) = placed_runs_in(&doc, page_id) else {
+            hits.push(MatchHit {
+                page,
+                rect: [0.0, 0.0, 0.0, 0.0],
+                kind: crate::security::patterns::PatternKind::Custom,
+                preview: String::new(),
+                covers_whole_run: false,
+                unreadable: true,
+            });
+            continue;
+        };
+        for run in runs {
+            for found in matcher.find_in(&run.text) {
+                hits.push(MatchHit {
+                    page,
+                    rect: run.sub_rect(&found.range),
+                    kind: found.kind,
+                    preview: run.text[found.range.clone()].to_owned(),
+                    covers_whole_run: run.offsets.is_empty(),
+                    unreadable: false,
+                });
+            }
+        }
+    }
+    Ok(hits)
+}

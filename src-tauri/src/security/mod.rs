@@ -15,6 +15,7 @@ pub mod cms;
 pub mod credential;
 pub mod decrypt;
 pub mod encrypt;
+pub mod patterns;
 pub mod redact;
 pub mod sign;
 pub mod verify;

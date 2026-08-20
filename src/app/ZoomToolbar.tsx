@@ -43,6 +43,8 @@ export interface ZoomToolbarProps {
   onClean?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
   onSign?: (() => void) | undefined;
+  /** SPEC: P6-SEC-011 (P6.D2b) — open the find-and-redact dialog. */
+  onFindRedact?: (() => void) | undefined;
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
@@ -66,6 +68,7 @@ export function ZoomToolbar({
   onProtect,
   onClean,
   onSign,
+  onFindRedact,
   onUnlock,
   onBackground,
   onHeaderFooter,
@@ -270,6 +273,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Sign…
+        </button>
+      ) : null}
+
+      {onFindRedact ? (
+        <button
+          type="button"
+          onClick={onFindRedact}
+          title="Search for sensitive patterns and choose what to redact"
+          className="rounded px-2 py-0.5 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+        >
+          Find &amp; Redact…
         </button>
       ) : null}
 

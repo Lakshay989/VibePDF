@@ -389,3 +389,46 @@ export async function redactRegion(
 ): Promise<RedactReport> {
   return invoke<RedactReport>("pdf_redact_region", { id, page, rect, options });
 }
+
+/** SPEC: P6-SEC-011 (P6.D2) — the patterns the spec names, plus user regexes. */
+export type PatternKind = "ssn" | "creditCard" | "email" | "phone" | "custom";
+
+export interface PatternSet {
+  kinds: PatternKind[];
+  /** Extra regexes, in Rust `regex` syntax. */
+  custom: string[];
+}
+
+/** One thing found — or one page that could not be searched. */
+export interface MatchHit {
+  /** 0-based. */
+  page: number;
+  rect: [number, number, number, number];
+  kind: PatternKind;
+  /** The matched text, so the list can actually be reviewed. */
+  preview: string;
+  /**
+   * The font could not be measured, so confirming this removes the whole run
+   * rather than just the match.
+   */
+  coversWholeRun: boolean;
+  /**
+   * Not a match: a page that could not be searched at all. "We found nothing
+   * here" and "we could not look here" must stay distinguishable, or a clean
+   * result is indistinguishable from a failed one.
+   */
+  unreadable: boolean;
+}
+
+/**
+ * SPEC: P6-SEC-011 — find matches. **Changes nothing.**
+ *
+ * Finding and applying are separate on purpose: the spec requires the user to
+ * confirm first, so there is deliberately no call that does both.
+ */
+export async function findRedactionMatches(
+  id: DocumentId,
+  patterns: PatternSet,
+): Promise<MatchHit[]> {
+  return invoke<MatchHit[]>("pdf_find_redaction_matches", { id, patterns });
+}

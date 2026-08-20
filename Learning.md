@@ -9763,6 +9763,58 @@ Put the redaction engine behind a drag-a-region tool.
 
 ---
 
+## P6.D2 — Pattern redaction (SPEC P6-SEC-011)
+
+### Problem
+
+Find SSNs, card numbers, emails, phone numbers and user-supplied regexes; let
+the user confirm; then redact what they picked.
+
+### Concepts learned
+
+- **The same codebase can need opposite biases, and should say why.**
+  `redact.rs` removes *more* when unsure, because the alternative is a leak
+  nobody reviews. `patterns.rs` matches *less* when unsure, because a human
+  reads every result before anything happens and a list of forty false
+  positives is a list nobody reads — after which the real match gets confirmed
+  along with the rest, unlooked at. Both biases are safety; what differs is
+  what happens next. Writing that down at the top of each module stops the
+  next person "fixing" one to match the other.
+
+- **Luhn is a noise control, not a security control.** It is trivial to
+  construct a number that passes. What it does is stop the card pattern firing
+  on every invoice and part number in an ordinary document, which is the
+  difference between a usable confirm list and one that gets dismissed.
+
+- **"Found nothing" and "couldn't look" must be different answers.** Text inside
+  a Form XObject is invisible to the page-content walk, so a document with an
+  SSN on such a page reported as clean — a false negative that looks exactly
+  like success. A test caught it by noticing the fixture's *second* SSN was
+  never reported. `MatchHit.unreadable` now marks those pages and the dialog
+  names them.
+
+  Generally: **any search that can silently skip part of its input must report
+  the skip**, or its negative result means nothing.
+
+- **Don't let the caller choose the search range.** `find_matches` scans every
+  page rather than taking a `Range`. A caller that got the range wrong would
+  report a clean document with the sensitive page left out — the same class of
+  bug as above, moved one layer up and made someone else's fault.
+
+- **Defaults are a design decision about attention.** Nothing in the confirm
+  list is pre-selected. "Select all" is one click away for the user who wants
+  it, but the default cannot be the thing that makes the review step
+  ceremonial.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/patterns.rs` | The patterns, the Luhn filter, overlap resolution. |
+| `src-tauri/src/security/redact.rs` | `placed_runs` / `find_matches` — geometry in the redactor's own basis. |
+| `src/app/FindRedactDialog.tsx` | Find, review, apply. |
+
+---
+
 ---
 
 ## How this file evolves

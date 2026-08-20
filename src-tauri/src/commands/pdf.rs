@@ -1892,6 +1892,42 @@ pub async fn pdf_protect(
     Ok(())
 }
 
+/// SPEC: P6-SEC-011 (P6.D2) — find pattern matches. **Changes nothing.**
+///
+/// The spec requires the user to confirm before anything is applied, so finding
+/// and applying are two commands. One call that redacted what it found would
+/// remove exactly the review step the requirement exists for, and there would
+/// be no way for a caller to get it back.
+///
+/// Entries with `unreadable` set are not matches — they mark pages that could
+/// not be searched, so "we found nothing here" and "we could not look here"
+/// stay distinguishable.
+#[tauri::command]
+pub async fn pdf_find_redaction_matches(
+    state: State<'_, AppState>,
+    id: String,
+    patterns: crate::security::patterns::PatternSet,
+) -> Result<Vec<crate::security::redact::MatchHit>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    crate::security::redact::find_matches(&bytes, &patterns)
+}
+
 /// SPEC: P6-SEC-010 (P6.D1c) — remove the content inside `rect` on `page`.
 ///
 /// `rect` is `[x0, y0, x1, y1]` in PDF points. Undoable in-session, and

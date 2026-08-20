@@ -319,3 +319,114 @@ fn metadata_goes_only_when_asked() {
         "the metadata option left an /Info entry behind"
     );
 }
+
+// ---------------------------------------------------------------------------
+// P6.D2a — pattern matching (SPEC P6-SEC-011)
+// ---------------------------------------------------------------------------
+
+/// The real matches, dropping the entries that mark pages we could not search.
+/// Those are gaps in the search, not findings, and every count below is about
+/// findings.
+fn matches_only(
+    hits: Vec<vibepdf_lib::security::redact::MatchHit>,
+) -> Vec<vibepdf_lib::security::redact::MatchHit> {
+    hits.into_iter().filter(|h| !h.unreadable).collect()
+}
+
+// SPEC: P6-SEC-011 — "finds matches and asks the user to confirm before
+// applying". Finding must therefore change nothing at all: a scan that quietly
+// redacted would remove the confirm step the spec is built around.
+#[test]
+fn finding_matches_changes_nothing() {
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let source = fixture();
+    let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
+    let hits = matches_only(find_matches(&source, &set).expect("find"));
+
+    assert_eq!(hits.len(), 1, "expected one SSN: {hits:?}");
+    assert_eq!(hits[0].preview, SSN);
+    assert_eq!(hits[0].page, 0);
+    assert!(leaks(&source, SSN), "finding must not remove anything");
+}
+
+// The rectangle a match reports has to be the one that actually removes it —
+// the whole point of computing geometry in the same basis the redactor uses.
+// A plausible-looking rect from a different coordinate source would confirm
+// fine and redact the wrong place.
+#[test]
+fn a_matchs_rect_redacts_that_match() {
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let source = fixture();
+    let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
+    let hits = matches_only(find_matches(&source, &set).expect("find"));
+
+    let (out, report) =
+        redact_text_in_region(&source, hits[0].page, hits[0].rect).expect("redact");
+
+    assert!(!leaks(&out, SSN), "the reported rect did not remove the match");
+    assert!(!report.is_empty());
+    // …and it was a cut, not the whole line — the label is not part of the match.
+    let text = extracted(&out, 0);
+    assert!(text.contains("SSN"), "the rect was wider than the match: {text:?}");
+}
+
+// An unmeasurable font cannot give a sub-rectangle, so the match covers its
+// whole run. That is the safe answer, and the list has to say so — a user
+// confirming it is agreeing to lose more than the highlighted text.
+#[test]
+fn an_unmeasurable_match_says_it_covers_the_whole_run() {
+    use vibepdf_lib::security::patterns::PatternSet;
+    use vibepdf_lib::security::redact::find_matches;
+
+    // A custom pattern, not a built-in: this test is about geometry, and using
+    // the phone pattern would tie it to whether "555-0100" looks like a phone
+    // number (it does not — seven digits).
+    let set = PatternSet {
+        kinds: Vec::new(),
+        custom: vec![r"555-0100".into()],
+    };
+    let hits = matches_only(find_matches(&fixture(), &set).expect("find"));
+
+    assert_eq!(hits.len(), 1, "expected the account number: {hits:?}");
+    assert!(
+        hits[0].covers_whole_run,
+        "an unmeasurable run claimed a precise rectangle"
+    );
+}
+
+#[test]
+fn a_document_with_no_matches_reports_none() {
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let set = PatternSet { kinds: vec![PatternKind::Email], custom: Vec::new() };
+    assert!(matches_only(find_matches(&fixture(), &set).expect("find")).is_empty());
+}
+
+// A page whose text lives in a form cannot be searched. Reporting it as clean
+// would tell a user asking "find every SSN" that there is one when there are
+// two — the false negative that looks exactly like success. The redactor
+// refuses these pages; the finder has to say the same thing.
+#[test]
+fn a_page_that_cannot_be_searched_is_listed_rather_than_skipped() {
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
+    let hits = find_matches(&fixture(), &set).expect("find");
+
+    // Page 1's SSN, found. Page 2's, not found — but reported as unsearchable.
+    let found: Vec<_> = hits.iter().filter(|h| !h.unreadable).collect();
+    let gaps: Vec<_> = hits.iter().filter(|h| h.unreadable).collect();
+
+    assert_eq!(found.len(), 1, "expected page 1's SSN: {found:?}");
+    assert_eq!(found[0].preview, SSN);
+    assert_eq!(gaps.len(), 1, "page 2 was silently treated as clean");
+    assert_eq!(gaps[0].page, 1);
+    // …and the SSN it could not see really is in there.
+    assert!(leaks(&fixture(), IN_A_FORM));
+}

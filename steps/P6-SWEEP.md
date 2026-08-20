@@ -249,6 +249,20 @@ In-app (D1c), against `tests/fixtures/acceptance/p6-document.pdf`:
 - [ ] Drag on **page 4** (the image) → the image goes
 - [ ] Tick "Also remove document metadata" and confirm it still works
 
+## 9. Pattern redaction (D2)
+
+Against `tests/fixtures/acceptance/p6-document.pdf`.
+
+- [ ] **Find & Redact…** → tick SSNs → Find → one match listed, showing
+      `123-45-6789`, page 1, **nothing pre-ticked**
+- [ ] The panel also says **page 2 could not be searched** — that page's SSN is
+      real and deliberately not found
+- [ ] Tick the match → Redact → it goes; `SSN:` stays
+- [ ] A custom pattern (`555-0100`) finds the page-3 account number and warns
+      that the whole line will go
+- [ ] Card numbers: a real test number (`4242 4242 4242 4242`) matches, an
+      invoice-shaped 16-digit number does not
+
 ---
 
 ## Known and accepted, not defects

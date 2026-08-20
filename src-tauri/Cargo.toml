@@ -104,6 +104,12 @@ des = "0.8"
 sha1 = "0.10"
 hmac = "0.12"
 digest = "0.10"
+# P6.D2 (SPEC P6-SEC-011): pattern-based redaction needs a regex engine, and
+# the spec names user-supplied regexes as well as the built-ins. Already in
+# Cargo.lock transitively (tracing-subscriber's env-filter → matchers → regex),
+# so this adds a direct edge and **no new crates**. Same argument as getrandom
+# in P6.C1. rust-lang maintained, no unsafe in the default build.
+regex = "1"
 ttf-parser = "0.25.1"       # RazrFalcon; read-only: codepoint → glyph-id lookup
 subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
 
