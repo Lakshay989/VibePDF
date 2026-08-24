@@ -4813,6 +4813,31 @@ Not verified: the dialog against a real document. Sweep §9.
 
 ---
 
+## P6.A5b — signing an existing field (commit TBD)
+
+No new dependencies.
+
+```bash
+python3 tests/fixtures/basic/generate-sigfield.py    # committed fixture
+npm run check
+npm run test                                          # 737 frontend tests
+npm run test:rust
+cargo test --test sign_pades
+```
+
+Two mutations run by hand and reverted: adding a new field instead of filling
+the existing one (5 failures), and allowing an already-signed field to be
+overwritten (1, exactly the right one).
+
+The `SignDialog` tests grew a `show()` helper that flushes the field-listing
+effect, because the dialog now does async work on open and every test was
+otherwise printing an `act()` warning. Worth the churn: warnings on every test
+are how a real one gets missed.
+
+Not verified: the field picker against a real form. Sweep §6f.
+
+---
+
 ---
 
 ## How this file evolves

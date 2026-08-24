@@ -14,11 +14,16 @@
 // that blurred them would be the most misleading thing in the app.
 
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { basename } from "@/app/paths";
 import { reportError } from "@/app/report-error";
-import { type DocMdpLevel, type DocumentId, signPdf } from "@/ipc/pdf";
+import {
+  type DocMdpLevel,
+  type DocumentId,
+  signPdf,
+  unsignedSignatureFields,
+} from "@/ipc/pdf";
 import { pdfDate } from "@/tools/sign/pdf-date";
 
 /**
@@ -50,7 +55,33 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
   const [location, setLocation] = useState("");
   const [name, setName] = useState("");
   const [certify, setCertify] = useState<DocMdpLevel | "">("");
+  // SPEC: P6-SEC-004 (P6.A5b) — "" means add a new invisible field.
+  const [field, setField] = useState("");
+  const [fields, setFields] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // Which fields the document offers decides whether this dialog shows a field
+  // picker at all. Most documents have none.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void unsignedSignatureFields(documentId)
+      .then((names) => {
+        if (cancelled) return;
+        setFields(names);
+        // Default to the first empty field when there is one: a document that
+        // came with a signature box is asking to be signed in that box, and an
+        // invisible signature elsewhere would leave it looking unsigned.
+        setField(names[0] ?? "");
+      })
+      .catch(() => {
+        // Not being able to list fields must not stop someone signing.
+        if (!cancelled) setFields([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, documentId]);
 
   if (!open) return null;
 
@@ -65,6 +96,7 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
     setLocation("");
     setName("");
     setCertify("");
+    setField(fields[0] ?? "");
   };
 
   const chooseCertificate = () => {
@@ -99,6 +131,8 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
           location: location.length > 0 ? location : null,
           name: name.length > 0 ? name : null,
           certify: certify === "" ? null : certify,
+          target:
+            field === "" ? { kind: "newField" } : { kind: "existingField", name: field },
         });
         reset();
         onClose();
@@ -188,6 +222,25 @@ export function SignDialog({ open, documentId, documentName, onClose }: Props) {
         <p className="mb-3 text-xs text-neutral-500">
           A display name only. Who actually signed is decided by the certificate.
         </p>
+
+        {fields.length > 0 ? (
+          <label className="mb-3 flex flex-col gap-0.5">
+            <span className="text-xs text-neutral-500">Signature field</span>
+            <select
+              aria-label="Signature field"
+              value={field}
+              onChange={(e) => setField(e.target.value)}
+              className="w-full rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            >
+              {fields.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+              <option value="">Add a new invisible signature</option>
+            </select>
+          </label>
+        ) : null}
 
         <label className="mb-1 flex flex-col gap-0.5">
           <span className="text-xs text-neutral-500">After signing</span>

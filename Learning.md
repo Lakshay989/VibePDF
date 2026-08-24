@@ -9815,6 +9815,50 @@ the user confirm; then redact what they picked.
 
 ---
 
+## P6.A5b — Signing an existing field (SPEC P6-SEC-004)
+
+### Problem
+
+A document routed for sign-off arrives with an empty signature box in it. B1
+could only add a field of its own.
+
+### Concepts learned
+
+- **"Technically satisfied" is not satisfied.** Adding an invisible signature
+  field beside the empty box makes every automated check pass — the document is
+  signed, the signature verifies, `/SigFlags` is set — while the thing the
+  recipient actually looks at stays blank. The requirement was never "a
+  signature exists"; it was "this box is signed". Worth noticing whenever a
+  feature has a visible artefact and a structural one: passing the structural
+  check can leave the visible promise unmet.
+
+- **Change the least that does the job.** Signing into a field touches exactly
+  one entry: the field's `/V`. Its widget, rectangle and position in
+  `/AcroForm /Fields` are the document's own, and a test asserts the rectangle
+  is untouched — moving the box would make it a different document than the one
+  the recipient was sent.
+
+- **Refusing to overwrite is not caution, it is correctness.** A field with a
+  `/V` already holds someone's signature, and that signature covers bytes that
+  would no longer exist after we replaced it. The result would not be a
+  counter-signature; it would read as tampering with theirs. Same shape as
+  refusing to sign an already-signed document in B1a.
+
+- **A default that follows the document's intent.** The dialog picks the first
+  empty field rather than defaulting to "add a new one", because a document that
+  came with a signature box is asking to be signed in that box. Failing to list
+  the fields falls back to the old behaviour rather than blocking — a read that
+  is only there to improve a default must never be able to stop the action.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src-tauri/src/security/sign.rs` | `SignatureTarget`, `sign_into_field`, `unsigned_signature_fields`. |
+| `tests/fixtures/basic/sigfield.pdf` | Two empty signature fields, so "the right one" and "the only one" differ. |
+| `src/app/SignDialog.tsx` | The field picker, shown only when there is something to pick. |
+
+---
+
 ---
 
 ## How this file evolves

@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 
 use vibepdf_lib::pdf::document::open_pdf;
-use vibepdf_lib::security::sign::{prepare, SignatureSpec};
+use vibepdf_lib::security::sign::{prepare, SignatureSpec, SignatureTarget};
 
 fn fixture(name: &str) -> Vec<u8> {
     let p = PathBuf::from("../tests/fixtures/basic").join(name);
@@ -29,6 +29,7 @@ fn spec() -> SignatureSpec {
         contact: None,
         name: Some("VibePDF Test Signer".into()),
         certify: None,
+        target: SignatureTarget::NewField,
     }
 }
 

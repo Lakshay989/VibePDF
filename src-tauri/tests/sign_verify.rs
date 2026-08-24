@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use vibepdf_lib::security::sign::{sign_document, DocMdpLevel, SignatureSpec};
+use vibepdf_lib::security::sign::{sign_document, DocMdpLevel, SignatureSpec, SignatureTarget};
 use vibepdf_lib::security::verify::{verify_signatures, ChainStatus};
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -39,6 +39,7 @@ fn spec(certify: Option<DocMdpLevel>) -> SignatureSpec {
         contact: None,
         name: Some("VibePDF Test Signer".into()),
         certify,
+        target: SignatureTarget::NewField,
     }
 }
 

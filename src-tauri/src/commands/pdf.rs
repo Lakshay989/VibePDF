@@ -1957,6 +1957,35 @@ pub async fn pdf_redact_region(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P6-SEC-004 (P6.A5b) — the empty signature fields this document offers.
+///
+/// Read-only. Reads the file from disk for the same reason verification does:
+/// the names have to describe the document a signature will be written into,
+/// and the actor's bytes are a re-serialisation of it.
+#[tauri::command]
+pub async fn pdf_unsigned_signature_fields(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<String>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let path = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?
+            .path()
+            .clone()
+    };
+    let bytes = std::fs::read(&path).map_err(|e| {
+        CommandError::Internal(format!("could not read {}: {e}", path.display()))
+    })?;
+    crate::security::sign::unsigned_signature_fields(&bytes)
+}
+
 /// SPEC: P6-SEC-006 (P6.B2b) — verify every signature on the open document.
 ///
 /// **Reads the file from disk, not the actor's bytes.** The actor produces

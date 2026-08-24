@@ -138,6 +138,7 @@ pub fn run() {
             commands::pdf::pdf_clean_document,
             commands::pdf::pdf_sign_document,
             commands::pdf::pdf_verify_signatures,
+            commands::pdf::pdf_unsigned_signature_fields,
             commands::pdf::pdf_redact_region,
             commands::pdf::pdf_find_redaction_matches,
             commands::signatures::signatures_list,

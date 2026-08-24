@@ -164,6 +164,19 @@ Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
       reports on the file as saved. (Known and intended — it says so in
       `steps/P6.md`. Worth confirming it does not report nonsense.)
 
+## 6f. Signing into an existing field (A5b)
+
+File: `Sample PDFs/signatures/sigfield-form.pdf`, or the committed
+`tests/fixtures/basic/sigfield.pdf`. Certificate `signer.pfx` / `test123`.
+
+- [ ] **Sign…** on a document with a signature field → the dialog shows a
+      **Signature field** picker, defaulting to the first empty one
+- [ ] Sign it → in Acrobat the signature appears **in that field's box**, not as
+      an invisible extra
+- [ ] Sign the same field again → refused, saying the field is already signed
+- [ ] Choose "Add a new invisible signature" instead → behaves as before
+- [ ] A document with no fields shows **no picker at all**
+
 ## 6d. Certification (B1b)
 
 File: `Sample PDFs/vibepdf-verify-certified.pdf` — certified at "no changes".

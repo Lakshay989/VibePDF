@@ -121,6 +121,25 @@ pub struct SignatureSpec {
     /// `Some` makes this a **certification** signature (`DocMDP`); `None` an
     /// ordinary approval signature, which is the common case.
     pub certify: Option<DocMdpLevel>,
+    /// Which field to sign. See [`SignatureTarget`].
+    pub target: SignatureTarget,
+}
+
+/// SPEC: P6-SEC-004 (P6.A5b) — which field the signature goes in.
+///
+/// A document routed for sign-off usually *arrives* with an empty signature
+/// field in it. Adding a second, invisible one beside it and signing that would
+/// technically satisfy "the document is signed" while leaving the box the
+/// recipient is looking at still empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "name")]
+pub enum SignatureTarget {
+    /// Add an invisible field of our own. The only option when the document has
+    /// no signature field.
+    #[default]
+    NewField,
+    /// Sign into the existing, empty field with this `/T` name.
+    ExistingField(String),
 }
 
 /// The parts of a signature a user fills in, as they arrive over IPC.
@@ -138,6 +157,9 @@ pub struct SignatureDetails {
     pub name: Option<String>,
     /// `Some` certifies the document at that level; `None` signs it.
     pub certify: Option<DocMdpLevel>,
+    /// Which field to sign. Defaults to adding one.
+    #[serde(default)]
+    pub target: SignatureTarget,
 }
 
 impl SignatureDetails {
@@ -152,6 +174,7 @@ impl SignatureDetails {
             contact: None,
             name: self.name,
             certify: self.certify,
+            target: self.target,
         }
     }
 }
@@ -246,11 +269,16 @@ pub fn prepare(bytes: &[u8], spec: &SignatureSpec) -> Result<PreparedSignature, 
     let prev = Document::load_mem(bytes).map_err(sign_err)?;
     let mut doc = IncrementalDocument::create_from(bytes.to_vec(), prev);
 
-    let page_id = first_page_id(doc.get_prev_documents())?;
     let sig_id = add_signature_dict(&mut doc, spec);
-    let widget_id = add_widget(&mut doc, spec, sig_id, page_id);
-    attach_to_page(&mut doc, page_id, widget_id)?;
-    register_in_acroform(&mut doc, widget_id)?;
+    match &spec.target {
+        SignatureTarget::NewField => {
+            let page_id = first_page_id(doc.get_prev_documents())?;
+            let widget_id = add_widget(&mut doc, spec, sig_id, page_id);
+            attach_to_page(&mut doc, page_id, widget_id)?;
+            register_in_acroform(&mut doc, widget_id)?;
+        }
+        SignatureTarget::ExistingField(name) => sign_into_field(&mut doc, name, sig_id)?,
+    }
     if spec.certify.is_some() {
         certify_in_catalog(&mut doc, sig_id)?;
     }
@@ -638,4 +666,97 @@ pub fn sign_document(
     let prepared = prepare(bytes, spec)?;
     let blob = crate::security::cms::sign_detached(&prepared.message(), &credential)?;
     prepared.embed(&blob)
+}
+
+/// SPEC: P6-SEC-004 (P6.A5b) — put the signature in a field that already exists.
+///
+/// Only the field's `/V` changes: the widget, its rectangle and its place in
+/// `/AcroForm /Fields` are all the document's own and stay exactly as they are.
+/// That is the point — the recipient is looking at *that* box.
+///
+/// A field that already has a `/V` is **refused**. Overwriting it would replace
+/// somebody else's signature with ours, and their signature covers bytes that
+/// would then no longer exist; the result reads as a forgery rather than as a
+/// counter-signature. Counter-signing is a second incremental update, which
+/// `prepare` does not do yet (see `signing_twice_is_refused_rather_than_corrupting_the_first`).
+fn sign_into_field(
+    doc: &mut IncrementalDocument,
+    name: &str,
+    sig_id: ObjectId,
+) -> Result<(), CommandError> {
+    let field_id = unsigned_field_id(doc.get_prev_documents(), name)?;
+    doc.opt_clone_object_to_new_document(field_id)
+        .map_err(sign_err)?;
+
+    let field = doc
+        .new_document
+        .get_object_mut(field_id)
+        .and_then(Object::as_dict_mut)
+        .map_err(sign_err)?;
+    field.set("V", Object::Reference(sig_id));
+    Ok(())
+}
+
+/// Find the empty signature field called `name`, or say precisely what is wrong.
+fn unsigned_field_id(doc: &Document, name: &str) -> Result<ObjectId, CommandError> {
+    let mut seen_but_signed = false;
+
+    for (id, obj) in &doc.objects {
+        let Ok(dict) = obj.as_dict() else { continue };
+        let is_signature_field = dict
+            .get(b"FT")
+            .and_then(Object::as_name)
+            .is_ok_and(|ft| ft == b"Sig");
+        if !is_signature_field {
+            continue;
+        }
+        let matches = dict
+            .get(b"T")
+            .and_then(Object::as_str)
+            .is_ok_and(|t| t == name.as_bytes());
+        if !matches {
+            continue;
+        }
+        if dict.has(b"V") {
+            seen_but_signed = true;
+            continue;
+        }
+        return Ok(*id);
+    }
+
+    Err(CommandError::InvalidInput(if seen_but_signed {
+        format!("The signature field \u{201c}{name}\u{201d} has already been signed. Signing over it would destroy the existing signature.")
+    } else {
+        format!("This document has no empty signature field called \u{201c}{name}\u{201d}.")
+    }))
+}
+
+/// SPEC: P6-SEC-004 — the empty signature fields a document offers, by name.
+///
+/// Used to decide whether to offer signing into a field at all: a document with
+/// none can only be signed by adding one.
+pub fn unsigned_signature_fields(bytes: &[u8]) -> Result<Vec<String>, CommandError> {
+    let doc = Document::load_mem(bytes).map_err(sign_err)?;
+    let mut names: Vec<String> = doc
+        .objects
+        .values()
+        .filter_map(|obj| {
+            let dict = obj.as_dict().ok()?;
+            let is_sig = dict
+                .get(b"FT")
+                .and_then(Object::as_name)
+                .is_ok_and(|ft| ft == b"Sig");
+            if !is_sig || dict.has(b"V") {
+                return None;
+            }
+            dict.get(b"T")
+                .and_then(Object::as_str)
+                .ok()
+                .map(|t| String::from_utf8_lossy(t).into_owned())
+        })
+        .collect();
+    // Object order is arbitrary; a list that reshuffles between calls would
+    // make the UI's field picker jump around.
+    names.sort();
+    Ok(names)
 }

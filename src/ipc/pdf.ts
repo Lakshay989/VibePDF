@@ -279,6 +279,24 @@ export interface SignatureDetails {
    * ordinary approval signature, which is the common case.
    */
   certify: DocMdpLevel | null;
+  /**
+   * SPEC: P6-SEC-004 (P6.A5b) — which field to sign.
+   *
+   * A document routed for sign-off usually arrives with an empty field in it.
+   * Adding an invisible one beside it would satisfy "the document is signed"
+   * while leaving the box the recipient is looking at empty.
+   */
+  target: { kind: "newField" } | { kind: "existingField"; name: string };
+}
+
+/**
+ * SPEC: P6-SEC-004 — the empty signature fields this document offers, sorted.
+ *
+ * Empty because a signed one cannot be signed again: overwriting would destroy
+ * the existing signature, whose byte range would no longer exist.
+ */
+export async function unsignedSignatureFields(id: DocumentId): Promise<string[]> {
+  return invoke<string[]>("pdf_unsigned_signature_fields", { id });
 }
 
 /**

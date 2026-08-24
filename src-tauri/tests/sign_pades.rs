@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use vibepdf_lib::pdf::document::open_pdf;
-use vibepdf_lib::security::sign::{sign_document, SignatureSpec};
+use vibepdf_lib::security::sign::{sign_document, SignatureSpec, SignatureTarget};
 
 fn fixture(name: &str) -> Vec<u8> {
     let p = PathBuf::from("../tests/fixtures/basic").join(name);
@@ -38,6 +38,7 @@ fn spec() -> SignatureSpec {
         contact: None,
         name: Some("VibePDF Test Signer".into()),
         certify: None,
+        target: SignatureTarget::NewField,
     }
 }
 
@@ -416,4 +417,191 @@ fn writes_certified_artifact() {
     let path = dir.join("vibepdf-verify-certified.pdf");
     std::fs::write(&path, certified(DocMdpLevel::NoChanges)).expect("write");
     eprintln!("wrote {}", path.display());
+}
+
+// ---------------------------------------------------------------------------
+// P6.A5b — signing into an existing field (SPEC: P6-SEC-004)
+// ---------------------------------------------------------------------------
+
+use vibepdf_lib::security::sign::unsigned_signature_fields;
+
+fn into_field(name: &str) -> SignatureSpec {
+    let mut s = spec();
+    s.target = SignatureTarget::ExistingField(name.into());
+    s
+}
+
+fn sign_form(name: &str) -> Result<Vec<u8>, vibepdf_lib::error::CommandError> {
+    sign_document(
+        &fixture("sigfield.pdf"),
+        &into_field(name),
+        &cert("signer.pfx"),
+        "test123",
+    )
+}
+
+// SPEC: P6-SEC-004 — a document routed for sign-off arrives with an empty field
+// in it. Signing a new invisible field beside it would satisfy "the document is
+// signed" while leaving the box the recipient is looking at still empty.
+#[test]
+fn signing_fills_the_existing_field_rather_than_adding_one() {
+    let signed = sign_form("Approval").expect("sign");
+    let doc = lopdf::Document::load_mem(&signed).expect("load");
+
+    // The field the user picked now has a value…
+    let approval = signature_field(&doc, "Approval").expect("the Approval field");
+    let sig_ref = approval
+        .get(b"V")
+        .and_then(lopdf::Object::as_reference)
+        .expect("/V on the field we signed");
+    assert_eq!(
+        doc.get_object(sig_ref)
+            .and_then(lopdf::Object::as_dict)
+            .and_then(|d| d.get(b"Type"))
+            .and_then(lopdf::Object::as_name)
+            .ok(),
+        Some(b"Sig".as_slice())
+    );
+
+    // …and the other one does not.
+    let counter = signature_field(&doc, "Countersign").expect("the Countersign field");
+    assert!(
+        !counter.has(b"V"),
+        "signing one field filled in the other as well"
+    );
+}
+
+// The field keeps its own geometry: it is the box the recipient is looking at,
+// and moving or resizing it would be a different document than the one they
+// were sent.
+#[test]
+fn the_fields_own_rectangle_is_left_alone() {
+    let signed = sign_form("Approval").expect("sign");
+    let doc = lopdf::Document::load_mem(&signed).expect("load");
+    let rect = signature_field(&doc, "Approval")
+        .expect("the field")
+        .get(b"Rect")
+        .and_then(lopdf::Object::as_array)
+        .expect("/Rect")
+        .iter()
+        .map(|o| o.as_float().unwrap_or(0.0))
+        .collect::<Vec<_>>();
+
+    assert_eq!(rect, vec![130.0, 630.0, 330.0, 665.0]);
+}
+
+// No second field, and no second entry in /AcroForm /Fields. A stray invisible
+// field is exactly what this feature exists to avoid.
+#[test]
+fn no_extra_field_is_created() {
+    let signed = sign_form("Approval").expect("sign");
+    let doc = lopdf::Document::load_mem(&signed).expect("load");
+
+    let fields = acroform(&doc)
+        .get(b"Fields")
+        .and_then(lopdf::Object::as_array)
+        .expect("/Fields")
+        .len();
+    assert_eq!(fields, 2, "the form gained or lost a field");
+}
+
+// The whole point is that it is a real signature, not a picture in a box.
+#[test]
+fn openssl_verifies_a_signature_placed_in_a_field() {
+    let Some(openssl) = openssl_path() else {
+        eprintln!("openssl not found; skipping the differential check");
+        return;
+    };
+    let signed = sign_form("Approval").expect("sign");
+    let (der, message) = extract(&signed);
+
+    let sig = Temp::new("der", &der);
+    let content = Temp::new("bin", &message);
+    let out = Command::new(openssl)
+        .args(["cms", "-verify", "-binary", "-inform", "DER", "-in"])
+        .arg(&sig.0)
+        .arg("-content")
+        .arg(&content.0)
+        .args(["-noverify", "-out", "/dev/null"])
+        .output()
+        .expect("run openssl");
+
+    assert!(
+        out.status.success(),
+        "openssl rejected a field signature:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// Overwriting an existing signature replaces somebody else's work with ours,
+// and their signature covers bytes that would no longer exist — the result
+// reads as a forgery rather than as a counter-signature.
+#[test]
+fn a_field_that_is_already_signed_is_refused() {
+    let once = sign_form("Approval").expect("sign");
+    let err = sign_document(&once, &into_field("Approval"), &cert("signer.pfx"), "test123")
+        .unwrap_err();
+
+    let msg = format!("{err:?}");
+    assert!(msg.contains("already been signed"), "unhelpful refusal: {msg}");
+    assert!(msg.contains("destroy"), "the refusal should say what is at stake: {msg}");
+}
+
+#[test]
+fn a_field_that_does_not_exist_is_refused_by_name() {
+    let err = sign_form("NoSuchField").unwrap_err();
+    assert!(format!("{err:?}").contains("NoSuchField"));
+}
+
+// The UI needs to know whether to offer field signing at all.
+#[test]
+fn the_empty_fields_are_listed_in_a_stable_order() {
+    let names = unsigned_signature_fields(&fixture("sigfield.pdf")).expect("list");
+    assert_eq!(names, vec!["Approval".to_string(), "Countersign".to_string()]);
+
+    // Once signed, the field stops being on offer.
+    let signed = sign_form("Approval").expect("sign");
+    assert_eq!(
+        unsigned_signature_fields(&signed).expect("list"),
+        vec!["Countersign".to_string()]
+    );
+}
+
+#[test]
+fn a_document_with_no_fields_offers_none() {
+    assert!(unsigned_signature_fields(&fixture("hello.pdf"))
+        .expect("list")
+        .is_empty());
+}
+
+fn signature_field(doc: &lopdf::Document, name: &str) -> Option<lopdf::Dictionary> {
+    doc.objects.values().find_map(|o| {
+        let d = o.as_dict().ok()?;
+        let is_sig = d
+            .get(b"FT")
+            .and_then(lopdf::Object::as_name)
+            .is_ok_and(|ft| ft == b"Sig");
+        let named = d
+            .get(b"T")
+            .and_then(lopdf::Object::as_str)
+            .is_ok_and(|t| t == name.as_bytes());
+        (is_sig && named).then(|| d.clone())
+    })
+}
+
+fn acroform(doc: &lopdf::Document) -> lopdf::Dictionary {
+    let root = doc
+        .trailer
+        .get(b"Root")
+        .and_then(lopdf::Object::as_reference)
+        .expect("/Root");
+    doc.get_object(root)
+        .and_then(lopdf::Object::as_dict)
+        .expect("catalog")
+        .get(b"AcroForm")
+        .and_then(lopdf::Object::as_reference)
+        .and_then(|r| doc.get_object(r))
+        .and_then(lopdf::Object::as_dict)
+        .expect("/AcroForm")
+        .clone()
 }
