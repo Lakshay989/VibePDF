@@ -8,7 +8,7 @@
 //! per string). `FABLE_REVIEW` §3.10 (P4.HF16).
 //!
 //! The per-glyph tables in [`tables`] are **generated** from bundled `PDFium` by
-//! `tests/gen_font_metrics.rs` (offline, no new deps — `PDFium`'s Foxit Core-14
+//! `tests/gen_font_metrics.rs` (offline, no new deps — `PDFium`'s bundled Core-14
 //! substitutes are metric-compatible with Adobe's AFMs). Embedded / non-WinAnsi
 //! text is unaffected: it already carries exact subset widths from the stage-2
 //! embedding path.

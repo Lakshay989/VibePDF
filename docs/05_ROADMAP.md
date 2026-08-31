@@ -59,7 +59,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 - Resize pages
 
 **Acceptance demo:**
-- Open `tests/fixtures/acceptance/p2-multi.pdf`, delete page 3, insert a blank, rotate page 5 by 90°, save. Re-open in Adobe Acrobat: changes are visible and the file is not corrupt.
+- Open `tests/fixtures/acceptance/p2-multi.pdf`, delete page 3, insert a blank, rotate page 5 by 90°, save. Re-open in a mainstream PDF reader: changes are visible and the file is not corrupt.
 - Merge five PDFs from `tests/fixtures/acceptance/p2-merge-*.pdf`. Form fields and bookmarks survive.
 - Split a 100-page PDF into 10 files. Each file opens cleanly.
 
@@ -69,7 +69,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 
 ## Phase 3 — Annotations
 
-**Goal:** Standard PDF annotations that round-trip through Acrobat.
+**Goal:** Standard PDF annotations that round-trip through a mainstream reader.
 
 **Scope:**
 - Highlight, underline, strikethrough, squiggly
@@ -85,8 +85,8 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 - Flatten annotations
 
 **Acceptance demo:**
-- Add five annotations of different types to `tests/fixtures/acceptance/p3-doc.pdf`. Save. Open in Acrobat Reader, iOS Books, and Okular. All five render correctly in all three.
-- Open `tests/fixtures/acceptance/p3-annotated.pdf` (annotated in Acrobat). All annotations show up in our sidebar with correct authors and timestamps.
+- Add five annotations of different types to `tests/fixtures/acceptance/p3-doc.pdf`. Save. Open in three independent readers. All five render correctly in all three.
+- Open `tests/fixtures/acceptance/p3-annotated.pdf` (annotated in a mainstream reader). All annotations show up in our sidebar with correct authors and timestamps.
 - Export to XFDF, delete all annotations, re-import the XFDF: annotations restored identically.
 
 **Spec lines covered:** P3-ANN-001 through P3-ANN-011.
@@ -114,7 +114,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 - Bates numbering
 
 **Acceptance demo:**
-- Open `tests/fixtures/acceptance/p4-edit-typo.pdf` (a real contract with a typo). Edit the typo. Save. Diff the result against Acrobat's edit of the same document — text is in the same position, same font, no visual drift.
+- Open `tests/fixtures/acceptance/p4-edit-typo.pdf` (a real contract with a typo). Edit the typo. Save. Diff the result against a mainstream reader's edit of the same document — text is in the same position, same font, no visual drift.
 - Add a watermark to a 50-page PDF in under 2 seconds.
 - Add Bates numbers across three merged PDFs starting at "ABC000001" — confirm sequence is correct on every page.
 
@@ -139,7 +139,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 - Flatten forms
 
 **Acceptance demo:**
-- Fill out `tests/fixtures/acceptance/p5-irs-w9.pdf` (a real IRS W-9 form). Save. Open in Acrobat: all fields show the values; the form is still interactive.
+- Fill out `tests/fixtures/acceptance/p5-irs-w9.pdf` (a real IRS W-9 form). Save. Open in a mainstream reader: all fields show the values; the form is still interactive.
 - Create a new form from scratch with 8 fields of various types. Export the data after filling. Re-import to a blank copy: fields are filled identically.
 
 **Spec lines covered:** P5-FORM-001 through P5-FORM-010.
@@ -162,7 +162,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 - Metadata cleaning
 
 **Acceptance demo:**
-- Sign `tests/fixtures/acceptance/p6-contract.pdf` with a test certificate. Open in Acrobat: signature is verified as valid, chain shown.
+- Sign `tests/fixtures/acceptance/p6-contract.pdf` with a test certificate. Open in a mainstream reader: signature is verified as valid, chain shown.
 - Redact an SSN from `tests/fixtures/acceptance/p6-document.pdf`. Use `pdftotext` on the result: the SSN does not appear in the extracted text.
 - Encrypt a PDF with both user and owner passwords. Open with only the user password: print is blocked. Open with the owner password: print works.
 
@@ -226,7 +226,7 @@ The product is "done" in the sense that it meets the original vision. Future dir
 - Plugin/extension system (JS plugins via a sandboxed runtime)
 - Real-time collaborative annotations (via a shared annotation file format, not a server)
 - Mobile (Tauri 2 mobile)
-- Acrobat-compatible JavaScript form actions
+- a mainstream reader-compatible JavaScript form actions
 - Document comparison (visual + text diff)
 - A11y audit and tagging editor
 - Custom branding / theming (for orgs that want to ship a re-skinned VibePDF internally)

@@ -5,7 +5,7 @@
 
 ## What we are building
 
-VibePDF is an **offline, free, open-source PDF editor** for Windows / macOS / Linux. The goal is to match Adobe Acrobat Pro on its core editing surface, with no paywall, no account, and no telemetry. See `docs/01_VISION.md` for the full pitch.
+VibePDF is an **offline, free, open-source PDF editor** for Windows / macOS / Linux. The goal is to match the paid editors on its core editing surface, with no paywall, no account, and no telemetry. See `docs/01_VISION.md` for the full pitch.
 
 ## Read these in order on first session
 

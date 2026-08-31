@@ -4,7 +4,7 @@
 //!
 //!   node scripts/cargo-test.mjs --test gen_font_metrics -- --ignored --nocapture
 //!
-//! Widths are sourced from the **bundled PDFium** (its Foxit Core-14
+//! Widths are sourced from the **bundled PDFium** (its bundled Core-14
 //! substitutes are metric-compatible with Adobe's AFMs — verified: Helvetica
 //! 'A'=667, 'W'=944, 'i'=222, 'm'=833, '0'=556). No network, no new deps.
 //! Each glyph's advance is measured as `width("A" + c + "A") − width("AA")`,

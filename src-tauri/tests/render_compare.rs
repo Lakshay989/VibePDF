@@ -7,10 +7,10 @@
 //!
 //! ## Phase-1 interpretation of P1-VIEW-004
 //!
-//! The spec's bar is "same pixel-fidelity as Adobe Acrobat for the W3C
-//! conformance suite." We have neither Acrobat output nor that suite
+//! The spec's bar is "same pixel-fidelity as a mainstream PDF reader for the W3C
+//! conformance suite." We have neither a mainstream reader output nor that suite
 //! checked in, so this *scaffold* compares against a golden produced by
-//! our **own** pipeline — a regression baseline, not an Acrobat
+//! our **own** pipeline — a regression baseline, not an a mainstream reader
 //! reference. The real conformance comparison is future work; this is
 //! the machinery it will plug into. (Step title: "scaffold".)
 //!
@@ -139,7 +139,7 @@ fn write_log(rows: &[(&Case, Option<String>)]) {
     md.push_str("> SPEC: P1-VIEW-004 — render fidelity.\n>\n");
     md.push_str("> Phase-1 interpretation: each fixture's render must match its committed\n");
     md.push_str("> golden, a regression baseline produced by our own PDFium pipeline —\n");
-    md.push_str("> **not** an Adobe Acrobat reference. The real Acrobat / W3C conformance\n");
+    md.push_str("> **not** an a mainstream PDF reader reference. The real a mainstream reader / W3C conformance\n");
     md.push_str("> comparison is future work; this scaffold is the machinery it plugs into.\n>\n");
     md.push_str("> Regenerate goldens after an intentional renderer change:\n>\n");
     md.push_str(">     cargo test --manifest-path src-tauri/Cargo.toml -- --ignored bless_goldens\n>\n");

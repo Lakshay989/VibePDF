@@ -271,7 +271,7 @@ fn fix_permissions_entry(doc: &mut Document, key: &[u8; KEY_BYTES]) -> Result<()
 pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, CommandError> {
     let user = opts.user_password.as_deref().unwrap_or("");
     // An omitted owner password becomes the user password, so the document
-    // always has a credential with full rights. This is what Acrobat does when
+    // always has a credential with full rights. This is what a mainstream reader does when
     // only an open password is set.
     let owner = opts.owner_password.as_deref().unwrap_or(user);
 

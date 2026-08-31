@@ -225,7 +225,7 @@ fn an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect(
     );
 }
 
-/// SPEC: P6-SEC-004 (P6.A5a) — a file to open in Acrobat / Preview / a third
+/// SPEC: P6-SEC-004 (P6.A5a) — a file to open in a mainstream reader / Preview / a third
 /// reader. A passing test does not prove the PDF is valid to other viewers, and
 /// transparency is exactly the sort of thing one renderer gets right and
 /// another does not.

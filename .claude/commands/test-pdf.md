@@ -16,9 +16,9 @@ For the target file (or each fixture):
 
 ## 2. Cross-viewer reminder
 
-You cannot open Acrobat/Preview/Okular yourself. After the structural checks, explicitly remind the human:
+You cannot open several independent readers yourself. After the structural checks, explicitly remind the human:
 
-> "Structural checks complete. These do NOT prove cross-viewer compatibility. Please open the output in: (1) Adobe Acrobat Reader, (2) macOS Preview or Edge's built-in viewer, (3) a third reader like Okular or Sumatra. Confirm it renders identically in all three."
+> "Structural checks complete. These do NOT prove cross-viewer compatibility. Please open the output in: (1) a mainstream PDF reader, (2) a platform viewer, (3) a third independent reader. Confirm it renders identically in all three."
 
 ## 3. Operation regression
 

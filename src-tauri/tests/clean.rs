@@ -304,7 +304,7 @@ fn a_document_with_nothing_to_clean_is_handled() {
     drop(doc);
 }
 
-/// SPEC: P6-SEC-012 — a file to open in Acrobat / Preview / a third reader.
+/// SPEC: P6-SEC-012 — a file to open in a mainstream reader / Preview / a third reader.
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {

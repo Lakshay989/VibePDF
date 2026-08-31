@@ -4,7 +4,7 @@
 
 ---
 
-I'm building VibePDF, an offline open-source PDF editor that aims to match Acrobat Pro on its core editing surface, with no paywall. The project is brand-new — the only thing in this repo right now is a `docs/` folder, a `CLAUDE.md`, and a `.claude/` config.
+I'm building VibePDF, an offline open-source PDF editor that aims to match the paid editors on its core editing surface, with no paywall. The project is brand-new — the only thing in this repo right now is a `docs/` folder, a `CLAUDE.md`, and a `.claude/` config.
 
 Before you do anything else:
 

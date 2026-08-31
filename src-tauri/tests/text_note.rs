@@ -190,7 +190,7 @@ async fn read_notes_tracks_undo_and_redo() {
 }
 
 /// Writes a note-bearing PDF to the git-ignored `Sample PDFs/` for the manual
-/// cross-reader ritual (Acrobat / Preview / Okular). Ignored; run on demand:
+/// cross-reader ritual (several independent readers). Ignored; run on demand:
 ///   cargo test --test text_note note_writes_verification_artifact -- --ignored
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]

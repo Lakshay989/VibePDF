@@ -181,7 +181,7 @@ async fn save_as_then_same_path_save_is_noop() {
 }
 
 /// Writes a real saved PDF to `/tmp/vibepdf-verify.pdf` for the manual
-/// cross-reader verification ritual (Acrobat / Preview / a third reader).
+/// cross-reader verification ritual (a mainstream reader / Preview / a third reader).
 /// Ignored by default — produces an artifact, so run on demand:
 ///   cargo test --test save_noop save_writes_verification_artifact -- --ignored
 #[tokio::test]

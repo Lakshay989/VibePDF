@@ -33,7 +33,7 @@ Tick a box when done. When a step's checks pass, flip its status in
 
 ## A. Cross-reader PDF checks
 
-Open each in **Adobe Acrobat + macOS Preview + a third reader** (Chrome
+Open each in **a mainstream PDF reader + a platform viewer + a third reader** (Chrome
 works as the third). A passing unit test does *not* prove cross-reader
 validity.
 
@@ -230,7 +230,7 @@ the rest still want a pass.
   **shows in the main view** (the PDF.js canvas renders the `/AP`). **Cmd+Z**
   removes it; **Cmd+S** → reopen in VibePDF → still there. Then the
   **cross-reader**: open `Sample PDFs/vibepdf-verify-highlight.pdf` (and your own
-  saved file) in **Preview + Chrome + Acrobat** — the highlight must be visible
+  saved file) in **Preview + Chrome + a mainstream reader** — the highlight must be visible
   and correctly placed over the text. Repeat for underline/strikethrough/squiggly.
   → on pass, flip **P3.B1b** to `[x]`. *(If the highlight does NOT appear in the
   main view, tell me — the fallback is overlay-rendering committed markup.)*
@@ -297,7 +297,7 @@ testing — never the committed fixtures.** (PDFs you edit get saved in place.)
 ### Confirmed NOT bugs (expected behavior)
 - **"No bookmarks" in Apple Preview** — Preview doesn't surface PDF `/Outlines`
   in its default sidebar. Bookmarks are present in the bytes (verified for
-  merged + pruned). Use **Acrobat**, or Preview → **View → Table of Contents**.
+  merged + pruned). Use **a mainstream reader**, or Preview → **View → Table of Contents**.
 - **"Can't edit the page text"** — text editing isn't a Phase 2 feature; it's
   Phase 3 (redact + reflow). Preview also can't edit arbitrary PDF text.
 - **No per-page thumbnails in Preview** for these small hand-built PDFs — a

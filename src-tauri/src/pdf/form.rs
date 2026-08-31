@@ -409,7 +409,7 @@ pub(crate) fn decode_pdf_text_string(raw: &[u8]) -> String {
 }
 
 /// Encode a string as a PDF text string: a literal for ASCII, else UTF-16BE with
-/// a `FEFF` BOM (what Acrobat expects for non-Latin field values).
+/// a `FEFF` BOM (what a mainstream reader expects for non-Latin field values).
 fn encode_pdf_text_string(s: &str) -> Object {
     if s.is_ascii() {
         Object::string_literal(s)

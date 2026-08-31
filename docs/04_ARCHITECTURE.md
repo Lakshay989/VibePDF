@@ -259,7 +259,7 @@ shared click/multi-click lifecycle is well overdue (BACKLOG).
 
 **C4b** completes the interop half: `add_measure` also attaches a rectilinear
 **`/Measure`** dict (§12.9 — `/X`/`/D`/`/A` `NumberFormat`s; `/X /C` *is* the
-calibration, units per point), so Acrobat & co. re-measure *live* against the raw
+calibration, units per point), so a mainstream reader & co. re-measure *live* against the raw
 geometry rather than trusting our baked `/Contents` label. The `/Measure` dict is
 also how the calibration **persists**: `read_measure_calibration` reads it back,
 and `use-calibration-sync` re-seeds `measure-store` on reopen (guarded so it never
@@ -299,7 +299,7 @@ flat (orphan- and cycle-safe); the sidebar renders the root row + nested replies
 an inline composer, and filters operate on roots only.
 
 **XFDF interchange (P3.E1, P3-ANN-010)** lives in **`pdf/xfdf.rs`** — the one place
-that maps between annotation dicts and the XFDF (XML) sidecar Acrobat uses to ship
+that maps between annotation dicts and the XFDF (XML) sidecar a mainstream reader uses to ship
 markup separately from the PDF. **Export** (`annotations_to_xfdf`, a read-only
 `ExportAnnotations` actor query that writes the file like `extract_pages` writes
 `dest`) walks the raw dicts and emits one element per `/Subtype` with full geometry
@@ -805,7 +805,7 @@ cache *derived views* or *previews*.
 
 ## WebView quirks
 
-The frontend runs in the OS-native webview (Tauri 2), **not** Chromium — so it
+The frontend runs in the OS-native webview (Tauri 2), **not** a major browser — so it
 is not a Chrome-equivalent. Behaviour differs per platform, and on macOS the
 webview is **WKWebView**.
 

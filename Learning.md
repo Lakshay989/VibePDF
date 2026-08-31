@@ -61,7 +61,7 @@ These two halves talk over a typed JSON RPC ("Tauri commands"). Nothing more.
 | **Tailwind CSS 4** | Utility-first CSS — instead of writing class names like `.button-primary`, you compose visual properties inline (`px-3 py-1 bg-blue-500 rounded`). | Matches tool UIs where dozens of small controls share styling. No design-system overhead. |
 | **zustand 5** | Tiny global state library. Each "store" is a hook (`useDocumentStore`) that components subscribe to. | No boilerplate, scales fine, no Redux. |
 | **pdfjs-dist 5** | Mozilla's PDF renderer — the same one that ships in Firefox. We use it for *viewing only*. | Most battle-tested PDF renderer in the world; permissive license; excellent text-layer support. |
-| **pdfium-render 0.9** | Rust bindings to Google's PDFium (the engine inside Chromium). We use it for *all mutation*. | BSD-licensed. Full surface area: text edit, annotation, forms, signatures. Single-threaded per document — see the actor pattern below. |
+| **pdfium-render 0.9** | Rust bindings to Google's PDFium (the engine inside a major browser). We use it for *all mutation*. | BSD-licensed. Full surface area: text edit, annotation, forms, signatures. Single-threaded per document — see the actor pattern below. |
 
 ### Why two PDF engines?
 
@@ -581,7 +581,7 @@ be "put the world in the known starting state."
 
 #### Problem
 
-A PDF's outline (the "bookmarks" panel in Acrobat) is a tree of named
+A PDF's outline (the "bookmarks" panel in a mainstream reader) is a tree of named
 entries pointing to specific pages. We want to surface it as a
 collapsible sidebar; clicking an entry should call into the
 virtualizer's `scrollToPage` from P1.C1.
@@ -1983,9 +1983,9 @@ collaborate on the same surface.
 
 #### Problem
 
-P1-VIEW-004 sets a high bar — "same pixel-fidelity as Adobe Acrobat for
+P1-VIEW-004 sets a high bar — "same pixel-fidelity as a mainstream PDF reader for
 the W3C conformance suite, failures documented in
-`tests/render-failures.md`." We have neither Acrobat output nor that
+`tests/render-failures.md`." We have neither a mainstream reader output nor that
 suite checked in. E2's job (per its title) is the *scaffold*: stand up
 the comparison machinery + the failures log now, so the real
 conformance work later just plugs into it.
@@ -1993,13 +1993,13 @@ conformance work later just plugs into it.
 #### Concepts learned
 
 - **A scaffold reinterprets an unreachable spec into a reachable
-  invariant.** The literal spec needs Acrobat; the Phase-1 reading is
+  invariant.** The literal spec needs a mainstream reader; the Phase-1 reading is
   "match a committed golden produced by our own pipeline" — i.e. a
   **regression** baseline, not a fidelity reference. That's an honest
   narrowing: it catches *our renderer changing unexpectedly* (real
-  value) without pretending to verify Acrobat-equivalence (which we
+  value) without pretending to verify a mainstream reader-equivalence (which we
   can't yet). The distinction is documented in the log header and
-  PROVENANCE so nobody mistakes the golden for an Acrobat truth.
+  PROVENANCE so nobody mistakes the golden for an a mainstream reader truth.
 - **Compare decoded pixels, not encoded bytes.** Goldens are stored as
   PNG (human-viewable — you can open it and see "Hello, VibePDF."), but
   the comparison renders to **RGBA8** and decodes the golden to RGBA8,
@@ -2033,7 +2033,7 @@ conformance work later just plugs into it.
 | `src-tauri/tests/render_compare.rs` | The harness/test. `CASES` table → render to RGBA8 → decode golden → compare within tolerance → rewrite the log. Gate test `renders_match_goldens` (fails on divergence); `#[ignore] bless_goldens` regenerates goldens. |
 | `tests/render-failures.md` | The committed log in its clean "no failures" state. Header documents the Phase-1 interpretation + tolerance + regen command. |
 | `tests/fixtures/golden/hello-p0-72dpi.png` | Committed golden (612×792 RGBA, self-generated). |
-| `tests/fixtures/PROVENANCE.md` | Golden provenance row (self-baseline, not Acrobat). |
+| `tests/fixtures/PROVENANCE.md` | Golden provenance row (self-baseline, not a mainstream reader). |
 
 #### Deviations from the step doc
 
@@ -2043,7 +2043,7 @@ conformance work later just plugs into it.
   lives in `src-tauri/tests/`. (`docs/04`'s `tests/integration/` is
   aspirational/unused.) The log stays at the spec-mandated
   `tests/render-failures.md`.
-- **Golden is a self-render, not Acrobat output** (see above).
+- **Golden is a self-render, not a mainstream reader output** (see above).
 
 #### Further reading
 
@@ -3119,7 +3119,7 @@ Produce a new PDF containing exactly the chosen pages, with their resources
 
 #### Problem
 
-Acrobat lets you break one PDF into many. The spec (P2-PAGE-007) wants four
+a mainstream reader lets you break one PDF into many. The spec (P2-PAGE-007) wants four
 ways to choose the cut points: every N pages, at specific pages, by file-size
 target, and by top-level bookmarks. Each produces N separate files.
 
@@ -3385,7 +3385,7 @@ to *rewrite* those. We needed a tool that can.
 
 #### Problem
 
-Drag a page thumbnail to a new slot and the document reorders — Acrobat's
+Drag a page thumbnail to a new slot and the document reorders — a mainstream reader's
 bread-and-butter page management, and the first feature built on the lopdf
 COS layer. It was *blocked* (not just partial) before lopdf: PDFium exposes no
 way to reorder the page tree.
@@ -3949,7 +3949,7 @@ builds both, preview-only — the actual PDF write is B1b.
 #### Problem
 
 B1a previewed highlights in an overlay; they vanished on reload. B1b makes them
-**real**: a standard PDF annotation, written into the file, visible in Acrobat /
+**real**: a standard PDF annotation, written into the file, visible in a mainstream reader /
 Preview / Chrome and undoable — the first time we write an *annotation* to a PDF.
 
 #### Concepts learned
@@ -3958,7 +3958,7 @@ Preview / Chrome and undoable — the first time we write an *annotation* to a P
   *what* it is: `/Subtype /Highlight`, `/QuadPoints` (the marked rectangles),
   `/C` (colour), `/Rect`, `/P` (its page). The **`/AP`** ("appearance") says *how
   to draw it* — a little embedded form (a Form XObject) with a content stream.
-  Acrobat can regenerate appearances from `/QuadPoints`+`/C`, but Preview/PDF.js
+  a mainstream reader can regenerate appearances from `/QuadPoints`+`/C`, but Preview/PDF.js
   largely won't, so **shipping an `/AP` is what makes the markup show everywhere**.
 - **Generating an appearance stream.** The `/AP` is drawn in the page's own
   coordinates by setting the form's `/BBox == /Rect` with an identity matrix —
@@ -4825,7 +4825,7 @@ Distance / perimeter / area tools that report a real-world value — which needs
   **`/IT`** (`LineDimension`/…). So the geometry + `/AP` reuse the shape writers;
   the only new bits are the `/IT` tag and a value label baked into `/Contents` +
   the `/AP`. Read-back keys off `/IT` to surface it as "measure", not the bare
-  shape — the inverse of how we *write* it. (Acrobat's live `/Measure` dict, which
+  shape — the inverse of how we *write* it. (a mainstream reader's live `/Measure` dict, which
   would let it re-measure from raw scale, is deferred to C4b; our baked label
   renders everywhere meanwhile.)
 - **One overlay, two jobs, via a store flag.** Calibration and measurement are
@@ -4877,7 +4877,7 @@ collaboration loop, persisted in the PDF so other readers see the thread.
   for "where does this annotation belong?" lives at the *read* boundary, once.
 - **Threading is tree-walking with guards.** `buildThreads` finds each reply's
   thread **root** by walking `inReplyTo` upward, then flattens all descendants
-  under that root (Acrobat shows one indent level, chronological — simpler than
+  under that root (a mainstream reader shows one indent level, chronological — simpler than
   arbitrary nesting). Real PDFs are hostile: a reply whose parent was deleted
   (**orphan**) must still show (treat it as its own root, don't drop data), and a
   malformed **cycle** (`a→b→a`) must not infinite-loop (a `seen` set caps the
@@ -4911,7 +4911,7 @@ collaboration loop, persisted in the PDF so other readers see the thread.
 #### Problem
 
 Markup is only useful if it can leave the app. **XFDF** (XML Forms Data Format)
-is the file Acrobat and other readers use to ship annotations *separately* from
+is the file a mainstream reader and other readers use to ship annotations *separately* from
 the PDF — a reviewer exports their comments, emails the small XML, and the author
 imports them onto their own copy. P3-ANN-010 asks for a round-trip: export every
 annotation, re-import it, get it back identically.
@@ -4948,8 +4948,8 @@ annotation, re-import it, get it back identically.
   XFDF subset: elements, attributes, self-closing tags, the five named entities +
   numeric (`&#65;`/`&#x41;`), comments/PIs/DOCTYPE skipped, CDATA handled. It's
   **lenient on import** (numeric lists split on comma *or* semicolon *or*
-  whitespace, so Acrobat's quirks parse) and **strict on output** (we emit clean
-  comma-separated lists Acrobat reads). Malformed input fails cleanly — never
+  whitespace, so a mainstream reader's quirks parse) and **strict on output** (we emit clean
+  comma-separated lists a mainstream reader reads). Malformed input fails cleanly — never
   panics — which the unit tests pin down by feeding it garbage.
 
 #### Files in this step
@@ -5043,7 +5043,7 @@ save and reopen.
 #### Problem
 
 C4a let you calibrate a scale and drew the measured value as a *label*. But that
-label is just baked text — open the PDF in Acrobat and its measuring tool reports
+label is just baked text — open the PDF in a mainstream reader and its measuring tool reports
 the raw point distance, not "4 m," because nothing in the file says *what one
 point is worth*. C4b writes that scale in the form readers understand, and makes
 the calibration survive a save/reopen.
@@ -5056,7 +5056,7 @@ the calibration survive a save/reopen.
   display), `/A` (area display). The whole calibration is one number: `/X[0] /C`
   = real units per point. `/D 100` means "round to 1/100" (our 2-dp). Area works
   because the reader squares the X scale — matching our `polygonArea · upp²`. Now
-  Acrobat re-measures *live* off the geometry; our baked `/Contents` label is just
+  a mainstream reader re-measures *live* off the geometry; our baked `/Contents` label is just
   the fallback.
 
 - **Persisting state = writing it into the artifact, then reading it back.** The
@@ -5831,8 +5831,8 @@ fixture's own bordered link. Add an opt-in appearance: a box, an underline, or i
   identically everywhere is a generated **appearance stream** (`/AP`): a Form XObject whose content
   you draw yourself. We attach an `/AP` that strokes the rectangle (box) or a bottom rule (underline),
   and *also* set `/C` + `/BS` as a fallback hint. This is the project's recurring "draw your own `/AP`"
-  pattern (markup, free-text, stamps all do it) — the lesson is: if it must look the same in Acrobat,
-  Preview, and Okular, don't rely on the reader's default rendering of a structural key.
+  pattern (markup, free-text, stamps all do it) — the lesson is: if it must look the same in a mainstream reader,
+  and other independent readers, don't rely on the reader's default rendering of a structural key.
 - **Appearance streams draw in their own coordinate space.** A Form XObject has a `BBox` and a
   matrix; with `BBox == Rect` and the identity matrix, form space == page space, so the content
   draws in absolute page coordinates — no translation math. (Same trick the markup `/AP` uses.)
@@ -5991,7 +5991,7 @@ of a document. The spec's third background source, and the only one that's genui
   pages can point at. The standard move is to convert it into a **Form XObject** — a self-contained
   bundle of `(BBox, /Resources, content stream)` that *is* referable and paintable with `Do`. So
   "page as background" = "import page → Form XObject → `Do` it behind content." This is the same
-  primitive Acrobat calls a "stamp," and it's the building block for N-up, booklets, and overlays.
+  primitive a mainstream reader calls a "stamp," and it's the building block for N-up, booklets, and overlays.
 - **Cross-document object ids collide; renumber first.** The source and destination each number
   their objects from 1, so copying source object `6 0 R` into a dest that already has a `6 0 R`
   would clobber it. lopdf's `renumber_objects_with(dest.max_id + 1)` shifts the *whole* source above
@@ -6841,7 +6841,7 @@ dates drifted several points and centred titles sat slightly off.
   face, indexed by the encoding byte (WinAnsi here).
 - **Source data from a tool you already ship.** The AFM widths weren't available
   offline and we won't fabricate 2,048 integers. But **PDFium is already bundled**
-  and lays base-14 text out using AFM-compatible metrics (its Foxit substitutes).
+  and lays base-14 text out using AFM-compatible metrics (its bundled substitutes).
   A throwaway spike measured a few glyphs (`'A'`→667, `'W'`→944) and they matched
   Adobe AFM exactly — so a small `#[ignore]`d generator measures every glyph and
   writes `font_metrics/tables.rs`. Zero network, zero new deps.
@@ -7902,7 +7902,7 @@ The spec also says respect `/MaxLen`, and values can be non-Latin.
 - **`/NeedAppearances`** — an AcroForm flag that tells a viewer "my `/AP`s are
   stale — regenerate them from `/V` on open." Setting it (and dropping the stale
   `/AP`) is the cheap, well-supported alternative to generating appearances
-  ourselves. Acrobat/Preview honour it; that's why the saved file shows the value.
+  ourselves. a mainstream reader/Preview honour it; that's why the saved file shows the value.
 - **The overlay is the in-app display** — our PDF.js view doesn't regenerate field
   appearances, so the value wouldn't show on our canvas. Instead the fill input
   sits *over* the field and shows the value directly. That also means filling is a
@@ -7913,7 +7913,7 @@ The spec also says respect `/MaxLen`, and values can be non-Latin.
   chain; a field's identity is its **fully-qualified name** (parent names joined
   by `.`).
 - **PDF text strings** — ASCII goes in a literal; non-Latin is UTF-16BE with a
-  `FEFF` BOM (what Acrobat expects). Reading back detects the BOM to decode.
+  `FEFF` BOM (what a mainstream reader expects). Reading back detects the BOM to decode.
 
 ### Design choices
 - **NeedAppearances over `/AP` generation.** Cost: our own PDF.js canvas won't
@@ -8047,7 +8047,7 @@ move is to say so and offer a graceful exit — not to fail silently or pretend.
 
 ### Concepts learned
 - **AcroForm vs XFA vs hybrid** — AcroForm is the classic widget/field model;
-  XFA is Adobe's dynamic XML form. A *hybrid* has both (the AcroForm is a static
+  XFA is a dynamic XML form format. A *hybrid* has both (the AcroForm is a static
   shadow of the XFA); *XFA-only* dynamic forms have an empty/absent AcroForm
   `/Fields`. We detect XFA-only as `has_xfa && field_count == 0` (reusing the A1
   summary) — a hybrid keeps Form mode and shows no warning.
@@ -8314,7 +8314,7 @@ as-is would have thrown away every value the user typed.
 - **The bug hiding inside "just reuse it"** — filling a text field (P5.A2) sets
   `/V`, **deletes** the widget's `/AP`, and sets `AcroForm /NeedAppearances true`.
   That is correct: it tells the viewer "regenerate the look from the value", which
-  is how you avoid re-implementing Acrobat's text layout. But it means a filled
+  is how you avoid re-implementing a mainstream reader's text layout. But it means a filled
   field has **no appearance stream**. P3's flatten bakes `/AP` into page content —
   so on a filled form it would have found nothing to bake, dropped the widget, and
   produced a blank page. The fix isn't a flag; it's an extra pass that *builds*
@@ -8440,7 +8440,7 @@ adding more tests of the kind already written — which is the interesting part.
 - **A field that draws nothing reads as a broken feature.** The signature field
   set `/FT /Sig` and no `/AP`, which is *legal* and invisible. The count went up,
   the page didn't change, and the reasonable conclusion was "signature is
-  broken". Acrobat draws a placeholder box; now so do we. Correct-but-invisible
+  broken". a mainstream reader draws a placeholder box; now so do we. Correct-but-invisible
   is a bug in everything except the spec.
 - **`/MK /CA` is data, `/AP` is pixels.** The push-button stored its caption in
   the right place per spec — and nothing rendered it, because a viewer paints the
@@ -8971,7 +8971,7 @@ signature the dialog had armed a moment earlier.
   always to watch the new test fail first.
 
 ### Follow-up: the refusal was wrong, and a real document proved it
-Opening the fixture in macOS Preview showed Preview happily offering to put a
+Opening the fixture in a platform viewer showed Preview happily offering to put a
 signature on the same `/Sig` fields VibePDF was refusing. Inspecting the saved
 file settled what that means: no `/ByteRange`, no `/Adobe.PPKLite`, both `/Sig`
 fields still without a `/V`. Preview's signature feature places an **image
@@ -9536,7 +9536,7 @@ cryptographically valid, chain-trusted, modified-after-signing, expired.
 
 - **The honest answer to "is this trusted?" is often "I can't tell."** Trust
   means checking against a list of roots someone vouches for. For document
-  signing that's Adobe's AATL or the EU trust list; neither is redistributable,
+  signing that is AATL or the EU trust list; neither is redistributable,
   and neither is the TLS root store you already have. So `ChainStatus` has no
   `Trusted` variant at all — the type makes the claim unrepresentable rather
   than leaving it to a comment. Every self-signed certificate has an internally

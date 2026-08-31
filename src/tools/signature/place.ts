@@ -13,7 +13,7 @@
 // inches lower, on the ruled line, produces exactly the same document — and
 // that was always allowed. The `/Sig` rectangle is not what makes it look
 // signed; the picture is. Nothing here ever writes `/V`, so a reader that
-// checks sees an unsigned field either way. macOS Preview's signature feature
+// checks sees an unsigned field either way. a platform viewer's signature feature
 // does precisely this and calls it signing.
 //
 // So refusing blocked the most natural action in the document — signing on the

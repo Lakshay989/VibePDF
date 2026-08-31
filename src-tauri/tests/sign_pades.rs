@@ -231,7 +231,7 @@ fn openssl_path() -> Option<&'static str> {
         })
 }
 
-/// SPEC: P6-SEC-005 — a signed file to open in Acrobat.
+/// SPEC: P6-SEC-005 — a signed file to open in a mainstream reader.
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {
@@ -408,7 +408,7 @@ fn a_certified_document_still_opens() {
     drop(doc);
 }
 
-/// SPEC: P6-SEC-005 — a certified file for Acrobat.
+/// SPEC: P6-SEC-005 — a certified file for a mainstream reader.
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_certified_artifact() {

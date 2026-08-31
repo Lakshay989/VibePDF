@@ -4,7 +4,7 @@
 
 **VibePDF is the PDF editor people wish existed.**
 
-In May 2026, every functional PDF editor on the market is either paywalled (Acrobat Pro at $20+/month, Nitro at $180/year, Foxit at $135/year), limited to a handful of uses per day (Smallpdf, iLovePDF), or both. The free options either upload your documents to a server (privacy disaster for any sensitive document) or are missing the features people actually use (LibreOffice Draw cannot edit existing text reliably; Stirling PDF is impressive but requires Docker and has no native text editing).
+In May 2026, every functional PDF editor on the market is either paywalled behind a subscription or a licence fee, limited to a handful of uses per day, or both. The free options either upload your documents to a server (privacy disaster for any sensitive document) or are missing the features people actually use — reliable editing of existing text is the usual gap, and the ones that come closest are server tools that expect you to run a container rather than open an app.
 
 There is no offline, free, full-featured PDF editor for desktop in 2026.
 
@@ -12,7 +12,7 @@ VibePDF fills that gap.
 
 ## What success looks like
 
-A user who has been paying for Acrobat Pro can install VibePDF, open any PDF they have, and within five minutes do every one of these things without hitting a feature wall or a sign-up flow:
+A user who has been paying for a commercial editor can install VibePDF, open any PDF they have, and within five minutes do every one of these things without hitting a feature wall or a sign-up flow:
 
 - Edit a typo in existing text without the font getting mangled
 - Highlight, underline, comment on a passage
@@ -39,7 +39,7 @@ Beyond the constraints, the design is guided by five principles when there's a r
 
 ### 1. Round-trip fidelity over feature breadth
 
-If we add a feature that subtly corrupts PDFs that Acrobat opens fine, we have made the product worse, not better. Every write operation must round-trip through a real PDF viewer test. This is more important than checking off a feature list.
+If we add a feature that subtly corrupts PDFs that a mainstream reader opens fine, we have made the product worse, not better. Every write operation must round-trip through a real PDF viewer test. This is more important than checking off a feature list.
 
 ### 2. The 90% feature is better than 10 half-features
 
@@ -47,7 +47,7 @@ Form filling that works on 95% of PDFs in the wild beats form filling, XFA editi
 
 ### 3. Power without obscurity
 
-Keyboard shortcuts match Acrobat where they exist (Cmd/Ctrl+E for edit, Cmd/Ctrl+J for page properties, etc.). Right-click menus expose the deep functionality. The toolbar shows the 12 things 95% of users need. Settings are searchable.
+Keyboard shortcuts match a mainstream reader where they exist (Cmd/Ctrl+E for edit, Cmd/Ctrl+J for page properties, etc.). Right-click menus expose the deep functionality. The toolbar shows the 12 things 95% of users need. Settings are searchable.
 
 ### 4. AI is a feature, not a religion
 
@@ -69,28 +69,35 @@ To prevent scope creep, we name the explicit non-goals up front:
 - **Not mobile.** Tauri 2 supports mobile but we will not target it in v1. Mobile PDF editing has different UX constraints and we will get desktop right first.
 - **Not a cloud SaaS.** There is no server we operate. Optional sync (later) would be BYO-storage (Dropbox, iCloud Drive, etc.) at the filesystem level.
 
-## The competitive frame
+## The gap we are filling
 
-| | Acrobat Pro | Nitro | Foxit | LibreOffice Draw | Stirling PDF | **VibePDF** |
-|---|---|---|---|---|---|---|
-| Price | $20/mo | $180/yr | $135/yr | Free | Free | **Free** |
-| Offline | ✓ | ✓ | ✓ | ✓ | Self-host | **✓** |
-| Edit existing text | ✓ | ✓ | ✓ | Partial | ✗ | **✓** |
-| OCR | ✓ | ✓ | ✓ | ✗ | ✓ | **✓** |
-| Forms (AcroForm) | ✓ | ✓ | ✓ | Partial | ✗ | **✓** |
-| Digital signatures | ✓ | ✓ | ✓ | ✗ | ✗ | **✓** |
-| True redaction | ✓ | ✓ | ✓ | ✗ | ✗ | **✓** |
-| Native desktop | ✓ | ✓ | ✓ | ✓ | Docker only | **✓** |
-| Source available | ✗ | ✗ | ✗ | ✓ | ✓ | **✓** |
-| Account required | ✓ | ✓ | ✓ | ✗ | ✗ | **✓ none** |
+Rather than compare against named products — which dates badly and invites
+argument about someone else's feature list — the bar is stated as capabilities
+VibePDF must have. A user should get **all** of these in one application, free,
+offline, with no account:
 
-The blank cell where every competitor has a paywall and we don't is the entire reason this product exists.
+| Capability | Required |
+|---|---|
+| Price | Free, no subscription, no per-day limit |
+| Works offline | Every feature, with no server component |
+| Edit existing text | Reliably, without mangling fonts |
+| OCR | Bundled, running locally |
+| Forms (`AcroForm`) | Fill, create, export, flatten |
+| Digital signatures | Sign and verify, certificate-based |
+| True redaction | Content removed, not covered |
+| Native desktop | An application, not a container to run |
+| Source available | Readable and buildable by anyone |
+| Account required | None, ever |
+
+The paid tools generally offer the capabilities and charge for them. The free
+tools generally give up one or more of offline, native, or reliable text
+editing. Holding all ten at once is the entire reason this product exists.
 
 ## Why now
 
 Three things have changed since the last serious open-source PDF editor attempt:
 
-1. **PDFium is mature, free, and BSD-licensed.** It's the engine inside Chromium and powers Edge's built-in PDF viewer. The Rust bindings (`pdfium-render`) are production-ready as of 2026.
+1. **PDFium is mature, free, and BSD-licensed.** It is widely deployed in mainstream browsers and viewers. The Rust bindings (`pdfium-render`) are production-ready as of 2026.
 2. **Tauri 2 ships small native desktop apps.** ~8MB installer vs Electron's ~120MB, with similar developer experience. Memory footprint is 30-60% lower. For an editor people might keep open all day, this matters.
 3. **Local LLMs are good enough for document AI.** Llama 3.1 8B and Phi-4 14B running on a consumer GPU can summarize a 20-page document, find PII, and answer questions about it — accurately enough to be useful, locally enough to be private.
 

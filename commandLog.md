@@ -836,10 +836,10 @@ file /tmp/vibepdf-verify.pdf
 #    is exactly why the same-path no-op must skip the write entirely.)
 ```
 
-Awaiting the human cross-reader check (Acrobat / Preview / a third
+Awaiting the human cross-reader check (a mainstream reader / Preview / a third
 reader) before `steps/P2.md` A1 flips `[~]` → `[x]`.
 
-(Human verified the artifact in Preview/Acrobat + re-opened it in VibePDF;
+(Human verified the artifact in Preview/a mainstream reader + re-opened it in VibePDF;
 A1 marked `[x]`.)
 
 ---
@@ -964,7 +964,7 @@ file /tmp/vibepdf-verify-rotated.pdf
 #   PDF document, version 1.4, 1 pages — page 0 /Rotate = 90°.
 ```
 
-Step left `[~]` pending the human cross-reader check (Acrobat / Preview /
+Step left `[~]` pending the human cross-reader check (a mainstream reader / Preview /
 a third reader) of the rotated artifact.
 
 ---
@@ -1368,7 +1368,7 @@ cargo test --test merge merge_writes_verification_artifact \
 
 Full P2-PAGE-008 now met (bookmarks ✅ form fields ✅ collision rename ✅).
 Left `[~]` pending the human cross-reader check (bookmarks panel + form field
-in Acrobat/Preview).
+in a mainstream reader/Preview).
 
 ---
 
@@ -1399,7 +1399,7 @@ cargo test --test insert_from insert_from_writes_verification_artifact \
 ```
 
 Full P2-PAGE-005 now met (content/annotations/dimensions ✅ + form fields ✅).
-Left `[~]` pending the human cross-reader check (fillable field in Acrobat).
+Left `[~]` pending the human cross-reader check (fillable field in a mainstream reader).
 Terminal fields only (kid hierarchies = follow-up).
 
 ---
@@ -1607,7 +1607,7 @@ cargo test --test text_markup markup_writes_verification_artifact \
 
 Rendering decision: the **PDF.js canvas** renders committed markup from `/AP`
 (consistent with every other edit). Left `[~]` pending the human cross-reader
-(Acrobat/Preview/Chrome) + the in-app main-view render check.
+(a mainstream reader/Preview/Chrome) + the in-app main-view render check.
 
 ---
 
@@ -1680,7 +1680,7 @@ cargo test --test text_note note_writes_verification_artifact -- --ignored
 Rendering decision: notes carry **no `/AP`**, so the HTML `NoteLayer` overlay
 draws the icon + popup from the store (vs markup, which the canvas paints from
 `/AP`). Left `[~]` pending the human in-app ritual (place → type → Save → reopen
-→ edit → Delete → ⌘Z → ⌘S) + cross-reader (Acrobat/Preview/Okular). Reopening a
+→ edit → Delete → ⌘Z → ⌘S) + cross-reader (several independent readers). Reopening a
 saved file does not yet repopulate notes in-app — that's **B2b**.
 
 ---
@@ -1770,7 +1770,7 @@ cargo test --test free_text free_text_writes_verification_artifact -- --ignored
 Rendering decision: the committed box has an `/AP`, so the **PDF.js canvas** draws
 it (consistent with markup). Left `[~]` pending the human in-app check that the
 canvas renders the FreeText `/AP` (the key unknown — overlay fallback ready) +
-cross-reader (Acrobat/Preview/Okular). Rich text / underline / re-edit are **B3b**.
+cross-reader (several independent readers). Rich text / underline / re-edit are **B3b**.
 
 ---
 
@@ -2104,7 +2104,7 @@ cross-reader pass. Image stamps are C3b (image XObject embedding).
 
 ```bash
 # No new deps. Distance/perimeter/area measurements + draw-to-calibrate. The PDF
-# /Measure dict (Acrobat live re-measure) is split to C4b.
+# /Measure dict (a mainstream reader live re-measure) is split to C4b.
 #   cos::add_measure → /Line|/PolyLine|/Polygon with a dimension /IT
 #     (LineDimension/PolyLineDimension/PolygonDimension), /Contents=value, /C,
 #     /CA, /BS/W, /NM + a generated /AP (geometry stroke + the bold value label
@@ -2200,7 +2200,7 @@ sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/x.png   # CoreGraphics ope
 XFDF only (FDF deferred to E1b). Export reads raw dicts; import reuses the
 `add_*` writers + patches `/NM`/`/Contents`/`/T` + wires `/IRT` (two-pass). Left
 `[~]` pending the human in-app round-trip + cross-reader (open the `.xfdf` in
-Acrobat). FDF, freetext font-family fidelity, the O(N·docsize) import re-serialize,
+a mainstream reader). FDF, freetext font-family fidelity, the O(N·docsize) import re-serialize,
 and `<contents-richtext>` are deferred (BACKLOG).
 
 ---
@@ -2262,7 +2262,7 @@ sips -s format png /tmp/vibepdf-verify.pdf --out /tmp/m.png   # CoreGraphics ope
 Attach a rectilinear /Measure dict (/X /C = units-per-point, /D 100 = 2-dp) so
 readers re-measure live; read it back to re-seed the tool on reopen (no clobber
 of an in-session calibration). Imported XFDF measures get a default pt scale.
-Left `[~]` pending the human in-app reopen + Acrobat re-measure pass. Angle
+Left `[~]` pending the human in-app reopen + a mainstream reader re-measure pass. Angle
 formats, anisotropic scale, page /VP viewport, and UTF-16 unit labels deferred.
 
 ---
@@ -4133,7 +4133,7 @@ by `an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect
 whose name and comment say it records the behaviour rather than endorsing it,
 and raised as separate work.
 
-Not covered by any test: that the placed signature renders correctly in Acrobat,
+Not covered by any test: that the placed signature renders correctly in a mainstream reader,
 Preview and a third reader. That is the human ritual, and transparency is
 exactly the sort of thing one renderer gets right and another does not.
 
@@ -4503,7 +4503,7 @@ is not crate-wide fmt-clean. Reverted with `git checkout --` on everything
 outside the step; do not repeat it.
 
 Not verified: whether any reader actually *enforces* the restrictions. That is
-an Acrobat check and is on the P6 sweep.
+an a mainstream reader check and is on the P6 sweep.
 
 ---
 
@@ -4536,7 +4536,7 @@ Two mutation checks were run by hand and reverted, to confirm the tests bite:
 detaching `/Info` without deleting the object, and skipping the XMP packet. Each
 failed `metadata_clears_both_stores` and the full-clean test, and nothing else.
 
-Not verified: that a reader agrees the cleaned file is well-formed. Acrobat and
+Not verified: that a reader agrees the cleaned file is well-formed. a mainstream reader and
 Preview are on the P6 sweep (§5).
 
 ---
@@ -4578,7 +4578,7 @@ Two mutations were run by hand and reverted, confirming the tests bite: an
 off-by-one in `byte_range[1]` (4 failures) and a non-incremental save (5).
 
 Not verified: anything cryptographic — there is nothing cryptographic in this
-slice. Acrobat showing an unsigned signature field is sweep §6.
+slice. a mainstream reader showing an unsigned signature field is sweep §6.
 
 ---
 
@@ -4609,7 +4609,7 @@ npm run check
 npm run test:rust
 cargo test --test sign_credential --test sign_pades --test sign_container
 
-# Signed artifact for Acrobat (git-ignored Sample PDFs/)
+# Signed artifact for a mainstream reader (git-ignored Sample PDFs/)
 cargo test --test sign_pades -- --ignored
 ```
 
@@ -4627,7 +4627,7 @@ Confirmed by mutation, then reverted: signing over `message[..len-1]` fails
 passing, so the two discriminate rather than both being vacuous. Also confirmed
 openssl is actually found and run (no "skipping" line under `--nocapture`).
 
-Not verified: what Acrobat makes of the signed file. Sweep §6a.
+Not verified: what a mainstream reader makes of the signed file. Sweep §6a.
 
 ---
 
@@ -4673,7 +4673,7 @@ and nothing else), and removing the `/Reference` while keeping the catalog entry
 Dev run this session was clean — opened `Sample PDFs/signatures/sigfield-form.pdf`,
 no errors or warnings in the log.
 
-Not verified: whether Acrobat honours the certification. Sweep §6d — the item
+Not verified: whether a mainstream reader honours the certification. Sweep §6d — the item
 that matters is adding a comment to the certified file and confirming the
 signature is then reported invalid.
 
@@ -4700,7 +4700,7 @@ covers it.
 
 Not verified: agreement with another verifier on *someone else's* signed PDF.
 We only have documents we produced. Worth revisiting if a real signed file turns
-up — the sweep's Acrobat check on `vibepdf-verify-signed.pdf` is the nearest
+up — the sweep's a mainstream reader check on `vibepdf-verify-signed.pdf` is the nearest
 thing until then.
 
 ---

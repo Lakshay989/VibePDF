@@ -10,7 +10,7 @@ Two kinds of item, kept apart on purpose:
   under `src-tauri/src/security/`, tests passing or not, because crypto bugs are
   silent.
 - **Cross-reader** — opening a file somewhere that is not PDFium. A passing test
-  proves our reader agrees with us; it says nothing about Acrobat. Phase 6 has
+  proves our reader agrees with us; it says nothing about a mainstream reader. Phase 6 has
   already produced two files that PDFium accepted and something else did not, or
   vice versa.
 
@@ -43,8 +43,8 @@ Two diffs: `8e8394b`, `f7384e3`, `536510b`.
 Files: `Sample PDFs/vibepdf-verify-encrypted-user.pdf`, `…-both.pdf`.
 Password to open: `open-me`. Permissions password on the second: `owner-only`.
 
-- [ ] **Acrobat** prompts, opens with `open-me`, refuses a wrong password
-- [ ] **A third reader** (Chrome, Okular, Sumatra) — same
+- [ ] **a mainstream reader** prompts, opens with `open-me`, refuses a wrong password
+- [ ] **A third reader** (Chrome, other independent viewers) — same
 - [ ] Preview — same *(already done 2026-08-12: renders correctly)*
 - [ ] **Unlock** one in-app, then open the result in all three: opens with **no**
       password anywhere
@@ -59,9 +59,9 @@ all**: the tests assert what the document *says*, and nothing in a PDF makes a
 reader obey it. A green suite here means the bits are right, not that the
 feature works.
 
-- [ ] **Acrobat**, opened with `open-me`: **printing is blocked** (greyed out or
+- [ ] **a mainstream reader**, opened with `open-me`: **printing is blocked** (greyed out or
       refused), and copying text is blocked
-- [ ] **Acrobat**, opened with `owner-only`: printing works
+- [ ] **a mainstream reader**, opened with `owner-only`: printing works
 - [ ] A **third reader**: note what it does. Ignoring `/P` entirely is a legitimate
       reader choice, not a defect in our file — record which readers honour it so
       the dialog's wording can stay honest.
@@ -76,7 +76,7 @@ feature works.
 File: `Sample PDFs/vibepdf-verify-signature.pdf` — two placements, full and 50%
 opacity.
 
-- [ ] **Acrobat** and a **third reader**: both render, transparent background,
+- [ ] **a mainstream reader** and a **third reader**: both render, transparent background,
       no white box, correct proportions, the half-opacity one visibly lighter
 - [ ] **Undo** after placing a signature in-app → the page returns to exactly as
       it was *(never checked; the only A5a item with no coverage at all)*
@@ -104,7 +104,7 @@ The automated tests prove the strings are gone from the bytes, which is the part
 that matters most. What they cannot show is whether a *reader* agrees the file
 is still well-formed after seven kinds of surgery.
 
-- [ ] Open **both** in Acrobat: Document Properties on the dirty one shows
+- [ ] Open **both** in a mainstream reader: Document Properties on the dirty one shows
       `SECRETAUTHOR`; on the cleaned one shows nothing. Same in Preview's
       Inspector, which reads XMP rather than `/Info` — the one that catches a
       half-done metadata clean.
@@ -122,15 +122,15 @@ File: `Sample PDFs/vibepdf-verify-signed.pdf` — `hello.pdf` signed with the te
 certificate in `tests/fixtures/certs/`.
 
 `openssl cms -verify` already accepts this signature and rejects a tampered
-copy, so the cryptography is checked. What is not checked is what **Acrobat**
+copy, so the cryptography is checked. What is not checked is what **a mainstream reader**
 makes of the container around it, which is the thing the roadmap asks for.
 
-- [ ] **Acrobat**: the signature panel shows a signature, and it is
+- [ ] **a mainstream reader**: the signature panel shows a signature, and it is
       **cryptographically valid**. It will say the identity is *unknown* — the
       certificate is self-signed, which is correct and expected, not a failure
 - [ ] The **certificate chain** is shown, with `CN=VibePDF Test Signer`
-- [ ] Acrobat reports **no changes since signing**
-- [ ] Change one byte of the file in a hex editor and reopen: Acrobat now says
+- [ ] a mainstream reader reports **no changes since signing**
+- [ ] Change one byte of the file in a hex editor and reopen: a mainstream reader now says
       the document has been modified. (If it does not, the `/ByteRange` is
       covering less than it should.)
 - [ ] Preview and a third reader open it without complaint
@@ -140,7 +140,7 @@ makes of the container around it, which is the thing the roadmap asks for.
 Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
 
 - [ ] **Sign…** → choose the certificate, type the password, save a copy. The
-      copy opens in Acrobat with a valid signature
+      copy opens in a mainstream reader with a valid signature
 - [ ] The **open document is unchanged** — no dirty marker, no signature in it.
       Save it and confirm the saved file has no signature either
 - [ ] A **wrong certificate password** is refused with a message about the
@@ -171,7 +171,7 @@ File: `Sample PDFs/signatures/sigfield-form.pdf`, or the committed
 
 - [ ] **Sign…** on a document with a signature field → the dialog shows a
       **Signature field** picker, defaulting to the first empty one
-- [ ] Sign it → in Acrobat the signature appears **in that field's box**, not as
+- [ ] Sign it → in a mainstream reader the signature appears **in that field's box**, not as
       an invisible extra
 - [ ] Sign the same field again → refused, saying the field is already signed
 - [ ] Choose "Add a new invisible signature" instead → behaves as before
@@ -181,9 +181,9 @@ File: `Sample PDFs/signatures/sigfield-form.pdf`, or the committed
 
 File: `Sample PDFs/vibepdf-verify-certified.pdf` — certified at "no changes".
 
-- [ ] **Acrobat** says the document is **certified**, not merely signed, and
+- [ ] **a mainstream reader** says the document is **certified**, not merely signed, and
       names the level
-- [ ] Add a comment in Acrobat and save: the signature is now reported as
+- [ ] Add a comment in a mainstream reader and save: the signature is now reported as
       invalid, or the change is refused. Either is a pass — what matters is that
       it is not silently accepted
 - [ ] `vibepdf-verify-signed.pdf` (uncertified) shows as an ordinary signature
@@ -199,7 +199,7 @@ the gap reserved and nothing in it.
 Not a signed document, and not meant to look like one. What is worth confirming
 is that the *container* is well-formed before any crypto goes near it.
 
-- [ ] **Acrobat** opens it and shows an **unsigned signature field** in the
+- [ ] **a mainstream reader** opens it and shows an **unsigned signature field** in the
       signature panel — not a broken signature, and not an error
 - [ ] Preview and a third reader open it and render the page normally
 - [ ] The file still opens after the placeholder is there (an append, so the
@@ -243,7 +243,7 @@ The tests already prove the string is gone from the bytes and from PDFium's
 extractor. What a human adds is a different reader's opinion and a look at the
 result.
 
-- [ ] **Acrobat**: select the redacted area and copy — nothing comes out. Search
+- [ ] **a mainstream reader**: select the redacted area and copy — nothing comes out. Search
       for `123-45-6789` — no hit
 - [ ] The black box sits where the number was, and `SSN:` is still readable
       beside it

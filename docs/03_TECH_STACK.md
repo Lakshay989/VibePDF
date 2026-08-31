@@ -51,7 +51,7 @@ Every choice here has a reason. If Claude wants to deviate, the reason needs to 
 
 ## PDF mutation — PDFium via `pdfium-render` (Rust)
 
-**Why:** Google PDFium is the engine inside Chromium. BSD-licensed. C++ at its core, with mature Rust bindings (`pdfium-render`). Supports the full surface area we need: text editing, annotation, forms, signatures, redaction.
+**Why:** Google PDFium is the engine inside a major browser. BSD-licensed. C++ at its core, with mature Rust bindings (`pdfium-render`). Supports the full surface area we need: text editing, annotation, forms, signatures, redaction.
 
 **Specifically why not the alternatives:**
 

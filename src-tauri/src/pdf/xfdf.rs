@@ -1,7 +1,7 @@
 //! XFDF annotation interchange (P3.E1).
 //!
 //! SPEC: P3-ANN-010 — export every annotation to an XFDF (XML) sidecar and
-//! import one back, compatible with Adobe Acrobat.
+//! import one back, compatible with a mainstream PDF reader.
 //!
 //! Two halves:
 //!   * [`annotations_to_xfdf`] walks the raw lopdf annotation dicts and emits an
@@ -14,7 +14,7 @@
 //!     `/T`, and timestamps so identity and reply threads survive the round-trip.
 //!
 //! FDF is deferred (E1b). XML parsing is hand-rolled over the XFDF subset we and
-//! Acrobat emit rather than pulling in a parser dependency (see CLAUDE.md).
+//! a mainstream reader emit rather than pulling in a parser dependency (see CLAUDE.md).
 
 use std::collections::HashSet;
 
@@ -673,7 +673,7 @@ fn line_has_arrow(head: Option<&str>, tail: Option<&str>) -> bool {
 
 /// Split a numeric attribute (`coords`, `vertices`, `start`, …) into floats,
 /// lenient about the separator (comma, semicolon, or whitespace) so both our
-/// output and Acrobat's are accepted.
+/// output and a mainstream reader's are accepted.
 fn parse_floats(s: &str) -> Vec<f32> {
     s.split([',', ';', ' ', '\t', '\n', '\r'])
         .filter(|t| !t.is_empty())

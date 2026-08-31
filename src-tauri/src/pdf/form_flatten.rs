@@ -245,7 +245,7 @@ fn parse_da(da: &str) -> (Option<String>, f32, (f32, f32, f32)) {
 
 /// Map a `/DA` font resource name to a base-14 family: through the `AcroForm`
 /// `/DR /Font /<name> /BaseFont` when it resolves, else the conventional short
-/// names Acrobat writes, else Helvetica. The appearance carries its own font
+/// names a mainstream reader writes, else Helvetica. The appearance carries its own font
 /// dictionary, so it never depends on `/DR` surviving the flatten.
 fn resolve_base_font(doc: &Document, res_name: Option<&str>) -> String {
     let Some(name) = res_name else { return "Helvetica".to_owned() };
@@ -275,7 +275,7 @@ fn resolve_base_font(doc: &Document, res_name: Option<&str>) -> String {
 }
 
 /// Resolve the `/DA` size against the widget box. `0` means auto-size: fit the
-/// box height for a single line (capped at 12pt, the size Acrobat converges on
+/// box height for a single line (capped at 12pt, the size a mainstream reader converges on
 /// for ordinary field heights), a fixed 10pt for a multi-line box where the line
 /// count — not the height — sets the scale.
 fn resolve_size(da_size: f32, rect: [f32; 4], multiline: bool) -> f32 {
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn parses_rgb_da_in_any_order() {
-        // Colour before the font selector — legal, and Acrobat writes both orders.
+        // Colour before the font selector — legal, and a mainstream reader writes both orders.
         let (font, size, color) = parse_da("0 0 1 rg /TiRo 12 Tf");
         assert_eq!(font.as_deref(), Some("TiRo"));
         assert_eq!(size, 12.0);

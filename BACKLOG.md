@@ -281,8 +281,8 @@ the current roadmap phase. When one is picked up, move it into the relevant
   aspect ratio; if the backend's placement ever diverges, the swap will jump slightly.
 - **`/QuadPoints` corner order is verified visually, not by spec.** We emit
   `UL,UR,LL,LR`; since we own the `/AP`, rendering is correct regardless, but a
-  reader that *regenerates* appearance from `/QuadPoints` (Acrobat with `/AP`
-  stripped) depends on the order. Confirm against the de-facto Acrobat order.
+  reader that *regenerates* appearance from `/QuadPoints` (a mainstream reader with `/AP`
+  stripped) depends on the order. Confirm against the de-facto a mainstream reader order.
 - **Squiggly `/AP` is a fixed-step zigzag**, not a true PDF squiggly wave.
   Acceptable; refine for fidelity if it reads poorly.
 - **The frontend store doesn't track committed markup** (the canvas renders it
@@ -293,7 +293,7 @@ the current roadmap phase. When one is picked up, move it into the relevant
   delete is D1.)*
 
 - **Overlapping highlights Multiply-blend into mixed colours** (yellow over blue
-  → green). It's standard `/Highlight` behaviour (and how Acrobat looks), but
+  → green). It's standard `/Highlight` behaviour (and how a mainstream reader looks), but
   confusing. Options if we want "newest wins": a Normal-blend translucent
   appearance, or de-duping/merging overlapping quads of the same colour.
 
@@ -319,7 +319,7 @@ the current roadmap phase. When one is picked up, move it into the relevant
   author through `ToolOptions`/settings when identity lands (also feeds D2 replies).
 - **Note icon is a fixed 18px hit target** anchored at the click's lower-left;
   it doesn't visually match the reader's own icon glyph. Fine for now; revisit if
-  placement feels off against Acrobat/Preview.
+  placement feels off against a mainstream reader/Preview.
 
 ## From P3.B2b (read notes on open)
 
@@ -329,7 +329,7 @@ the current roadmap phase. When one is picked up, move it into the relevant
   `pdf_date_now`) when D1 lands.
 - **Foreign `/Contents`//`/T` aren't decoded** — only ASCII/UTF-8 round-trips;
   UTF-16BE (BOM) and PDFDocEncoding from other editors render as mojibake. Add a
-  decoder if we want to faithfully show notes authored in Acrobat with non-ASCII.
+  decoder if we want to faithfully show notes authored in a mainstream reader with non-ASCII.
 - **Re-sync re-reads on *every* edit-epoch bump**, including markup edits that
   don't touch notes (each is a full `save_to_bytes` + lopdf parse). Cheap today;
   gate to notes-affecting epochs (or diff by `/NM` set) if it ever shows up.
@@ -467,13 +467,13 @@ confirmed them** (four issues found + fixed mid-sweep: scroll-jump, free-text
 wrap/hard-break, filter-reset-on-delete, reply-button visibility). All Phase-3
 steps are now `[x]` in `steps/P3.md` except **B3c** (rich text, `[ ]`, deferred
 by design). The remaining **cross-reader pass** (opening the
-`Sample PDFs/vibepdf-verify-*.pdf` artifacts in Acrobat/Preview) is **optional /
+`Sample PDFs/vibepdf-verify-*.pdf` artifacts in a mainstream reader/Preview) is **optional /
 not blocking** — the artifacts are already CoreGraphics-validated (`sips`). Worth
 a deeper look someday, especially:
-- **C4b** — Acrobat's measuring tool re-measuring the saved line *live* (validates
+- **C4b** — a mainstream reader's measuring tool re-measuring the saved line *live* (validates
   the `/Measure` `/X`/`/D`/`/A` chain against a real reader; risk #2 from the plan).
-- **E1** — Acrobat *reading* our exported `.xfdf` against the same base PDF (we
-  verified the in-app cross-document round-trip, not Acrobat ingestion).
+- **E1** — a mainstream reader *reading* our exported `.xfdf` against the same base PDF (we
+  verified the in-app cross-document round-trip, not a mainstream reader ingestion).
 - The **per-edit page-blank flash** is a separate *open bug* (below), not
   verification debt; the scroll-jump half of it was fixed 2026-06-25.
 
@@ -486,12 +486,12 @@ a deeper look someday, especially:
   context menu could complement it.
 - **Editing a reply's text** — no edit affordance (delete + re-reply for now;
   `update_text_note` already updates a `/Text` by `/NM`, so it's a small add).
-- **Reply state / status** — Acrobat's `/State` + `/StateModel` (Accepted /
+- **Reply state / status** — a mainstream reader's `/State` + `/StateModel` (Accepted /
   Rejected / Cancelled / Completed review marks); no collapse/expand or unread.
 - **Author identity** — replies use the fixed `"VibePDF User"` (no accounts);
   shared with notes.
 - **Arbitrary nesting** — threads render one indent level (flat under the root,
-  Acrobat-style); deep visual nesting isn't shown even though `/IRT` can chain.
+  a mainstream reader-style); deep visual nesting isn't shown even though `/IRT` can chain.
 
 ## From P3.E1 (XFDF import / export)
 
@@ -506,7 +506,7 @@ a deeper look someday, especially:
   from the `/DA`, but defaults family to Helvetica regular (the XFDF
   `<defaultappearance>` font ref isn't mapped back to a base-14 family). Geometry +
   text + size + colour round-trip; the typeface may not.
-- **`<contents-richtext>`** — Acrobat-authored rich-text free-text is dropped to
+- **`<contents-richtext>`** — a mainstream reader-authored rich-text free-text is dropped to
   plain `<contents>` on import (we never emit it).
 - **Import is O(N · docsize)** — each annotation is added via a separate
   `add_*` load→save, then a patch load→save (2–3 full re-serializations per
@@ -532,7 +532,7 @@ a deeper look someday, especially:
 - **Flattening a subset / by type / selection** — spec says *all*; we flatten the
   whole document. A "flatten selected" or "flatten by kind" is a natural follow-up.
 - **Baking note icons** — `/AP`-less notes + replies are kept live (no appearance
-  to bake). Acrobat's full Flatten stamps a note glyph; we chose not to (would lose
+  to bake). a mainstream reader's full Flatten stamps a note glyph; we chose not to (would lose
   the thread text + needs an icon generator). Could add a "bake note icons" option.
 - **No flatten progress UI** — synchronous; a huge doc with thousands of
   annotations would block briefly (each is just a resource + content append, so
@@ -548,7 +548,7 @@ a deeper look someday, especially:
   `read_measure_calibration` re-seeds the tool on reopen). Deferred:
 - **Angle measurement** (`/T` number format) — no angle tool. **Anisotropic scale**
   (`/X` ≠ `/Y`) — single uniform scale only. **Page-level `/VP` viewport scale** —
-  we attach `/Measure` to the annotation (Acrobat's measure-markup convention); a
+  we attach `/Measure` to the annotation (a mainstream reader's measure-markup convention); a
   `/VP` fallback is the move if a reader ignores annotation-level `/Measure`.
 - **UTF-16 unit labels** — `/Measure` unit strings stay ASCII (`sq ft`); the `²` is
   only in the on-screen `/AP` label. **XFDF round-trip of `/Measure`** — imported
@@ -665,7 +665,7 @@ C4a/b, B3b). Four issues found + fixed this session:
   switch.
 - ✅ **Reply affordance unclear (D2)** — the `💬 Reply` button was faint gray text;
   made it a visible bordered blue button with a count ("💬 2 replies").
-- ⏳ **Add a note/comment from the sidebar** — the user expected an Acrobat-style
+- ⏳ **Add a note/comment from the sidebar** — the user expected an a mainstream reader-style
   "add comment" in the panel; today notes are placed via the page Note tool and
   the sidebar only *replies* to existing annotations. A "new note" affordance in
   the sidebar needs a placement decision (where on the page?) — deferred as a

@@ -239,7 +239,7 @@ fn our_own_output_can_be_decrypted_again() {
     doc.decrypt("pw").expect("lopdf must be able to decrypt what it wrote");
 }
 
-/// SPEC: P6-SEC-007 — a file to open in Acrobat / Preview / a third reader.
+/// SPEC: P6-SEC-007 — a file to open in a mainstream reader / Preview / a third reader.
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifacts() {
@@ -253,7 +253,7 @@ fn writes_verification_artifacts() {
         // SPEC: P6-SEC-009 — the acceptance demo from the roadmap: "open with
         // the user password: print is blocked". Printing and copying are the two
         // restrictions a reader is most likely to actually enforce, so they are
-        // the ones worth putting in front of Acrobat.
+        // the ones worth putting in front of a mainstream reader.
         ("vibepdf-verify-no-print.pdf", {
             let mut o = opts(Some("open-me"), Some("owner-only"));
             o.permissions = DocumentPermissions {
@@ -280,7 +280,7 @@ fn writes_verification_artifacts() {
 //
 // What these can check is that the *document says* what the user chose. What
 // they cannot check is that any reader obeys it — nothing in a PDF enforces
-// permissions, PDFium largely ignores them, and Acrobat is the only honest
+// permissions, PDFium largely ignores them, and a mainstream reader is the only honest
 // acceptance test. That is a sweep item, not a unit test, and pretending
 // otherwise here would be the more dangerous mistake.
 

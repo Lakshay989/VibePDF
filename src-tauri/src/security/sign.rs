@@ -45,7 +45,7 @@ use crate::error::CommandError;
 ///
 /// A CMS `SignedData` with one RSA-2048 signature and a three-certificate chain
 /// runs about 4 KB; timestamps and revocation data (`PAdES` B-LT) push it higher.
-/// 16 KB is the value Acrobat and most signing libraries reserve, and the cost
+/// 16 KB is the value a mainstream reader and most signing libraries reserve, and the cost
 /// of being generous is 32 KB of zeros in a file that is already going to be
 /// re-saved. The cost of being stingy is a signature that will not fit, found
 /// only at the last step.

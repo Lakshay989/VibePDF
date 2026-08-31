@@ -12,7 +12,7 @@ Every feature, from "add a freehand pen tool" to "implement OCR pipeline," shoul
 2. **Plan.** Run `/plan <feature>` in Claude Code. It enters plan mode, drafts an implementation, and waits. Read the plan critically.
 3. **Push back.** This step is the most under-used. If the plan touches three files when you thought it would touch one, ask why. If it adds a dependency, ask whether the existing stack can handle it. Treat the plan as a contract you are negotiating.
 4. **Ship.** Run `/ship <feature>`. Hooks run formatters and type-checks on every save.
-5. **Verify.** Run `/review`, then `/test-pdf <fixture>`. Look at the *output PDF* with your own eyes in a real viewer (Acrobat, Preview, Okular). Code that passes tests but produces broken PDFs is the most common failure mode.
+5. **Verify.** Run `/review`, then `/test-pdf <fixture>`. Look at the *output PDF* with your own eyes in a real viewer (several independent readers). Code that passes tests but produces broken PDFs is the most common failure mode.
 
 ---
 
@@ -54,7 +54,7 @@ Tell Claude what you *don't* want:
 
 For anything that writes a PDF, add to your prompt:
 
-> When you're done, generate the output file at `/tmp/verify.pdf` and tell me to open it in Adobe Acrobat to inspect. Do not assume that a passing test means the file is valid.
+> When you're done, generate the output file at `/tmp/verify.pdf` and tell me to open it in a mainstream PDF reader to inspect. Do not assume that a passing test means the file is valid.
 
 This is the single biggest defense against the most-common-failure-mode: tests that pass on the binary structure but the PDF looks broken in actual viewers.
 
@@ -98,7 +98,7 @@ If you start typing "and also" or "while you're at it," delete the message and s
 ### 4. Asking Claude to grade its own work without an external signal
 
 ❌ "Is this implementation good?"
-✅ "Run `/test-pdf` and paste the failures here. Run the prettier check. Open the output in Acrobat and tell me what looks wrong."
+✅ "Run `/test-pdf` and paste the failures here. Run the prettier check. Open the output in a mainstream reader and tell me what looks wrong."
 
 Claude is too agreeable when grading itself. Make it grade against external signals.
 
@@ -134,9 +134,9 @@ This codebase will get big. To keep sessions responsive and tokens reasonable:
 
 Before any feature is marked done, do this ritual out loud (or in chat):
 
-1. "I am opening the output PDF in Adobe Acrobat right now." (Do it.)
-2. "I am opening the output PDF in macOS Preview right now." (Do it.)
-3. "I am opening the output PDF in a free reader like Okular or Sumatra right now." (Do it.)
+1. "I am opening the output PDF in a mainstream PDF reader right now." (Do it.)
+2. "I am opening the output PDF in a platform viewer right now." (Do it.)
+3. "I am opening the output PDF in a second independent reader right now." (Do it.)
 4. "All three render correctly: yes/no."
 5. "If yes, the test suite is green: yes/no."
 6. "If both yes, mark the spec line complete."

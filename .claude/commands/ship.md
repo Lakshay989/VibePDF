@@ -33,7 +33,7 @@ Suggested increment order:
 1. Run `npm run check` (typecheck + lint + cargo clippy). Fix everything it flags.
 2. Run the tests you added plus any tests in touched modules.
 3. **For any PDF write path:** generate an output PDF at `/tmp/vibepdf-verify.pdf`, then tell the human:
-   > "I've written a verification file to /tmp/vibepdf-verify.pdf. Please open it in Adobe Acrobat, macOS Preview, and a third reader (Okular/Sumatra) and confirm it renders correctly. A passing test does not prove the PDF is valid to other viewers."
+   > "I've written a verification file to /tmp/vibepdf-verify.pdf. Please open it in a mainstream PDF reader, a platform viewer, and a third reader (any independent viewer) and confirm it renders correctly. A passing test does not prove the PDF is valid to other viewers."
 4. Produce a summary: what changed, which spec IDs, what was tested, what was NOT tested, and a draft commit message following Conventional Commits.
 
 ## What you must NOT do

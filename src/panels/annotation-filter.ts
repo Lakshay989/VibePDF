@@ -124,7 +124,7 @@ export function distinctKinds(list: readonly AnnotationInfo[]): AnnotationKind[]
 export interface AnnotationThread {
   root: AnnotationInfo;
   /** Every descendant (replies, replies-to-replies) flattened under the root,
-   *  ordered by `modified` (Acrobat-style flat thread). */
+   *  ordered by `modified` (a mainstream reader-style flat thread). */
   replies: AnnotationInfo[];
 }
 

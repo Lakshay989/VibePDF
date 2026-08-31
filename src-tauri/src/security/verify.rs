@@ -23,7 +23,7 @@
 //!
 //! **We have no trust anchors, so we never report a signature as trusted.**
 //! Deciding that a certificate is trustworthy means checking it against a list
-//! of roots someone vouches for — for document signing that is Adobe's AATL or
+//! of roots someone vouches for — for document signing that is the AATL or
 //! the EU trust list, neither of which is a thing we can bundle, and neither of
 //! which is the TLS root store. `VibePDF` therefore reports the *shape* of the
 //! chain — self-signed, or issued by someone we cannot check — and says plainly

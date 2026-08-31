@@ -67,10 +67,10 @@ describe("TextEditLayer", () => {
     fireEvent.click(await screen.findByTitle("Click to edit this text"));
 
     const input = screen.getByLabelText("Edit text run");
-    fireEvent.change(input, { target: { value: "Hello, Acrobat." } });
+    fireEvent.change(input, { target: { value: "Hello, a mainstream reader." } });
     fireEvent.click(screen.getByRole("button", { name: "Save text edit" }));
 
-    expect(mockReplace).toHaveBeenCalledWith(DOC, 0, 0, "Hello, Acrobat.");
+    expect(mockReplace).toHaveBeenCalledWith(DOC, 0, 0, "Hello, a mainstream reader.");
   });
 
   it("deletes a run via deleteTextRun with the run index", async () => {

@@ -3447,7 +3447,7 @@ pub fn add_measure(
     annot.set("C", Object::Array(vec![Object::Real(sr), Object::Real(sg), Object::Real(sb)]));
     annot.set("CA", Object::Real(opacity));
     annot.set("BS", Object::Dictionary(bs));
-    // SPEC: P3-ANN-007 (P3.C4b) — the machine-readable scale, so Acrobat & co.
+    // SPEC: P3-ANN-007 (P3.C4b) — the machine-readable scale, so a mainstream reader & co.
     // re-measure live against the raw geometry instead of trusting our /Contents.
     annot.set("Measure", Object::Dictionary(measure_dict(units_per_point, unit)));
     annot.set("F", Object::Integer(4)); // Print

@@ -373,7 +373,7 @@ macos+windows only if Linux PDFium fetch is the blocker.
 > centring** (the review's cited "dates drift / titles off-centre" symptoms).
 > `pdf::font_metrics::text_width(base, text, size)` sums per-glyph widths from
 > `font_metrics/tables.rs`, which is **generated offline** by
-> `tests/gen_font_metrics.rs` measuring bundled PDFium (its Foxit Core-14
+> `tests/gen_font_metrics.rs` measuring bundled PDFium (its bundled Core-14
 > substitutes == Adobe AFM — verified: Helvetica space=278, 'A'=667, 'W'=944).
 > No network, no new deps; Courier is a `600` constant. Proven by
 > `font_metrics::tests` (WWW≫iii; Courier monospaced; exact AFM sums).
@@ -665,7 +665,7 @@ engine is not the bottleneck; memory (§3.6) is the scaling risk, not CPU.
 - **Font embedding + real metrics** (3.2 + 3.10) — unlocks Unicode everywhere, exact alignment,
   OCR text layers, and professional typography. The biggest single upgrade available.
 - **Decoration identity via marked content** (3.13) — enables edit/remove/re-stamp workflows
-  (Bates re-runs, watermark removal) that Acrobat parity will eventually demand.
+  (Bates re-runs, watermark removal) that a mainstream reader parity will eventually demand.
 - **Incremental save** (PDF's append-only update mechanism) — would make saves O(edit) instead
   of O(document), preserve signatures (P6 prerequisite for signing correctly!), and pair
   naturally with delta-undo (3.6). Large; design doc first.
