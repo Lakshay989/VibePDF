@@ -2,11 +2,11 @@
 
 An offline, free PDF editor for Windows, macOS and Linux.
 
-Every capable PDF editor in 2026 is paywalled, rate-limited, or uploads your
-documents to somebody else's server. VibePDF aims at the same core surface as
-Acrobat Pro — editing existing text, forms, signatures, encryption, redaction —
-with no account, no subscription, no watermark, and no network request you did
-not ask for.
+Most capable PDF editors are paywalled, rate-limited, or upload your documents
+to somebody else's server. VibePDF aims at the same core surface people pay for
+— editing existing text, forms, signatures, encryption, redaction — with no
+account, no subscription, no watermark, and no network request you did not ask
+for.
 
 **Nothing leaves your machine.** There is no telemetry and no cloud component.
 The only network access in the codebase is an optional, off-by-default local
@@ -28,14 +28,14 @@ download — building from source is currently the only way to run it.
 | 4 | Content editing — text, images, watermarks, headers | Built |
 | 5 | Forms — fill, create, export, flatten | Built |
 | 6 | Signing, encryption, redaction | Code complete, in verification |
-| 7 | OCR and conversion to Word/Excel | Not started |
+| 7 | OCR and export to word-processor and spreadsheet formats | Not started |
 | 8 | Local AI and batch processing | Not started |
 
 "Built" means the phase's features are implemented, tested, and have passed a
 manual verification pass. Phase 6 is implemented and its automated suites are
 green, but the cross-reader checks that matter for cryptography and redaction —
-Acrobat, Preview, a third reader — are still outstanding. See
-[`steps/P6-SWEEP.md`](steps/P6-SWEEP.md).
+opening the output in several independent PDF readers — are still outstanding.
+See [`steps/P6-SWEEP.md`](steps/P6-SWEEP.md).
 
 ## What works today
 
@@ -139,8 +139,9 @@ Two conventions are worth knowing if you contribute:
 
 Two PDF engines, deliberately:
 
-- **PDFium** (via `pdfium-render`) renders pages and reads structure. It is the
-  engine inside Chromium, so what it shows is what most people will see.
+- **PDFium** (via `pdfium-render`) renders pages and reads structure. It is a
+  widely deployed, BSD-licensed engine, so what it shows closely matches what
+  most readers will show.
 - **lopdf** performs structural surgery on the serialized bytes — the page
   tree, `/AcroForm`, content streams, encryption dictionaries — in between
   PDFium passes, never on a shared live handle.
