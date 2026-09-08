@@ -66,6 +66,15 @@ corpus has to be rebuildable and reviewable rather than taken on trust.
 Scratch and verification PDFs belong in the gitignored `Sample PDFs/` tree, not
 in the repository.
 
+### Citations you cannot resolve
+
+Comments across the Rust and TypeScript source cite `FABLE_REVIEW` by section
+number — `FABLE_REVIEW §3.9`, and so on. That document is an internal design
+review kept out of the repository, so those references will not resolve from a
+clone. They are left in place because the surrounding comment always says what
+the finding *was*; the citation is provenance, not the explanation. If one is
+genuinely unclear, ask in an issue and it will be quoted back.
+
 ## Code style
 
 - **TypeScript:** strict, no `any`. Prefer `unknown` plus narrowing.

@@ -39,11 +39,20 @@ docs/story/
 # also `git rm --cached`ed, and that its history stays in the repository either
 # way, so this is tidiness rather than removal.
 #
-# FABLE_REVIEW.md is deliberately NOT here: 31 tracked files cite it by section
-# number, including Rust source comments and docs/04_ARCHITECTURE.md, so it has
-# become reference documentation whether or not that was the intent.
 INITIAL_PROMPT.md
 PROMPTING_PLAYBOOK.md
+
+# The working logs and the internal design review. Written every step, kept
+# local. Learning.md and commandLog.md are the running teaching / command
+# journals; FABLE_REVIEW.md is an internal review whose section numbers are
+# cited from ~31 files, so those citations resolve only for someone holding the
+# document — CONTRIBUTING.md says so rather than leaving a contributor guessing.
+#
+# Same caveat as above: their history stays in the repository. This stops them
+# being published from here on; it does not remove what was already pushed.
+FABLE_REVIEW.md
+Learning.md
+commandLog.md
 
 # Scratch working files. None of these exist yet; they are here so the first
 # one never has to be noticed in a `git status` and cleaned up by hand.

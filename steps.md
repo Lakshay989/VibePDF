@@ -52,14 +52,20 @@ This makes back-tracking trivial:
 
 ## Workflow rule
 
-After every step's acceptance criteria are met, the **same** commit must:
-1. Flip the step in its phase doc from `[ ]` to `[x]`.
+After every step's acceptance criteria are met:
+1. Flip the step in its phase doc from `[ ]` to `[x]`, in the step's own commit.
 2. **Append a section to `Learning.md`** — the concepts/tech the step exercised, why we chose them, what's worth knowing next time. See `Learning.md` § "How this file evolves" for the template.
 3. **Append a section to `commandLog.md`** — every command that mutated the repo / toolchain during the step, plus the verification gates. See `commandLog.md` § "How this file evolves" for the template.
 4. Push to `origin/main` immediately. No batched commits.
 5. If verification couldn't run locally (toolchain missing, etc.), say so in the commit body — don't claim a green check we didn't actually get.
 
-Doc-only edits to the step files, Learning.md, or commandLog.md (rewording, fixing a typo, adding context) **can** be batched. The "one commit per step" rule applies to feature steps, not doc maintenance.
+`Learning.md` and `commandLog.md` are **local-only** — gitignored, so they are
+written every step but never committed. They are working journals for whoever
+holds the checkout, not project documentation. Everything a reader of the
+repository needs belongs in `docs/`, the commit message, or a comment next to
+the code.
+
+Doc-only edits to the step files (rewording, fixing a typo, adding context) **can** be batched. The "one commit per step" rule applies to feature steps, not doc maintenance.
 
 ## Phase gating
 
