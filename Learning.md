@@ -10046,6 +10046,72 @@ unpacked it, with nothing checking what arrived.
 ### Further reading
 - <https://slsa.dev/spec/v1.0/provenance>
 - <https://docs.github.com/actions/security-guides/using-artifact-attestations>
+## Meeting the release licence obligations (non-step)
+
+The four remaining items in `THIRD-PARTY-NOTICES.md` — an inventory, PDFium's
+licences in the bundle, a NOTICE, and somewhere a user can read them.
+
+### Concepts learned
+
+- **A licence list has to be generated or it is a lie.** Hand-maintained, it is
+  wrong one `npm install` later, and a stale inventory is worse than none: it
+  makes a specific false claim about what the binary contains.
+  `scripts/generate-notices.mjs` reads `cargo metadata` and `package-lock.json`,
+  so it always describes the tree that would actually build.
+
+- **The dependency graph, not the lockfile.** `Cargo.lock` lists every resolved
+  crate including build- and dev-only ones. Walking `resolve.nodes` from the
+  root and following only edges whose `dep_kinds` include the normal kind is
+  what separates 512 shipped crates from the rest — `tauri-build` is resolved
+  and never shipped. Same on the npm side, where the lockfile marks `dev: true`.
+
+- **`MIT/Apache-2.0` is not an SPDX expression**, but a large slice of crates.io
+  predates the convention and Cargo still accepts the slash. The permissive
+  gate flagged 24 perfectly ordinary crates until it normalised `/` to ` OR `.
+  Worth remembering generally: SPDX `OR` means *we* choose, so one permissive
+  branch is enough — "GPL-2.0 OR MIT" is fine, and a checker that reports it is
+  a checker people switch off.
+
+- **The gate belongs in the generator.** `docs/01_VISION.md` promises no
+  copyleft in the shipped binary. Rather than assert that in prose, the script
+  exits non-zero on any licence outside a reviewed set. The message says the
+  finding means "nobody has looked yet", not "this is forbidden" — the fix is a
+  human decision recorded in the allowlist, not a silent pass.
+
+- **MPL-2.0 is the honest edge case.** Five crates in Tauri's WebView stack use
+  it. It is file-level copyleft: the obligation attaches to those files and only
+  if modified. Allowing it is correct but it *is* an interpretation of "no
+  copyleft", so it is written into the generated document where a reader will
+  see it, not just into the script.
+
+- **Reading the archive beat assuming what was in it.** The earlier notes said
+  PDFium's `LICENSE` and `AUTHORS` travel in the release. There is no `AUTHORS`,
+  and the root `LICENSE` is the *packaging repository's* MIT licence (Benoit
+  Blanchon) — PDFium's own BSD-3 sits in `licenses/pdfium.txt` alongside 14
+  files for the libraries PDFium vendors. Shipping only the root file would have
+  attributed the wrong project while looking like compliance.
+
+- **Copied, not committed.** The licence files are pulled from the archive by
+  `fetch-pdfium.sh` rather than checked in, so bumping `PINNED_RELEASE` updates
+  them automatically. A committed copy silently describes the wrong build.
+
+- **A notices file beside the executable is read by nobody.** The obligation is
+  to reproduce the attribution; the point is that someone can find it. The
+  toolbar's "Licences" is deliberately not gated on an open document — what a
+  distribution owes does not depend on whether a file happens to be open.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `scripts/generate-notices.mjs` | Walks both trees; emits the inventory and the app's data; gates on licence terms. |
+| `THIRD-PARTY-LICENSES.md` | Generated inventory: 512 crates, 62 npm packages, 2 bundled. |
+| `NOTICE` | Apache-2.0 §4(d) attributions. |
+| `src/app/LicensesDialog.tsx` | The in-app view, filterable by name or licence. |
+| `scripts/fetch-pdfium.sh` | Now copies `LICENSE` and `licenses/` into the bundle. |
+
+### Further reading
+- <https://www.apache.org/legal/apply-license.html#new-content> — what NOTICE is for
+- <https://spdx.org/licenses/> — the identifier list the gate matches against
 ---
 
 ---

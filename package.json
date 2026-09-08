@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check": "tsc --noEmit && eslint src --max-warnings=0 && cd src-tauri && cargo clippy --all-targets -- -D warnings",
+    "licenses": "node scripts/generate-notices.mjs",
     "pretest": "node scripts/copy-pdfjs-worker.mjs",
     "test": "vitest run",
     "test:rust": "node scripts/cargo-test.mjs",

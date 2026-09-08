@@ -5,11 +5,12 @@ VibePDF's own source is dual-licensed `MIT OR Apache-2.0` (see
 their own terms. Several of those terms are *redistribution* obligations: they
 bind a shipped `.dmg` / `.msi` / `.AppImage`, not a source checkout.
 
-> **Status.** The components below are the ones that end up inside a built
-> application, and their licences have been verified. A full transitive
-> dependency inventory has **not** been produced yet — see
-> [Before the first binary release](#before-the-first-binary-release). Nothing
-> here is a legal opinion.
+> **This file is the reasoning; the list is generated.** The full inventory of
+> what a build contains lives in
+> [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md), produced by
+> `npm run licenses` from the resolved dependency trees. This file explains the
+> components that carry a real obligation and how it is met. Nothing here is a
+> legal opinion.
 
 ## Components in a shipped binary
 
@@ -19,13 +20,18 @@ bind a shipped `.dmg` / `.msi` / `.AppImage`, not a source checkout.
 - **Obtained as:** a prebuilt binary from
   [`bblanchon/pdfium-binaries`](https://github.com/bblanchon/pdfium-binaries),
   release pinned to `chromium/7857` in `scripts/fetch-pdfium.sh`.
-- **Licence:** BSD 3-Clause (PDFium itself), with Apache-2.0 and other terms
-  covering its own vendored third-party code — its `LICENSE` and
-  `AUTHORS` files travel in the release archive.
+- **Licence:** BSD 3-Clause for PDFium itself, plus separate terms for the
+  libraries it vendors. The archive carries `licenses/pdfium.txt` and a file per
+  vendored component (FreeType, ICU, lcms, libjpeg-turbo, libpng, libtiff,
+  OpenJPEG, zlib, Abseil, agg23, fast_float, llvm-libc, simdutf), and a root
+  `LICENSE` which is the **packaging repository's own MIT licence** (Benoit
+  Blanchon) rather than PDFium's — a distinction worth keeping straight, since
+  shipping only the root file would attribute the wrong project.
 - **Obligation:** binary redistribution must reproduce the copyright notice,
-  the licence text, and the disclaimer. **PDFium's own `LICENSE` file must be
-  copied into the bundle** — this repository does not vendor it, because the
-  binary is fetched at build time and is gitignored.
+  the licence text, and the disclaimer. **Met:** `scripts/fetch-pdfium.sh`
+  copies both the root `LICENSE` and the whole `licenses/` directory into
+  `resources/pdfium/`, which `tauri.conf.json` bundles. They are copied rather
+  than committed so they stay pinned to the release actually fetched.
 
 ### PDF.js
 
@@ -51,11 +57,16 @@ Verified from the installed package metadata. All permissive; no copyleft.
 ### Rust dependencies
 
 The direct dependencies are declared in `src-tauri/Cargo.toml`, each with its
-justification comment. Tauri, the RustCrypto crates (`cms`, `x509-cert`, `rsa`,
-`pkcs12`, `pkcs5`, `pkcs8`, `sha2`, `der`, …), `lopdf`, `pdfium-render`,
-`regex`, `ttf-parser` and `subsetter` are all published under permissive terms,
-but **the transitive tree has not been audited**. Do not treat this paragraph as
-the inventory.
+justification comment. The full transitive set — 512 crates reached from the
+root through normal (not dev, not build) dependency edges, across all three
+target platforms — is enumerated in
+[`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md).
+
+Five of them are MPL-2.0, all in Tauri's WebView stack. MPL-2.0 is *file-level*
+copyleft: the obligation attaches to the MPL-licensed files and only if they are
+modified, which we do not do. That is the single place `docs/01_VISION.md`'s "no
+copyleft in the shipped binary" is interpreted rather than applied literally, and
+it is written down in the generated file too so the decision stays visible.
 
 ## Test-only components (not shipped)
 
@@ -68,20 +79,41 @@ the inventory.
   application, so no redistribution obligation is triggered today. If a font is
   ever shipped, the OFL notice ships with it.
 
-## Before the first binary release
+## Release obligations
 
-These are open, and each one blocks distribution rather than development:
+All five are now met. They are recorded here because each one is a thing a
+*binary* distribution owes and a source checkout does not, so they are easy to
+forget until someone asks for a build.
 
-1. **Generate a real dependency inventory.** `cargo install cargo-about` (or
-   `cargo-license`) for the Rust tree, and a licence checker for the npm tree.
-   Commit the output, don't paraphrase it.
-2. **Copy PDFium's `LICENSE` and `AUTHORS` into the bundle.** They arrive in the
-   release archive that `fetch-pdfium.sh` unpacks and are currently discarded.
-3. **Ship a NOTICE for the Apache-2.0 components** (PDF.js, Tauri where it is
-   taken under Apache-2.0).
-4. **Surface the notices in the application** — an "Open source licences" view,
-   or a notices file beside the executable.
-~~5. **Pin the PDFium download by checksum.**~~ Done. `fetch-pdfium.sh` now
-   verifies each asset against a SHA-256 committed in the script, taken from the
-   SLSA provenance upstream publishes and signs for the release, and refuses to
-   unpack anything that does not match.
+1. **A real dependency inventory.** Generated, not written:
+   `npm run licenses` walks `cargo metadata` and `package-lock.json` into
+   [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) — 512 Rust crates,
+   62 npm packages, 2 bundled components, dev- and build-only dependencies
+   excluded because they ship to nobody. The same script is a gate: it exits
+   non-zero if any shipped component carries a licence outside a reviewed
+   permissive set, which is where `docs/01_VISION.md`'s "no copyleft in the
+   shipped binary" is checked rather than assumed.
+2. **PDFium's licences travel with the binary.** `scripts/fetch-pdfium.sh`
+   copies the archive's `LICENSE` and its whole `licenses/` directory —
+   PDFium's own BSD-3-Clause plus a file per vendored component (FreeType, ICU,
+   libjpeg-turbo, libpng, libtiff, OpenJPEG, zlib, Abseil and others) — into
+   `resources/pdfium/`, which `tauri.conf.json` bundles. Copied rather than
+   committed so they stay pinned to the release actually fetched.
+3. **A NOTICE for the Apache-2.0 components.** [`NOTICE`](NOTICE) carries the
+   attributions Apache-2.0 §4(d) requires. None of the upstream projects ships
+   a NOTICE of its own today; if one appears, its contents belong there verbatim.
+4. **The notices are surfaced in the application.** A "Licences" button in the
+   toolbar opens the generated inventory, available whether or not a document is
+   open. A file beside the executable satisfies the letter of the obligation and
+   is read by nobody.
+5. **The PDFium download is pinned by checksum.** `fetch-pdfium.sh` verifies
+   each asset against a SHA-256 taken from the SLSA provenance upstream signs
+   for the release, and refuses to unpack anything that does not match.
+
+### Still open
+
+- **Windows.** `fetch-pdfium.sh` has no Windows branch, so the obligations above
+  are satisfied on macOS and Linux only. A Windows build must copy the same
+  licence files.
+- The inventory is not regenerated automatically. `npm run licenses -- --check`
+  reports staleness; nothing runs it in CI yet.

@@ -57,6 +57,10 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-012 — open the Bates-numbering dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBates?: (() => void) | undefined;
+  /** Open the third-party licence list. Unlike every other entry here this is
+   *  not gated on a document: the attribution a binary distribution owes is
+   *  owed whether or not a file happens to be open. */
+  onLicences?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -74,6 +78,7 @@ export function ZoomToolbar({
   onHeaderFooter,
   onPageNumbers,
   onBates,
+  onLicences,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -343,6 +348,16 @@ export function ZoomToolbar({
       ) : null}
 
       <span className="ml-auto text-neutral-300 dark:text-neutral-700">|</span>
+      {onLicences ? (
+        <button
+          type="button"
+          onClick={onLicences}
+          title="Open source licences for the components VibePDF is built on"
+          className="rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        >
+          Licences
+        </button>
+      ) : null}
       <label className="flex items-center gap-1" title="Theme">
         <span className="text-neutral-500 dark:text-neutral-400">Theme</span>
         <select

@@ -142,5 +142,25 @@ case "$uname_s" in
     ;;
 esac
 
+# The licences travel with the binary they cover. Both are BSD-3/MIT-family
+# terms whose one obligation is that a binary distribution reproduces them, and
+# the archive already carries everything needed:
+#
+#   LICENSE     the packaging repository's own MIT licence (Benoit Blanchon)
+#   licenses/   PDFium's BSD-3-Clause licence, plus a file per component PDFium
+#               vendors — FreeType, ICU, libjpeg-turbo, libpng, libtiff,
+#               OpenJPEG, zlib, Abseil and others
+#
+# Copying them here rather than committing them keeps them pinned to the exact
+# release fetched: bump PINNED_RELEASE and the licences update with it, which a
+# committed copy would not. `resources/pdfium/*` and `resources/pdfium/licenses/*`
+# in tauri.conf.json put them in the bundle.
+cp "$tmpdir/LICENSE" "$DEST/LICENSE.pdfium-binaries.txt"
+rm -rf "$DEST/licenses"
+cp -R "$tmpdir/licenses" "$DEST/licenses"
+if [ -f "$tmpdir/VERSION" ]; then
+  cp "$tmpdir/VERSION" "$DEST/VERSION"
+fi
+
 echo "fetch-pdfium: installed to $DEST"
 ls -la "$DEST"

@@ -18,6 +18,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { CleanDialog } from "@/app/CleanDialog";
+import { LicensesDialog } from "@/app/LicensesDialog";
 import { FindRedactDialog } from "@/app/FindRedactDialog";
 import { ProtectDialog } from "@/app/ProtectDialog";
 import { SignDialog } from "@/app/SignDialog";
@@ -209,6 +210,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [watermarkOpen, setWatermarkOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
   const [cleanOpen, setCleanOpen] = useState(false);
+  const [licencesOpen, setLicencesOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
   const [findRedactOpen, setFindRedactOpen] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
@@ -529,6 +531,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
         onPageNumbers={doc ? () => setPageNumbersOpen(true) : undefined}
         onBates={doc ? () => setBatesOpen(true) : undefined}
+        onLicences={() => setLicencesOpen(true)}
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
@@ -584,6 +587,7 @@ export function PdfViewer({ documentId, path }: Props) {
         documentId={documentId}
         onClose={() => setFindRedactOpen(false)}
       />
+      <LicensesDialog open={licencesOpen} onClose={() => setLicencesOpen(false)} />
       <CleanDialog
         open={cleanOpen}
         documentId={documentId}

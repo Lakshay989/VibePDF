@@ -1,0 +1,57 @@
+VibePDF
+Copyright (c) 2026 The VibePDF contributors
+
+This product is licensed under the Apache License, Version 2.0, or the MIT
+license, at your option. See LICENSE-APACHE, LICENSE-MIT and COPYRIGHT.
+
+--------------------------------------------------------------------------------
+
+This product includes software developed by third parties. The complete
+inventory of what a build contains, with the licence of each component, is in
+THIRD-PARTY-LICENSES.md, generated from the resolved dependency trees rather
+than maintained by hand.
+
+The attributions below cover the components taken under the Apache License,
+Version 2.0, as required by section 4(d) of that licence. None of these projects
+ships a NOTICE file of its own; where one appears upstream in future, its
+contents belong here verbatim.
+
+  PDF.js
+  Copyright Mozilla Foundation and contributors
+  https://github.com/mozilla/pdf.js
+  Apache License 2.0. Used unmodified: scripts/copy-pdfjs-worker.mjs copies the
+  distributed worker into place without changing it.
+
+  Tauri
+  Copyright Tauri Programme within The Commons Conservancy
+  https://github.com/tauri-apps/tauri
+  Dual-licensed Apache-2.0 OR MIT, and listed here because Apache-2.0 is an
+  option we rely on.
+
+  Rust crates dual-licensed "MIT OR Apache-2.0"
+  The majority of the Rust dependency tree, including the RustCrypto crates
+  used for signing, is offered under this pair. Each carries its own copyright
+  notice in its source distribution; THIRD-PARTY-LICENSES.md names every one.
+
+--------------------------------------------------------------------------------
+
+Components fetched or vendored outside a package manager:
+
+  PDFium
+  Copyright The PDFium Authors
+  https://pdfium.googlesource.com/pdfium/
+  BSD 3-Clause. Distributed as a prebuilt binary. Its own LICENSE, and the
+  per-component licences for the libraries it vendors (FreeType, ICU,
+  libjpeg-turbo, libpng, libtiff, OpenJPEG, zlib, Abseil and others), are
+  copied next to the library by scripts/fetch-pdfium.sh and travel with it in
+  the application bundle.
+
+  pdfium-binaries
+  Copyright 2014-2025 Benoit Blanchon
+  https://github.com/bblanchon/pdfium-binaries
+  MIT. The build scripts that produce the PDFium binary above.
+
+  Noto Sans Coptic
+  Copyright The Noto Project Authors
+  SIL Open Font License 1.1. Used only by the test suite; not shipped. See
+  tests/fixtures/fonts/OFL-NOTICE.txt.

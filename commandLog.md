@@ -4976,6 +4976,42 @@ archive is the working one and not merely a matching one.
 Not verified: the Linux x64/arm64 and mac x64 digests, which are committed from
 the attestation but have not been exercised on those platforms. CI covers
 linux-x64 on the next E2E run.
+### Release licence obligations 1–4 (non-step)
+
+```bash
+npm run licenses            # generate THIRD-PARTY-LICENSES.md + src/generated/
+npm run licenses -- --check # fail if either output is stale
+```
+
+`--check` was mutation-tested: appending one line to the generated markdown
+makes it exit 1 with "is out of date"; restoring it passes.
+
+The permissive gate was tested by its own first failure — it flagged 24 crates
+using the pre-SPDX `MIT/Apache-2.0` slash form. Fixed by normalising `/` to
+` OR ` rather than by widening the allowlist, which would have hidden the bug.
+
+Verifying what is actually inside the PDFium archive, rather than trusting the
+earlier note that claimed `LICENSE` and `AUTHORS`:
+
+```bash
+tar -tzf pdfium-mac-arm64.tgz | grep -i licens
+# LICENSE  licenses/{pdfium,freetype,icu,lcms,libjpeg_turbo,libpng,libtiff,
+#           libopenjpeg,zlib,abseil,agg23,fast_float,llvm-libc,simdutf}.txt
+tar -xzOf pdfium-mac-arm64.tgz LICENSE | head -1
+# Copyright 2014-2025 Benoit Blanchon   <- the packager's MIT, not PDFium's BSD-3
+```
+
+Then `npm run fetch-pdfium` end to end, confirming the copy step lands:
+
+```
+resources/pdfium/: LICENSE.pdfium-binaries.txt  VERSION  libpdfium.dylib  licenses/
+```
+
+Verification: `npm run check` green; 744 frontend tests across 127 files
+(+6 for the licence dialog).
+
+Not verified: the Windows path — `fetch-pdfium.sh` still has no Windows branch,
+so the bundled-licence step is macOS/Linux only. Recorded in the notices file.
 ---
 
 ---
