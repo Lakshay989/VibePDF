@@ -81,6 +81,7 @@ These are open, and each one blocks distribution rather than development:
    taken under Apache-2.0).
 4. **Surface the notices in the application** — an "Open source licences" view,
    or a notices file beside the executable.
-5. **Pin the PDFium download by checksum.** `fetch-pdfium.sh` fetches over HTTPS
-   with no hash verification, so the build trusts whatever that URL serves. This
-   is a supply-chain gap, not a licensing one, but it is fixed in the same file.
+~~5. **Pin the PDFium download by checksum.**~~ Done. `fetch-pdfium.sh` now
+   verifies each asset against a SHA-256 committed in the script, taken from the
+   SLSA provenance upstream publishes and signs for the release, and refuses to
+   unpack anything that does not match.

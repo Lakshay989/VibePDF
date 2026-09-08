@@ -4931,6 +4931,51 @@ fix looks plausible and someone will reach for it again.
 Verification: `npm run check` green; 738 frontend tests across 126 files.
 
 Not verified: nothing in the deferred `steps/P6-SWEEP.md` — still on hold.
+### Pinning the PDFium download (non-step)
+
+Digests taken from upstream's signed SLSA provenance rather than computed
+locally — a self-computed hash pins whatever you happened to download:
+
+```bash
+curl -fsSL -o attestation.json \
+  "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7857/pdfium-attestation.json"
+
+python3 -c 'import sys,json,base64; \
+  p=json.loads(base64.b64decode(json.load(open("attestation.json"))["dsseEnvelope"]["payload"])); \
+  [print(s["name"], s["digest"]["sha256"]) for s in p["subject"]]'
+```
+
+Then verified rather than assumed:
+
+```bash
+gh attestation verify pdfium-mac-arm64.tgz --repo bblanchon/pdfium-binaries
+# exit 0; signer = bblanchon/pdfium-binaries/.github/workflows/build-all.yml@refs/heads/master
+
+# Negative control — one flipped byte must fail.
+dd of=tampered.tgz bs=1 seek=1000000 count=1 conv=notrunc < /dev/zero
+gh attestation verify tampered.tgz --repo bblanchon/pdfium-binaries   # exit 1
+```
+
+Four paths exercised on the rewritten script:
+
+| Case | Result |
+|---|---|
+| Normal run | `sha256 ok (65a4a6b0…)`, installed |
+| Digest corrupted to `deadbeef…` | Refused, exit 1; installed dylib byte-identical and mtime unchanged, so nothing was unpacked |
+| `PDFIUM_RELEASE=chromium/9999` | Refused with re-pin instructions, exit 1 |
+| Same + `PDFIUM_ALLOW_UNPINNED=1` | Warned that verification is disabled, then proceeded (404, as that release does not exist) |
+
+The mismatch case was run from a `sed`-modified copy inside `scripts/` so that
+`REPO_ROOT` still resolved to the real tree — the point of the test was that the
+*real* install directory stays untouched on refusal.
+
+Verification: `npm run test:pdf` green against the freshly fetched library
+(render, actor and encrypted-open suites), which is what proves the pinned
+archive is the working one and not merely a matching one.
+
+Not verified: the Linux x64/arm64 and mac x64 digests, which are committed from
+the attestation but have not been exercised on those platforms. CI covers
+linux-x64 on the next E2E run.
 ---
 
 ---

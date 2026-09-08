@@ -9997,6 +9997,55 @@ two that might have, did not either — for a reason worth writing down.
 ### Further reading
 - <https://github.com/mozilla/pdf.js/security/advisories/GHSA-hq66-cqwq-w95j>
 - <https://developer.mozilla.org/docs/Web/HTTP/CSP> — why withholding `unsafe-eval` is the second layer
+## Pinning the PDFium download (non-step)
+
+`scripts/fetch-pdfium.sh` fetched a native shared library over HTTPS and
+unpacked it, with nothing checking what arrived.
+
+### Concepts learned
+
+- **HTTPS authenticates the server, not the artefact.** It proves the bytes came
+  from github.com unmodified in transit. It says nothing about whether the
+  release asset behind that URL is the same asset it was last week — a tag can
+  be re-pointed and a release asset replaced, and neither leaves a trace in this
+  repository. The library then gets linked into an application whose whole pitch
+  is that it can be trusted with your documents.
+
+- **The digests did not have to be ours.** `bblanchon/pdfium-binaries` publishes
+  `pdfium-attestation.json` on each release: SLSA v1 provenance in a Sigstore
+  bundle, signed by its own build workflow, listing a SHA-256 for all 43 assets.
+  Taking the digests from there beats computing our own, because a
+  self-computed hash is trust-on-first-use — it records whatever we happened to
+  download, including a bad artefact, and then faithfully pins it.
+
+- **Verifying the attestation is a separate act from reading it.** Decoding the
+  DSSE payload only shows what the document claims. `gh attestation verify`
+  checks the Sigstore chain and reports the signing workflow
+  (`build-all.yml@refs/heads/master`). Both were done, and the whole thing was
+  mutation-checked: flipping one byte of the downloaded archive made
+  verification fail, which is what proves the check is doing work.
+
+- **A verification step that can silently disable itself is worse than none**,
+  because the build still *looks* verified. The committed digests describe
+  exactly one release, so `PDFIUM_RELEASE=<other>` invalidates them. The script
+  refuses outright and prints how to re-pin; skipping the check requires typing
+  `PDFIUM_ALLOW_UNPINNED=1`, which is not something anyone does by accident.
+
+- **Order is the whole point: verify before `tar`.** Unpacking is the first
+  operation that acts on the downloaded bytes, so a check placed after it is
+  decoration. The failure message also says *not* to fix a mismatch by editing
+  the digest, because that is the tempting move and it is the one that converts
+  a caught supply-chain event into a silent acceptance of it.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `scripts/fetch-pdfium.sh` | Per-platform SHA-256, checked before unpacking; refuses unpinned releases. |
+| `THIRD-PARTY-NOTICES.md` | Obligation 5 closed. |
+
+### Further reading
+- <https://slsa.dev/spec/v1.0/provenance>
+- <https://docs.github.com/actions/security-guides/using-artifact-attestations>
 ---
 
 ---
