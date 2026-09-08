@@ -40,7 +40,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # wrapper over getrandom(2)/BCryptGenRandom and holds no state of its own. It
 # was already in Cargo.lock transitively, so this adds a direct edge and no new
 # supply-chain surface. lopdf supplies the cryptography itself.
-getrandom = "0.3"
+getrandom = "0.4"
 # P6.C1 (SPEC P6-SEC-007): one AES-256-ECB block, to write the /Perms entry
 # that lopdf 0.36.0 leaves in plaintext (its compute_permissions encrypts a
 # temporary copy and returns the original). PDFium validates /Perms and refuses
