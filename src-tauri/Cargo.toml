@@ -33,7 +33,7 @@ pdfium-render = "0.9"
 # through `image = "0.25"` (transitive via pdfium-render) keeps the
 # surface area minimal — we don't want decoders or manipulation
 # routines we'll never call.
-png = "0.17"
+png = "0.18"
 uuid = { version = "1", features = ["v4", "serde"] }
 # P6.C1 (SPEC P6-SEC-007): the OS CSPRNG, for AES-256 file encryption keys.
 # Key material must not come from a seeded PRNG — `getrandom` is the thinnest
