@@ -31,7 +31,7 @@ These are constraints, not features. Violating them changes the product into som
 1. **Offline-first.** The editor must do every core operation with no network connection. Network is opt-in per-feature (e.g. checking for updates, cloud sync if a user enables it), and turned off by default.
 2. **No account, no signup, no telemetry.** The first time the app opens, it just opens. No tracking pixel, no anonymous-usage-stats nag, no "please rate us." Period.
 3. **No watermarks on output.** This is the line that separates free editors from free trials.
-4. **Permissively licensed.** MIT or Apache 2.0 on our code. Every bundled dependency must be license-compatible. No GPL/AGPL contamination in the shipped binary. (This rules out one PDF library — see `03_TECH_STACK.md`.)
+4. **Permissively licensed.** Dual-licensed `MIT OR Apache-2.0` — see `LICENSE-MIT`, `LICENSE-APACHE` and `COPYRIGHT`. Every bundled dependency must be license-compatible. No GPL/AGPL contamination in the shipped binary. (This rules out one PDF library — see `03_TECH_STACK.md`.)
 
 ## The principles
 

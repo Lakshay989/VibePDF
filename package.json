@@ -2,6 +2,7 @@
   "name": "vibepdf",
   "private": true,
   "version": "0.0.1",
+  "license": "MIT OR Apache-2.0",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/copy-pdfjs-worker.mjs",

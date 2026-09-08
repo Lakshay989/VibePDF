@@ -4836,6 +4836,61 @@ are how a real one gets missed.
 
 Not verified: the field picker against a real form. Sweep §6f.
 
+### Repository hardening — going public (non-step)
+
+Repo settings, changed through the API rather than the web UI so the change is
+reviewable here:
+
+```bash
+# Secret scanning + push protection. Neither helps with what is already
+# committed; they stop the *next* accidental key push.
+gh api -X PATCH repos/Lakshay989/VibePDF \
+  -f 'security_and_analysis[secret_scanning][status]=enabled' \
+  -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'
+
+gh api -X PUT repos/Lakshay989/VibePDF/vulnerability-alerts      # Dependabot alerts
+gh api -X PUT repos/Lakshay989/VibePDF/automated-security-fixes  # auto-fix PRs
+
+# Ruleset on the default branch: deletion + non_fast_forward only.
+# Deliberately NOT requiring PRs or status checks — see Learning.md.
+gh api -X POST repos/Lakshay989/VibePDF/rulesets --input ruleset.json  # id 22515438
+```
+
+Left disabled: `secret_scanning_non_provider_patterns` (generic-secret
+heuristics). It would flag the documented `test123` fixture password on every
+scan, and an alert list with a known-permanent entry is one that stops being
+read.
+
+Action SHAs resolved before pinning, so the pin matches what `@v4` / `@stable`
+resolved to at the time and CI behaviour is unchanged:
+
+```bash
+gh api repos/actions/checkout/commits/v4 --jq .sha        # 11d5960a… = v4.4.0
+gh api repos/actions/setup-node/commits/v4 --jq .sha      # 49933ea5… = v4.4.0
+gh api repos/Swatinem/rust-cache/commits/v2 --jq .sha     # 6323deb1… = v2.9.2
+gh api repos/dtolnay/rust-toolchain/commits/stable --jq .sha  # 6bed0761… (branch head)
+```
+
+Apache-2.0 text was **copied, not typed** — `node_modules/@tauri-apps/api/`
+and `node_modules/pdfjs-dist/` each ship a copy, and `cmp` showed them
+byte-identical, which is the check that the text is the canonical one.
+
+Audit commands run (read-only, no state change, but worth recording because
+they are the evidence the history is clean):
+
+```bash
+git log --diff-filter=A --name-only --format='' | sort -u   # every file ever added
+git grep -nIE '[A-Za-z0-9._%+-]+@(gmail|outlook|yahoo)\.'  # no personal email tracked
+git grep -nI '/Users/lakshay'                                # no absolute home paths
+```
+
+Verification: `npm run check` green. Both workflows and `dependabot.yml` parsed
+with `js-yaml` before commit — a malformed workflow does not fail CI, it
+silently stops running it.
+
+Not verified: whether the pinned action SHAs still resolve on GitHub's side
+(they will only be exercised on the next CI run), and no binary release exists
+yet to test the `THIRD-PARTY-NOTICES.md` obligations against.
 ---
 
 ---

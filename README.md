@@ -223,10 +223,21 @@ Before opening a pull request:
 
 ## License
 
-Intended to be permissively licensed — MIT or Apache 2.0, per
-[`docs/01_VISION.md`](docs/01_VISION.md), with every bundled dependency
-license-compatible and no copyleft in the shipped binary.
+Dual-licensed under either of
 
-**A `LICENSE` file has not been added yet.** Until one is, the code is
-technically unlicensed and no usage rights are granted. This needs resolving
-before any release.
+- Apache License 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option — the Rust ecosystem convention. Contributions are accepted
+under the same terms; see [`COPYRIGHT`](COPYRIGHT).
+
+Bundled third-party components keep their own licences, all permissive with no
+copyleft in the shipped binary. The redistribution obligations that a released
+binary must satisfy are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md); several are still open, and
+they block a binary release rather than development.
+
+## Security
+
+Please do not report security issues in a public issue. See
+[`SECURITY.md`](SECURITY.md).

@@ -1,0 +1,39 @@
+# Code owners — who GitHub asks to review what.
+#
+# Listing a path here makes GitHub request that owner's review automatically on
+# any pull request touching it. It is a routing rule, not a gate: enforcement
+# needs "Require review from Code Owners" on a branch ruleset, which is
+# deliberately not enabled while this is a single-maintainer repository (it
+# would block the maintainer's own direct pushes to main).
+#
+# The value it carries today is that the security paths can never be reviewed by
+# accident — the request appears on the PR whether or not anyone remembered.
+
+# Default owner for everything.
+*                           @Lakshay989
+
+# Signing, encryption, redaction. Mistakes here are silent: a document that
+# looks protected and is not, or looks redacted and still carries the text.
+# Every diff gets a human review pass regardless of test results — CLAUDE.md
+# and SECURITY.md both state this; this line is the machine-readable copy.
+/src-tauri/src/security/    @Lakshay989
+
+# The PDF engine. Every change needs a deterministic test against a fixture.
+/src-tauri/src/pdf/         @Lakshay989
+
+# Licensing and security posture.
+/LICENSE-APACHE             @Lakshay989
+/LICENSE-MIT                @Lakshay989
+/COPYRIGHT                  @Lakshay989
+/THIRD-PARTY-NOTICES.md     @Lakshay989
+/SECURITY.md                @Lakshay989
+
+# CI, and the fetch script the build trusts to supply PDFium.
+/.github/                   @Lakshay989
+/scripts/fetch-pdfium.sh    @Lakshay989
+
+# The spec is the source of truth and is the human's to change.
+/docs/02_PRODUCT_SPEC.md    @Lakshay989
+
+# Test fixtures, including the committed signing keys.
+/tests/fixtures/            @Lakshay989

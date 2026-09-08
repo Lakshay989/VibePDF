@@ -9857,6 +9857,83 @@ could only add a field of its own.
 | `tests/fixtures/basic/sigfield.pdf` | Two empty signature fields, so "the right one" and "the only one" differ. |
 | `src/app/SignDialog.tsx` | The field picker, shown only when there is something to pick. |
 
+## Repository hardening — going public (non-step)
+
+Not a `steps/P<n>.md` item. The repository became public, and going public
+changes which mistakes are cheap.
+
+### Problem
+
+A public repository makes three separate promises it can silently fail to keep:
+a licence that grants what the README claims, a merge path nobody can walk
+around, and a history that holds no secret. Each fails quietly.
+
+### Concepts learned
+
+- **No `LICENSE` file means "all rights reserved", not "public domain".**
+  Copyright is automatic on creation; publishing source grants nothing. The
+  repository declared `license = "MIT OR Apache-2.0"` in `Cargo.toml` and
+  promised "free and open source" in the README, while GitHub's API reported
+  `license: null`. Anyone forking was infringing, and — the half that is easy
+  to miss — contributions arrived under **no inbound licence**, so accepting a
+  PR was the risk running in the other direction.
+
+- **Dual `MIT OR Apache-2.0`, the Rust-ecosystem convention.** Apache-2.0
+  carries an express patent grant that MIT lacks; MIT stays usable by the few
+  downstreams that cannot take Apache-2.0. "OR" means the *user* chooses, not
+  us. The SPDX expression now appears in three places that must agree:
+  `Cargo.toml`, `package.json`, and the licence files themselves.
+
+- **A git tag is a mutable pointer, so `uses: actions/checkout@v4` is a trust
+  decision renewed on every run.** Whoever controls that repository — or
+  whoever compromises it — can move `v4` to arbitrary code that then executes
+  on our runner. Pinning to a commit SHA makes the reference immutable; the
+  `# v4.4.0` comment keeps it legible, and Dependabot bumps SHA and comment
+  together. `dtolnay/rust-toolchain@stable` was the worse case: `stable` is a
+  *branch*, tracking head continuously.
+
+- **`pull_request` vs `pull_request_target` is the single biggest fork-PR
+  footgun**, and this repository already had it right. `pull_request` runs the
+  fork's code with a read-only token and no secrets. `pull_request_target` runs
+  in the *base* repository's context — with secrets — while checking out the
+  fork's code, which hands a stranger everything the workflow can reach.
+
+- **"A private key is in the repository" and "a credential leaked" are
+  different findings.** `tests/fixtures/certs/` holds a committed RSA key on
+  purpose: the signing tests must be deterministic and offline, and the two
+  PKCS#12 wrappings are themselves the thing under test. It is safe because the
+  certificate is self-signed and chains to nothing — the same fact that
+  `verify.rs` encodes by having no `Trusted` variant. What was missing was a
+  `README.md` saying so, next to the key, where a scanner or a stranger looks
+  first.
+
+- **`CODEOWNERS` is routing, not a gate.** It auto-requests a review; it only
+  *blocks* when a ruleset requires code-owner review. Adding the file still
+  pays: the security paths can no longer be reviewed by accident, because the
+  request appears whether or not anyone remembered.
+
+- **Choosing the weaker branch rule on purpose.** The ruleset blocks deletion
+  and force-push and stops there. Requiring pull requests or passing status
+  checks would have broken the one-commit-per-step direct-push workflow, and CI
+  here deliberately runs only every third push — a required check that never
+  reports would block `main` permanently. Protection that fights the workflow
+  gets switched off, so it protects nothing.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `LICENSE-APACHE`, `LICENSE-MIT`, `COPYRIGHT` | The grant. Apache text copied verbatim from two independent local copies that compared byte-identical, rather than retyped. |
+| `THIRD-PARTY-NOTICES.md` | What a *binary* release must reproduce (PDFium BSD-3, PDF.js Apache-2.0), and the five obligations still open. |
+| `SECURITY.md` | Private disclosure route, and a scope list written around silent failures — incomplete redaction, encryption that does not hold, signatures that verify over the wrong bytes. |
+| `CONTRIBUTING.md` | The rules that surprise people: sequential phases, the `security/` review gate, mutation-checked tests, fixture provenance. |
+| `.github/CODEOWNERS` | Machine-readable copy of "every `security/` diff gets a human pass". |
+| `.github/dependabot.yml` | Grouped weekly updates; RustCrypto grouped because those crates are version-coupled and split PRs produce a tree that will not build. |
+| `tests/fixtures/certs/README.md` | Why the committed key is safe, and the rule that it is never used for anything real. |
+
+### Further reading
+- <https://choosealicense.com/no-permission/> — what "no licence" actually means
+- <https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/> — `pull_request_target`
+- <https://docs.github.com/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions>
 ---
 
 ---

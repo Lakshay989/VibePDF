@@ -19,6 +19,20 @@ name: CI
 # If Linux CI is wanted later, regenerate the golden on Linux
 # (`npm run test:pdf -- --ignored bless_goldens`) or exclude
 # render_compare there.
+#
+# Third-party actions are pinned by commit SHA, not by tag. A tag is a mutable
+# pointer: `@v4` re-authorises whatever that repository's owner (or anyone who
+# compromises it) has since moved the tag to, on every single run. The trailing
+# `# v4.4.0` comment keeps it readable, and Dependabot bumps the SHA and the
+# comment together — see .github/dependabot.yml.
+#
+# `dtolnay/rust-toolchain@stable` is worse than a tag: `stable` is a *branch*,
+# so it tracked head continuously. It is pinned to the head at the time of
+# pinning; bumping it is a deliberate act.
+#
+# Trigger is `pull_request`, deliberately never `pull_request_target`. A fork's
+# PR runs its own code here, so the job must never hold anything worth stealing:
+# no secrets are referenced, and the workflow token is read-only.
 
 on:
   push:
@@ -43,7 +57,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # need full history to count commits
       - id: decide
@@ -63,21 +77,21 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
         with:
           components: clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -114,21 +128,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
         with:
           components: clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
