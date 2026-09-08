@@ -9934,6 +9934,69 @@ around, and a history that holds no secret. Each fails quietly.
 - <https://choosealicense.com/no-permission/> — what "no licence" actually means
 - <https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/> — `pull_request_target`
 - <https://docs.github.com/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions>
+## Triaging the alerts that hardening switched on (non-step)
+
+Enabling Dependabot immediately reported 44 open advisories. The interesting
+part was not the number; it was that 42 of them did not matter and one of the
+two that might have, did not either — for a reason worth writing down.
+
+### Concepts learned
+
+- **Scope is the first filter, and it does most of the work.** 42 alerts were
+  `development` scope: vitest, vite, esbuild, undici, js-yaml. They ship to
+  nobody. The critical-rated one (vitest UI arbitrary file read) needs a Vitest
+  UI server listening, which only exists while a developer runs it. Reading a
+  raw alert count as a security posture would have produced a week of pointless
+  upgrades.
+
+- **The one runtime alert was real and specific.** `pdfjs-dist` 5.7.284 is
+  inside the range of GHSA-hq66-cqwq-w95j (CVE-2026-16633) — arbitrary
+  JavaScript execution in the host context on opening a malicious PDF. For an
+  offline editor whose entire job is opening documents from strangers, that is
+  the worst-shaped bug available.
+
+- **Then the fix was wrong, and finding out why was the actual lesson.** The
+  advisory's workaround is "set `enableScripting` to false", so the obvious move
+  was to pass it to `getDocument`. `tsc` rejected it: `enableScripting` is not
+  a member of `DocumentInitParameters`. It is an option on PDF.js's *viewer* and
+  on its `AnnotationLayer` — the components that own script execution. It does
+  not exist on the core parsing API, and adding it there would have been a
+  comment claiming a protection that the code did not implement.
+
+- **The real mitigation was architectural and already in place.** The only
+  runtime values this frontend imports from `pdfjs-dist` are `getDocument`,
+  `GlobalWorkerOptions` and `TextLayer`; everything else is `import type` and
+  erased at compile time. The app's own `AnnotationLayer` in
+  `src/view/annotation-layer.tsx` is a React SVG component that shares a name
+  with PDF.js's class and nothing else. The scripting path is never constructed,
+  so it cannot run. (The Tauri CSP withholds `unsafe-eval` as a second layer,
+  which is the advisory's other stated workaround.)
+
+- **A safety property that holds "because nobody imported it" needs a test, and
+  the test has to read source.** There is no runtime moment at which an absent
+  scripting manager is observable — you cannot assert on a thing that was never
+  built. So `pdfjs-surface.test.ts` walks the frontend and checks the *import
+  surface*: allowed runtime bindings only, and nothing from `pdfjs-dist/web/`.
+  Its failure message deliberately says the fix is to pass
+  `enableScripting: false` at the new call site, not to widen the allowlist.
+
+- **Mutation-checking caught a bug in the test itself.** The first regex used a
+  lazy `[\s\S]*?` between `import` and `from "pdfjs-dist"`, which happily
+  started at an *earlier* import statement and swallowed everything in between —
+  reporting `useState` and `forwardRef` as PDF.js imports. Anchoring to a line
+  start and forbidding `;` inside the clause fixed it. Three probes were then
+  run: a disallowed named import (caught), a viewer-bundle import (caught), and
+  a type-only import (correctly ignored). The third mattered most — a guard that
+  fires on `import type` would have been deleted by the first person it annoyed.
+
+### Files in this step
+| File | Role |
+|---|---|
+| `src/view/__tests__/pdfjs-surface.test.ts` | Pins the PDF.js runtime import surface, so the scripting path cannot be pulled in by accident. |
+
+### Further reading
+- <https://github.com/mozilla/pdf.js/security/advisories/GHSA-hq66-cqwq-w95j>
+- <https://developer.mozilla.org/docs/Web/HTTP/CSP> — why withholding `unsafe-eval` is the second layer
 ---
 
 ---

@@ -4891,6 +4891,46 @@ silently stops running it.
 Not verified: whether the pinned action SHAs still resolve on GitHub's side
 (they will only be exercised on the next CI run), and no binary release exists
 yet to test the `THIRD-PARTY-NOTICES.md` obligations against.
+### Dependabot triage (non-step)
+
+Enabling alerts in the previous commit surfaced 44 open advisories on push.
+
+```bash
+# Triage by scope first — 42 of 44 are devDependencies.
+gh api 'repos/Lakshay989/VibePDF/dependabot/alerts?state=open&per_page=100' \
+  --jq '.[] | "\(.security_advisory.severity)\t\(.dependency.scope)\t\(.dependency.package.name)"' | sort
+
+# The three runtime-scope ones, with affected/patched ranges.
+gh api 'repos/Lakshay989/VibePDF/dependabot/alerts?state=open&per_page=100' \
+  --jq '.[] | select(.dependency.scope=="runtime")'
+```
+
+Runtime findings:
+
+| Package | Advisory | Status |
+|---|---|---|
+| `pdfjs-dist` 5.7.284 | GHSA-hq66-cqwq-w95j (high) | **Not exploitable here** — path never constructed. Guarded by a new test. |
+| `serde_with` 3.20.0 | GHSA-7gcf-g7xr-8hxj (medium) | Fixable by lockfile update to ≥ 3.21.0. Left for the Dependabot PR. |
+| `glib` 0.18.5 | GHSA-wrw7-89jp-8q8g (medium) | Needs 0.20.0, a semver-major bump held by tauri's own tree. Blocked upstream. |
+
+```bash
+cargo update --dry-run -p glib -p serde_with   # confirms glib cannot move, serde_with can
+grep -rn "from \"pdfjs-dist" src/             # the import-surface audit, now a test
+```
+
+Mutation-checked the new guard three ways before trusting it — disallowed named
+import (fails), `pdfjs-dist/web/` import (fails), `import type` (still passes).
+The third is the one that matters: a guard that fires on type-only imports gets
+deleted by whoever it blocks first.
+
+An earlier attempt passed `enableScripting: false` to `getDocument` and was
+reverted: `tsc` rejects it, because the option belongs to PDF.js's viewer and
+`AnnotationLayer`, not to `DocumentInitParameters`. Recorded because the wrong
+fix looks plausible and someone will reach for it again.
+
+Verification: `npm run check` green; 738 frontend tests across 126 files.
+
+Not verified: nothing in the deferred `steps/P6-SWEEP.md` — still on hold.
 ---
 
 ---
