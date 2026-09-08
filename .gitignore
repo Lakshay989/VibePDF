@@ -32,6 +32,30 @@ coverage/
 docs/PORTFOLIO_*.md
 docs/story/
 
+# Prompt-engineering and process notes. These describe how the project was
+# *built* rather than what it is, and on a public repository they are noise to
+# a reader and a distraction to a contributor. Untracked in the same commit
+# that added these lines — note that ignoring a file does nothing until it is
+# also `git rm --cached`ed, and that its history stays in the repository either
+# way, so this is tidiness rather than removal.
+#
+# FABLE_REVIEW.md is deliberately NOT here: 31 tracked files cite it by section
+# number, including Rust source comments and docs/04_ARCHITECTURE.md, so it has
+# become reference documentation whether or not that was the intent.
+INITIAL_PROMPT.md
+PROMPTING_PLAYBOOK.md
+
+# Scratch working files. None of these exist yet; they are here so the first
+# one never has to be noticed in a `git status` and cleaned up by hand.
+scratch/
+*.local.md
+*.orig
+*.rej
+*.bak
+.env
+.env.*
+!.env.example
+
 # Scratch / exploratory / verification PDFs. Its own README always claimed this
 # folder was ignored; it wasn't — only untracked, so one `git add -A` would have
 # committed tens of MB of scratch. See `Sample PDFs/README.md` for the layout.
