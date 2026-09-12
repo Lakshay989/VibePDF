@@ -76,9 +76,7 @@ fn encrypts_with_aes_256() {
     assert_eq!(int(&dict, b"V"), 5, "/V 5 is the AES-256 security handler");
     assert_eq!(int(&dict, b"R"), 6, "/R 6 is its revision");
 
-    // V5 omits /Length — the key size is stated by the crypt filter's method,
-    // and /AESV3 *is* the 256-bit one. Asserting /Length here would be
-    // asserting a key the spec does not put in this dictionary.
+    // The crypt filter names the method: /AESV3 is AES-256.
     let cf = dict.get(b"CF").and_then(Object::as_dict).expect("/CF");
     let std = cf.get(b"StdCF").and_then(Object::as_dict).expect("/StdCF");
     assert_eq!(
@@ -86,10 +84,20 @@ fn encrypts_with_aes_256() {
         b"AESV3",
         "/AESV3 is AES-256; /AESV2 would be 128-bit and off-spec here"
     );
+    // …and states its key length, in bytes. Without this PDFKit (Preview,
+    // Safari, Quick Look) accepts the correct password and then renders every
+    // page blank — "unsupported crypt filter key length" — while PDFium, PDF.js
+    // and Ghostscript never notice. Found by the P6 sweep, not by any test.
+    assert_eq!(
+        std.get(b"Length").and_then(Object::as_i64).expect("/StdCF /Length"),
+        32,
+        "the crypt filter must state a 32-byte key or Preview renders nothing"
+    );
     assert_eq!(dict.get(b"StmF").and_then(Object::as_name).unwrap(), b"StdCF");
     assert_eq!(dict.get(b"StrF").and_then(Object::as_name).unwrap(), b"StdCF");
 
-    // …and no `/Length`. Optional for V5, and actively harmful: lopdf's own
+    // …and no top-level `/Length` — a different entry from the crypt filter's
+    // above. Optional for V5, and actively harmful: lopdf's own
     // decrypt derives `n = Length / 8` and rejects `n > 16`, so writing it makes
     // our output undecryptable by the library that produced it — which is what
     // P6.C2 needs to do.

@@ -33,13 +33,25 @@ const KEY_BYTES: usize = 32;
 /// choice and what every reader expects to find.
 const FILTER_NAME: &[u8] = b"StdCF";
 
-// No `/Length` is written. PDF 2.0 makes it optional for V5 — `/AESV3` already
-// states the key size — and adding it does active harm: `lopdf`'s own decrypt
-// derives `n = Length / 8`, hits its `n > 16` guard (the legacy MD5 path caps
-// at 128 bits) and fails with `InvalidKeyLength`. A `/Length 256` was briefly
-// added here on a guess while chasing an unrelated problem; it was never needed
-// — `PDFium` opens these files without it — and it made our own output
+// There are two `/Length` entries a V5 `/Encrypt` can carry, in different
+// places and different units, and they must be treated oppositely.
+//
+// **The top-level one is not written.** PDF 2.0 makes it optional for V5 —
+// `/AESV3` already states the key size — and adding it does active harm:
+// `lopdf`'s own decrypt derives `n = Length / 8`, hits its `n > 16` guard (the
+// legacy MD5 path caps at 128 bits) and fails with `InvalidKeyLength`. A
+// `/Length 256` was briefly added there on a guess; it made our own output
 // undecryptable by the very library that wrote it, which P6.C2 depends on.
+//
+// **The crypt filter's is written** — see `state_crypt_filter_key_length`.
+// Leaving it out is what made Preview render every page of our files blank.
+
+/// The crypt filter's key length, in **bytes**: the standard security handler
+/// states a crypt filter's `/Length` in multiples of 8 ("16 means 128", ISO
+/// 32000-1 Table 25), so AES-256 is 32, not 256. Every reader we test accepts
+/// either; 32 is the one the standard names.
+#[allow(clippy::cast_possible_wrap)] // 32 fits in an i64 with room to spare
+const CRYPT_FILTER_KEY_LENGTH: i64 = KEY_BYTES as i64;
 
 /// What to protect a document with.
 ///
@@ -261,6 +273,37 @@ fn fix_permissions_entry(doc: &mut Document, key: &[u8; KEY_BYTES]) -> Result<()
     Ok(())
 }
 
+
+/// Write `/Length` into the crypt filter, where `CoreGraphics` requires it.
+///
+/// Without it, `PDFKit` — Preview, Safari, Quick Look — accepts the correct
+/// password and then renders every page **blank**, logging `unsupported crypt
+/// filter key length`. Nothing fails loudly: the document opens, it is simply
+/// empty. `PDFium`, PDF.js and Ghostscript all derive the key size from `/AESV3`
+/// and never noticed, which is how a file that looked correct in three readers
+/// was unreadable in the one most Mac users open by default.
+///
+/// This is the crypt filter's entry, not the top-level `/Encrypt` `/Length`
+/// that `lopdf` rejects (see the comment above `CRYPT_FILTER_KEY_LENGTH`), and
+/// `security::decrypt` still unlocks the result.
+fn state_crypt_filter_key_length(doc: &mut Document) -> Result<(), CommandError> {
+    let id = doc
+        .trailer
+        .get(b"Encrypt")
+        .and_then(Object::as_reference)
+        .map_err(|e| CommandError::PdfError(format!("no /Encrypt after encrypting: {e}")))?;
+    let filter = doc
+        .get_object_mut(id)
+        .and_then(Object::as_dict_mut)
+        .and_then(|encrypt| encrypt.get_mut(b"CF"))
+        .and_then(Object::as_dict_mut)
+        .and_then(|filters| filters.get_mut(FILTER_NAME))
+        .and_then(Object::as_dict_mut)
+        .map_err(|e| CommandError::PdfError(format!("no crypt filter after encrypting: {e}")))?;
+    filter.set("Length", Object::Integer(CRYPT_FILTER_KEY_LENGTH));
+    Ok(())
+}
+
 /// SPEC: P6-SEC-007 — return `bytes` re-encoded with AES-256 encryption.
 ///
 /// The input must be an unencrypted document; re-encrypting an already
@@ -332,6 +375,7 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
         .map_err(|e| CommandError::PdfError(format!("could not encrypt the document: {e}")))?;
 
     fix_permissions_entry(&mut doc, &key)?;
+    state_crypt_filter_key_length(&mut doc)?;
 
     let mut out = Vec::new();
     doc.save_to(&mut out)

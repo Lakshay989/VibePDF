@@ -37,6 +37,10 @@ Two diffs: `8e8394b`, `f7384e3`, `536510b`.
 - [ ] `DocumentPermissions::default()` — hand-written, granting everything. The
       derived `Default` would clear every bit and silently produce the most
       restricted document possible.
+- [ ] `security/encrypt.rs::state_crypt_filter_key_length` (sweep fix,
+      2026-09-12) — writes `/Length 32` into `/CF/StdCF` and **only** there.
+      Check the top-level `/Encrypt` still carries no `/Length` (lopdf's decrypt
+      rejects it), and that the value is bytes, not bits.
 
 ## 2. Cross-reader: encryption (blocking)
 
@@ -45,7 +49,12 @@ Password to open: `open-me`. Permissions password on the second: `owner-only`.
 
 - [ ] **a mainstream reader** prompts, opens with `open-me`, refuses a wrong password
 - [ ] **A third reader** (Chrome, other independent viewers) — same
-- [ ] Preview — same *(already done 2026-08-12: renders correctly)*
+- [ ] Preview — same. **Re-check; the 2026-08-12 pass did not hold.** On
+      2026-09-11 every page of these files rendered *blank* in PDFKit after the
+      correct password (`unsupported crypt filter key length`), while PDFium,
+      PDF.js and Ghostscript were fine. Fixed 2026-09-12 by stating the crypt
+      filter's key length; the files were regenerated and PDFKit now extracts
+      and renders the text. Confirm in the Preview app itself.
 - [ ] **Unlock** one in-app, then open the result in all three: opens with **no**
       password anywhere
 
