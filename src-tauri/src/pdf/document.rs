@@ -1,5 +1,7 @@
+use std::ffi::c_void;
+use std::os::raw::{c_int, c_ulong};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
 
 use pdfium_render::prelude::*;
 use serde::Serialize;
@@ -78,13 +80,128 @@ static PDFIUM: LazyLock<Result<Pdfium, String>> = LazyLock::new(|| {
     // binding option lives behind a non-default cargo feature we don't
     // depend on. `bind_to_system_library` walks the standard search
     // path (incl. src-tauri/resources/pdfium/ at dev time).
-    Pdfium::bind_to_system_library()
-        .map(Pdfium::new)
-        .map_err(|e| format!("could not load PDFium: {e}. Run `npm run fetch-pdfium`."))
+    let bind = || {
+        Pdfium::bind_to_system_library()
+            .map_err(|e| format!("could not load PDFium: {e}. Run `npm run fetch-pdfium`."))
+    };
+    // The spare handle has to be taken *first*: once `Pdfium::new` has run,
+    // pdfium-render refuses every further bind with
+    // `PdfiumLibraryBindingsAlreadyInitialized`. See `RAW_BINDINGS`.
+    //
+    // The spare must never be dropped: pdfium-render's `Drop` for a binding
+    // calls `FPDF_DestroyLibrary`, which would tear the library down under the
+    // live instance. Hence `forget` on both paths that could otherwise drop it.
+    let spare = bind()?;
+    let main = match bind() {
+        Ok(main) => main,
+        Err(e) => {
+            std::mem::forget(spare);
+            return Err(e);
+        }
+    };
+    let pdfium = Pdfium::new(main);
+    if let Err(unused) = RAW_BINDINGS.set(spare) {
+        std::mem::forget(unused); // unreachable: this initialiser runs once
+    }
+    Ok(pdfium)
 });
 
 pub fn pdfium() -> Result<&'static Pdfium, CommandError> {
     PDFIUM.as_ref().map_err(|e| CommandError::Internal(e.clone()))
+}
+
+/// A second binding to the same `PDFium` library, for the one call pdfium-render
+/// cannot make.
+///
+/// pdfium-render 0.9.1 hard-codes `flags = 0` in `save_to_writer` (its own
+/// TODO names `FPDF_REMOVE_SECURITY`) and keeps the document handle and its
+/// bindings `pub(crate)`. The only public way to reach the raw functions is a
+/// fresh `bind_to_system_library`, which it permits only before the library is
+/// initialised — so `PDFIUM` takes this one first. Both bindings resolve the
+/// same loaded library and share its one initialisation. It lives in a static
+/// and is never dropped, because dropping a binding destroys the library.
+static RAW_BINDINGS: OnceLock<Box<dyn PdfiumLibraryBindings>> = OnceLock::new();
+
+/// `FPDF_REMOVE_SECURITY` from `fpdf_save.h`.
+const FPDF_REMOVE_SECURITY: c_ulong = 3;
+
+/// `PDFium`'s `FPDF_FILEWRITE`, with the output buffer riding behind it.
+///
+/// `PDFium` calls `write_block` with the pointer it was handed. The header is
+/// the first field of a `#[repr(C)]` struct, so that pointer is also a pointer
+/// to the whole `FileSink` — which is how the callback reaches `buf`.
+#[repr(C)]
+struct FileSink {
+    version: c_int,
+    write_block: Option<extern "C" fn(*mut FileSink, *const c_void, c_ulong) -> c_int>,
+    buf: Vec<u8>,
+}
+
+extern "C" fn append_block(this: *mut FileSink, data: *const c_void, size: c_ulong) -> c_int {
+    if size == 0 {
+        return 1;
+    }
+    let Ok(len) = usize::try_from(size) else {
+        return 0;
+    };
+    if this.is_null() || data.is_null() {
+        return 0;
+    }
+    // SAFETY: `this` is the `FileSink` passed to `FPDF_SaveAsCopy`, alive and
+    // exclusively borrowed for the whole call; `data` points at `size` bytes
+    // `PDFium` owns for the duration of this callback.
+    let (sink, block) = unsafe { (&mut *this, std::slice::from_raw_parts(data.cast::<u8>(), len)) };
+    sink.buf.extend_from_slice(block);
+    1
+}
+
+/// SPEC: P1-VIEW-003 — `bytes` re-serialised with their encryption removed,
+/// **for the view layer only**.
+///
+/// PDF.js renders whatever `pdf_get_bytes` returns and has no password, by
+/// design: the open password lives only in the prompt's closure
+/// (`app/open-with-password.ts`). A normal save keeps `/Encrypt`, so PDF.js
+/// raised "No password given" and every encrypted PDF opened to a broken view.
+///
+/// The result goes over IPC to the webview, which renders and extracts exactly
+/// this content anyway. It must never reach a disk write: `save_document`
+/// keeps the protection, and `GetBytes` — what Protect, Unlock, Sign and Find
+/// operate on — still returns the protected document. `GetViewBytes` is the
+/// only caller.
+///
+/// The caller must hold `pdfium_lock`.
+pub(crate) fn remove_security_for_view(bytes: &[u8], password: &str) -> Result<Vec<u8>, CommandError> {
+    pdfium()?; // guarantees FPDF_InitLibrary has run and RAW_BINDINGS is set
+    let raw = RAW_BINDINGS
+        .get()
+        .ok_or_else(|| CommandError::Internal("PDFium raw bindings missing".into()))?;
+
+    // SAFETY: `PDFium` does not copy a memory document, so `bytes` must outlive
+    // the handle — it does; the handle is closed below, before returning.
+    let doc = unsafe { raw.FPDF_LoadMemDocument64(bytes, Some(password)) };
+    if doc.is_null() {
+        return Err(CommandError::PdfError(
+            "could not reopen the document to prepare it for display".into(),
+        ));
+    }
+
+    let mut sink = FileSink {
+        version: 1,
+        write_block: Some(append_block),
+        buf: Vec::with_capacity(bytes.len()),
+    };
+    // SAFETY: `sink` is a live, `#[repr(C)]` `FPDF_FILEWRITE` for the whole call.
+    let saved = unsafe {
+        raw.FPDF_SaveAsCopy(doc, std::ptr::addr_of_mut!(sink).cast(), FPDF_REMOVE_SECURITY)
+    };
+    // SAFETY: `doc` came from `FPDF_LoadMemDocument64` above and is closed
+    // exactly once, on every path past the null check.
+    unsafe { raw.FPDF_CloseDocument(doc) };
+
+    if !raw.is_true(saved) {
+        return Err(CommandError::PdfError("could not prepare the document for display".into()));
+    }
+    Ok(sink.buf)
 }
 
 /// Open a document and return both the live handle and a metadata

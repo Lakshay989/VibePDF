@@ -2653,6 +2653,11 @@ pub async fn pdf_extract_pages(
 /// every edit — slow enough on large files that the reload never landed and
 /// edits silently failed to appear (P4.HF28). Raw bytes are ~1× overhead.
 /// Read-only — no mutation, no dirty change.
+///
+/// SPEC: P1-VIEW-003 — these are the bytes PDF.js renders, so a document opened
+/// with a password is served with its encryption removed: the view layer has no
+/// password. Commands that operate on the document itself use
+/// `get_bytes_request`, which keeps the protection.
 #[tauri::command]
 pub async fn pdf_get_bytes(
     state: State<'_, AppState>,
@@ -2669,7 +2674,7 @@ pub async fn pdf_get_bytes(
         let handle = guard
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
-        handle.get_bytes_request()?
+        handle.get_view_bytes_request()?
     };
 
     let bytes = rx

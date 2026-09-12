@@ -63,6 +63,7 @@ import {
 import { useOptimisticEditStore } from "@/state/optimistic-edit-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
+import { loadViewDocument } from "@/view/load-view-document";
 
 interface Props {
   documentId: DocumentId;
@@ -295,14 +296,12 @@ export function PdfViewer({ documentId, path }: Props) {
 
     (async () => {
       try {
-        // A pristine document loads from disk (cheap); an edited one — even
-        // a rotate, which doesn't bump the epoch — must load from the
-        // actor's live bytes, which carry the in-memory edits.
-        const bytes = isDocEdited(documentId)
-          ? await getPdfBytes(documentId)
-          : await readFile(path);
-        if (cancelled) return;
-        localDoc = await loadDocument(bytes);
+        // Disk for a pristine document, the actor for an edited or encrypted
+        // one — see `loadViewDocument`.
+        localDoc = await loadViewDocument(
+          { documentId, path, edited: isDocEdited(documentId) },
+          { readFile, getPdfBytes, loadDocument },
+        );
         if (cancelled) {
           await localDoc.destroy();
           return;

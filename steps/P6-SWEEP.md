@@ -41,6 +41,17 @@ Two diffs: `8e8394b`, `f7384e3`, `536510b`.
       2026-09-12) — writes `/Length 32` into `/CF/StdCF` and **only** there.
       Check the top-level `/Encrypt` still carries no `/Length` (lopdf's decrypt
       rejects it), and that the value is bytes, not bits.
+- [ ] `pdf/document.rs::remove_security_for_view` + `RAW_BINDINGS` (sweep fix,
+      2026-09-13, P1-VIEW-003) — **the codebase's first `unsafe`**, outside
+      `security/` but producing decrypted document bytes. Check:
+      the write callback cannot read past `size` and tolerates `size == 0`;
+      the raw document is closed exactly once on every path past the null
+      check; the spare PDFium binding can never be dropped (its `Drop` calls
+      `FPDF_DestroyLibrary`); and `GetViewBytes` is the **only** caller — the
+      decrypted bytes must never reach `save_document` or any command.
+      `encrypted_view_bytes.rs::a_protected_document_stays_protected_everywhere_but_the_screen`
+      is the guard; it was mutation-checked by leaking the view path into
+      `GetBytes`.
 
 ## 2. Cross-reader: encryption (blocking)
 
@@ -55,6 +66,10 @@ Password to open: `open-me`. Permissions password on the second: `owner-only`.
       PDF.js and Ghostscript were fine. Fixed 2026-09-12 by stating the crypt
       filter's key length; the files were regenerated and PDFKit now extracts
       and renders the text. Confirm in the Preview app itself.
+- [ ] **Open one in VibePDF** with `open-me`: the page **renders**. Before
+      2026-09-13 every encrypted PDF opened to "This file does not appear to be
+      a valid PDF" (P1-VIEW-003) — the backend opened it, the view could not.
+      Also make an edit (rotate) and confirm the view updates.
 - [ ] **Unlock** one in-app, then open the result in all three: opens with **no**
       password anywhere
 

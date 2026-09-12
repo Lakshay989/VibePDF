@@ -35,7 +35,8 @@ use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::insert_from::InsertFromEdit;
 use crate::pdf::document::{
-    collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
+    collect_metadata, open_pdf, pdfium_lock, remove_security_for_view, save_document,
+    DocumentMetadata, SaveOutcome,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
@@ -189,10 +190,18 @@ pub enum Message {
     GetHistoryState {
         reply: oneshot::Sender<HistoryState>,
     },
-    /// Serialize the live document to bytes — the edit-preview pipeline
-    /// reloads PDF.js from these so the view reflects in-memory edits
-    /// without a save/reopen.
+    /// Serialize the live document to bytes, **protection intact** — what
+    /// Protect, Unlock, Sign and Find operate on. The view layer uses
+    /// `GetViewBytes`.
     GetBytes {
+        reply: oneshot::Sender<Result<Vec<u8>, CommandError>>,
+    },
+    /// SPEC: P1-VIEW-003 — the bytes PDF.js renders, so the view reflects
+    /// in-memory edits without a save/reopen. Identical to `GetBytes` for an
+    /// unprotected document; for one opened with a password, the same document
+    /// with its encryption removed — in memory, because the view layer has no
+    /// password and must not be given one. Never written to disk.
+    GetViewBytes {
         reply: oneshot::Sender<Result<Vec<u8>, CommandError>>,
     },
     /// SPEC: P2-PAGE-001 — rotate `pages` by `quarter_turns` × 90°.
@@ -950,7 +959,7 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
-    /// Serialize the live document to bytes (edit-preview pipeline).
+    /// Serialize the live document to bytes, protection intact.
     /// Await-holding convenience for tests; IPC uses `get_bytes_request`.
     pub async fn get_bytes(&self) -> Result<Vec<u8>, CommandError> {
         let rx = self.get_bytes_request()?;
@@ -964,6 +973,24 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::GetBytes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P1-VIEW-003 — the bytes the view renders; see `Message::GetViewBytes`.
+    /// Await-holding convenience for tests; IPC uses `get_view_bytes_request`.
+    pub async fn get_view_bytes(&self) -> Result<Vec<u8>, CommandError> {
+        let rx = self.get_view_bytes_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn get_view_bytes_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<Vec<u8>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::GetViewBytes { reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3223,6 +3250,20 @@ fn run_worker(
                 // state); same path the explicit save uses.
                 let result = pdfium_lock().and_then(|_guard| {
                     doc.save_to_bytes().map_err(CommandError::from)
+                });
+                let _ = reply.send(result);
+            }
+            Message::GetViewBytes { reply } => {
+                // Same lock, same serialisation — then, only for a document
+                // that needed a password, drop the encryption for PDF.js. The
+                // password is the one this actor was opened with; it never
+                // leaves this thread.
+                let result = pdfium_lock().and_then(|_guard| {
+                    let bytes = doc.save_to_bytes().map_err(CommandError::from)?;
+                    match password.as_deref() {
+                        Some(pw) => remove_security_for_view(&bytes, pw),
+                        None => Ok(bytes),
+                    }
                 });
                 let _ = reply.send(result);
             }
