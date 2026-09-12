@@ -223,11 +223,26 @@ the gap reserved and nothing in it.
 Not a signed document, and not meant to look like one. What is worth confirming
 is that the *container* is well-formed before any crypto goes near it.
 
-- [ ] **a mainstream reader** opens it and shows an **unsigned signature field** in the
-      signature panel — not a broken signature, and not an error
-- [ ] Preview and a third reader open it and render the page normally
-- [ ] The file still opens after the placeholder is there (an append, so the
-      original revision should also still open on its own)
+**The expected result here was wrong, and is corrected (2026-09-13).** It said a
+reader should show an *unsigned* field. It cannot: the field's `/V` points at a
+real signature dictionary — `/Filter`, `/SubFilter`, `/ByteRange`, `/M`,
+`/Reason` all present — whose `/Contents` is 16 KB of zeros. To a reader that
+is a signature that fails to parse, and reporting it as broken is the *correct*
+behaviour. VibePDF's own verifier says `The signature has no readable content.`,
+so opening this file in-app shows a red problem banner, as it should.
+
+Checked without a human (2026-09-11): the file differs from
+`vibepdf-verify-signed.pdf` only inside the `/Contents` gap; `/ByteRange` starts
+at 0 and ends at EOF; the gap is exactly the hex string; revision 1 opens on
+its own in PDFKit, PDF.js and pypdf; PDFKit, PDF.js and Ghostscript render the
+page.
+
+- [ ] **a mainstream reader** opens it **without an error dialog** and lists a
+      signature in the panel. Record what it says about it — "invalid",
+      "corrupted" or "unable to verify" are all correct for zeroed
+      `/Contents`. An *unsigned field* would mean the reader ignored `/V`, and
+      is worth noting, not failing.
+- [ ] Preview renders the page normally *(PDFKit already does; confirm in the app)*
 
 ## 7. Artifact inventory
 
