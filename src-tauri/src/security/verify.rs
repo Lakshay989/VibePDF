@@ -209,7 +209,7 @@ fn verify_one(
     let Some(signed_bytes) = collect_ranges(bytes, &ranges) else {
         report
             .problems
-            .push("The signature covers bytes outside the file.".into());
+            .push("This file was rewritten or cut short after it was signed, so the signature can no longer be checked.".into());
         return report;
     };
 

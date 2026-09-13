@@ -99,9 +99,10 @@ export function describeSignature(report: SignatureReport): SignatureStatus {
 
   // From here the mathematics is sound. What remains is what we could not
   // establish, which is a warning rather than a failure.
-  if (!report.coversWholeDocument) {
+  const changedAfterSigning = !report.coversWholeDocument;
+  if (changedAfterSigning) {
     notes.push(
-      "Something was added to the file after this signature — often a second signature, but it is outside what this one covers.",
+      "The file was changed after this signature — by a later edit or another signature. Everything this signature covers is still intact.",
     );
   }
   if (report.certificateExpired) {
@@ -113,7 +114,7 @@ export function describeSignature(report: SignatureReport): SignatureStatus {
   notes.push(chainNote(report.chain));
 
   return {
-    severity: notes.some((n) => n.startsWith("Something was added")) || report.certificateExpired
+    severity: changedAfterSigning || report.certificateExpired
       ? "warning"
       : "valid",
     headline: `Signed by ${who}`,

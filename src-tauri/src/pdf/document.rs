@@ -294,6 +294,19 @@ pub fn save_document(
     make_backup: bool,
     password: Option<&str>,
 ) -> Result<SaveOutcome, CommandError> {
+    save_document_onto(doc, dest, make_backup, password, None)
+}
+
+/// `save_document` for a document that may be signed. When `signed_base` is
+/// the file as signed, the edit is appended to it rather than replacing it, so
+/// the signatures keep verifying — see `pdf::incremental_save`.
+pub fn save_document_onto(
+    doc: &PdfDocument<'_>,
+    dest: &Path,
+    make_backup: bool,
+    password: Option<&str>,
+    signed_base: Option<&[u8]>,
+) -> Result<SaveOutcome, CommandError> {
     let dir = dest.parent().ok_or_else(|| {
         CommandError::InvalidInput(format!("destination has no parent directory: {}", dest.display()))
     })?;
@@ -315,6 +328,11 @@ pub fn save_document(
     // bookmarks left by a delete or split) before the bytes hit disk. A no-op
     // for documents with nothing dangling; infallible (never breaks a save).
     let bytes = crate::pdf::cos::prune_dangling_destinations(bytes);
+    // SPEC: P6-SEC-006 — a signed document's signed bytes stay where they are.
+    let bytes = match signed_base {
+        Some(base) => crate::pdf::incremental_save::append_as_incremental_update(base, &bytes)?,
+        None => bytes,
+    };
     let tmp = sibling_with_suffix(dest, ".vibepdf-tmp");
     std::fs::write(&tmp, &bytes)?;
 

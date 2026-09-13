@@ -22,6 +22,7 @@ pub mod header_footer;
 pub mod image_edit;
 pub mod image_extract;
 pub mod image_xobject;
+pub mod incremental_save;
 pub mod insert_blank;
 pub mod insert_from;
 pub mod merge;

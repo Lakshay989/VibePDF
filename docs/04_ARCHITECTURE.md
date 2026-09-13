@@ -542,7 +542,7 @@ reference **to an array** is now dereferenced and flattened by the content appen
 (`existing_contents`), and `save_document` threads the document's open password into the round-trip
 verification — before this, **encrypted documents could not be saved at all** (PDFium preserves
 encryption on save; the verify re-opened the temp file with no password and failed). Save now
-succeeds and the copy stays encrypted, pinned by `tests/hardening.rs`.
+succeeds and the copy stays encrypted, pinned by `tests/hardening.rs`. **Signed documents are the one exception to the whole-file rewrite (P6-SEC-006).** When PDFium reports signatures at open, the actor keeps the bytes it opened, and `save_document_onto` appends only the objects that differ from them as an incremental update (`pdf/incremental_save.rs`) — every signed byte stays where it was, so the signature keeps verifying for the revision it signed and readers report the later change. PDFium still makes every edit; the module diffs PDFium's rewrite against the signed file object by object, which works because PDFium keeps object numbers across a rewrite (streams compare by decoded content, since a rewrite re-encodes them). A signed *and* password-protected document refuses to save rather than break its signature.
 
 **Decoration identity (P4.HF2).** Every Track-D fragment is wrapped in a marked-content block —
 `/VibePDF << /Kind (watermark|background|header-footer) /Id (uuid) >> BDC … EMC`

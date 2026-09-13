@@ -158,6 +158,11 @@ makes of the container around it, which is the thing the roadmap asks for.
       the document has been modified. (If it does not, the `/ByteRange` is
       covering less than it should.)
 - [ ] Preview and a third reader open it without complaint
+- [ ] `vibepdf-verify-signed-then-edited.pdf` — signed, then a note added and
+      saved by VibePDF. A mainstream reader calls the signature **valid** for
+      the revision it signed, says the document was **modified after
+      signing**, and shows the note. OpenSSL already validates the signed
+      revision, and `/ByteRange` stops before the appended edit.
 
 ## 6c. Signing in-app (B1a)
 
@@ -187,6 +192,11 @@ Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
 - [ ] Open a signed file, edit it in-app without saving: the banner still
       reports on the file as saved. (Known and intended — it says so in
       `steps/P6.md`. Worth confirming it does not report nonsense.)
+- [ ] On a Finder copy of a signed file: add a note, **save**, undo, **save**
+      again. The banner stays **Signed by VibePDF Test Signer**, with a note
+      that the file changed after signing. Pass one got "The signature covers
+      bytes outside the file" — every save rewrote the whole file. Fixed
+      2026-09-13 (P6-SEC-006): saves of a signed document are appended.
 
 ## 6f. Signing into an existing field (A5b)
 
@@ -260,13 +270,14 @@ does not have to reconstruct it. All in `Sample PDFs/` (git-ignored).
 | `vibepdf-verify-sig-placeholder.pdf` | B1a | Signature field, gap reserved, empty | — |
 | `vibepdf-verify-signed.pdf` | B1a | Certificate-signed | — |
 | `vibepdf-verify-certified.pdf` | B1b | Certified, no changes allowed | — |
+| `vibepdf-verify-signed-then-edited.pdf` | P6-SEC-006 | Signed, then a note saved as an incremental update | — |
 | `vibepdf-verify-redacted.pdf` | D1a | SSN removed, `SSN:` label kept | — |
 
 Regenerate any of them with the `--ignored` test in the matching suite:
 
 ```bash
 cd src-tauri && cargo test --test encrypt --test clean --test sign_container \
-  --test sign_pades --test signature_place -- --ignored
+  --test sign_pades --test signature_place --test signed_save -- --ignored
 ```
 
 **The two that catch the most:** Preview's Inspector on the cleaned file (it
@@ -330,6 +341,9 @@ Listed so a sweep does not re-report them.
 | Cleaning **hidden text** makes a scanned page unsearchable | That layer *is* the searchability. Off by default; the dialog says so. |
 | Clean does not remove hidden **layers** (OCGs) | P6-SEC-012 does not name them. Revisit if a real file needs it. |
 | Signing a document that is **already signed** is refused | B1a-container. Needs a second incremental update; would otherwise corrupt the first signature. |
+| Saving a document that is **both signed and password protected** is refused | Appending needs each object encrypted with the document key, which nothing does yet; rewriting would break the signature. The edit stays in the open document. |
+| **Autosave recovery** of a signed document is a whole-file rewrite | A *recovered* copy's signature won't verify. Files you save yourself are appended and unaffected. |
+| Notes and other lopdf-backed edits fail on a **password-opened** document | Pre-existing, found 2026-09-13 while testing P6-SEC-006: those edits reload without the password. Tracked as its own task. |
 
 ## Upstream
 

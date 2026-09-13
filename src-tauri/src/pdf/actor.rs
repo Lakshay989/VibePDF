@@ -35,7 +35,7 @@ use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::insert_from::InsertFromEdit;
 use crate::pdf::document::{
-    collect_metadata, open_pdf, pdfium_lock, remove_security_for_view, save_document,
+    collect_metadata, open_pdf, pdfium_lock, remove_security_for_view, save_document_onto,
     DocumentMetadata, SaveOutcome,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
@@ -3014,6 +3014,11 @@ fn run_worker(
         }
     };
 
+    // SPEC: P6-SEC-006 — a signed document is saved by appending to the bytes it
+    // was opened from, so its signatures keep verifying. `None` for every
+    // unsigned document, which keeps saving exactly as it was.
+    let mut signed_base = crate::pdf::incremental_save::signed_base_for(&doc, &path);
+
     tracing::info!(page_count = metadata.page_count, "doc-actor started");
     if ready.send(Ok(metadata.clone())).is_err() {
         // Caller went away before we could report success; nothing to
@@ -3212,7 +3217,13 @@ fn run_worker(
                     // make_backup only when overwriting the original; a
                     // same-path save that reaches here is, by the branch
                     // above, necessarily dirty.
-                    let outcome = save_document(&doc, &dest, same_path, password.as_deref());
+                    let outcome = save_document_onto(
+                        &doc,
+                        &dest,
+                        same_path,
+                        password.as_deref(),
+                        signed_base.as_deref(),
+                    );
                     if outcome.is_ok() {
                         // Any successful save — same-path *or* save-as — makes
                         // the in-memory document clean: record the state we
@@ -3222,6 +3233,16 @@ fn run_worker(
                         // "unsaved changes" claim. SPEC: P2-SAVE-001 / P2.A2;
                         // FABLE_REVIEW §3.11 (P4.HF12).
                         saved_state_id = history.current_state_id();
+                        // The file on disk is now what the next save appends to.
+                        // Only for a same-path save: a save-as leaves the original
+                        // file, and so the base, untouched. If it can't be read
+                        // back, the old base still yields a valid file — the next
+                        // save simply replaces this revision instead of stacking.
+                        if same_path && signed_base.is_some() {
+                            if let Ok(bytes) = std::fs::read(&dest) {
+                                signed_base = Some(bytes);
+                            }
+                        }
                         if let Some(dir) = autosave_dir.as_deref() {
                             let _ = autosave::discard_autosave(dir, &id_str);
                         }

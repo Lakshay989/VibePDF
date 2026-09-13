@@ -86,10 +86,14 @@ describe("describeSignature", () => {
     expect(s.notes.join(" ")).toMatch(/cannot be relied on/i);
   });
 
-  it("treats an appended file as a warning, not a failure", () => {
+  // Since P6-SEC-006 the common cause is the user's own saved edit, appended
+  // after the signed revision — so the note must not suggest something foreign.
+  it("treats a file changed after signing as a warning, not a failure", () => {
     const s = describeSignature(intact({ coversWholeDocument: false }));
     expect(s.severity).toBe("warning");
-    expect(s.notes.join(" ")).toMatch(/added to the file after/i);
+    expect(s.headline).toContain("VibePDF Test Signer");
+    expect(s.notes.join(" ")).toMatch(/changed after this signature/i);
+    expect(s.notes.join(" ")).toMatch(/still intact/i);
   });
 
   // Expiry does not retroactively break the mathematics, and saying so stops a
