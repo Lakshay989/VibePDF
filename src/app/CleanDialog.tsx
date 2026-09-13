@@ -23,6 +23,7 @@ import {
   cleanDocument,
   type DocumentId,
 } from "@/ipc/pdf";
+import { useEditEpochStore } from "@/state/edit-epoch-store";
 
 interface Props {
   open: boolean;
@@ -91,6 +92,7 @@ export function CleanDialog({ open, documentId, onClose }: Props) {
   const [opts, setOpts] = useState<CleanOptions>(CLEAN_NOTHING);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<CleanReport | null>(null);
+  const bumpEpoch = useEditEpochStore((s) => s.bumpEpoch);
 
   if (!open) return null;
 
@@ -110,6 +112,11 @@ export function CleanDialog({ open, documentId, onClose }: Props) {
         // afterwards, so closing straight away would leave no evidence that
         // anything happened at all.
         setDone(await cleanDocument(documentId, opts));
+        // The document changed underneath the view, so reload it the way every
+        // other edit does. Without this the removed comments and bookmarks
+        // stayed on screen until the file was saved and reopened — which made
+        // a clean that had worked look like one that hadn't.
+        bumpEpoch(documentId);
       } catch (err) {
         reportError("Couldn't clean the document", err);
       } finally {

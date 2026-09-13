@@ -19,6 +19,7 @@ vi.mock("@/app/report-error", () => ({ reportError: vi.fn() }));
 import { CleanDialog } from "@/app/CleanDialog";
 import { reportError } from "@/app/report-error";
 import { CLEAN_NOTHING, type CleanReport, cleanDocument } from "@/ipc/pdf";
+import { useEditEpochStore } from "@/state/edit-epoch-store";
 
 const mockClean = vi.mocked(cleanDocument);
 const mockReport = vi.mocked(reportError);
@@ -52,6 +53,7 @@ const dialog = () => <CleanDialog open documentId="doc-1" onClose={onClose} />;
 beforeEach(() => {
   mockClean.mockResolvedValue(emptyReport({ infoKeys: 8, comments: 1 }));
   vi.clearAllMocks();
+  useEditEpochStore.setState({ byDoc: {}, edited: {} });
   mockClean.mockResolvedValue(emptyReport({ infoKeys: 8, comments: 1 }));
 });
 afterEach(cleanup);
@@ -140,6 +142,28 @@ describe("CleanDialog", () => {
     await waitFor(() => expect(mockReport).toHaveBeenCalled());
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Bookmarks")).toBeTruthy();
+  });
+
+  // Found in the P6 sweep: the clean worked, but comments and bookmarks stayed
+  // visible until the file was reopened, so a successful clean looked like a
+  // failed one. The view reloads when the edit epoch moves.
+  it("reloads the view once the document is cleaned", async () => {
+    render(dialog());
+    fireEvent.click(screen.getByLabelText("Comments and markup"));
+    fireEvent.click(screen.getByText("Clean"));
+
+    await waitFor(() => expect(screen.getByText(/Removed:/)).toBeTruthy());
+    expect(useEditEpochStore.getState().byDoc["doc-1"]).toBe(1);
+  });
+
+  it("does not reload the view when cleaning fails", async () => {
+    mockClean.mockRejectedValue(new Error("actor is gone"));
+    render(dialog());
+    fireEvent.click(screen.getByLabelText("Bookmarks"));
+    fireEvent.click(screen.getByText("Clean"));
+
+    await waitFor(() => expect(mockReport).toHaveBeenCalled());
+    expect(useEditEpochStore.getState().byDoc["doc-1"]).toBeUndefined();
   });
 
   it("does not keep the selection after closing", async () => {
