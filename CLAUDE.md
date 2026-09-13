@@ -38,6 +38,7 @@ Full reasoning lives in `docs/03_TECH_STACK.md`. Do not introduce additional PDF
 - **Tests are not optional for the PDF engine.** Any change to `src-tauri/src/pdf/` must come with a deterministic test against a sample PDF in `tests/fixtures/`.
 - **Offline-first is a hard constraint.** Any code path that needs the network must be gated behind an explicit user-enabled setting and must degrade gracefully when offline.
 - **No silent breakage of existing PDFs.** Every write operation must round-trip the file through PDFium and verify the output opens cleanly before returning.
+- **`security/` changes are reviewed, not waited on.** They still need a go-ahead before they're made. Once made, Claude reviews its own diff adversarially — lists what could fail silently and checks each item against the code — and records that review in the commit message, alongside tests that assert on data, are mutation-checked, and are verified against an outside implementation where one exists. A human review is welcome, not required. (Changed from mandatory human review on 2026-09-13.)
 
 ## Code style — the short version
 

@@ -68,6 +68,6 @@ supported, and fixes land there.
 ## Where the risk is concentrated
 
 `src-tauri/src/security/` holds signing, encryption, and redaction — the code
-where a mistake is silent rather than loud. Every change there gets a human
-review pass on the diff regardless of whether the tests pass, and that rule is
-enforced by `.github/CODEOWNERS`.
+where a mistake is silent rather than loud. Every change there gets a dedicated
+review pass on the diff regardless of whether the tests pass, and review
+requests are routed by `.github/CODEOWNERS`.

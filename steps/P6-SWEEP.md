@@ -6,9 +6,9 @@ of it, and that is exactly why these items exist.
 
 Two kinds of item, kept apart on purpose:
 
-- **Review** — reading a diff. Required by `docs/05_ROADMAP.md` for anything
-  under `src-tauri/src/security/`, tests passing or not, because crypto bugs are
-  silent.
+- **Review** — reading a diff against what could fail silently. Required for
+  anything under `src-tauri/src/security/`, tests passing or not. Since
+  2026-09-13 Claude may perform and record it; a human pass is optional.
 - **Cross-reader** — opening a file somewhere that is not PDFium. A passing test
   proves our reader agrees with us; it says nothing about a mainstream reader. Phase 6 has
   already produced two files that PDFium accepted and something else did not, or

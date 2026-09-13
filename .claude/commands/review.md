@@ -59,7 +59,7 @@ List the cases the current code does NOT handle. For each, say whether it's acce
 
 - Any network calls introduced? (There should be none unless the feature explicitly needs them with consent.)
 - Any logging of file contents or PII?
-- Any change under `src-tauri/src/security/`? (If so, flag for mandatory human review.)
+- Any change under `src-tauri/src/security/`? If so, run the adversarial review: list what could fail silently, check each item against the diff, confirm the tests assert on data and are mutation-checked, and record the result in the commit message. A human review is optional.
 
 ## Output
 

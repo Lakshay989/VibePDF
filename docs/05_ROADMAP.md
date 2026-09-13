@@ -168,7 +168,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 
 **Spec lines covered:** P6-SEC-001 through P6-SEC-012.
 
-**Hard rule:** The security module is the one place where Claude does NOT modify code without an explicit human go-ahead per change. Crypto bugs are silent and dangerous.
+**Hard rule:** The security module is the one place where Claude does NOT modify code without an explicit human go-ahead per change. Crypto bugs are silent and dangerous. Once a change is made it gets a recorded adversarial review of the diff — which Claude may perform — plus mutation-checked tests and outside-implementation verification; a human review pass is optional (since 2026-09-13).
 
 ---
 

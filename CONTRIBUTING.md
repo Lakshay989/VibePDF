@@ -35,9 +35,10 @@ Signing, encryption, and redaction live there. These are the paths where a bug
 is *silent*: the document looks protected and is not, or looks redacted and
 still carries the text. Nobody notices until it matters.
 
-Changes there get a human review pass on the diff **regardless of whether the
-tests pass**, and reviews are slower as a result. Please don't take it
-personally.
+Changes there get a dedicated review pass on the diff **regardless of whether
+the tests pass**, and reviews are slower as a result. Please don't take it
+personally. Expect to be asked for mutation-checked tests, and for any
+cryptography to be verified against an implementation other than ours.
 
 If you have found a security problem, do not open a PR that fixes it in public.
 See [`SECURITY.md`](SECURITY.md).

@@ -154,8 +154,9 @@ operation returns its own inverse for undo.
 
 `src-tauri/src/security/` holds the code where mistakes are silent — a document
 that looks protected and is not, or looks redacted and still carries the text.
-Changes there require a human review pass on the diff regardless of whether the
-tests pass.
+Changes there get a recorded review of the diff regardless of whether the tests
+pass, backed by mutation-checked tests and, for cryptography, verification
+against an outside implementation.
 
 Full detail in [`docs/04_ARCHITECTURE.md`](docs/04_ARCHITECTURE.md).
 
