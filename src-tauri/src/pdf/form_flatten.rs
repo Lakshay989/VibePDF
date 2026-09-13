@@ -34,7 +34,7 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::free_text_appearance;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::flatten::flatten_annots_where;
 use crate::pdf::form::{
     dict_rect, field_kind, field_widget_ids, inherited, node_dict, parse_opt, terminal_field_ids,
@@ -353,7 +353,7 @@ impl<'a> Edit<PdfDocument<'a>> for FlattenFormEdit {
         let new_bytes = flatten_form(&pre_bytes)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }

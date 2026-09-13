@@ -17,7 +17,7 @@ use crate::pdf::cos::{
     clear_text_markup, delete_annotation, remove_text_box, update_free_text, update_text_box,
     update_text_note,
 };
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::flatten::flatten_annotations;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -37,9 +37,7 @@ fn cos_edit<'a>(
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }
@@ -85,9 +83,7 @@ impl<'a> Edit<PdfDocument<'a>> for TextMarkupEdit {
         //    verification — a malformed result would fail to open here).
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
 
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
@@ -113,9 +109,7 @@ impl<'a> Edit<PdfDocument<'a>> for ClearMarkupEdit {
         let new_bytes = clear_text_markup(&pre_bytes)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }

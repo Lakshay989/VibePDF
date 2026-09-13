@@ -18,7 +18,7 @@ use lopdf::{Document, Object};
 use pdfium_render::prelude::*;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{load_edited_bytes, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::image_extract::extract_images_from_bytes;
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
@@ -43,9 +43,7 @@ pub fn transform_image(
         .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
 
     let _guard = pdfium_lock()?;
-    let doc = pdfium()?
-        .load_pdf_from_byte_vec(bytes.to_vec(), None)
-        .map_err(CommandError::from)?;
+    let doc = load_edited_bytes(bytes.to_vec())?;
 
     {
         let mut pdf_page = doc.pages().get(page_index).map_err(CommandError::from)?;
@@ -373,9 +371,7 @@ fn image_edit_apply<'a>(
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

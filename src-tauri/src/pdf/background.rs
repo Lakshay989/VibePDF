@@ -23,7 +23,7 @@ use crate::pdf::cos::{
     register_page_resource, remove_decorations_on_page, visual_cm_line, visual_transform,
     wrap_decoration,
 };
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -344,9 +344,7 @@ fn background_apply<'a>(
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

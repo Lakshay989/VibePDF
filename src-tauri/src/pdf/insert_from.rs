@@ -20,7 +20,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::register_inserted_form_fields;
 use crate::pdf::delete_page::{range_string, validate};
-use crate::pdf::document::{open_pdf, pdfium, pdfium_lock};
+use crate::pdf::document::{open_pdf, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -97,9 +97,7 @@ impl<'a> Edit<PdfDocument<'a>> for InsertFromEdit {
         let fixed = register_inserted_form_fields(&post_bytes, start, inserted)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(fixed, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, fixed)?;
         }
 
         // Inverse: restore the document to its pre-insert bytes (pages + form).

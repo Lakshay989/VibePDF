@@ -19,7 +19,7 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::acroform_dict;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -466,7 +466,7 @@ impl<'a> Edit<PdfDocument<'a>> for FillTextFieldEdit {
         let new_bytes = set_text_field_value(&pre_bytes, &self.name, &self.value)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -651,7 +651,7 @@ impl<'a> Edit<PdfDocument<'a>> for SetButtonFieldEdit {
         let new_bytes = set_button_field(&pre_bytes, &self.name, &self.on_state, self.checked)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -864,7 +864,7 @@ impl<'a> Edit<PdfDocument<'a>> for SetChoiceFieldEdit {
         let new_bytes = set_choice_field(&pre_bytes, &self.name, &self.values)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -921,7 +921,7 @@ impl<'a> Edit<PdfDocument<'a>> for StripXfaEdit {
         let new_bytes = strip_xfa(&pre_bytes)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -1121,7 +1121,7 @@ impl<'a> Edit<PdfDocument<'a>> for AddTextFieldEdit {
         )?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -1559,7 +1559,7 @@ impl<'a> Edit<PdfDocument<'a>> for AddFieldEdit {
         let new_bytes = add_field(&pre_bytes, self.page, self.rect, &self.name, &self.kind)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -1943,7 +1943,7 @@ fn form_apply<'a>(
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

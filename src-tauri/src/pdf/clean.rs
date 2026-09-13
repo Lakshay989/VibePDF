@@ -27,7 +27,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -569,9 +569,7 @@ pub fn clean_into<'a>(
     let (new_bytes, report) = clean_document(&pre_bytes, opts)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok((Box::new(RestoreDocEdit { bytes: pre_bytes }), report))
 }

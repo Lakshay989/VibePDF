@@ -70,6 +70,9 @@ Password to open: `open-me`. Permissions password on the second: `owner-only`.
       2026-09-13 every encrypted PDF opened to "This file does not appear to be
       a valid PDF" (P1-VIEW-003) — the backend opened it, the view could not.
       Also make an edit (rotate) and confirm the view updates.
+- [ ] With the encrypted file open, try to **add a sticky note**: refused, with
+      a message saying to Unlock…, edit, then Protect… again. **Rotate** still
+      works, and saving afterwards keeps the file protected.
 - [ ] **Unlock** one in-app, then open the result in all three: opens with **no**
       password anywhere
 
@@ -343,7 +346,7 @@ Listed so a sweep does not re-report them.
 | Signing a document that is **already signed** is refused | B1a-container. Needs a second incremental update; would otherwise corrupt the first signature. |
 | Saving a document that is **both signed and password protected** is refused | Appending needs each object encrypted with the document key, which nothing does yet; rewriting would break the signature. The edit stays in the open document. |
 | **Autosave recovery** of a signed document is a whole-file rewrite | A *recovered* copy's signature won't verify. Files you save yourself are appended and unaffected. |
-| Notes and other lopdf-backed edits fail on a **password-opened** document | Pre-existing, found 2026-09-13 while testing P6-SEC-006: those edits reload without the password. Tracked as its own task. |
+| On a **password-protected** document, edits that go through lopdf — annotations, forms, text editing, watermarks, headers, Clean, redaction — are **refused**; PDFium-native page edits (rotate, crop, delete, insert blank) still work | lopdf cannot encrypt the objects it adds. Before 2026-09-13 these edits failed obscurely, saved garbage, or — on RC4 permissions-only files — silently saved the file *without its protection*. Unlock…, edit, then Protect… again. |
 
 ## Upstream
 

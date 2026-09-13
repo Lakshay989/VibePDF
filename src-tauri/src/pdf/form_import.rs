@@ -29,7 +29,7 @@ use lopdf::{Document, Object};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::form::{
     decode_pdf_text_string, field_kind, field_widget_ids, qualified_name, set_button_field_doc,
     set_choice_field_doc, set_text_field_value_doc, terminal_field_ids, widget_on_state,
@@ -112,7 +112,7 @@ pub fn import_into<'a>(
     let (new_bytes, report) = import_form_data(&pre_bytes, data, format)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok((Box::new(RestoreDocEdit { bytes: pre_bytes }), report))
 }

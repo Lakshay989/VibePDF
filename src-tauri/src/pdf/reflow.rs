@@ -33,7 +33,7 @@ use lopdf::Document;
 use pdfium_render::prelude::*;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{load_edited_bytes, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::text_extract::extract_text_runs;
 use crate::pdf::undo::Edit;
@@ -62,9 +62,7 @@ pub fn replace_text_run(
         .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
 
     let _guard = pdfium_lock()?;
-    let doc = pdfium()?
-        .load_pdf_from_byte_vec(bytes.to_vec(), None)
-        .map_err(CommandError::from)?;
+    let doc = load_edited_bytes(bytes.to_vec())?;
 
     // Single page borrow: locate + mutate + regenerate. Staging under **Manual**
     // regeneration and committing once is load-bearing — `set_text` mutates the
@@ -132,9 +130,7 @@ impl<'a> Edit<PdfDocument<'a>> for ReplaceTextRunEdit {
         let new_bytes = replace_text_run(&pre_bytes, self.page, self.run_index, &self.new_text)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -192,9 +188,7 @@ pub fn delete_text_run(
 fn extract_runs(bytes: &[u8], page: usize) -> Result<Vec<crate::pdf::text_extract::TextRun>, CommandError> {
     let doc = {
         let _guard = pdfium_lock()?;
-        pdfium()?
-            .load_pdf_from_byte_vec(bytes.to_vec(), None)
-            .map_err(CommandError::from)?
+        load_edited_bytes(bytes.to_vec())?
     };
     let runs = extract_text_runs(&doc, page)?;
     {
@@ -279,9 +273,7 @@ impl<'a> Edit<PdfDocument<'a>> for DeleteTextRunEdit {
         let new_bytes = delete_text_run(&pre_bytes, self.page, self.run_index)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }

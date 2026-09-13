@@ -110,6 +110,98 @@ pub fn pdfium() -> Result<&'static Pdfium, CommandError> {
     PDFIUM.as_ref().map_err(|e| CommandError::Internal(e.clone()))
 }
 
+/// What a person sees when an edit is refused on a protected document.
+pub const PROTECTED_EDIT_REFUSAL: &str = "This document is password protected, and VibePDF \
+    can't make this change to it yet without corrupting the file. Remove the protection with \
+    Unlock…, make the change, then protect it again with Protect….";
+
+/// SPEC: P1-VIEW-003 — whether serialised bytes declare encryption: an
+/// `/Encrypt` *key with a value* (`/Encrypt 6 0 R` or `/Encrypt <<…>>`).
+///
+/// A plain substring search is wrong here: an old encryption dictionary left
+/// behind as an unreferenced object carries `/EncryptMetadata`, which contains
+/// `/Encrypt` and would read as protected.
+#[must_use]
+pub fn declares_encryption(bytes: &[u8]) -> bool {
+    const KEY: &[u8] = b"/Encrypt";
+    bytes.windows(KEY.len()).enumerate().any(|(at, window)| {
+        window == KEY && {
+            let rest = &bytes[at + KEY.len()..];
+            let value = rest.iter().position(|b| !b.is_ascii_whitespace()).map(|n| &rest[n..]);
+            matches!(value, Some([b'0'..=b'9', ..] | [b'<', b'<', ..]))
+        }
+    })
+}
+
+/// SPEC: P1-VIEW-003 — refuse to edit a protected document through a byte
+/// round trip, rather than corrupt it.
+///
+/// Every edit that goes through lopdf serialises the document, transforms the
+/// bytes and reloads them. lopdf cannot encrypt the objects it *adds*: they go
+/// out as plaintext inside a file that still declares encryption, and every
+/// reader then "decrypts" them into garbage. Measured on 2026-09-13 — a note
+/// added to an RC4 permissions-only file saved as `"²Åë\t\u{15}\u{15}/("`, with
+/// no error; on a file with an open password the reload failed outright, and
+/// passing it the password only produced an empty note plus the note's text in
+/// plaintext on disk. Refusing is the honest answer until appended objects can
+/// be encrypted with the document's own key.
+///
+/// `PDFium`-native edits (rotation, cropping) never come through here and keep
+/// working on protected documents.
+pub fn refuse_if_protected(bytes: &[u8]) -> Result<(), CommandError> {
+    if declares_encryption(bytes) {
+        return Err(CommandError::InvalidInput(PROTECTED_EDIT_REFUSAL.into()));
+    }
+    Ok(())
+}
+
+/// Whether `PDFium` has a security handler on this document.
+///
+/// Anything other than a definite "unprotected" counts as protected:
+/// pdfium-render only names revisions 2–4, so an AES-256 (R6) document comes
+/// back as an unknown revision — which is exactly the case that must refuse.
+/// The caller must hold `pdfium_lock`.
+pub(crate) fn is_protected(doc: &PdfDocument<'_>) -> bool {
+    !matches!(
+        doc.permissions().security_handler_revision(),
+        Ok(PdfSecurityHandlerRevision::Unprotected)
+    )
+}
+
+/// Replace the actor's document with the result of a lopdf round trip —
+/// unless the document being replaced is protected.
+///
+/// Checking the *outgoing* document, not the incoming bytes, is the point. For
+/// a permissions-only file lopdf can decrypt (RC4 with no open password), lopdf
+/// decrypts on load and writes the edit back **without** `/Encrypt`: the bytes
+/// look unprotected, and replacing the document with them would make the next
+/// save write the file with its protection silently removed. Measured on
+/// 2026-09-13 — every edit went through on such a file until this check moved
+/// here. The incoming bytes are still checked too, for the files lopdf cannot
+/// decrypt, where the edit instead comes back as plaintext inside ciphertext.
+/// The caller must hold `pdfium_lock`.
+pub(crate) fn replace_with_edited_bytes(
+    doc: &mut PdfDocument<'_>,
+    bytes: Vec<u8>,
+) -> Result<(), CommandError> {
+    if is_protected(doc) {
+        return Err(CommandError::InvalidInput(PROTECTED_EDIT_REFUSAL.into()));
+    }
+    *doc = load_edited_bytes(bytes)?;
+    Ok(())
+}
+
+/// Load bytes back into `PDFium` after a lopdf round trip, refusing protected
+/// ones (see [`refuse_if_protected`]). The caller must hold `pdfium_lock`.
+///
+/// Generic over the lifetime because `PdfDocument` is invariant in it: callers
+/// assign the result into an existing `&mut PdfDocument<'a>`.
+pub(crate) fn load_edited_bytes<'a>(bytes: Vec<u8>) -> Result<PdfDocument<'a>, CommandError> {
+    refuse_if_protected(&bytes)?;
+    let engine: &'a Pdfium = pdfium()?;
+    engine.load_pdf_from_byte_vec(bytes, None).map_err(CommandError::from)
+}
+
 /// A second binding to the same `PDFium` library, for the one call pdfium-render
 /// cannot make.
 ///
@@ -396,3 +488,24 @@ pub fn pdfium_version_string() -> String {
         Err(e) => format!("pdfium: failed — {e}"),
     }
 }
+
+#[cfg(test)]
+mod declares_encryption_tests {
+    use super::declares_encryption;
+
+    #[test]
+    fn a_trailer_reference_or_inline_dictionary_is_protection() {
+        assert!(declares_encryption(b"trailer\n<</Root 1 0 R/Encrypt 6 0 R/Size 7>>"));
+        assert!(declares_encryption(b"trailer <</Encrypt\r\n  12 0 R>>"));
+        assert!(declares_encryption(b"<</Encrypt<</Filter/Standard/V 5>>>>"));
+    }
+
+    // PDFium's REMOVE_SECURITY leaves the old dictionary behind as an orphan,
+    // and its key contains the substring. That is not protection.
+    #[test]
+    fn encrypt_metadata_and_plain_files_are_not() {
+        assert!(!declares_encryption(b"6 0 obj <</EncryptMetadata true/Filter/Standard>> endobj trailer <</Root 1 0 R>>"));
+        assert!(!declares_encryption(b"%PDF-1.4 1 0 obj <</Type/Catalog>> endobj trailer <</Root 1 0 R>>"));
+    }
+}
+

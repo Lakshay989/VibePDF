@@ -1925,6 +1925,9 @@ pub async fn pdf_find_redaction_matches(
         .await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
 
+    // Searching ciphertext finds nothing, and "Nothing matched" on a protected
+    // document would read as "this document holds no SSNs".
+    crate::pdf::document::refuse_if_protected(&bytes)?;
     crate::security::redact::find_matches(&bytes, &patterns)
 }
 
@@ -2073,6 +2076,9 @@ pub async fn pdf_sign_document(
     })?;
 
     let spec = details.into_spec("Signature1");
+    // lopdf would append the signature to a protected file in plaintext, and
+    // the round-trip below would then refuse it with a message about reopening.
+    crate::pdf::document::refuse_if_protected(&bytes)?;
     let signed = crate::security::sign::sign_document(&bytes, &spec, &pfx, &password)?;
 
     let out = PathBuf::from(&path);

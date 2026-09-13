@@ -35,8 +35,8 @@ use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::insert_from::InsertFromEdit;
 use crate::pdf::document::{
-    collect_metadata, open_pdf, pdfium_lock, remove_security_for_view, save_document_onto,
-    DocumentMetadata, SaveOutcome,
+    collect_metadata, is_protected, open_pdf, pdfium_lock, remove_security_for_view,
+    save_document_onto, DocumentMetadata, SaveOutcome, PROTECTED_EDIT_REFUSAL,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
@@ -3861,10 +3861,23 @@ fn run_worker(
             Message::RedactRegion { page, rect, opts, reply } => {
                 // SPEC: P6-SEC-010 — the counts are the only visible result;
                 // the page afterwards looks the same whether it worked or not.
-                let result = redact_into(&mut doc, page, rect, opts).map(|(inverse, report)| {
-                    history.record(inverse);
-                    RedactOutcome { report, history: history.state() }
-                });
+                // A protected document is refused before `security::redact`
+                // runs: its reload carries no password, and a redaction that
+                // fails obscurely is worse than one that says why.
+                let protected = pdfium_lock().map(|_guard| is_protected(&doc));
+                let result = protected
+                    .and_then(|protected| {
+                        if protected {
+                            Err(CommandError::InvalidInput(PROTECTED_EDIT_REFUSAL.into()))
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .and_then(|()| redact_into(&mut doc, page, rect, opts))
+                    .map(|(inverse, report)| {
+                        history.record(inverse);
+                        RedactOutcome { report, history: history.state() }
+                    });
                 let _ = reply.send(result);
             }
             Message::CleanDocument { opts, reply } => {

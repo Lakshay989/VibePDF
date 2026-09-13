@@ -10,7 +10,7 @@
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::undo::Edit;
 
 /// Replace the document with exactly `bytes` when applied. Its inverse is a
@@ -38,9 +38,7 @@ impl<'a> Edit<PdfDocument<'a>> for RestoreDocEdit {
         // serialized like every FFI call); the new one owns its buffer.
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, bytes)?;
         }
 
         Ok(Box::new(RestoreDocEdit { bytes: current }))

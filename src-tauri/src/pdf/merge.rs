@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::CommandError;
 use crate::pdf::cos;
-use crate::pdf::document::{pdfium, pdfium_lock, save_document, SaveOutcome};
+use crate::pdf::document::{load_edited_bytes, pdfium_lock, save_document, SaveOutcome};
 
 /// Merge `sources` (≥ 2 files, in order) into a new PDF at `dest`, preserving
 /// pages, annotations, bookmarks, and form fields (colliding field names are
@@ -44,9 +44,7 @@ pub fn merge_documents(sources: &[PathBuf], dest: &Path) -> Result<SaveOutcome, 
     // the lock; `save_document` re-acquires it (the lock is not reentrant).
     let out = {
         let _guard = pdfium_lock()?;
-        pdfium()?
-            .load_pdf_from_byte_vec(merged, None)
-            .map_err(CommandError::from)?
+        load_edited_bytes(merged)?
     };
 
     save_document(&out, dest, false, None)
