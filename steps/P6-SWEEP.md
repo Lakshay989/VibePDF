@@ -14,6 +14,21 @@ Two kinds of item, kept apart on purpose:
   already produced two files that PDFium accepted and something else did not, or
   vice versa.
 
+**No mainstream commercial reader is available on the verification machine
+(2026-09-15).** Cross-reader items are checked in Preview (PDFKit) and Firefox
+(PDF.js). Signature items — which neither of those validates — are checked with
+**pyHanko 0.37.0**, an independent open-source PAdES validator that also analyses
+every incremental update made after signing. It runs offline, with revocation
+checks off and the committed test certificate as its only trust root:
+
+```bash
+"Sample PDFs/tools/check-signature.sh" "Sample PDFs/<file>.pdf"
+```
+
+The script and its virtualenv live in git-ignored `Sample PDFs/tools/`; the
+wrapper's header says how to recreate them. It reports two verdicts separately:
+whether the signed bytes are intact, and what was appended after signing.
+
 ---
 
 ## 1. `security/` review — C1 and C2 (blocking)
@@ -167,6 +182,19 @@ makes of the container around it, which is the thing the roadmap asks for.
       signing**, and shows the note. OpenSSL already validates the signed
       revision, and `/ByteRange` stops before the appended edit.
 
+pyHanko, 2026-09-15 (a person still reads the output and ticks the boxes):
+
+| File | Signature | After signing |
+|---|---|---|
+| `vibepdf-verify-signed.pdf` | VALID, signer `CN=VibePDF Test Signer, O=VibePDF, C=GB`, ordinary (not certified) | Nothing — covers the whole file |
+| `vibepdf-verify-signed-TAMPERED.pdf` | INVALID — cryptographically unsound | — |
+| `vibepdf-verify-signed-then-edited.pdf` | VALID | One revision: the page (`/Annots` gains one entry) and the note. pyHanko's default policy rejects it — see *Known and accepted* |
+
+A copy of `vibepdf-verify-signed.pdf` re-saved in-app during pass two (note →
+save → undo → save) kept a VALID signature, began with the exact signed bytes,
+and carried two appended revisions; the second rewrote only the page, back to
+its signed state.
+
 ## 6c. Signing in-app (B1a)
 
 Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
@@ -228,6 +256,12 @@ File: `Sample PDFs/vibepdf-verify-certified.pdf` — certified at "no changes".
 - [ ] In-app: the "After signing" default is **Sign only**, and a plain signature
       produces a file with no certification
 
+Without a mainstream reader, the comment check becomes: add a note to a Finder
+copy **in VibePDF**, save, and run the checker on the copy. Expected:
+`Signature: VALID` and `Certification: BROKEN`. pyHanko, 2026-09-15: the
+certified file reports `certified — no changes allowed`, VALID; a control with a
+comment appended by pyHanko's own writer reports BROKEN.
+
 ## 6b. Signature container (B1a, part one)
 
 File: `Sample PDFs/vibepdf-verify-sig-placeholder.pdf` — a signature field with
@@ -248,7 +282,8 @@ Checked without a human (2026-09-11): the file differs from
 `vibepdf-verify-signed.pdf` only inside the `/Contents` gap; `/ByteRange` starts
 at 0 and ends at EOF; the gap is exactly the hex string; revision 1 opens on
 its own in PDFKit, PDF.js and pypdf; PDFKit, PDF.js and Ghostscript render the
-page.
+page. pyHanko (2026-09-15) reports the signature UNREADABLE — its CMS parser
+finds no container in the zeros — rather than valid.
 
 - [ ] **a mainstream reader** opens it **without an error dialog** and lists a
       signature in the panel. Record what it says about it — "invalid",
@@ -300,7 +335,8 @@ result.
       for `123-45-6789` — no hit
 - [ ] The black box sits where the number was, and `SSN:` is still readable
       beside it
-- [ ] A third reader (Preview, Chrome) — same
+- [ ] A third reader (Preview, Firefox) — same. Not Chrome: it renders with
+      PDFium, so agreeing with VibePDF proves nothing
 - [ ] Optional, if `brew install poppler` is wanted: `pdftotext` on the file,
       as the roadmap literally specifies, and confirm the SSN is absent
 
@@ -345,6 +381,7 @@ Listed so a sweep does not re-report them.
 | Clean does not remove hidden **layers** (OCGs) | P6-SEC-012 does not name them. Revisit if a real file needs it. |
 | Signing a document that is **already signed** is refused | B1a-container. Needs a second incremental update; would otherwise corrupt the first signature. |
 | Saving a document that is **both signed and password protected** is refused | Appending needs each object encrypted with the document key, which nothing does yet; rewriting would break the signature. The edit stays in the open document. |
+| pyHanko calls a signed file with a **comment added afterwards** "not allowed" | Its default difference policy accepts form filling and signature updates but rejects every other annotation change, by design. The signature itself stays VALID; with difference analysis off the verdict is VALID. Not a VibePDF defect. |
 | **Autosave recovery** of a signed document is a whole-file rewrite | A *recovered* copy's signature won't verify. Files you save yourself are appended and unaffected. |
 | On a **password-protected** document, edits that go through lopdf — annotations, forms, text editing, watermarks, headers, Clean, redaction — are **refused**; PDFium-native page edits (rotate, crop, delete, insert blank) still work | lopdf cannot encrypt the objects it adds. Before 2026-09-13 these edits failed obscurely, saved garbage, or — on RC4 permissions-only files — silently saved the file *without its protection*. Unlock…, edit, then Protect… again. |
 
