@@ -74,7 +74,7 @@ export async function renderPageOnDoc(
     input.canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
     input.canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
   }
-  // PDF.js v5 expects `canvas`; the legacy `canvasContext` field is
+  // PDF.js v5+ expects `canvas`; the legacy `canvasContext` field is
   // deprecated. We pass the canvas and let PDF.js manage the 2d
   // context lifecycle.
   await page.render({
@@ -108,6 +108,6 @@ export async function renderPage(input: {
       canvas: input.canvas,
     });
   } finally {
-    await doc.destroy();
+    await doc.loadingTask.destroy();
   }
 }

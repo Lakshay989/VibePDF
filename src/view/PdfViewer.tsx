@@ -303,7 +303,7 @@ export function PdfViewer({ documentId, path }: Props) {
           { readFile, getPdfBytes, loadDocument },
         );
         if (cancelled) {
-          await localDoc.destroy();
+          await localDoc.loadingTask.destroy();
           return;
         }
         setDoc(localDoc);
@@ -332,7 +332,8 @@ export function PdfViewer({ documentId, path }: Props) {
     return () => {
       cancelled = true;
       if (freezeTimer !== undefined) clearTimeout(freezeTimer);
-      void localDoc?.destroy();
+      // PDF.js 6 dropped `PDFDocumentProxy.destroy()`; v5's only forwarded here.
+      void localDoc?.loadingTask.destroy();
       setDoc(null);
     };
   }, [path, epoch, documentId, resetRotations]);

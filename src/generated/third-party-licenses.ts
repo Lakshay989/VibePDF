@@ -3128,73 +3128,73 @@ export const NPM_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   },
   {
     "name": "@napi-rs/canvas",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-android-arm64",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-darwin-arm64",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-darwin-x64",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-linux-arm-gnueabihf",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-linux-arm64-gnu",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-linux-arm64-musl",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-linux-riscv64-gnu",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-linux-x64-gnu",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-linux-x64-musl",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-win32-arm64-msvc",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
   {
     "name": "@napi-rs/canvas-win32-x64-msvc",
-    "version": "0.1.100",
+    "version": "1.0.9",
     "license": "MIT",
     "repository": ""
   },
@@ -3410,7 +3410,7 @@ export const NPM_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   },
   {
     "name": "pdfjs-dist",
-    "version": "5.7.284",
+    "version": "6.3.289",
     "license": "Apache-2.0",
     "repository": ""
   },

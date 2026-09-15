@@ -46,7 +46,7 @@ export default defineConfig(async () => ({
     // environments (jsdom counts). The default ESM build assumes a
     // browser runtime with DOMMatrix, `Uint8Array.prototype.toHex`,
     // `Promise.try`, etc. — none of which are guaranteed on Node 22.4
-    // (pdfjs-dist@5.7.284 declares `engines: { node: ">=22.13.0" }`).
+    // (pdfjs-dist@6.3.289 declares `engines: { node: ">=22.13.0 || >=24" }`).
     // The legacy bundle self-polyfills the lot via core-js, so we
     // redirect bare `pdfjs-dist` imports to it. Regex `find` matches
     // exactly so explicit subpath imports (e.g. the worker preload in
