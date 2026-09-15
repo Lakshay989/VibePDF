@@ -39,7 +39,29 @@ bind a shipped `.dmg` / `.msi` / `.AppImage`, not a source checkout.
 - **Licence:** Apache License 2.0.
 - **Obligation:** retain the licence and any `NOTICE` file; state changes if the
   source is modified (VibePDF does not modify it — `scripts/copy-pdfjs-worker.mjs`
-  copies the worker verbatim).
+  copies the worker and data files verbatim).
+
+### PDF.js image decoders
+
+PDF.js decodes JBIG2, CCITT fax and JPEG 2000 images, and applies ICC colour,
+with WebAssembly modules that ship inside `pdfjs-dist` but are built from other
+projects. `scripts/copy-pdfjs-worker.mjs` serves them from `public/pdfjs/`, so
+they are in every build.
+
+| Component | Module | Licence | Licence file shipped beside it |
+|---|---|---|---|
+| PDFium's JBIG2 / CCITT decoder | `wasm/jbig2.wasm` | BSD-3-Clause (Mozilla glue: Apache-2.0) | `LICENSE_JBIG2`, `LICENSE_PDFJS_JBIG2` |
+| OpenJPEG | `wasm/openjpeg.wasm` | BSD-2-Clause (glue: BSD-2-Clause) | `LICENSE_OPENJPEG`, `LICENSE_PDFJS_OPENJPEG` |
+| qcms | `wasm/qcms_bg.wasm` | MIT (glue: MIT) | `LICENSE_QCMS`, `LICENSE_PDFJS_QCMS` |
+| CGATS001Compat-v2-micro ICC profile | `iccs/CGATS001Compat-v2-micro.icc` | CC0-1.0 | `iccs/LICENSE` |
+
+- **Obligation:** the BSD and MIT terms require the copyright notice and
+  licence text to accompany binary redistribution. **Met:** the copy script
+  copies each licence file into the same directory as its module, and the
+  build bundles that directory whole. The same components are listed in the
+  generated inventory and the in-app Licences view.
+- **Not shipped:** `wasm/quickjs-eval.*`, PDF.js's sandbox for a document's own
+  JavaScript. The copy script excludes it, and a test fails if it is served.
 
 ### Frontend runtime dependencies
 
@@ -88,7 +110,7 @@ forget until someone asks for a build.
 1. **A real dependency inventory.** Generated, not written:
    `npm run licenses` walks `cargo metadata` and `package-lock.json` into
    [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) — 512 Rust crates,
-   62 npm packages, 2 bundled components, dev- and build-only dependencies
+   62 npm packages, 6 bundled components, dev- and build-only dependencies
    excluded because they ship to nobody. The same script is a gate: it exits
    non-zero if any shipped component carries a licence outside a reviewed
    permissive set, which is where `docs/01_VISION.md`'s "no copyleft in the

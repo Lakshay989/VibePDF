@@ -2,7 +2,8 @@
 
 Small, hand-generated, **committed** PDFs the automated suites depend on. Every
 one is deterministic: a `generate-*.py` beside it rebuilds it byte-for-byte with
-zero external dependencies. Provenance for anything not generated here is in
+zero external dependencies — except `jpx.pdf`, whose generator needs OpenJPEG's
+`opj_compress`. Provenance for anything not generated here is in
 [`PROVENANCE.md`](PROVENANCE.md).
 
 ⚠️ **Never open these in the app for manual testing.** VibePDF saves in place, so
@@ -28,6 +29,8 @@ findability fix instead.
 | `rotated.pdf` | 4 | `/Rotate` 0 / 90 / 180 / 270, one per page. | P4.HF hardening — decorations must respect rotation |
 | `cropped.pdf` | 1 | `/CropBox` strictly inside `/MediaBox` (print bleed). Viewers show only the CropBox. | P4.HF hardening — decorations must respect crop |
 | `sample.jpg` | — | Not a PDF. The image-embed source. | image add / replace |
+| `ccitt.pdf` | 1 | A 16×16 CCITT fax image (`/K 0`) with an asymmetric black pattern. Decodes only through PDF.js's `jbig2.wasm`, the module JBIG2 also uses. | P1-VIEW-004 image decoders |
+| `jpx.pdf` | 1 | A 16×16 lossless JPEG 2000 image, four coloured quadrants. Decodes only through `openjpeg.wasm`. **The one generator with an external tool:** `opj_compress` (OpenJPEG). | P1-VIEW-004 image decoders |
 
 ### Form fixtures (Phase 5)
 

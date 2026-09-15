@@ -28,19 +28,42 @@ export interface RenderPageOnDocInput {
   rotation?: number;
 }
 
+/**
+ * Where PDF.js loads its runtime data from, under `base` (which ends in `/`).
+ * `scripts/copy-pdfjs-worker.mjs` puts every directory here under
+ * `public/pdfjs/`.
+ */
+export function pdfjsAssetUrls(base: string): {
+  standardFontDataUrl: string;
+  cMapUrl: string;
+  wasmUrl: string;
+  iccUrl: string;
+} {
+  return {
+    // SPEC: P3-ANN-001 — `getTextContent` (text selection for markup) needs
+    // the standard-14 font data to map glyphs → Unicode; rendering falls back
+    // to built-in metrics, but text extraction throws without these.
+    standardFontDataUrl: `${base}pdfjs/standard_fonts/`,
+    // CMaps for CID-keyed fonts.
+    cMapUrl: `${base}pdfjs/cmaps/`,
+    // SPEC: P1-VIEW-004 — JBIG2, CCITT fax and JPEG 2000 images decode only
+    // through PDF.js's WebAssembly modules (or their JS fallbacks), fetched
+    // from here. Without it those images render as nothing, with no error.
+    wasmUrl: `${base}pdfjs/wasm/`,
+    // The CMYK profile for accurate DeviceCMYK colour.
+    iccUrl: `${base}pdfjs/iccs/`,
+  };
+}
+
 export async function loadDocument(
   data: Uint8Array,
+  // Tests pass a filesystem directory; the app serves `public/` at its origin.
+  assetBase: string = new URL("/", window.location.origin).href,
 ): Promise<PDFDocumentProxy> {
   configurePdfJsWorker();
-  // SPEC: P3-ANN-001 — `getTextContent` (text selection for markup) needs the
-  // standard-14 font data to map glyphs → Unicode; rendering falls back to
-  // built-in metrics, but text extraction throws without these. cmaps cover
-  // CID-keyed fonts. Both are hosted as static assets next to the worker.
-  const origin = window.location.origin;
   const task = getDocument({
     data,
-    standardFontDataUrl: new URL("/pdfjs/standard_fonts/", origin).toString(),
-    cMapUrl: new URL("/pdfjs/cmaps/", origin).toString(),
+    ...pdfjsAssetUrls(assetBase),
     cMapPacked: true,
   });
   return task.promise;

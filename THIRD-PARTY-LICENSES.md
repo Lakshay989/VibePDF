@@ -20,7 +20,7 @@ Apache-2.0 components is in [`NOTICE`](NOTICE).
 
 - **512** Rust crates
 - **62** npm packages
-- **2** bundled components
+- **6** bundled components
 - **0** with a licence outside the reviewed-permissive set
 
 ## Bundled components
@@ -36,6 +36,30 @@ Prebuilt binary fetched by scripts/fetch-pdfium.sh. Ships its own LICENSE and a 
 MIT — <https://github.com/bblanchon/pdfium-binaries>
 
 Copyright Benoit Blanchon. The build scripts that produce the binary above; its MIT licence is the LICENSE file at the archive root.
+
+### PDFium JBIG2 and CCITT fax decoder (PDF.js jbig2.wasm) 6.3.289
+
+BSD-3-Clause — <https://pdfium.googlesource.com/pdfium/>
+
+Copyright The PDFium Authors. Compiled to WebAssembly by Mozilla, whose build glue is Apache-2.0. Licences: wasm/LICENSE_JBIG2 and wasm/LICENSE_PDFJS_JBIG2.
+
+### OpenJPEG JPEG 2000 decoder (PDF.js openjpeg.wasm) 6.3.289
+
+BSD-2-Clause — <https://github.com/uclouvain/openjpeg>
+
+Copyright the OpenJPEG contributors. Compiled to WebAssembly by Mozilla (glue also BSD-2-Clause). Licences: wasm/LICENSE_OPENJPEG and wasm/LICENSE_PDFJS_OPENJPEG.
+
+### qcms colour management (PDF.js qcms_bg.wasm) 6.3.289
+
+MIT — <https://github.com/FirefoxGraphics/qcms>
+
+Copyright Mozilla Corporation and Marti Maria. Compiled to WebAssembly by Mozilla (glue also MIT). Licences: wasm/LICENSE_QCMS and wasm/LICENSE_PDFJS_QCMS.
+
+### CGATS001Compat-v2-micro ICC profile (PDF.js iccs) 6.3.289
+
+CC0-1.0 — <https://github.com/saucecontrol/Compact-ICC-Profiles>
+
+The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: iccs/LICENSE.
 
 ## Rust crates
 
@@ -626,17 +650,17 @@ Copyright Benoit Blanchon. The build scripts that produce the binary above; its 
 | Licence | Count |
 |---|---|
 | MIT OR Apache-2.0 | 238 |
-| MIT | 167 |
+| MIT | 168 |
 | Apache-2.0 OR MIT | 48 |
 | MIT/Apache-2.0 | 24 |
 | Unicode-3.0 | 18 |
 | Zlib OR Apache-2.0 OR MIT | 17 |
 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 13 |
 | Apache-2.0/MIT | 5 |
+| BSD-3-Clause | 5 |
 | MPL-2.0 | 5 |
 | Unlicense OR MIT | 5 |
 | Apache-2.0 | 4 |
-| BSD-3-Clause | 4 |
 | MIT OR Apache-2.0 OR Zlib | 4 |
 | BSD-2-Clause OR Apache-2.0 OR MIT | 2 |
 | BSD-3-Clause OR Apache-2.0 | 2 |
@@ -651,8 +675,10 @@ Copyright Benoit Blanchon. The build scripts that produce the binary above; its 
 | 0BSD OR MIT OR Apache-2.0 | 1 |
 | Apache-2.0 / MIT | 1 |
 | Apache-2.0 AND MIT | 1 |
+| BSD-2-Clause | 1 |
 | BSD-3-Clause AND MIT | 1 |
 | BSD-3-Clause/MIT | 1 |
+| CC0-1.0 | 1 |
 | CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
 

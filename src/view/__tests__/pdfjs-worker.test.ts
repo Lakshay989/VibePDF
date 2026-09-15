@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -26,5 +26,29 @@ describe("pdf.js worker asset", () => {
       "public/pdfjs/pdf.worker.min.mjs missing — run `node scripts/copy-pdfjs-worker.mjs` " +
         "(normally automatic via the postinstall/predev/prebuild/pretest hooks)",
     ).toBe(true);
+  });
+
+  // SPEC: P1-VIEW-004 — the image decoders `wasmUrl` points at. Decoding is
+  // proved in image-decoders.test.ts; this names what must be served.
+  it("serves the image decoders and the CMYK profile", () => {
+    const pdfjs = resolve(__dirname, "../../../public/pdfjs");
+    for (const file of [
+      "wasm/jbig2.wasm",
+      "wasm/jbig2_nowasm_fallback.js",
+      "wasm/openjpeg.wasm",
+      "wasm/openjpeg_nowasm_fallback.js",
+      "wasm/qcms_bg.wasm",
+      "iccs/CGATS001Compat-v2-micro.icc",
+    ]) {
+      expect(existsSync(resolve(pdfjs, file)), `public/pdfjs/${file} missing`).toBe(true);
+    }
+  });
+
+  // PDF.js's sandbox for running a document's own JavaScript ships in the same
+  // directory. VibePDF never runs document scripts (pdfjs-surface.test.ts), and
+  // not serving the sandbox keeps any future option from switching it on.
+  it("does not serve PDF.js's document-script sandbox", () => {
+    const wasm = resolve(__dirname, "../../../public/pdfjs/wasm");
+    expect(readdirSync(wasm).filter((f) => f.startsWith("quickjs"))).toEqual([]);
   });
 });

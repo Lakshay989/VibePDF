@@ -23,6 +23,34 @@ export const BUNDLED_COMPONENTS: readonly ThirdPartyLicence[] = [
     "license": "MIT",
     "repository": "https://github.com/bblanchon/pdfium-binaries",
     "note": "Copyright Benoit Blanchon. The build scripts that produce the binary above; its MIT licence is the LICENSE file at the archive root."
+  },
+  {
+    "name": "PDFium JBIG2 and CCITT fax decoder (PDF.js jbig2.wasm)",
+    "version": "6.3.289",
+    "license": "BSD-3-Clause",
+    "repository": "https://pdfium.googlesource.com/pdfium/",
+    "note": "Copyright The PDFium Authors. Compiled to WebAssembly by Mozilla, whose build glue is Apache-2.0. Licences: wasm/LICENSE_JBIG2 and wasm/LICENSE_PDFJS_JBIG2."
+  },
+  {
+    "name": "OpenJPEG JPEG 2000 decoder (PDF.js openjpeg.wasm)",
+    "version": "6.3.289",
+    "license": "BSD-2-Clause",
+    "repository": "https://github.com/uclouvain/openjpeg",
+    "note": "Copyright the OpenJPEG contributors. Compiled to WebAssembly by Mozilla (glue also BSD-2-Clause). Licences: wasm/LICENSE_OPENJPEG and wasm/LICENSE_PDFJS_OPENJPEG."
+  },
+  {
+    "name": "qcms colour management (PDF.js qcms_bg.wasm)",
+    "version": "6.3.289",
+    "license": "MIT",
+    "repository": "https://github.com/FirefoxGraphics/qcms",
+    "note": "Copyright Mozilla Corporation and Marti Maria. Compiled to WebAssembly by Mozilla (glue also MIT). Licences: wasm/LICENSE_QCMS and wasm/LICENSE_PDFJS_QCMS."
+  },
+  {
+    "name": "CGATS001Compat-v2-micro ICC profile (PDF.js iccs)",
+    "version": "6.3.289",
+    "license": "CC0-1.0",
+    "repository": "https://github.com/saucecontrol/Compact-ICC-Profiles",
+    "note": "The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: iccs/LICENSE."
   }
 ];
 

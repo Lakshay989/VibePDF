@@ -847,12 +847,18 @@ IPC access, so it runs under a strict CSP set in `src-tauri/tauri.conf.json`
 `default-src 'self'` with the minimum relaxations the frontend actually needs,
 each earned by a specific resource:
 
-- `script-src 'self' 'wasm-unsafe-eval'` — our bundle, plus PDF.js v5's WASM
-  decoders (OpenJPEG/JBIG2 images, QuickJS PDF-function eval). `'wasm-unsafe-eval'`
-  is strictly narrower than `'unsafe-eval'` (WASM compile only, no JS `eval`).
+- `script-src 'self' 'wasm-unsafe-eval'` — our bundle, plus PDF.js's WASM
+  image decoders served from `/pdfjs/wasm/`: `jbig2.wasm` (JBIG2 and CCITT
+  fax), `openjpeg.wasm` (JPEG 2000) and `qcms_bg.wasm` (ICC colour), with their
+  JS fallbacks. `'wasm-unsafe-eval'` is strictly narrower than `'unsafe-eval'`
+  (WASM compile only, no JS `eval`). The same package's `quickjs-eval.*` is
+  PDF.js's *document-scripting* sandbox, loaded only by `pdf.sandbox.mjs`; it is
+  deliberately not served (`scripts/copy-pdfjs-worker.mjs`). PostScript
+  functions don't need it — the worker parses them itself.
 - `worker-src 'self'` — the PDF.js worker is a same-origin static asset
   (`/pdfjs/pdf.worker.min.mjs`), not a blob worker.
-- `connect-src 'self' ipc: http://ipc.localhost` — same-origin cmap/font fetches
+- `connect-src 'self' ipc: http://ipc.localhost` — same-origin cmap, font,
+  decoder and ICC-profile fetches (`pdfjsAssetUrls` in `src/view/render-page.ts`)
   plus Tauri IPC.
 - `img-src 'self' blob: data:` — thumbnail `<img>`s use `blob:` object URLs.
 - `style-src 'self' 'unsafe-inline'` — Tailwind + React inline `style={}` attrs.

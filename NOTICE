@@ -20,7 +20,9 @@ contents belong here verbatim.
   Copyright Mozilla Foundation and contributors
   https://github.com/mozilla/pdf.js
   Apache License 2.0. Used unmodified: scripts/copy-pdfjs-worker.mjs copies the
-  distributed worker into place without changing it.
+  distributed worker, data files and WebAssembly image decoders into place
+  without changing them. The decoders' own upstream licences are listed in
+  THIRD-PARTY-NOTICES.md and ship beside each module.
 
   Tauri
   Copyright Tauri Programme within The Commons Conservancy
