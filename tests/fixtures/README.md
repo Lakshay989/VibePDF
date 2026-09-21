@@ -31,6 +31,8 @@ findability fix instead.
 | `sample.jpg` | — | Not a PDF. The image-embed source. | image add / replace |
 | `ccitt.pdf` | 1 | A 16×16 CCITT fax image (`/K 0`) with an asymmetric black pattern. Decodes only through PDF.js's `jbig2.wasm`, the module JBIG2 also uses. | P1-VIEW-004 image decoders |
 | `scan.pdf` | 1 | A page that is only a *picture* of text: four lines (24 pt heading, 9 pt body) rasterised at 150 DPI and embedded, so nothing in it is selectable. Body text is small on purpose — at 28 pt every preprocessing pipeline looks fine, including a harmful one. **Generator needs `ghostscript`.** | P7-OCR-001/003 OCR smoke |
+| `scan-rotated.pdf` | 1 | The same scan sideways on a landscape page with `/Rotate 270` turning it upright — a sheet fed in rotated. Displays identically to `scan.pdf`, so the OCR text layer must land in rotated page coordinates. | P7-OCR-001 placement |
+| `scan-skewed.pdf` | 1 | The same scan drawn 3° off level before rasterising. Recognition straightens it, so the text layer has to be tilted back. | P7-OCR-001 placement |
 | `jpx.pdf` | 1 | A 16×16 lossless JPEG 2000 image, four coloured quadrants. Decodes only through `openjpeg.wasm`. **The one generator with an external tool:** `opj_compress` (OpenJPEG). | P1-VIEW-004 image decoders |
 
 ### Form fixtures (Phase 5)

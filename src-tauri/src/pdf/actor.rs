@@ -48,6 +48,9 @@ use crate::pdf::annotation::{
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
+use crate::pdf::ocr_text_layer::{
+    keep_writable_words, recognise_pages, OcrOptions, OcrSummary, OcrTextLayerEdit,
+};
 use crate::pdf::page_numbers::PageNumbersEdit;
 use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
@@ -90,6 +93,9 @@ pub enum DocumentChange {
     Opened { id: String, page_count: u32 },
     Closed { id: String },
 }
+
+/// What an OCR run replies with: what it found, and the undo state afterwards.
+pub type OcrReply = Result<(OcrSummary, HistoryState), CommandError>;
 
 /// Messages the worker thread accepts. Each variant carries its own
 /// reply channel so the worker can answer one message at a time
@@ -582,6 +588,14 @@ pub enum Message {
         margin: f32,
         date: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P7-OCR-001 — OCR the 0-based `pages` and add an invisible text
+    /// layer over the picture of the text, so the page becomes searchable.
+    /// One undoable edit for the whole run; replies with what was recognised.
+    RunOcr {
+        pages: Vec<i32>,
+        options: OcrOptions,
+        reply: oneshot::Sender<OcrReply>,
     },
     /// SPEC: P4-EDIT-011 — stamp a page number (in `format`, from `start`) in the
     /// `position`/`align` margin of every page except the 0-based `exclude`d ones.
@@ -2153,6 +2167,18 @@ impl DocumentActorHandle {
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
+    /// SPEC: P7-OCR-001 (P7.A2) — OCR pages into a searchable layer.
+    /// Await-holding for tests.
+    pub async fn run_ocr(
+        &self,
+        pages: Vec<i32>,
+        options: OcrOptions,
+    ) -> Result<(OcrSummary, HistoryState), CommandError> {
+        let rx = self.run_ocr_request(pages, options)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
     /// SPEC: P4-EDIT-011 (P4.D4) — stamp page numbers. Await-holding for tests.
     #[allow(clippy::too_many_arguments)]
     pub async fn add_page_numbers(
@@ -2257,6 +2283,25 @@ impl DocumentActorHandle {
                 color,
                 margin,
                 date,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-001 — OCR pages into a searchable layer. Non-blocking; the
+    /// command awaits. A page takes on the order of a second, and the actor
+    /// handles one message at a time, so a long document holds the mailbox.
+    pub fn run_ocr_request(
+        &self,
+        pages: Vec<i32>,
+        options: OcrOptions,
+    ) -> Result<oneshot::Receiver<OcrReply>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RunOcr {
+                pages,
+                options,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -4048,6 +4093,43 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::RunOcr {
+                pages,
+                options,
+                reply,
+            } => {
+                // SPEC: P7-OCR-001 (P7.A2) — recognise first so the reply can
+                // report what was found even when nothing is confident enough
+                // to write, then apply the write as one undoable edit.
+                let started = std::time::Instant::now();
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| {
+                        let mut found = recognise_pages(&doc, &pages, &options)?;
+                        let (words, skipped) =
+                            keep_writable_words(&mut found, options.min_confidence);
+                        let page_count = found.len();
+                        if words > 0 {
+                            let inverse = Box::new(OcrTextLayerEdit { found }).apply(&mut doc)?;
+                            history.record(inverse);
+                        }
+                        let summary = OcrSummary {
+                            pages: u32::try_from(page_count).unwrap_or(u32::MAX),
+                            words,
+                            skipped,
+                            milliseconds: u64::try_from(started.elapsed().as_millis())
+                                .unwrap_or(u64::MAX),
+                        };
+                        Ok((summary, history.state()))
+                    });
                 let _ = reply.send(result);
             }
             Message::AddPageNumbers {

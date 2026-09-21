@@ -126,10 +126,40 @@ pub fn preprocess(
     source_dpi: u32,
     options: PreprocessOptions,
 ) -> Result<GrayImage, PreprocessError> {
+    Ok(preprocess_reported(image, source_dpi, options)?.0)
+}
+
+/// What the pipeline did to the image, so a caller can map coordinates in the
+/// processed image back to the original.
+///
+/// P7-OCR-001 needs exactly this: Tesseract's word boxes are in the *processed*
+/// image, and the invisible text has to land on the ink in the *page*.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreprocessReport {
+    /// How much the image was enlarged (1.0 when it was not).
+    pub scale: f64,
+    /// The tilt that was straightened out, in degrees, positive meaning the
+    /// text ran down to the right. 0 when deskewing was off or found nothing.
+    pub skew_degrees: f32,
+}
+
+/// [`preprocess`], reporting what it did.
+///
+/// # Errors
+/// When the image is empty.
+pub fn preprocess_reported(
+    image: &GrayImage,
+    source_dpi: u32,
+    options: PreprocessOptions,
+) -> Result<(GrayImage, PreprocessReport), PreprocessError> {
     if image.width == 0 || image.height == 0 {
         return Err(PreprocessError::Empty);
     }
     let mut out = image.clone();
+    let mut report = PreprocessReport {
+        scale: 1.0,
+        skew_degrees: 0.0,
+    };
     if options.denoise {
         out = despeckle(&out);
     }
@@ -137,13 +167,18 @@ pub fn preprocess(
         let angle = estimate_skew_degrees(&out);
         if angle.abs() >= 0.1 {
             out = rotate(&out, -angle);
+            report.skew_degrees = angle;
         }
     }
     if options.min_dpi > 0 && source_dpi > 0 && source_dpi < options.min_dpi {
         let factor = f64::from(options.min_dpi) / f64::from(source_dpi);
         out = upscale(&out, factor);
+        // What the resize actually achieved, not what was asked for: `upscale`
+        // rounds to whole pixels, and a caller mapping boxes back needs the
+        // ratio that moved them.
+        report.scale = f64::from(out.width) / f64::from(image.width);
     }
-    Ok(out)
+    Ok((out, report))
 }
 
 /// Replace isolated specks with the median of their neighbours, and leave

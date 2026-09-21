@@ -26,6 +26,7 @@ pub mod incremental_save;
 pub mod insert_blank;
 pub mod insert_from;
 pub mod merge;
+pub mod ocr_text_layer;
 pub mod page_numbers;
 pub mod reflow;
 pub mod render;

@@ -14,6 +14,8 @@ use crate::pdf::form::{
 use crate::pdf::form_data::ExportFormat;
 use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
+use crate::ocr::preprocess::PreprocessOptions;
+use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
@@ -1521,6 +1523,67 @@ pub async fn pdf_add_header_footer(
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-001 (P7.A2) — OCR the 0-based `pages` (all pages when empty)
+/// and write what Tesseract read as invisible text over the picture of it, so
+/// the page becomes searchable. One undoable edit; replies with what was found.
+///
+/// `dpi`, `min_confidence` and the three preprocessing switches are the
+/// spec's configurable pipeline (P7-OCR-003); omitting them uses the defaults.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_ocr_run(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    language: Option<String>,
+    dpi: Option<f32>,
+    min_confidence: Option<f32>,
+    deskew: Option<bool>,
+    denoise: Option<bool>,
+    min_dpi: Option<u32>,
+) -> Result<OcrRunReply, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let defaults = OcrOptions::default();
+    let options = OcrOptions {
+        language: language.unwrap_or(defaults.language),
+        dpi: dpi.unwrap_or(defaults.dpi),
+        min_confidence: min_confidence.unwrap_or(defaults.min_confidence),
+        preprocess: PreprocessOptions {
+            deskew: deskew.unwrap_or(defaults.preprocess.deskew),
+            denoise: denoise.unwrap_or(defaults.preprocess.denoise),
+            min_dpi: min_dpi.unwrap_or(defaults.preprocess.min_dpi),
+        },
+    };
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        let pages = if pages.is_empty() {
+            (0..i32::try_from(handle.metadata().page_count).unwrap_or(i32::MAX)).collect()
+        } else {
+            pages
+        };
+        handle.run_ocr_request(pages, options)?
+    };
+    let (summary, history) = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+    Ok(OcrRunReply { summary, history })
+}
+
+/// Reply of [`pdf_ocr_run`]: what OCR found, plus the undo state the edit left.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrRunReply {
+    pub summary: OcrSummary,
+    pub history: HistoryState,
 }
 
 /// SPEC: P4-EDIT-011 (P4.D4) — stamp a page number in `format` (from `start`) in

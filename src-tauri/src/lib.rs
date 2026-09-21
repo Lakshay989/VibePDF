@@ -156,6 +156,7 @@ pub fn run() {
             commands::pdf::pdf_add_image_background,
             commands::pdf::pdf_add_pdf_background,
             commands::pdf::pdf_add_header_footer,
+            commands::pdf::pdf_ocr_run,
             commands::pdf::pdf_add_page_numbers,
             commands::pdf::pdf_add_bates,
             commands::pdf::pdf_extract_images,
