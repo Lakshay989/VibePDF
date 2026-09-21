@@ -74,45 +74,50 @@ function isPermissive(expression) {
     );
 }
 
-/** Every crate reachable from the root through normal (not dev, not build) edges. */
+/** The platforms a release targets. The inventory is their union. */
+const RUST_TARGETS = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+];
+
+/**
+ * Every crate that actually links into a build, per target, unioned.
+ *
+ * `cargo tree` rather than walking `cargo metadata`'s resolve graph: that
+ * graph unions features across the whole workspace, so an *optional* edge
+ * counts as taken. Adding the OCR build-dependency exposed this (2026-09-21) —
+ * its build script uses reqwest, which put reqwest in the lockfile, after
+ * which the old walk reported tauri's optional reqwest, rustls and a TLS root
+ * store as shipped. `cargo tree -e normal --target <t>` resolves features the
+ * way a build does, and says those are linked on no target we ship.
+ */
 function rustDependencies() {
-  const raw = execFileSync(
-    "cargo",
-    ["metadata", "--format-version", "1", "--manifest-path", path.join(ROOT, "src-tauri", "Cargo.toml")],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-  );
-  const meta = JSON.parse(raw);
-
-  const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
-  const packages = new Map(meta.packages.map((p) => [p.id, p]));
-
-  // Walk the graph rather than listing every resolved package: Cargo.lock
-  // contains build- and dev-only crates that never reach the shipped binary,
-  // and including them would overstate the obligations by hundreds of entries.
-  const reached = new Set();
-  const queue = [meta.resolve.root];
-  while (queue.length > 0) {
-    const id = queue.pop();
-    const node = nodes.get(id);
-    if (!node) continue;
-    for (const dep of node.deps) {
-      // `kind: null` is a normal dependency. "dev" and "build" are not shipped.
-      const normal = dep.dep_kinds.some((k) => k.kind === null || k.kind === "normal");
-      if (!normal || reached.has(dep.pkg)) continue;
-      reached.add(dep.pkg);
-      queue.push(dep.pkg);
+  const out = [];
+  for (const target of RUST_TARGETS) {
+    const raw = execFileSync(
+      "cargo",
+      [
+        "tree", "-e", "normal", "--target", target, "--prefix", "none",
+        "--format", "{p}|{l}|{r}",
+        "--manifest-path", path.join(ROOT, "src-tauri", "Cargo.toml"),
+      ],
+      { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    );
+    for (const line of raw.split("\n")) {
+      // "name v1.2.3 (path)? (*)?|<licence>|<repository>"; "(*)" marks a
+      // subtree cargo already printed.
+      const [pkg = "", license = "", repository = ""] = line.split("|");
+      const match = /^(\S+) v(\S+)/.exec(pkg.trim());
+      if (!match) continue;
+      const [, name, version] = match;
+      if (name === "vibepdf") continue; // the crate being inventoried
+      out.push({ name, version, license: license.trim(), repository: repository.trim() });
     }
   }
-
-  return [...reached]
-    .map((id) => packages.get(id))
-    .filter(Boolean)
-    .map((p) => ({
-      name: p.name,
-      version: p.version,
-      license: p.license ?? (p.license_file ? `see ${p.license_file}` : ""),
-      repository: p.repository ?? "",
-    }));
+  return out;
 }
 
 /** Every npm package the lockfile does not mark dev-only. */
@@ -188,6 +193,30 @@ const BUNDLED = [
     license: "MIT",
     repository: "https://github.com/FirefoxGraphics/qcms",
     note: "Copyright Mozilla Corporation and Marti Maria. Compiled to WebAssembly by Mozilla (glue also MIT). Licences: wasm/LICENSE_QCMS and wasm/LICENSE_PDFJS_QCMS.",
+  },
+  // P7.A1: the OCR engine. Compiled from source into the binary by the
+  // tesseract-rs build (see src-tauri/Cargo.toml), from the checksum-pinned
+  // archives scripts/fetch-tesseract-src.sh places for it.
+  {
+    name: "Tesseract OCR",
+    version: "5.5.2",
+    license: "Apache-2.0",
+    repository: "https://github.com/tesseract-ocr/tesseract",
+    note: "Copyright the Tesseract contributors, Apache-2.0 (attribution in NOTICE). Statically linked; its LICENSE travels in the source archive pinned by scripts/fetch-tesseract-src.sh.",
+  },
+  {
+    name: "Leptonica",
+    version: "1.87.0",
+    license: "BSD-2-Clause",
+    repository: "https://github.com/DanBloomberg/leptonica",
+    note: "Copyright Dan Bloomberg. The image library Tesseract is built on; statically linked alongside it.",
+  },
+  {
+    name: "Tesseract English language data (tessdata_fast)",
+    version: "87416418",
+    license: "Apache-2.0",
+    repository: "https://github.com/tesseract-ocr/tessdata_fast",
+    note: "The eng.traineddata model, fetched by scripts/fetch-tessdata.sh and bundled as a Tauri resource. Its LICENSE ships beside it in resources/tessdata/.",
   },
   {
     name: "CGATS001Compat-v2-micro ICC profile (PDF.js iccs)",

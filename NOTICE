@@ -24,6 +24,13 @@ contents belong here verbatim.
   without changing them. The decoders' own upstream licences are listed in
   THIRD-PARTY-NOTICES.md and ship beside each module.
 
+  Tesseract OCR
+  Copyright the Tesseract contributors
+  https://github.com/tesseract-ocr/tesseract
+  Apache License 2.0. Used unmodified: built from the upstream 5.5.2 source
+  archive and statically linked. The bundled English language model
+  (tessdata_fast) is under the same licence and ships with its LICENSE file.
+
   Tauri
   Copyright Tauri Programme within The Commons Conservancy
   https://github.com/tauri-apps/tauri

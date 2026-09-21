@@ -48,7 +48,10 @@ vibepdf/
 │   │   │   ├── form_flatten.rs   # Synthesize field appearances, bake, drop AcroForm (P5.C2)
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
-│   │   ├── ocr/                  # Tesseract pipeline
+│   │   ├── ocr/                  # Tesseract pipeline (P7)
+│   │   │   ├── engine.rs         # the only code that talks to Tesseract
+│   │   │   ├── preprocess.rs     # deskew / despeckle / upscale (P7-OCR-003)
+│   │   │   └── tessdata.rs       # where the bundled language data lives
 │   │   ├── security/             # Crypto, signatures, redaction
 │   │   │   ├── encrypt.rs
 │   │   │   ├── sign.rs

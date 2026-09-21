@@ -46,6 +46,27 @@ export const BUNDLED_COMPONENTS: readonly ThirdPartyLicence[] = [
     "note": "Copyright Mozilla Corporation and Marti Maria. Compiled to WebAssembly by Mozilla (glue also MIT). Licences: wasm/LICENSE_QCMS and wasm/LICENSE_PDFJS_QCMS."
   },
   {
+    "name": "Tesseract OCR",
+    "version": "5.5.2",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/tesseract-ocr/tesseract",
+    "note": "Copyright the Tesseract contributors, Apache-2.0 (attribution in NOTICE). Statically linked; its LICENSE travels in the source archive pinned by scripts/fetch-tesseract-src.sh."
+  },
+  {
+    "name": "Leptonica",
+    "version": "1.87.0",
+    "license": "BSD-2-Clause",
+    "repository": "https://github.com/DanBloomberg/leptonica",
+    "note": "Copyright Dan Bloomberg. The image library Tesseract is built on; statically linked alongside it."
+  },
+  {
+    "name": "Tesseract English language data (tessdata_fast)",
+    "version": "87416418",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/tesseract-ocr/tessdata_fast",
+    "note": "The eng.traineddata model, fetched by scripts/fetch-tessdata.sh and bundled as a Tauri resource. Its LICENSE ships beside it in resources/tessdata/."
+  },
+  {
     "name": "CGATS001Compat-v2-micro ICC profile (PDF.js iccs)",
     "version": "6.3.289",
     "license": "CC0-1.0",
@@ -65,13 +86,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "aes",
     "version": "0.8.4",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/block-ciphers"
+    "repository": "https://github.com/RustCrypto/block-ciphers (*)"
   },
   {
     "name": "aho-corasick",
     "version": "1.1.4",
     "license": "Unlicense OR MIT",
-    "repository": "https://github.com/BurntSushi/aho-corasick"
+    "repository": "https://github.com/BurntSushi/aho-corasick (*)"
   },
   {
     "name": "alloc-no-stdlib",
@@ -83,13 +104,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "alloc-stdlib",
     "version": "0.2.2",
     "license": "BSD-3-Clause",
-    "repository": "https://github.com/dropbox/rust-alloc-no-stdlib"
-  },
-  {
-    "name": "android_system_properties",
-    "version": "0.1.5",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/nical/android_system_properties"
+    "repository": "https://github.com/dropbox/rust-alloc-no-stdlib (*)"
   },
   {
     "name": "anyhow",
@@ -107,13 +122,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "atk-sys",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk3-rs"
-  },
-  {
-    "name": "atomic-waker",
-    "version": "1.1.2",
-    "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/smol-rs/atomic-waker"
+    "repository": "https://github.com/gtk-rs/gtk3-rs (*)"
   },
   {
     "name": "base64",
@@ -155,7 +164,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "bitflags",
     "version": "2.11.1",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/bitflags/bitflags"
+    "repository": "https://github.com/bitflags/bitflags (*)"
   },
   {
     "name": "block-buffer",
@@ -173,7 +182,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "block2",
     "version": "0.6.2",
     "license": "MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "brotli",
@@ -186,18 +195,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "5.0.0",
     "license": "BSD-3-Clause/MIT",
     "repository": "https://github.com/dropbox/rust-brotli-decompressor"
-  },
-  {
-    "name": "bs58",
-    "version": "0.5.1",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/Nullus157/bs58-rs"
-  },
-  {
-    "name": "bumpalo",
-    "version": "3.20.3",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/fitzgen/bumpalo"
   },
   {
     "name": "bytecount",
@@ -233,13 +230,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "cairo-rs",
     "version": "0.18.5",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "cairo-sys-rs",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "camino",
@@ -263,13 +260,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "cbc",
     "version": "0.1.2",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/block-modes"
-  },
-  {
-    "name": "cesu8",
-    "version": "1.1.0",
-    "license": "Apache-2.0/MIT",
-    "repository": "https://github.com/emk/cesu8-rs"
+    "repository": "https://github.com/RustCrypto/block-modes (*)"
   },
   {
     "name": "cfb",
@@ -293,31 +284,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "cipher",
     "version": "0.4.4",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/traits"
+    "repository": "https://github.com/RustCrypto/traits (*)"
   },
   {
     "name": "cms",
     "version": "0.2.3",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats/tree/master/cms"
-  },
-  {
-    "name": "combine",
-    "version": "4.6.7",
-    "license": "MIT",
-    "repository": "https://github.com/Marwes/combine"
-  },
-  {
-    "name": "console_error_panic_hook",
-    "version": "0.1.7",
-    "license": "Apache-2.0/MIT",
-    "repository": "https://github.com/rustwasm/console_error_panic_hook"
-  },
-  {
-    "name": "console_log",
-    "version": "1.0.0",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/iamcodemaker/console_log"
+    "repository": "https://github.com/RustCrypto/formats/tree/master/cms (*)"
   },
   {
     "name": "const-oid",
@@ -329,13 +302,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "cookie",
     "version": "0.18.1",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/SergioBenitez/cookie-rs"
+    "repository": "https://github.com/SergioBenitez/cookie-rs (*)"
   },
   {
     "name": "core-foundation",
     "version": "0.10.1",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/servo/core-foundation-rs"
+    "repository": "https://github.com/servo/core-foundation-rs (*)"
   },
   {
     "name": "core-foundation-sys",
@@ -365,13 +338,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "crc32fast",
     "version": "1.5.0",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/srijs/rust-crc32fast"
+    "repository": "https://github.com/srijs/rust-crc32fast (*)"
   },
   {
     "name": "crossbeam-channel",
     "version": "0.5.15",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/crossbeam-rs/crossbeam"
+    "repository": "https://github.com/crossbeam-rs/crossbeam (*)"
   },
   {
     "name": "crossbeam-utils",
@@ -389,7 +362,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "cssparser",
     "version": "0.36.0",
     "license": "MPL-2.0",
-    "repository": "https://github.com/servo/rust-cssparser"
+    "repository": "https://github.com/servo/rust-cssparser (*)"
   },
   {
     "name": "cssparser-macros",
@@ -419,7 +392,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "darling_core",
     "version": "0.23.0",
     "license": "MIT",
-    "repository": "https://github.com/TedDriggs/darling"
+    "repository": "https://github.com/TedDriggs/darling (*)"
   },
   {
     "name": "darling_macro",
@@ -437,7 +410,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "der",
     "version": "0.7.10",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats/tree/master/der"
+    "repository": "https://github.com/RustCrypto/formats/tree/master/der (*)"
   },
   {
     "name": "der_derive",
@@ -491,13 +464,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "dispatch2",
     "version": "0.3.1",
     "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "displaydoc",
     "version": "0.2.5",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/yaahc/displaydoc"
+    "repository": "https://github.com/yaahc/displaydoc (*)"
   },
   {
     "name": "dlopen2",
@@ -521,7 +494,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "dpi",
     "version": "0.1.2",
     "license": "Apache-2.0 AND MIT",
-    "repository": "https://github.com/rust-windowing/winit"
+    "repository": "https://github.com/rust-windowing/winit (*)"
   },
   {
     "name": "dtoa",
@@ -534,18 +507,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.3.5",
     "license": "MPL-2.0",
     "repository": "https://github.com/upsuper/dtoa-short"
-  },
-  {
-    "name": "dtor",
-    "version": "0.3.0",
-    "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/mmastrac/rust-ctor"
-  },
-  {
-    "name": "dtor-proc-macro",
-    "version": "0.0.6",
-    "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/mmastrac/rust-ctor"
   },
   {
     "name": "dunce",
@@ -633,12 +594,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   },
   {
     "name": "foldhash",
-    "version": "0.1.5",
-    "license": "Zlib",
-    "repository": "https://github.com/orlp/foldhash"
-  },
-  {
-    "name": "foldhash",
     "version": "0.2.0",
     "license": "Zlib",
     "repository": "https://github.com/orlp/foldhash"
@@ -671,7 +626,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "futures-channel",
     "version": "0.3.32",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/futures-rs"
+    "repository": "https://github.com/rust-lang/futures-rs (*)"
   },
   {
     "name": "futures-core",
@@ -698,12 +653,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/rust-lang/futures-rs"
   },
   {
-    "name": "futures-sink",
-    "version": "0.3.32",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/futures-rs"
-  },
-  {
     "name": "futures-task",
     "version": "0.3.32",
     "license": "MIT OR Apache-2.0",
@@ -713,31 +662,31 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "futures-util",
     "version": "0.3.32",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/futures-rs"
+    "repository": "https://github.com/rust-lang/futures-rs (*)"
   },
   {
     "name": "gdk",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk3-rs"
+    "repository": "https://github.com/gtk-rs/gtk3-rs (*)"
   },
   {
     "name": "gdk-pixbuf",
     "version": "0.18.5",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "gdk-pixbuf-sys",
     "version": "0.18.0",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "gdk-sys",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk3-rs"
+    "repository": "https://github.com/gtk-rs/gtk3-rs (*)"
   },
   {
     "name": "gdkwayland-sys",
@@ -755,13 +704,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "gdkx11-sys",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk3-rs"
+    "repository": "https://github.com/gtk-rs/gtk3-rs (*)"
   },
   {
     "name": "generic-array",
     "version": "0.14.7",
     "license": "MIT",
-    "repository": "https://github.com/fizyk20/generic-array.git"
+    "repository": "https://github.com/fizyk20/generic-array.git (*)"
   },
   {
     "name": "getrandom",
@@ -773,7 +722,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "getrandom",
     "version": "0.3.4",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/getrandom"
+    "repository": "https://github.com/rust-random/getrandom (*)"
   },
   {
     "name": "getrandom",
@@ -785,19 +734,19 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "gio",
     "version": "0.18.4",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "gio-sys",
     "version": "0.18.1",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "glib",
     "version": "0.18.5",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "glib-macros",
@@ -809,7 +758,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "glib-sys",
     "version": "0.18.1",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "glob",
@@ -821,19 +770,19 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "gobject-sys",
     "version": "0.18.0",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "gtk",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk3-rs"
+    "repository": "https://github.com/gtk-rs/gtk3-rs (*)"
   },
   {
     "name": "gtk-sys",
     "version": "0.18.2",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk3-rs"
+    "repository": "https://github.com/gtk-rs/gtk3-rs (*)"
   },
   {
     "name": "gtk3-macros",
@@ -844,12 +793,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   {
     "name": "hashbrown",
     "version": "0.12.3",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/hashbrown"
-  },
-  {
-    "name": "hashbrown",
-    "version": "0.15.5",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/rust-lang/hashbrown"
   },
@@ -872,16 +815,10 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/withoutboats/heck"
   },
   {
-    "name": "hex",
-    "version": "0.4.3",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/KokaKiwi/rust-hex"
-  },
-  {
     "name": "hmac",
     "version": "0.12.1",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/MACs"
+    "repository": "https://github.com/RustCrypto/MACs (*)"
   },
   {
     "name": "html5ever",
@@ -893,47 +830,11 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "http",
     "version": "1.4.1",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/hyperium/http"
-  },
-  {
-    "name": "http-body",
-    "version": "1.0.1",
-    "license": "MIT",
-    "repository": "https://github.com/hyperium/http-body"
-  },
-  {
-    "name": "http-body-util",
-    "version": "0.1.3",
-    "license": "MIT",
-    "repository": "https://github.com/hyperium/http-body"
-  },
-  {
-    "name": "httparse",
-    "version": "1.10.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/seanmonstar/httparse"
-  },
-  {
-    "name": "hyper",
-    "version": "1.9.0",
-    "license": "MIT",
-    "repository": "https://github.com/hyperium/hyper"
-  },
-  {
-    "name": "hyper-util",
-    "version": "0.1.20",
-    "license": "MIT",
-    "repository": "https://github.com/hyperium/hyper-util"
+    "repository": "https://github.com/hyperium/http (*)"
   },
   {
     "name": "iana-time-zone",
     "version": "0.1.65",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/strawlab/iana-time-zone"
-  },
-  {
-    "name": "iana-time-zone-haiku",
-    "version": "0.1.2",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/strawlab/iana-time-zone"
   },
@@ -947,13 +848,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "icu_collections",
     "version": "2.2.0",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "icu_locale_core",
     "version": "2.2.0",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "icu_normalizer",
@@ -983,13 +884,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "icu_provider",
     "version": "2.2.0",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
-  },
-  {
-    "name": "id-arena",
-    "version": "2.3.0",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/fitzgen/id-arena"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "ident_case",
@@ -1025,7 +920,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "indexmap",
     "version": "2.14.0",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/indexmap-rs/indexmap"
+    "repository": "https://github.com/indexmap-rs/indexmap (*)"
   },
   {
     "name": "infer",
@@ -1038,12 +933,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.1.4",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/RustCrypto/utils"
-  },
-  {
-    "name": "ipnet",
-    "version": "2.12.0",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/krisprice/ipnet"
   },
   {
     "name": "itertools",
@@ -1061,43 +950,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "javascriptcore-rs",
     "version": "1.1.2",
     "license": "MIT",
-    "repository": "https://github.com/tauri-apps/javascriptcore-rs"
+    "repository": "https://github.com/tauri-apps/javascriptcore-rs (*)"
   },
   {
     "name": "javascriptcore-rs-sys",
     "version": "1.1.1",
     "license": "MIT",
-    "repository": "https://github.com/tauri-apps/javascriptcore-rs"
-  },
-  {
-    "name": "jni",
-    "version": "0.21.1",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/jni-rs/jni-rs"
-  },
-  {
-    "name": "jni-sys",
-    "version": "0.3.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/jni-rs/jni-sys"
-  },
-  {
-    "name": "jni-sys",
-    "version": "0.4.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/jni-rs/jni-sys"
-  },
-  {
-    "name": "jni-sys-macros",
-    "version": "0.4.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/jni-rs/jni-sys"
-  },
-  {
-    "name": "js-sys",
-    "version": "0.3.99",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys"
+    "repository": "https://github.com/tauri-apps/javascriptcore-rs (*)"
   },
   {
     "name": "json-patch",
@@ -1127,25 +986,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "lazy_static",
     "version": "1.5.0",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang-nursery/lazy-static.rs"
-  },
-  {
-    "name": "leb128fmt",
-    "version": "0.1.0",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/bluk/leb128fmt"
-  },
-  {
-    "name": "libappindicator",
-    "version": "0.9.0",
-    "license": "Apache-2.0 OR MIT",
-    "repository": ""
-  },
-  {
-    "name": "libappindicator-sys",
-    "version": "0.9.0",
-    "license": "Apache-2.0 OR MIT",
-    "repository": ""
+    "repository": "https://github.com/rust-lang-nursery/lazy-static.rs (*)"
   },
   {
     "name": "libc",
@@ -1161,12 +1002,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   },
   {
     "name": "libloading",
-    "version": "0.7.4",
-    "license": "ISC",
-    "repository": "https://github.com/nagisa/rust_libloading/"
-  },
-  {
-    "name": "libloading",
     "version": "0.9.0",
     "license": "ISC",
     "repository": "https://github.com/nagisa/rust_libloading/"
@@ -1176,12 +1011,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.2.16",
     "license": "MIT",
     "repository": "https://github.com/rust-lang/compiler-builtins"
-  },
-  {
-    "name": "libredox",
-    "version": "0.1.16",
-    "license": "MIT",
-    "repository": "https://gitlab.redox-os.org/redox-os/libredox.git"
   },
   {
     "name": "litemap",
@@ -1253,13 +1082,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "miniz_oxide",
     "version": "0.8.9",
     "license": "MIT OR Zlib OR Apache-2.0",
-    "repository": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide"
-  },
-  {
-    "name": "mio",
-    "version": "1.2.0",
-    "license": "MIT",
-    "repository": "https://github.com/tokio-rs/mio"
+    "repository": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide (*)"
   },
   {
     "name": "moxcms",
@@ -1274,18 +1097,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/tauri-apps/muda"
   },
   {
-    "name": "ndk",
-    "version": "0.9.0",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-mobile/ndk"
-  },
-  {
-    "name": "ndk-sys",
-    "version": "0.6.0+11769913",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-mobile/ndk"
-  },
-  {
     "name": "new_debug_unreachable",
     "version": "1.0.6",
     "license": "MIT",
@@ -1295,7 +1106,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "nom",
     "version": "8.0.0",
     "license": "MIT",
-    "repository": "https://github.com/rust-bakery/nom"
+    "repository": "https://github.com/rust-bakery/nom (*)"
   },
   {
     "name": "nom_locate",
@@ -1308,18 +1119,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.50.3",
     "license": "MIT",
     "repository": "https://github.com/nushell/nu-ansi-term"
-  },
-  {
-    "name": "num_enum",
-    "version": "0.7.6",
-    "license": "BSD-3-Clause OR MIT OR Apache-2.0",
-    "repository": "https://github.com/illicitonion/num_enum"
-  },
-  {
-    "name": "num_enum_derive",
-    "version": "0.7.6",
-    "license": "BSD-3-Clause OR MIT OR Apache-2.0",
-    "repository": "https://github.com/illicitonion/num_enum"
   },
   {
     "name": "num-bigint-dig",
@@ -1337,7 +1136,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "num-integer",
     "version": "0.1.47",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-num/num-integer"
+    "repository": "https://github.com/rust-num/num-integer (*)"
   },
   {
     "name": "num-iter",
@@ -1349,61 +1148,25 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "num-traits",
     "version": "0.2.19",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-num/num-traits"
+    "repository": "https://github.com/rust-num/num-traits (*)"
   },
   {
     "name": "objc2",
     "version": "0.6.4",
     "license": "MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "objc2-app-kit",
     "version": "0.3.2",
     "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-cloud-kit",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-core-data",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "objc2-core-foundation",
     "version": "0.3.2",
     "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-core-graphics",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-core-image",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-core-location",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-core-text",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "objc2-encode",
@@ -1421,37 +1184,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "objc2-foundation",
     "version": "0.3.2",
     "license": "MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-io-surface",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-quartz-core",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-ui-kit",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
-  },
-  {
-    "name": "objc2-user-notifications",
-    "version": "0.3.2",
-    "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "objc2-web-kit",
     "version": "0.3.2",
     "license": "Zlib OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/madsmtm/objc2"
+    "repository": "https://github.com/madsmtm/objc2 (*)"
   },
   {
     "name": "once_cell",
@@ -1469,13 +1208,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "pango",
     "version": "0.18.3",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "pango-sys",
     "version": "0.18.0",
     "license": "MIT",
-    "repository": "https://github.com/gtk-rs/gtk-rs-core"
+    "repository": "https://github.com/gtk-rs/gtk-rs-core (*)"
   },
   {
     "name": "parking_lot",
@@ -1493,7 +1232,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "pbkdf2",
     "version": "0.12.2",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2"
+    "repository": "https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2 (*)"
   },
   {
     "name": "pdfium-render",
@@ -1529,7 +1268,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "phf_macros",
     "version": "0.13.1",
     "license": "MIT",
-    "repository": "https://github.com/rust-phf/rust-phf"
+    "repository": "https://github.com/rust-phf/rust-phf (*)"
   },
   {
     "name": "phf_shared",
@@ -1565,13 +1304,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "pkcs5",
     "version": "0.7.1",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs5"
+    "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs5 (*)"
   },
   {
     "name": "pkcs8",
     "version": "0.10.2",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs8"
+    "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs8 (*)"
   },
   {
     "name": "plist",
@@ -1583,7 +1322,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "png",
     "version": "0.17.16",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/image-rs/image-png"
+    "repository": "https://github.com/image-rs/image-png (*)"
   },
   {
     "name": "png",
@@ -1607,19 +1346,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "ppv-lite86",
     "version": "0.2.21",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/cryptocorrosion/cryptocorrosion"
+    "repository": "https://github.com/cryptocorrosion/cryptocorrosion (*)"
   },
   {
     "name": "precomputed-hash",
     "version": "0.1.1",
     "license": "MIT",
     "repository": "https://github.com/emilio/precomputed-hash"
-  },
-  {
-    "name": "prettyplease",
-    "version": "0.2.37",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/prettyplease"
   },
   {
     "name": "proc-macro-crate",
@@ -1634,16 +1367,10 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/bkchr/proc-macro-crate"
   },
   {
-    "name": "proc-macro-crate",
-    "version": "3.5.0",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/bkchr/proc-macro-crate"
-  },
-  {
     "name": "proc-macro-error",
     "version": "1.0.4",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://gitlab.com/CreepySkeleton/proc-macro-error"
+    "repository": "https://gitlab.com/CreepySkeleton/proc-macro-error (*)"
   },
   {
     "name": "proc-macro-error-attr",
@@ -1655,7 +1382,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "proc-macro2",
     "version": "1.0.106",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/proc-macro2"
+    "repository": "https://github.com/dtolnay/proc-macro2 (*)"
   },
   {
     "name": "pxfm",
@@ -1673,19 +1400,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "quote",
     "version": "1.0.45",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/quote"
-  },
-  {
-    "name": "r-efi",
-    "version": "5.3.0",
-    "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
-    "repository": "https://github.com/r-efi/r-efi"
-  },
-  {
-    "name": "r-efi",
-    "version": "6.0.0",
-    "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
-    "repository": "https://github.com/r-efi/r-efi"
+    "repository": "https://github.com/dtolnay/quote (*)"
   },
   {
     "name": "rand",
@@ -1715,13 +1430,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "rand_core",
     "version": "0.6.4",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/rand"
+    "repository": "https://github.com/rust-random/rand (*)"
   },
   {
     "name": "rand_core",
     "version": "0.9.5",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/rand"
+    "repository": "https://github.com/rust-random/rand (*)"
   },
   {
     "name": "rangemap",
@@ -1736,52 +1451,22 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/rust-windowing/raw-window-handle"
   },
   {
-    "name": "redox_syscall",
-    "version": "0.5.18",
-    "license": "MIT",
-    "repository": "https://gitlab.redox-os.org/redox-os/syscall"
-  },
-  {
-    "name": "redox_users",
-    "version": "0.5.2",
-    "license": "MIT",
-    "repository": "https://gitlab.redox-os.org/redox-os/users"
-  },
-  {
-    "name": "ref-cast",
-    "version": "1.0.25",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/ref-cast"
-  },
-  {
-    "name": "ref-cast-impl",
-    "version": "1.0.25",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/ref-cast"
-  },
-  {
     "name": "regex",
     "version": "1.12.3",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/regex"
+    "repository": "https://github.com/rust-lang/regex (*)"
   },
   {
     "name": "regex-automata",
     "version": "0.4.14",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/regex"
+    "repository": "https://github.com/rust-lang/regex (*)"
   },
   {
     "name": "regex-syntax",
     "version": "0.8.10",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/rust-lang/regex"
-  },
-  {
-    "name": "reqwest",
-    "version": "0.13.4",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/seanmonstar/reqwest"
   },
   {
     "name": "rfd",
@@ -1793,19 +1478,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "rsa",
     "version": "0.9.10",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/RSA"
+    "repository": "https://github.com/RustCrypto/RSA (*)"
   },
   {
     "name": "rustc-hash",
     "version": "2.1.2",
     "license": "Apache-2.0 OR MIT",
     "repository": "https://github.com/rust-lang/rustc-hash"
-  },
-  {
-    "name": "rustversion",
-    "version": "1.0.22",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/rustversion"
   },
   {
     "name": "salsa20",
@@ -1822,18 +1501,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   {
     "name": "schemars",
     "version": "0.8.22",
-    "license": "MIT",
-    "repository": "https://github.com/GREsau/schemars"
-  },
-  {
-    "name": "schemars",
-    "version": "0.9.0",
-    "license": "MIT",
-    "repository": "https://github.com/GREsau/schemars"
-  },
-  {
-    "name": "schemars",
-    "version": "1.2.1",
     "license": "MIT",
     "repository": "https://github.com/GREsau/schemars"
   },
@@ -1871,7 +1538,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "serde",
     "version": "1.0.228",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/serde-rs/serde"
+    "repository": "https://github.com/serde-rs/serde (*)"
   },
   {
     "name": "serde_core",
@@ -1883,7 +1550,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "serde_derive",
     "version": "1.0.228",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/serde-rs/serde"
+    "repository": "https://github.com/serde-rs/serde (*)"
   },
   {
     "name": "serde_derive_internals",
@@ -1895,13 +1562,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "serde_json",
     "version": "1.0.150",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/serde-rs/json"
+    "repository": "https://github.com/serde-rs/json (*)"
   },
   {
     "name": "serde_repr",
     "version": "0.1.20",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/serde-repr"
+    "repository": "https://github.com/dtolnay/serde-repr (*)"
   },
   {
     "name": "serde_spanned",
@@ -1925,7 +1592,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "serde_with_macros",
     "version": "3.20.0",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/jonasbb/serde_with/"
+    "repository": "https://github.com/jonasbb/serde_with/ (*)"
   },
   {
     "name": "serde-untagged",
@@ -1955,7 +1622,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "sha1",
     "version": "0.10.7",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/RustCrypto/hashes"
+    "repository": "https://github.com/RustCrypto/hashes (*)"
   },
   {
     "name": "sha2",
@@ -1979,7 +1646,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "signature",
     "version": "2.2.0",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/traits/tree/master/signature"
+    "repository": "https://github.com/RustCrypto/traits/tree/master/signature (*)"
   },
   {
     "name": "simd-adler32",
@@ -2006,12 +1673,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/servo/rust-smallvec"
   },
   {
-    "name": "socket2",
-    "version": "0.6.3",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-lang/socket2"
-  },
-  {
     "name": "softbuffer",
     "version": "0.4.8",
     "license": "MIT OR Apache-2.0",
@@ -2021,13 +1682,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "soup3",
     "version": "0.5.0",
     "license": "MIT",
-    "repository": "https://gitlab.gnome.org/World/Rust/soup3-rs"
+    "repository": "https://gitlab.gnome.org/World/Rust/soup3-rs (*)"
   },
   {
     "name": "soup3-sys",
     "version": "0.5.0",
     "license": "MIT",
-    "repository": "https://gitlab.gnome.org/World/Rust/soup3-rs"
+    "repository": "https://gitlab.gnome.org/World/Rust/soup3-rs (*)"
   },
   {
     "name": "spin",
@@ -2039,7 +1700,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "spki",
     "version": "0.7.3",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats/tree/master/spki"
+    "repository": "https://github.com/RustCrypto/formats/tree/master/spki (*)"
   },
   {
     "name": "stable_deref_trait",
@@ -2093,19 +1754,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "syn",
     "version": "2.0.117",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/syn"
-  },
-  {
-    "name": "sync_wrapper",
-    "version": "1.0.2",
-    "license": "Apache-2.0",
-    "repository": "https://github.com/Actyx/sync_wrapper"
+    "repository": "https://github.com/dtolnay/syn (*)"
   },
   {
     "name": "synstructure",
     "version": "0.13.2",
     "license": "MIT",
-    "repository": "https://github.com/mystor/synstructure"
+    "repository": "https://github.com/mystor/synstructure (*)"
   },
   {
     "name": "tao",
@@ -2114,16 +1769,10 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/tauri-apps/tao"
   },
   {
-    "name": "tao-macros",
-    "version": "0.1.3",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/tauri-apps/tao"
-  },
-  {
     "name": "tauri",
     "version": "2.11.2",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/tauri-apps/tauri"
+    "repository": "https://github.com/tauri-apps/tauri (*)"
   },
   {
     "name": "tauri-codegen",
@@ -2147,13 +1796,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "tauri-plugin-fs",
     "version": "2.5.1",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/tauri-apps/plugins-workspace"
+    "repository": "https://github.com/tauri-apps/plugins-workspace (*)"
   },
   {
     "name": "tauri-runtime",
     "version": "2.11.2",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/tauri-apps/tauri"
+    "repository": "https://github.com/tauri-apps/tauri (*)"
   },
   {
     "name": "tauri-runtime-wry",
@@ -2165,13 +1814,19 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "tauri-utils",
     "version": "2.9.2",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/tauri-apps/tauri"
+    "repository": "https://github.com/tauri-apps/tauri (*)"
   },
   {
     "name": "tendril",
     "version": "0.5.0",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/servo/html5ever"
+    "repository": "https://github.com/servo/html5ever (*)"
+  },
+  {
+    "name": "tesseract-rs",
+    "version": "0.4.0",
+    "license": "MIT",
+    "repository": "https://github.com/cafercangundogdu/tesseract-rs"
   },
   {
     "name": "thiserror",
@@ -2183,19 +1838,19 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "thiserror",
     "version": "2.0.18",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/thiserror"
+    "repository": "https://github.com/dtolnay/thiserror (*)"
   },
   {
     "name": "thiserror-impl",
     "version": "1.0.69",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/thiserror"
+    "repository": "https://github.com/dtolnay/thiserror (*)"
   },
   {
     "name": "thiserror-impl",
     "version": "2.0.18",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/dtolnay/thiserror"
+    "repository": "https://github.com/dtolnay/thiserror (*)"
   },
   {
     "name": "thread_local",
@@ -2207,7 +1862,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "time",
     "version": "0.3.47",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/time-rs/time"
+    "repository": "https://github.com/time-rs/time (*)"
   },
   {
     "name": "time-core",
@@ -2240,32 +1895,14 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/Soveu/tinyvec_macros"
   },
   {
-    "name": "tls_codec",
-    "version": "0.4.2",
-    "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats"
-  },
-  {
-    "name": "tls_codec_derive",
-    "version": "0.4.2",
-    "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats"
-  },
-  {
     "name": "tokio",
     "version": "1.52.3",
     "license": "MIT",
-    "repository": "https://github.com/tokio-rs/tokio"
+    "repository": "https://github.com/tokio-rs/tokio (*)"
   },
   {
     "name": "tokio-macros",
     "version": "2.7.0",
-    "license": "MIT",
-    "repository": "https://github.com/tokio-rs/tokio"
-  },
-  {
-    "name": "tokio-util",
-    "version": "0.7.18",
     "license": "MIT",
     "repository": "https://github.com/tokio-rs/tokio"
   },
@@ -2279,7 +1916,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "toml_datetime",
     "version": "0.6.3",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/toml-rs/toml"
+    "repository": "https://github.com/toml-rs/toml (*)"
   },
   {
     "name": "toml_datetime",
@@ -2300,12 +1937,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/toml-rs/toml"
   },
   {
-    "name": "toml_edit",
-    "version": "0.25.11+spec-1.1.0",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/toml-rs/toml"
-  },
-  {
     "name": "toml_parser",
     "version": "1.1.2+spec-1.1.0",
     "license": "MIT OR Apache-2.0",
@@ -2318,34 +1949,10 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/toml-rs/toml"
   },
   {
-    "name": "tower",
-    "version": "0.5.3",
-    "license": "MIT",
-    "repository": "https://github.com/tower-rs/tower"
-  },
-  {
-    "name": "tower-http",
-    "version": "0.6.11",
-    "license": "MIT",
-    "repository": "https://github.com/tower-rs/tower-http"
-  },
-  {
-    "name": "tower-layer",
-    "version": "0.3.3",
-    "license": "MIT",
-    "repository": "https://github.com/tower-rs/tower"
-  },
-  {
-    "name": "tower-service",
-    "version": "0.3.3",
-    "license": "MIT",
-    "repository": "https://github.com/tower-rs/tower"
-  },
-  {
     "name": "tracing",
     "version": "0.1.44",
     "license": "MIT",
-    "repository": "https://github.com/tokio-rs/tracing"
+    "repository": "https://github.com/tokio-rs/tracing (*)"
   },
   {
     "name": "tracing-attributes",
@@ -2357,7 +1964,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "tracing-core",
     "version": "0.1.36",
     "license": "MIT",
-    "repository": "https://github.com/tokio-rs/tracing"
+    "repository": "https://github.com/tokio-rs/tracing (*)"
   },
   {
     "name": "tracing-log",
@@ -2376,18 +1983,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.3.23",
     "license": "MIT",
     "repository": "https://github.com/tokio-rs/tracing"
-  },
-  {
-    "name": "tray-icon",
-    "version": "0.23.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/tauri-apps/tray-icon"
-  },
-  {
-    "name": "try-lock",
-    "version": "0.2.5",
-    "license": "MIT",
-    "repository": "https://github.com/seanmonstar/try-lock"
   },
   {
     "name": "ttf-parser",
@@ -2468,16 +2063,10 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/unicode-rs/unicode-segmentation"
   },
   {
-    "name": "unicode-xid",
-    "version": "0.2.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/unicode-rs/unicode-xid"
-  },
-  {
     "name": "url",
     "version": "2.5.8",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/servo/rust-url"
+    "repository": "https://github.com/servo/rust-url (*)"
   },
   {
     "name": "urlpattern",
@@ -2507,13 +2096,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "uuid",
     "version": "1.23.1",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/uuid-rs/uuid"
-  },
-  {
-    "name": "valuable",
-    "version": "0.1.1",
-    "license": "MIT",
-    "repository": "https://github.com/tokio-rs/valuable"
+    "repository": "https://github.com/uuid-rs/uuid (*)"
   },
   {
     "name": "vecmath",
@@ -2528,112 +2111,28 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/BurntSushi/walkdir"
   },
   {
-    "name": "want",
-    "version": "0.3.1",
-    "license": "MIT",
-    "repository": "https://github.com/seanmonstar/want"
-  },
-  {
-    "name": "wasi",
-    "version": "0.11.1+wasi-snapshot-preview1",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasi"
-  },
-  {
-    "name": "wasip2",
-    "version": "1.0.3+wasi-0.2.9",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasi-rs"
-  },
-  {
-    "name": "wasip3",
-    "version": "0.4.0+wasi-0.3.0-rc-2026-01-06",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasi-rs"
-  },
-  {
-    "name": "wasm-bindgen",
-    "version": "0.2.122",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen"
-  },
-  {
-    "name": "wasm-bindgen-futures",
-    "version": "0.4.72",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures"
-  },
-  {
-    "name": "wasm-bindgen-macro",
-    "version": "0.2.122",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro"
-  },
-  {
-    "name": "wasm-bindgen-macro-support",
-    "version": "0.2.122",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support"
-  },
-  {
-    "name": "wasm-bindgen-shared",
-    "version": "0.2.122",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared"
-  },
-  {
-    "name": "wasm-encoder",
-    "version": "0.244.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder"
-  },
-  {
-    "name": "wasm-metadata",
-    "version": "0.244.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-metadata"
-  },
-  {
-    "name": "wasm-streams",
-    "version": "0.5.0",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/MattiasBuelens/wasm-streams/"
-  },
-  {
-    "name": "wasmparser",
-    "version": "0.244.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser"
-  },
-  {
     "name": "web_atoms",
     "version": "0.2.4",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/servo/html5ever"
   },
   {
-    "name": "web-sys",
-    "version": "0.3.99",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys"
-  },
-  {
     "name": "webkit2gtk",
     "version": "2.0.2",
     "license": "MIT",
-    "repository": "https://github.com/tauri-apps/webkit2gtk-rs"
+    "repository": "https://github.com/tauri-apps/webkit2gtk-rs (*)"
   },
   {
     "name": "webkit2gtk-sys",
     "version": "2.0.2",
     "license": "MIT",
-    "repository": "https://github.com/tauri-apps/webkit2gtk-rs"
+    "repository": "https://github.com/tauri-apps/webkit2gtk-rs (*)"
   },
   {
     "name": "webview2-com",
     "version": "0.38.2",
     "license": "MIT",
-    "repository": "https://github.com/wravery/webview2-rs"
+    "repository": "https://github.com/wravery/webview2-rs (*)"
   },
   {
     "name": "webview2-com-macros",
@@ -2654,28 +2153,10 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/image-rs/weezl"
   },
   {
-    "name": "winapi",
-    "version": "0.3.9",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/retep998/winapi-rs"
-  },
-  {
-    "name": "winapi-i686-pc-windows-gnu",
-    "version": "0.4.0",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/retep998/winapi-rs"
-  },
-  {
     "name": "winapi-util",
     "version": "0.1.11",
     "license": "Unlicense OR MIT",
-    "repository": "https://github.com/BurntSushi/winapi-util"
-  },
-  {
-    "name": "winapi-x86_64-pc-windows-gnu",
-    "version": "0.4.0",
-    "license": "MIT/Apache-2.0",
-    "repository": "https://github.com/retep998/winapi-rs"
+    "repository": "https://github.com/BurntSushi/winapi-util (*)"
   },
   {
     "name": "window-vibrancy",
@@ -2687,133 +2168,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "windows",
     "version": "0.61.3",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_aarch64_gnullvm",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_aarch64_gnullvm",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_aarch64_gnullvm",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_aarch64_msvc",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_aarch64_msvc",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_aarch64_msvc",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_gnu",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_gnu",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_gnu",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_gnullvm",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_gnullvm",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_msvc",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_msvc",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_i686_msvc",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_gnu",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_gnu",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_gnu",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_gnullvm",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_gnullvm",
-    "version": "0.52.6",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_gnullvm",
-    "version": "0.53.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows_x86_64_msvc",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
+    "repository": "https://github.com/microsoft/windows-rs (*)"
   },
   {
     "name": "windows_x86_64_msvc",
@@ -2837,13 +2192,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "windows-core",
     "version": "0.61.2",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows-core",
-    "version": "0.62.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
+    "repository": "https://github.com/microsoft/windows-rs (*)"
   },
   {
     "name": "windows-future",
@@ -2855,13 +2204,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "windows-implement",
     "version": "0.60.2",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
+    "repository": "https://github.com/microsoft/windows-rs (*)"
   },
   {
     "name": "windows-interface",
     "version": "0.59.3",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
+    "repository": "https://github.com/microsoft/windows-rs (*)"
   },
   {
     "name": "windows-link",
@@ -2888,26 +2237,8 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/microsoft/windows-rs"
   },
   {
-    "name": "windows-result",
-    "version": "0.4.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
     "name": "windows-strings",
     "version": "0.4.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows-strings",
-    "version": "0.5.1",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows-sys",
-    "version": "0.45.0",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/microsoft/windows-rs"
   },
@@ -2927,13 +2258,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "windows-sys",
     "version": "0.61.2",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
-  },
-  {
-    "name": "windows-targets",
-    "version": "0.42.2",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
+    "repository": "https://github.com/microsoft/windows-rs (*)"
   },
   {
     "name": "windows-targets",
@@ -2957,7 +2282,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "windows-version",
     "version": "0.1.7",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/microsoft/windows-rs"
+    "repository": "https://github.com/microsoft/windows-rs (*)"
   },
   {
     "name": "winnow",
@@ -2970,48 +2295,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "1.0.3",
     "license": "MIT",
     "repository": "https://github.com/winnow-rs/winnow"
-  },
-  {
-    "name": "wit-bindgen",
-    "version": "0.51.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wit-bindgen"
-  },
-  {
-    "name": "wit-bindgen",
-    "version": "0.57.1",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wit-bindgen"
-  },
-  {
-    "name": "wit-bindgen-core",
-    "version": "0.51.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wit-bindgen"
-  },
-  {
-    "name": "wit-bindgen-rust",
-    "version": "0.51.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wit-bindgen"
-  },
-  {
-    "name": "wit-bindgen-rust-macro",
-    "version": "0.51.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wit-bindgen"
-  },
-  {
-    "name": "wit-component",
-    "version": "0.244.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-component"
-  },
-  {
-    "name": "wit-parser",
-    "version": "0.244.0",
-    "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser"
   },
   {
     "name": "writeable",
@@ -3029,31 +2312,31 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "x11",
     "version": "2.21.0",
     "license": "MIT",
-    "repository": "https://github.com/AltF02/x11-rs.git"
+    "repository": "https://github.com/AltF02/x11-rs.git (*)"
   },
   {
     "name": "x11-dl",
     "version": "2.21.0",
     "license": "MIT",
-    "repository": "https://github.com/AltF02/x11-rs.git"
+    "repository": "https://github.com/AltF02/x11-rs.git (*)"
   },
   {
     "name": "x509-cert",
     "version": "0.2.5",
     "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/formats/tree/master/x509-cert"
+    "repository": "https://github.com/RustCrypto/formats/tree/master/x509-cert (*)"
   },
   {
     "name": "yoke",
     "version": "0.8.2",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "yoke-derive",
     "version": "0.8.2",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "zerocopy",
@@ -3062,22 +2345,16 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/google/zerocopy"
   },
   {
-    "name": "zerocopy-derive",
-    "version": "0.8.50",
-    "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
-    "repository": "https://github.com/google/zerocopy"
-  },
-  {
     "name": "zerofrom",
     "version": "0.1.8",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "zerofrom-derive",
     "version": "0.1.7",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "zeroize",
@@ -3086,28 +2363,28 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/RustCrypto/utils"
   },
   {
-    "name": "zeroize_derive",
-    "version": "1.5.0",
-    "license": "Apache-2.0 OR MIT",
-    "repository": "https://github.com/RustCrypto/utils"
-  },
-  {
     "name": "zerotrie",
     "version": "0.2.4",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "zerovec",
     "version": "0.11.6",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
   },
   {
     "name": "zerovec-derive",
     "version": "0.11.3",
     "license": "Unicode-3.0",
-    "repository": "https://github.com/unicode-org/icu4x"
+    "repository": "https://github.com/unicode-org/icu4x (*)"
+  },
+  {
+    "name": "zlib-rs",
+    "version": "0.6.8",
+    "license": "Zlib",
+    "repository": "https://github.com/trifectatechfoundation/zlib-rs"
   },
   {
     "name": "zmij",

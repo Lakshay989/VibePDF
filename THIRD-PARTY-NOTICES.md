@@ -63,6 +63,27 @@ they are in every build.
 - **Not shipped:** `wasm/quickjs-eval.*`, PDF.js's sandbox for a document's own
   JavaScript. The copy script excludes it, and a test fails if it is served.
 
+### Tesseract OCR (P7)
+
+The OCR engine and the image library under it are compiled from source into the
+binary; the English model ships beside the executable as a Tauri resource.
+
+| Component | Version | Licence | How it arrives |
+|---|---|---|---|
+| [Tesseract](https://github.com/tesseract-ocr/tesseract) | 5.5.2 | Apache-2.0 | Built from a checksum-pinned source archive by `scripts/fetch-tesseract-src.sh`, statically linked |
+| [Leptonica](https://github.com/DanBloomberg/leptonica) | 1.87.0 | BSD-2-Clause | Same archive step; Tesseract's image layer |
+| [`eng.traineddata`](https://github.com/tesseract-ocr/tessdata_fast) | pinned commit | Apache-2.0 | `scripts/fetch-tessdata.sh` → `src-tauri/resources/tessdata/`, bundled |
+
+- **Obligation:** Apache-2.0 needs the licence retained and attribution kept
+  (§4(d)); BSD-2-Clause needs the copyright notice and disclaimer with binary
+  redistribution. **Met:** Tesseract's attribution is in [`NOTICE`](NOTICE), the
+  language model's `LICENSE` is downloaded next to it into
+  `resources/tessdata/`, and both libraries' licence files sit in the pinned
+  source archives the build compiles.
+- **Still open:** the statically linked libraries' licence texts are not yet
+  copied into the bundle the way PDFium's are. A binary release must do that;
+  `fetch-tesseract-src.sh` is where it belongs.
+
 ### Frontend runtime dependencies
 
 Verified from the installed package metadata. All permissive; no copyleft.
@@ -79,9 +100,9 @@ Verified from the installed package metadata. All permissive; no copyleft.
 ### Rust dependencies
 
 The direct dependencies are declared in `src-tauri/Cargo.toml`, each with its
-justification comment. The full transitive set — 512 crates reached from the
-root through normal (not dev, not build) dependency edges, across all three
-target platforms — is enumerated in
+justification comment. The full transitive set — 388 crates that actually link
+on at least one of the five target triples we release for, as `cargo tree`
+resolves them — is enumerated in
 [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md).
 
 Five of them are MPL-2.0, all in Tauri's WebView stack. MPL-2.0 is *file-level*
@@ -108,9 +129,9 @@ All five are now met. They are recorded here because each one is a thing a
 forget until someone asks for a build.
 
 1. **A real dependency inventory.** Generated, not written:
-   `npm run licenses` walks `cargo metadata` and `package-lock.json` into
-   [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) — 512 Rust crates,
-   62 npm packages, 6 bundled components, dev- and build-only dependencies
+   `npm run licenses` reads `cargo tree` per target triple and `package-lock.json` into
+   [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) — 388 Rust crates,
+   62 npm packages, 9 bundled components, dev- and build-only dependencies
    excluded because they ship to nobody. The same script is a gate: it exits
    non-zero if any shipped component carries a licence outside a reviewed
    permissive set, which is where `docs/01_VISION.md`'s "no copyleft in the

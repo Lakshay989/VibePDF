@@ -38,7 +38,8 @@
     ],
     "resources": [
       "resources/pdfium/*",
-      "resources/pdfium/licenses/*"
+      "resources/pdfium/licenses/*",
+      "resources/tessdata/*"
     ]
   }
 }

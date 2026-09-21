@@ -102,17 +102,30 @@ Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic,
 
 ---
 
-## OCR — Tesseract via `leptess` (Rust)
+## OCR — Tesseract via `tesseract-rs` (Rust)
 
-**Why Tesseract:** 100+ languages, mature, Apache 2.0. The gold standard for offline OCR.
+**Why Tesseract:** 100+ languages, mature, Apache 2.0. The gold standard for offline OCR, and what `P7-OCR-001` names.
 
-**Why `leptess` (Rust binding):** Stable Rust bindings, exposes the LSTM engine, supports getting word/line bounding boxes (needed for the invisible-text-layer alignment when producing searchable PDFs).
+**Why `tesseract-rs` and not `leptess` (decided 2026-09-21, P7.A1):** `leptess` was the original pick here and has had no release since **2023-02-21**; `steps/P7.md` carried a standing warning to re-evaluate before Track A started. Both bind the same C API, so the choice came down to how Tesseract reaches a user's machine:
 
-**Trained data:** We ship the English LSTM data (~15 MB) in the installer. Other languages are downloaded on demand from `tessdata_fast` (BSD license) and cached in the app data dir.
+| Option | Verdict |
+|---|---|
+| **`tesseract-rs` with `build-tesseract`** (chosen) | Compiles Tesseract 5.5.2 + Leptonica 1.87.0 from source and links them statically. Nothing to install, one story on all three platforms, MIT crate, actively released (0.4.0, 2026-07-31). |
+| `leptess` / `tesseract` against system libraries | Fast builds, but every contributor installs `libtesseract`/`libleptonica`, and a release would have to copy those dylibs into the bundle by hand per platform. |
+| Bundling the `tesseract` command-line program | Simplest linking and crash isolation, but we would have to produce and sign that binary for three platforms ourselves. Kept as the fallback if static linking ever becomes the tail that wags the dog. |
 
-**Pre-processing:** Before passing images to Tesseract we run a small Rust pipeline: deskew (via `imageproc`), denoise (median filter), and bicubic upscale if input is < 300 DPI. These preprocessing choices double OCR accuracy in our reference fixtures.
+**What the crate's build script does, and what we do about it:** it downloads both source archives over the network with no integrity check, and separately insists on two `*.traineddata` files, failing the build when the network is slow. `scripts/fetch-tesseract-src.sh` pre-places all four, verified against pinned SHA-256s, in the cache directory the build script reuses — so a build performs no download of its own. This is the same posture as `scripts/fetch-pdfium.sh`: the bytes a build compiles are pinned, and substitution is detectable.
 
-**Alternative considered:** Tesseract.js (WebAssembly). Rejected because native Tesseract via leptess is ~3-5× faster on multi-page docs and avoids holding the WebView main thread.
+**Trained data:** English (`tessdata_fast`, ~4 MB, Apache-2.0) is fetched by `scripts/fetch-tessdata.sh` into `src-tauri/resources/tessdata/` and bundled as a Tauri resource; `ocr::tessdata` resolves it at runtime and refuses to fall back to a system-wide Tesseract, so a developer machine cannot pass a test a user's machine would fail. Other languages are P7.A3's on-demand downloader.
+
+**Pre-processing — hand-written, not `imageproc`:** deskew, denoise and upscale are ~40 lines each over an 8-bit grayscale buffer (`ocr::preprocess`), so they carry no new dependency, in the same spirit as using `png` directly instead of `image`.
+
+Two findings worth keeping from building it:
+
+- **A plain 3×3 median filter is the wrong "denoise" for text.** Measured 2026-09-21 on 9 pt text rendered at 150 DPI: it cost 3 of 10 words (`brown` → `broval`), because a stroke is 2–3 pixels wide at that size and a median rounds it away. Replaced with a despeckle that only rewrites isolated outliers; it touches 11–18 pixels of a 2-megapixel page and the same page then reads perfectly.
+- **Fixtures must use body-text sizes.** At 28 pt every pipeline scored 10/10, including the harmful one. `tests/fixtures/basic/scan.pdf` now carries 9 pt lines for exactly this reason.
+
+**Alternative considered:** Tesseract.js (WebAssembly). Rejected because native Tesseract is ~3-5× faster on multi-page docs and avoids holding the WebView main thread.
 
 ---
 

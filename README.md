@@ -28,7 +28,7 @@ download — building from source is currently the only way to run it.
 | 4 | Content editing — text, images, watermarks, headers | Built |
 | 5 | Forms — fill, create, export, flatten | Built |
 | 6 | Signing, encryption, redaction | Code complete, in verification |
-| 7 | OCR and export to word-processor and spreadsheet formats | Not started |
+| 7 | OCR and export to word-processor and spreadsheet formats | In progress |
 | 8 | Local AI and batch processing | Not started |
 
 "Built" means the phase's features are implemented, tested, and have passed a
@@ -75,6 +75,9 @@ covering it, pattern-based redaction with a confirm step, and document cleaning
   [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/).
   On macOS that is Xcode Command Line Tools; on Linux, `webkit2gtk` and
   friends; on Windows, the MSVC build tools and WebView2.
+- **CMake** and a C++ compiler — the OCR engine (Tesseract) is compiled from
+  source and linked statically, so nothing has to be installed on a user's
+  machine. `brew install cmake`, `apt install cmake build-essential`.
 
 ### Setup
 
@@ -83,11 +86,24 @@ git clone https://github.com/Lakshay989/VibePDF.git
 cd VibePDF
 npm install
 npm run fetch-pdfium
+npm run fetch-tessdata
+npm run fetch-tesseract-src
 ```
 
-`npm install` copies the PDF.js worker into place. `fetch-pdfium` downloads the
-prebuilt PDFium binary the Rust side links against; it is the one step that
-needs the network, and it only runs when you ask for it.
+`npm install` copies the PDF.js worker into place. The three `fetch-*` steps are
+the only ones that need the network, and they only run when you ask for them:
+
+- `fetch-pdfium` — the prebuilt PDFium binary the Rust side links against.
+- `fetch-tessdata` — Tesseract's English model (~4 MB), bundled with the app.
+- `fetch-tesseract-src` — Tesseract and Leptonica sources, placed where the
+  build compiles them from. Skipping it does not fail the build; it lets the
+  OCR crate download them itself, unverified, which is what this avoids.
+
+Every one of them verifies a pinned SHA-256 before anything is installed.
+
+**The first build compiles Tesseract from source and takes several minutes.**
+Later builds reuse a cache outside the repo (`~/Library/Application Support/tesseract-rs`
+on macOS, `~/.tesseract-rs` on Linux).
 
 ### Run
 
@@ -116,6 +132,8 @@ npm run tauri build
 | `npm run test:pdf` | Just the PDF-touching Rust tests |
 | `npm run test:e2e` | End-to-end tests (WebdriverIO) |
 | `npm run licenses` | Regenerate the third-party licence inventory |
+| `npm run fetch-tessdata` | Download the bundled OCR language data |
+| `npm run fetch-tesseract-src` | Pin the OCR engine's sources for the build |
 
 `npm run check` and both test suites must be green before anything lands.
 

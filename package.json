@@ -19,7 +19,9 @@
     "test:rust": "node scripts/cargo-test.mjs",
     "test:pdf": "node scripts/cargo-test.mjs --test render_compare --test render_to_png --test actor_smoke --test encrypted_open",
     "test:e2e": "wdio run tests/e2e/wdio.conf.ts",
-    "fetch-pdfium": "bash scripts/fetch-pdfium.sh"
+    "fetch-pdfium": "bash scripts/fetch-pdfium.sh",
+    "fetch-tessdata": "bash scripts/fetch-tessdata.sh",
+    "fetch-tesseract-src": "bash scripts/fetch-tesseract-src.sh"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.2",

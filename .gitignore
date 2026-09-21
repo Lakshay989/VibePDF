@@ -16,6 +16,10 @@ src-tauri/gen/
 src-tauri/resources/pdfium/*
 !src-tauri/resources/pdfium/.gitkeep
 
+# Tesseract language data (fetched by scripts/fetch-tessdata.sh)
+src-tauri/resources/tessdata/*
+!src-tauri/resources/tessdata/.gitkeep
+
 # Editor / OS
 .DS_Store
 .idea/

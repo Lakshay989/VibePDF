@@ -35,6 +35,16 @@ pdfium-render = "0.9"
 # routines we'll never call.
 png = "0.17"
 uuid = { version = "1", features = ["v4", "serde"] }
+# P7.A1 (SPEC P7-OCR-001, P7-OCR-003): Tesseract, the OCR engine the spec
+# names. `leptess`, the binding docs/03_TECH_STACK.md originally picked, has
+# had no release since 2023-02-21; this one is maintained (0.4.0, 2026-07-31),
+# MIT, and with `build-tesseract` compiles Tesseract 5.5.2 + Leptonica 1.87.0
+# from source into our binary — so a user installs nothing and all three
+# platforms ship the same engine. Its build script would fetch those sources
+# over the network unverified; `scripts/fetch-tesseract-src.sh` pre-places
+# checksum-verified copies that it reuses instead. Confined to
+# `src-tauri/src/ocr/engine.rs`.
+tesseract-rs = "0.4.0"
 # P6.C1 (SPEC P6-SEC-007): the OS CSPRNG, for AES-256 file encryption keys.
 # Key material must not come from a seeded PRNG — `getrandom` is the thinnest
 # wrapper over getrandom(2)/BCryptGenRandom and holds no state of its own. It
