@@ -9,9 +9,12 @@ account, no subscription, no watermark, and no network request you did not ask
 for.
 
 **Nothing leaves your machine.** There is no telemetry and no cloud component.
-The only network access in the codebase is an optional, off-by-default local
-Ollama integration for the AI features, and a build-time script that downloads
-the PDFium binary.
+Three places in the codebase can reach the network, none of them by default and
+none of them with your documents: an optional local Ollama integration for the
+AI features; the OCR language-pack download, which is off until you switch it
+on and only ever fetches the language you asked for; and the build-time scripts
+that download PDFium and the OCR engine. Everything else, including OCR in the
+twelve bundled languages, works with the network off.
 
 ---
 
@@ -94,7 +97,7 @@ npm run fetch-tesseract-src
 the only ones that need the network, and they only run when you ask for them:
 
 - `fetch-pdfium` — the prebuilt PDFium binary the Rust side links against.
-- `fetch-tessdata` — Tesseract's English model (~4 MB), bundled with the app.
+- `fetch-tessdata` — the twelve OCR languages the app ships (~25 MB).
 - `fetch-tesseract-src` — Tesseract and Leptonica sources, placed where the
   build compiles them from. Skipping it does not fail the build; it lets the
   OCR crate download them itself, unverified, which is what this avoids.

@@ -52,6 +52,7 @@ vibepdf/
 │   │   ├── ocr/                  # Tesseract pipeline (P7)
 │   │   │   ├── engine.rs         # the only code that talks to Tesseract
 │   │   │   ├── preprocess.rs     # deskew / despeckle / upscale (P7-OCR-003)
+│   │   │   ├── languages.rs      # bundled + added language packs; the opt-in download (P7-OCR-002)
 │   │   │   └── tessdata.rs       # where the bundled language data lives
 │   │   ├── security/             # Crypto, signatures, redaction
 │   │   │   ├── encrypt.rs

@@ -34,9 +34,20 @@ impl OcrEngine {
     /// see [`tessdata::directory_for`] — and [`CommandError::Internal`] when
     /// Tesseract itself refuses to initialise.
     pub fn new(language: &str) -> Result<Self, CommandError> {
-        let datapath = tessdata::directory_for(language)?;
+        Self::with_datapath(&tessdata::directory_for(language)?, language)
+    }
+
+    /// Load `language` from an explicit directory — how a candidate language
+    /// pack is proved loadable before it is installed (SPEC: P7-OCR-002).
+    ///
+    /// # Errors
+    /// [`CommandError::Internal`] when Tesseract refuses the data.
+    pub fn with_datapath(
+        datapath: &std::path::Path,
+        language: &str,
+    ) -> Result<Self, CommandError> {
         let api = TesseractAPI::new();
-        api.init(&datapath, language).map_err(|e| {
+        api.init(datapath, language).map_err(|e| {
             CommandError::Internal(format!(
                 "could not start the OCR engine for \"{language}\" from {}: {e}",
                 datapath.display()

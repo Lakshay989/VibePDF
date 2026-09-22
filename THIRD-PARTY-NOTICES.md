@@ -72,7 +72,7 @@ binary; the English model ships beside the executable as a Tauri resource.
 |---|---|---|---|
 | [Tesseract](https://github.com/tesseract-ocr/tesseract) | 5.5.2 | Apache-2.0 | Built from a checksum-pinned source archive by `scripts/fetch-tesseract-src.sh`, statically linked |
 | [Leptonica](https://github.com/DanBloomberg/leptonica) | 1.87.0 | BSD-2-Clause | Same archive step; Tesseract's image layer |
-| [`eng.traineddata`](https://github.com/tesseract-ocr/tessdata_fast) | pinned commit | Apache-2.0 | `scripts/fetch-tessdata.sh` → `src-tauri/resources/tessdata/`, bundled |
+| [Twelve language models](https://github.com/tesseract-ocr/tessdata_fast) (eng, spa, fra, deu, chi_sim, chi_tra, jpn, kor, ara, hin, por, rus) | pinned commit | Apache-2.0 | `scripts/fetch-tessdata.sh` → `src-tauri/resources/tessdata/`, bundled with the repository's `LICENSE` beside them |
 
 - **Obligation:** Apache-2.0 needs the licence retained and attribution kept
   (§4(d)); BSD-2-Clause needs the copyright notice and disclaimer with binary

@@ -37,6 +37,14 @@ const PERMISSIVE = new Set([
   "BSD-2-Clause",
   "BSD-3-Clause",
   "BSL-1.0",
+  // Community Data License Agreement – Permissive 2.0. Reviewed 2026-09-22 for
+  // `webpki-roots`, the certificate-authority list `ureq` links for the
+  // language-pack download (P7-OCR-002). It is a *data* licence: it permits use
+  // and redistribution of the data, with attribution, and imposes nothing on
+  // the software that reads it — no source disclosure, no copyleft. Recorded
+  // here rather than waved through, because this set is the gate that keeps
+  // docs/01_VISION.md's "no copyleft in the shipped binary" honest.
+  "CDLA-Permissive-2.0",
   "CC0-1.0",
   "ISC",
   "MIT",

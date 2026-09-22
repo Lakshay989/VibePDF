@@ -18,7 +18,7 @@ Obligations that a *release* must satisfy, as opposed to this inventory, are in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Attribution text for the
 Apache-2.0 components is in [`NOTICE`](NOTICE).
 
-- **388** Rust crates
+- **404** Rust crates
 - **62** npm packages
 - **9** bundled components
 - **0** with a licence outside the reviewed-permissive set
@@ -93,6 +93,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [atk-sys](https://github.com/gtk-rs/gtk3-rs (*)) | 0.18.2 | MIT |
 | [base64](https://github.com/marshallpierce/rust-base64) | 0.21.7 | MIT OR Apache-2.0 |
 | [base64](https://github.com/marshallpierce/rust-base64) | 0.22.1 | MIT OR Apache-2.0 |
+| [base64](https://github.com/marshallpierce/rust-base64) | 0.23.1 | MIT OR Apache-2.0 |
 | [base64ct](https://github.com/RustCrypto/formats) | 1.8.3 | Apache-2.0 OR MIT |
 | [bit-set](https://github.com/contain-rs/bit-set) | 0.8.0 | Apache-2.0 OR MIT |
 | [bit-vec](https://github.com/contain-rs/bit-vec) | 0.8.0 | Apache-2.0 OR MIT |
@@ -189,7 +190,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [gdkx11](https://github.com/gtk-rs/gtk3-rs) | 0.18.2 | MIT |
 | [gdkx11-sys](https://github.com/gtk-rs/gtk3-rs (*)) | 0.18.2 | MIT |
 | [generic-array](https://github.com/fizyk20/generic-array.git (*)) | 0.14.7 | MIT |
-| [getrandom](https://github.com/rust-random/getrandom) | 0.2.17 | MIT OR Apache-2.0 |
+| [getrandom](https://github.com/rust-random/getrandom (*)) | 0.2.17 | MIT OR Apache-2.0 |
 | [getrandom](https://github.com/rust-random/getrandom (*)) | 0.3.4 | MIT OR Apache-2.0 |
 | [getrandom](https://github.com/rust-random/getrandom) | 0.4.2 | MIT OR Apache-2.0 |
 | [gio](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.4 | MIT |
@@ -209,6 +210,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [hmac](https://github.com/RustCrypto/MACs (*)) | 0.12.1 | MIT OR Apache-2.0 |
 | [html5ever](https://github.com/servo/html5ever) | 0.38.0 | MIT OR Apache-2.0 |
 | [http](https://github.com/hyperium/http (*)) | 1.4.1 | MIT OR Apache-2.0 |
+| [httparse](https://github.com/seanmonstar/httparse) | 1.10.1 | MIT OR Apache-2.0 |
 | [iana-time-zone](https://github.com/strawlab/iana-time-zone) | 0.1.65 | MIT OR Apache-2.0 |
 | [ico](https://github.com/mdsteele/rust-ico) | 0.5.0 | MIT |
 | [icu_collections](https://github.com/unicode-org/icu4x (*)) | 2.2.0 | Unicode-3.0 |
@@ -270,6 +272,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [objc2-foundation](https://github.com/madsmtm/objc2 (*)) | 0.3.2 | MIT |
 | [objc2-web-kit](https://github.com/madsmtm/objc2 (*)) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | [once_cell](https://github.com/matklad/once_cell) | 1.21.4 | MIT OR Apache-2.0 |
+| [openssl-probe](https://github.com/rustls/openssl-probe) | 0.2.1 | MIT OR Apache-2.0 |
 | [option-ext](https://github.com/soc/option-ext.git) | 0.2.0 | MPL-2.0 |
 | [pango](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.3 | MIT |
 | [pango-sys](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.0 | MIT |
@@ -316,14 +319,22 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [regex-automata](https://github.com/rust-lang/regex (*)) | 0.4.14 | MIT OR Apache-2.0 |
 | [regex-syntax](https://github.com/rust-lang/regex) | 0.8.10 | MIT OR Apache-2.0 |
 | [rfd](https://github.com/PolyMeilex/rfd) | 0.16.0 | MIT |
+| [ring](https://github.com/briansmith/ring (*)) | 0.17.14 | Apache-2.0 AND ISC |
 | [rsa](https://github.com/RustCrypto/RSA (*)) | 0.9.10 | MIT OR Apache-2.0 |
 | [rustc-hash](https://github.com/rust-lang/rustc-hash) | 2.1.2 | Apache-2.0 OR MIT |
+| [rustls](https://github.com/rustls/rustls (*)) | 0.23.45 | Apache-2.0 OR ISC OR MIT |
+| [rustls-native-certs](https://github.com/rustls/rustls-native-certs) | 0.8.4 | Apache-2.0 OR ISC OR MIT |
+| [rustls-pki-types](https://github.com/rustls/pki-types (*)) | 1.15.1 | MIT OR Apache-2.0 |
+| [rustls-platform-verifier](https://github.com/rustls/rustls-platform-verifier) | 0.7.0 | MIT OR Apache-2.0 |
+| [rustls-webpki](https://github.com/rustls/webpki) | 0.103.15 | ISC |
 | [salsa20](https://github.com/RustCrypto/stream-ciphers) | 0.10.2 | MIT OR Apache-2.0 |
 | [same-file](https://github.com/BurntSushi/same-file) | 1.0.6 | Unlicense/MIT |
 | [schemars](https://github.com/GREsau/schemars) | 0.8.22 | MIT |
 | [schemars_derive](https://github.com/GREsau/schemars) | 0.8.22 | MIT |
 | [scopeguard](https://github.com/bluss/scopeguard) | 1.2.0 | MIT OR Apache-2.0 |
 | [scrypt](https://github.com/RustCrypto/password-hashes/tree/master/scrypt) | 0.11.0 | MIT OR Apache-2.0 |
+| [security-framework](https://github.com/kornelski/rust-security-framework) | 3.7.0 | MIT OR Apache-2.0 |
+| [security-framework-sys](https://github.com/kornelski/rust-security-framework (*)) | 2.17.0 | MIT OR Apache-2.0 |
 | [selectors](https://github.com/servo/stylo) | 0.36.1 | MPL-2.0 |
 | [semver](https://github.com/dtolnay/semver) | 1.0.28 | MIT OR Apache-2.0 |
 | [serde](https://github.com/serde-rs/serde (*)) | 1.0.228 | MIT OR Apache-2.0 |
@@ -414,17 +425,22 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [unicode-normalization](https://github.com/unicode-rs/unicode-normalization) | 0.1.25 | MIT OR Apache-2.0 |
 | [unicode-properties](https://github.com/unicode-rs/unicode-properties) | 0.1.4 | MIT/Apache-2.0 |
 | [unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) | 1.13.2 | MIT OR Apache-2.0 |
+| [untrusted](https://github.com/briansmith/untrusted) | 0.9.0 | ISC |
+| [ureq](https://github.com/algesten/ureq) | 3.4.2 | MIT OR Apache-2.0 |
+| [ureq-proto](https://github.com/algesten/ureq-proto) | 0.6.4 | MIT OR Apache-2.0 |
 | [url](https://github.com/servo/rust-url (*)) | 2.5.8 | MIT OR Apache-2.0 |
 | [urlpattern](https://github.com/denoland/rust-urlpattern) | 0.3.0 | MIT |
 | [utf-8](https://github.com/SimonSapin/rust-utf8) | 0.7.6 | MIT OR Apache-2.0 |
 | [utf16string](https://github.com/getsentry/utf16string) | 0.2.0 | MIT OR Apache-2.0 |
 | [utf8_iter](https://github.com/hsivonen/utf8_iter) | 1.0.4 | Apache-2.0 OR MIT |
+| [utf8-zero](https://github.com/algesten/utf8-zero) | 0.8.1 | MIT OR Apache-2.0 |
 | [uuid](https://github.com/uuid-rs/uuid (*)) | 1.23.1 | Apache-2.0 OR MIT |
 | [vecmath](https://github.com/pistondevelopers/vecmath.git) | 1.0.0 | MIT |
 | [walkdir](https://github.com/BurntSushi/walkdir) | 2.5.0 | Unlicense/MIT |
 | [web_atoms](https://github.com/servo/html5ever) | 0.2.4 | MIT OR Apache-2.0 |
 | [webkit2gtk](https://github.com/tauri-apps/webkit2gtk-rs (*)) | 2.0.2 | MIT |
 | [webkit2gtk-sys](https://github.com/tauri-apps/webkit2gtk-rs (*)) | 2.0.2 | MIT |
+| [webpki-roots](https://github.com/rustls/webpki-roots) | 1.0.9 | CDLA-Permissive-2.0 |
 | [webview2-com](https://github.com/wravery/webview2-rs (*)) | 0.38.2 | MIT |
 | [webview2-com-macros](https://github.com/wravery/webview2-rs) | 0.8.1 | MIT |
 | [webview2-com-sys](https://github.com/wravery/webview2-rs) | 0.38.2 | MIT |
@@ -543,7 +559,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 
 | Licence | Count |
 |---|---|
-| MIT OR Apache-2.0 | 180 |
+| MIT OR Apache-2.0 | 190 |
 | MIT | 150 |
 | Apache-2.0 OR MIT | 40 |
 | Unicode-3.0 | 18 |
@@ -555,6 +571,8 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | Unlicense OR MIT | 5 |
 | MIT OR Apache-2.0 OR Zlib | 4 |
 | Apache-2.0/MIT | 3 |
+| ISC | 3 |
+| Apache-2.0 OR ISC OR MIT | 2 |
 | BSD-2-Clause | 2 |
 | BSD-3-Clause OR Apache-2.0 | 2 |
 | Unlicense/MIT | 2 |
@@ -564,13 +582,14 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | 0BSD | 1 |
 | 0BSD OR MIT OR Apache-2.0 | 1 |
 | Apache-2.0 / MIT | 1 |
+| Apache-2.0 AND ISC | 1 |
 | Apache-2.0 AND MIT | 1 |
 | BSD-2-Clause OR Apache-2.0 OR MIT | 1 |
 | BSD-3-Clause AND MIT | 1 |
 | BSD-3-Clause/MIT | 1 |
 | CC0-1.0 | 1 |
 | CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
-| ISC | 1 |
+| CDLA-Permissive-2.0 | 1 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
 
 ### On the MPL-2.0 entries

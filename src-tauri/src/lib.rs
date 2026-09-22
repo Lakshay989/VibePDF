@@ -91,6 +91,11 @@ pub fn run() {
                     *guard = cli_paths;
                 }
             }
+            // SPEC: P7-OCR-002 — language packs the user added live beside
+            // the bundled ones as far as the engine is concerned.
+            if let Ok(dir) = app.path().app_data_dir() {
+                pdf::ocr_user_tessdata(dir.join("tessdata"));
+            }
             app.manage(state);
             // SPEC: P2.A2 — start the 30s autosave tick. Pokes each open
             // actor to write a recovery copy if dirty. Dedicated std
@@ -157,6 +162,12 @@ pub fn run() {
             commands::pdf::pdf_add_pdf_background,
             commands::pdf::pdf_add_header_footer,
             commands::pdf::pdf_ocr_run,
+            commands::languages::ocr_list_languages,
+            commands::languages::ocr_install_language_file,
+            commands::languages::ocr_download_language,
+            commands::languages::ocr_remove_language,
+            commands::languages::ocr_downloads_allowed,
+            commands::languages::ocr_set_downloads_allowed,
             commands::pdf::pdf_add_page_numbers,
             commands::pdf::pdf_add_bates,
             commands::pdf::pdf_extract_images,

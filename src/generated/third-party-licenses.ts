@@ -137,6 +137,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/marshallpierce/rust-base64"
   },
   {
+    "name": "base64",
+    "version": "0.23.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/marshallpierce/rust-base64"
+  },
+  {
     "name": "base64ct",
     "version": "1.8.3",
     "license": "Apache-2.0 OR MIT",
@@ -716,7 +722,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "getrandom",
     "version": "0.2.17",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/getrandom"
+    "repository": "https://github.com/rust-random/getrandom (*)"
   },
   {
     "name": "getrandom",
@@ -831,6 +837,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "1.4.1",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/hyperium/http (*)"
+  },
+  {
+    "name": "httparse",
+    "version": "1.10.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/seanmonstar/httparse"
   },
   {
     "name": "iana-time-zone",
@@ -1199,6 +1211,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/matklad/once_cell"
   },
   {
+    "name": "openssl-probe",
+    "version": "0.2.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/rustls/openssl-probe"
+  },
+  {
     "name": "option-ext",
     "version": "0.2.0",
     "license": "MPL-2.0",
@@ -1475,6 +1493,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/PolyMeilex/rfd"
   },
   {
+    "name": "ring",
+    "version": "0.17.14",
+    "license": "Apache-2.0 AND ISC",
+    "repository": "https://github.com/briansmith/ring (*)"
+  },
+  {
     "name": "rsa",
     "version": "0.9.10",
     "license": "MIT OR Apache-2.0",
@@ -1485,6 +1509,36 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "2.1.2",
     "license": "Apache-2.0 OR MIT",
     "repository": "https://github.com/rust-lang/rustc-hash"
+  },
+  {
+    "name": "rustls",
+    "version": "0.23.45",
+    "license": "Apache-2.0 OR ISC OR MIT",
+    "repository": "https://github.com/rustls/rustls (*)"
+  },
+  {
+    "name": "rustls-native-certs",
+    "version": "0.8.4",
+    "license": "Apache-2.0 OR ISC OR MIT",
+    "repository": "https://github.com/rustls/rustls-native-certs"
+  },
+  {
+    "name": "rustls-pki-types",
+    "version": "1.15.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/rustls/pki-types (*)"
+  },
+  {
+    "name": "rustls-platform-verifier",
+    "version": "0.7.0",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/rustls/rustls-platform-verifier"
+  },
+  {
+    "name": "rustls-webpki",
+    "version": "0.103.15",
+    "license": "ISC",
+    "repository": "https://github.com/rustls/webpki"
   },
   {
     "name": "salsa20",
@@ -1521,6 +1575,18 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.11.0",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/RustCrypto/password-hashes/tree/master/scrypt"
+  },
+  {
+    "name": "security-framework",
+    "version": "3.7.0",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/kornelski/rust-security-framework"
+  },
+  {
+    "name": "security-framework-sys",
+    "version": "2.17.0",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/kornelski/rust-security-framework (*)"
   },
   {
     "name": "selectors",
@@ -2063,6 +2129,24 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/unicode-rs/unicode-segmentation"
   },
   {
+    "name": "untrusted",
+    "version": "0.9.0",
+    "license": "ISC",
+    "repository": "https://github.com/briansmith/untrusted"
+  },
+  {
+    "name": "ureq",
+    "version": "3.4.2",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/algesten/ureq"
+  },
+  {
+    "name": "ureq-proto",
+    "version": "0.6.4",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/algesten/ureq-proto"
+  },
+  {
     "name": "url",
     "version": "2.5.8",
     "license": "MIT OR Apache-2.0",
@@ -2091,6 +2175,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "1.0.4",
     "license": "Apache-2.0 OR MIT",
     "repository": "https://github.com/hsivonen/utf8_iter"
+  },
+  {
+    "name": "utf8-zero",
+    "version": "0.8.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/algesten/utf8-zero"
   },
   {
     "name": "uuid",
@@ -2127,6 +2217,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "2.0.2",
     "license": "MIT",
     "repository": "https://github.com/tauri-apps/webkit2gtk-rs (*)"
+  },
+  {
+    "name": "webpki-roots",
+    "version": "1.0.9",
+    "license": "CDLA-Permissive-2.0",
+    "repository": "https://github.com/rustls/webpki-roots"
   },
   {
     "name": "webview2-com",

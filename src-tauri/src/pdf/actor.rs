@@ -49,7 +49,7 @@ use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::ocr_text_layer::{
-    keep_writable_words, recognise_pages, OcrOptions, OcrSummary, OcrTextLayerEdit,
+    prepare_words, recognise_pages, OcrOptions, OcrSummary, OcrTextLayerEdit,
 };
 use crate::pdf::page_numbers::PageNumbersEdit;
 use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
@@ -4115,7 +4115,7 @@ fn run_worker(
                     .and_then(|pages| {
                         let mut found = recognise_pages(&doc, &pages, &options)?;
                         let (words, skipped) =
-                            keep_writable_words(&mut found, options.min_confidence);
+                            prepare_words(&mut found, options.min_confidence);
                         let page_count = found.len();
                         if words > 0 {
                             let inverse = Box::new(OcrTextLayerEdit { found }).apply(&mut doc)?;

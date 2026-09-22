@@ -39,3 +39,9 @@ pub mod text_extract;
 pub mod undo;
 pub mod watermark;
 pub mod xfdf;
+
+/// Register where user-installed OCR language packs live (SPEC: P7-OCR-002).
+/// Re-exported here so `lib.rs`'s setup hook has one thing to call.
+pub fn ocr_user_tessdata(dir: std::path::PathBuf) {
+    crate::ocr::tessdata::set_user_dir(dir);
+}

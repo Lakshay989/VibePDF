@@ -42,6 +42,8 @@ use crate::pdf::cos::{
     wrap_decoration,
 };
 use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::font_embed_cid::{build_cid_font, cid_run_fragment, CidRun};
+use crate::pdf::font_resolver::covering_font_bytes;
 use crate::pdf::render::{render_page, ImageFormat};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -93,6 +95,11 @@ pub struct Recognised {
     /// Size of the render the OCR boxes ultimately refer to.
     render_width: u32,
     render_height: u32,
+    /// SPEC: P7-OCR-002 — a system face covering this page's non-WinAnsi words
+    /// (Cyrillic, CJK, Arabic, Devanagari…), found once per page. `None` when
+    /// the page is plain Latin, or when no installed face covers it — in which
+    /// case those words were dropped rather than written as `.notdef` boxes.
+    embed_font: Option<Vec<u8>>,
 }
 
 /// Render, prepare and recognise each page. Reads the document; writes nothing,
@@ -125,6 +132,7 @@ pub fn recognise_pages(
             report,
             render_width: rendered.width,
             render_height: rendered.height,
+            embed_font: None,
         });
     }
     Ok(out)
@@ -143,10 +151,10 @@ struct Placed {
 
 /// Map one recognised page's words into visual-space placements.
 #[allow(clippy::cast_precision_loss)]
-fn place_words(found: &Recognised, vw: f32, vh: f32, min_confidence: f32) -> (Vec<Placed>, u32) {
+fn place_words(found: &Recognised, vw: f32, vh: f32) -> Vec<Placed> {
     let (rw, rh) = (found.render_width as f32, found.render_height as f32);
     if rw <= 0.0 || rh <= 0.0 {
-        return (Vec::new(), 0);
+        return Vec::new();
     }
     // Undo the upscale, then the straightening, then scale into points.
     #[allow(clippy::cast_possible_truncation)] // a resize ratio, near 1
@@ -160,12 +168,7 @@ fn place_words(found: &Recognised, vw: f32, vh: f32, min_confidence: f32) -> (Ve
     let (sin, cos) = (-skew).to_radians().sin_cos();
 
     let mut placed = Vec::new();
-    let mut skipped = 0;
     for word in &found.ocr.words {
-        if word.confidence < min_confidence || !winansi_fits(&word.text) {
-            skipped += 1;
-            continue;
-        }
         let [left, top, right, bottom] = word.rect;
         // Bottom-left of the box, in render pixels.
         let (px, py) = (left / scale, bottom / scale);
@@ -186,16 +189,14 @@ fn place_words(found: &Recognised, vw: f32, vh: f32, min_confidence: f32) -> (Ve
             degrees: -skew,
         });
     }
-    (placed, skipped)
+    placed
 }
 
-/// The `q … Q` fragment drawing `words` invisibly, in visual coordinates.
-fn text_layer_content(font: &str, base: &str, vt: [f32; 6], words: &[Placed]) -> String {
+/// One `BT … Tj … ET` for a word the base-14 font can encode.
+fn base14_word(font: &str, base: &str, word: &Placed) -> String {
     use std::fmt::Write as _;
     let mut content = String::new();
-    // `3 Tr` once for the whole block: every glyph below is laid out and
-    // selectable, and none of them is painted.
-    let _ = writeln!(content, "q\n{}\n3 Tr", visual_cm_line(vt));
+    let words = std::slice::from_ref(word);
     for word in words {
         // Tesseract's box hugs the glyphs, so its height is close to the font
         // size, and the baseline sits a little above the bottom of anything
@@ -220,12 +221,17 @@ fn text_layer_content(font: &str, base: &str, vt: [f32; 6], words: &[Placed]) ->
             esc = escape_pdf_string(&word.text),
         );
     }
-    content.push_str("Q\n");
     content
 }
 
 /// SPEC: P7-OCR-001 — write the recognised words into `bytes` as invisible
 /// text, one content fragment per page.
+///
+/// Words the base-14 font can encode go through the cheap path; the rest ride
+/// the CID path (SPEC: P7-OCR-002), which shares the embedding machinery the
+/// header/footer writer uses. Both sit inside the same `3 Tr` block: text
+/// render mode is graphics state, and `q` inherits it, so the embedded run is
+/// invisible for exactly the same reason the Latin one is.
 fn write_text_layer(bytes: &[u8], found: &[Recognised]) -> Result<(Vec<u8>, u32), CommandError> {
     let mut doc = Document::load_mem(bytes).map_err(|e| CommandError::PdfError(e.to_string()))?;
     let base = base_font("Helvetica", false, false)?;
@@ -243,23 +249,103 @@ fn write_text_layer(bytes: &[u8], found: &[Recognised]) -> Result<(Vec<u8>, u32)
 
         let rotate = page_rotation(&doc, page_id);
         let (vt, vw, vh) = visual_transform(rotate, page_effective_box(&doc, page_id));
-        let (words, _) = place_words(page, vw, vh, 0.0); // already filtered
+        let words = place_words(page, vw, vh);
         if words.is_empty() {
             continue;
         }
-        let font_name = register_page_resource(
-            &mut doc,
-            page_id,
-            b"Font",
-            "Focr",
-            Object::Dictionary(base14_font_dict(base)),
-        )?;
+
+        // Which fonts this page needs. Both are registered up front so the
+        // words themselves can be emitted in the order Tesseract read them:
+        // writing all the Latin words and then all the others would put a
+        // page's text in the wrong order for every reader, because extraction
+        // follows the content stream. (Measured 2026-09-22 on the mixed
+        // Cyrillic fixture: PDF.js read "4821 14 Счёт номер документ от марта".)
+        let needs_base = words.iter().any(|w| winansi_fits(&w.text));
+        let needs_cid = words.iter().any(|w| !winansi_fits(&w.text));
+
+        let mut content = String::new();
+        // `3 Tr` once for the whole block: every glyph below is laid out and
+        // selectable, and none of them is painted.
+        let _ = std::fmt::Write::write_fmt(
+            &mut content,
+            format_args!("q\n{}\n3 Tr\n", visual_cm_line(vt)),
+        );
+
+        let base_name = if needs_base {
+            Some(register_page_resource(
+                &mut doc,
+                page_id,
+                b"Font",
+                "Focr",
+                Object::Dictionary(base14_font_dict(base)),
+            )?)
+        } else {
+            None
+        };
+
+        let cid = if needs_cid {
+            let Some(font_bytes) = page.embed_font.as_ref() else {
+                return Err(CommandError::Internal(
+                    "non-Latin words survived without an embedding font; prepare_words should have dropped them".into(),
+                ));
+            };
+            let text: String = words
+                .iter()
+                .filter(|w| !winansi_fits(&w.text))
+                .map(|w| w.text.as_str())
+                .collect();
+            let font = build_cid_font(&mut doc, font_bytes, &text)?;
+            let name = register_page_resource(
+                &mut doc,
+                page_id,
+                b"Font",
+                "Focrcid",
+                Object::Dictionary(font.font_dict.clone()),
+            )?;
+            Some((font, name))
+        } else {
+            None
+        };
+
+        for word in &words {
+            match (winansi_fits(&word.text), base_name.as_ref(), cid.as_ref()) {
+                (true, Some(font_name), _) => {
+                    content.push_str(&base14_word(font_name, base, word));
+                }
+                (false, _, Some((font, font_name))) => {
+                    // The run's own matrix carries position, slant and the
+                    // horizontal squeeze that makes the selectable run as wide
+                    // as the ink; `cid_run_fragment` emits no `Tz`.
+                    let size = (word.height * 0.95).max(1.0);
+                    let natural = font.width(&word.text, size);
+                    let stretch = if natural > 0.0 { word.width / natural } else { 1.0 };
+                    let (sin, cos) = word.degrees.to_radians().sin_cos();
+                    let run = CidRun {
+                        text: &word.text,
+                        size,
+                        color: (0.0, 0.0, 0.0),
+                        matrix: [
+                            cos * stretch,
+                            sin * stretch,
+                            -sin,
+                            cos,
+                            word.x,
+                            word.y + word.height * 0.18,
+                        ],
+                        opacity: 1.0,
+                        behind: false,
+                        underline: None,
+                        kind: "ocr-text",
+                    };
+                    content.push_str(&cid_run_fragment(&mut doc, page_id, font_name, font, &run)?);
+                }
+                _ => {}
+            }
+        }
+
+        content.push_str("Q\n");
         written += u32::try_from(words.len()).unwrap_or(u32::MAX);
-        append_page_content(
-            &mut doc,
-            page_id,
-            wrap_decoration("ocr-text", text_layer_content(&font_name, base, vt, &words)),
-        )?;
+        append_page_content(&mut doc, page_id, wrap_decoration("ocr-text", content))?;
     }
 
     let mut buf = Vec::new();
@@ -299,19 +385,190 @@ impl<'a> Edit<PdfDocument<'a>> for OcrTextLayerEdit {
     }
 }
 
-/// Drop the words that must not be written, and say how many went: below
-/// `min_confidence`, or carrying characters the base font cannot encode (other
-/// scripts arrive with P7.A3's language packs).
-pub fn keep_writable_words(found: &mut [Recognised], min_confidence: f32) -> (u32, u32) {
+/// Decide what will actually be written, and say how much was dropped.
+///
+/// Two reasons a recognised word does not make it: the engine was not sure
+/// enough (`min_confidence`), or nothing on this machine can draw it. The
+/// second only applies to text outside `WinAnsi` — Cyrillic, CJK, Arabic,
+/// Devanagari — which needs an embedded face; one covering face is resolved per
+/// page here, so the write itself has no decisions left to make.
+///
+/// SPEC: P7-OCR-002 — without this, the eleven non-Latin languages would
+/// recognise perfectly and write nothing at all.
+pub fn prepare_words(found: &mut [Recognised], min_confidence: f32) -> (u32, u32) {
     let mut kept = 0u32;
     let mut skipped = 0u32;
-    for page in found {
+    for page in found.iter_mut() {
         let before = page.ocr.words.len();
-        page.ocr
-            .words
-            .retain(|w| w.confidence >= min_confidence && winansi_fits(&w.text));
-        kept += u32::try_from(page.ocr.words.len()).unwrap_or(u32::MAX);
+        page.ocr.words.retain(|w| w.confidence >= min_confidence);
         skipped += u32::try_from(before - page.ocr.words.len()).unwrap_or(u32::MAX);
+
+        let needs_embedding: String = page
+            .ocr
+            .words
+            .iter()
+            .filter(|w| !winansi_fits(&w.text))
+            .map(|w| w.text.as_str())
+            .collect();
+        if !needs_embedding.is_empty() {
+            page.embed_font = covering_font_bytes(&needs_embedding);
+            if page.embed_font.is_none() {
+                // Honest degradation: drop them and count them, rather than
+                // writing boxes a reader would happily "find".
+                let before = page.ocr.words.len();
+                page.ocr.words.retain(|w| winansi_fits(&w.text));
+                skipped += u32::try_from(before - page.ocr.words.len()).unwrap_or(u32::MAX);
+            }
+        }
+        kept += u32::try_from(page.ocr.words.len()).unwrap_or(u32::MAX);
     }
     (kept, skipped)
+}
+
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+#[cfg(test)]
+mod fixture_builder {
+    //! Rebuilds `tests/fixtures/basic/scan-cyrillic.pdf`: Cyrillic set in an
+    //! embedded system face, rasterised, and re-embedded as a picture — a
+    //! Russian page with nothing selectable in it.
+    //!
+    //! Here rather than in an integration test because building it needs the
+    //! crate-private CID embedding: Ghostscript's base fonts (which the Python
+    //! fixture generators drive) cannot set Cyrillic at all.
+
+    use lopdf::{Dictionary, Document, Object, Stream};
+
+    use crate::pdf::document::pdfium;
+    use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
+    use crate::pdf::font_resolver::covering_font_bytes;
+    use crate::pdf::render::{render_page, ImageFormat};
+
+    const LINES: &[(f32, &str)] = &[
+        (24.0, "Счёт номер 4821"),
+        (12.0, "документ от 14 марта"),
+    ];
+    const SCAN_DPI: f32 = 150.0;
+    const PAGE: (f32, f32) = (612.0, 792.0);
+
+    fn blank_page_doc() -> (Document, lopdf::ObjectId) {
+        let mut doc = Document::with_version("1.5");
+        let tree_id = doc.new_object_id();
+        let leaf_id = doc.new_object_id();
+        let mut page = Dictionary::new();
+        page.set("Type", Object::Name(b"Page".to_vec()));
+        page.set("Parent", Object::Reference(tree_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![0.into(), 0.into(), Object::Real(PAGE.0), Object::Real(PAGE.1)]),
+        );
+        page.set("Resources", Object::Dictionary(Dictionary::new()));
+        doc.objects.insert(leaf_id, Object::Dictionary(page));
+
+        let mut pages = Dictionary::new();
+        pages.set("Type", Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Object::Array(vec![Object::Reference(leaf_id)]));
+        pages.set("Count", 1);
+        doc.objects.insert(tree_id, Object::Dictionary(pages));
+
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", Object::Reference(tree_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        (doc, leaf_id)
+    }
+
+    #[test]
+    #[ignore = "regenerates a committed fixture; run on demand"]
+    fn writes_the_cyrillic_scan_fixture() {
+        let text: String = LINES.iter().map(|(_, t)| *t).collect();
+        let font_bytes =
+            covering_font_bytes(&text).expect("a system face covering Cyrillic is needed");
+
+        // 1. Cyrillic as real text, in an embedded face.
+        let (mut doc, page_id) = blank_page_doc();
+        let cid = build_cid_font(&mut doc, &font_bytes, &text).expect("embed");
+        let font_name = crate::pdf::cos::register_page_resource(
+            &mut doc,
+            page_id,
+            b"Font",
+            "Fcy",
+            Object::Dictionary(cid.font_dict.clone()),
+        )
+        .expect("register");
+        let mut y = PAGE.1 - 120.0;
+        for (size, line) in LINES {
+            place_cid_run(
+                &mut doc,
+                page_id,
+                &font_name,
+                &cid,
+                &CidRun {
+                    text: line,
+                    size: *size,
+                    color: (0.0, 0.0, 0.0),
+                    matrix: [1.0, 0.0, 0.0, 1.0, 72.0, y],
+                    opacity: 1.0,
+                    behind: false,
+                    underline: None,
+                    kind: "fixture",
+                },
+            )
+            .expect("place");
+            y -= size * 2.5;
+        }
+        let mut text_pdf = Vec::new();
+        doc.save_to(&mut text_pdf).expect("save text pdf");
+
+        // 2. Rasterise it — this is the "scanner".
+        let engine = pdfium().expect("pdfium");
+        let rendered = {
+            let loaded = engine.load_pdf_from_byte_vec(text_pdf, None).expect("load");
+            render_page(&loaded, 0, SCAN_DPI, ImageFormat::Rgba8).expect("render")
+        };
+        let gray: Vec<u8> = rendered
+            .bytes
+            .chunks_exact(4)
+            .map(|p| {
+                let v = 0.299 * f32::from(p[0]) + 0.587 * f32::from(p[1]) + 0.114 * f32::from(p[2]);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let byte = v.round().clamp(0.0, 255.0) as u8;
+                byte
+            })
+            .collect();
+
+        // 3. Put the raster back as the page's only content.
+        let (mut out, page_id) = blank_page_doc();
+        let mut image = Dictionary::new();
+        image.set("Type", Object::Name(b"XObject".to_vec()));
+        image.set("Subtype", Object::Name(b"Image".to_vec()));
+        image.set("Width", i64::from(rendered.width));
+        image.set("Height", i64::from(rendered.height));
+        image.set("ColorSpace", Object::Name(b"DeviceGray".to_vec()));
+        image.set("BitsPerComponent", 8);
+        let mut stream = Stream::new(image, gray);
+        stream.compress().expect("compress");
+        let image_id = out.add_object(stream);
+        let name = crate::pdf::cos::register_page_resource(
+            &mut out,
+            page_id,
+            b"XObject",
+            "Im",
+            Object::Reference(image_id),
+        )
+        .expect("register image");
+        crate::pdf::cos::append_page_content(
+            &mut out,
+            page_id,
+            format!("q {} 0 0 {} 0 0 cm /{name} Do Q", PAGE.0, PAGE.1),
+        )
+        .expect("content");
+
+        let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/basic/scan-cyrillic.pdf");
+        let mut bytes = Vec::new();
+        out.save_to(&mut bytes).expect("save");
+        std::fs::write(&target, &bytes).expect("write fixture");
+        println!("wrote {} ({} bytes)", target.display(), bytes.len());
+    }
 }

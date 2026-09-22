@@ -16,6 +16,7 @@
 //! from it rather than fetched separately.
 
 pub mod engine;
+pub mod languages;
 pub mod preprocess;
 pub mod tessdata;
 

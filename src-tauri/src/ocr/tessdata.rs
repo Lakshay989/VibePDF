@@ -15,11 +15,23 @@
 //! can't pass a test that a user's machine would fail.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::error::CommandError;
 
 /// Env var holding a directory of `*.traineddata` files.
 pub const TESSDATA_ENV: &str = "VIBEPDF_TESSDATA";
+
+/// Where packs the user added live, registered once at startup by the Tauri
+/// setup hook (the engine has no `AppHandle`). Unset in tests, which point
+/// [`TESSDATA_ENV`] at a temp directory instead.
+static USER_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Register the directory added language packs are installed into.
+/// Later calls are ignored: the path does not change while the app runs.
+pub fn set_user_dir(dir: PathBuf) {
+    let _ = USER_DIR.set(dir);
+}
 
 /// The directory to hand Tesseract, verified to hold `language`'s data.
 ///
@@ -65,6 +77,9 @@ fn candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(dir) = std::env::var(TESSDATA_ENV) {
         out.push(PathBuf::from(dir));
+    }
+    if let Some(dir) = USER_DIR.get() {
+        out.push(dir.clone());
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
