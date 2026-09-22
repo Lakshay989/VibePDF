@@ -15,6 +15,7 @@ use crate::pdf::form_data::ExportFormat;
 use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
 use crate::ocr::preprocess::PreprocessOptions;
+use crate::pdf::export_text::TextExportSummary;
 use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
@@ -1520,6 +1521,32 @@ pub async fn pdf_add_header_footer(
         handle.add_header_footer_request(
             pages, position, left, center, right, font_family, font_size, color, margin, date,
         )?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-006 (P7.B3) — write the document's text to `path` as UTF-8, in
+/// reading order. `pages` empty means the whole document. The PDF is not
+/// modified.
+#[tauri::command]
+pub async fn pdf_export_text(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<TextExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_text_request(pages, PathBuf::from(path))?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

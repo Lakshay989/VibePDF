@@ -48,6 +48,7 @@ use crate::pdf::annotation::{
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
+use crate::pdf::export_text::{document_text, TextExportSummary};
 use crate::pdf::ocr_text_layer::{
     prepare_words, recognise_pages, OcrOptions, OcrSummary, OcrTextLayerEdit,
 };
@@ -588,6 +589,13 @@ pub enum Message {
         margin: f32,
         date: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P7-OCR-006 — write the document's text, in reading order, to
+    /// `dest` as UTF-8. Read-only on the document.
+    ExportText {
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+        reply: oneshot::Sender<Result<TextExportSummary, CommandError>>,
     },
     /// SPEC: P7-OCR-001 — OCR the 0-based `pages` and add an invisible text
     /// layer over the picture of the text, so the page becomes searchable.
@@ -2287,6 +2295,30 @@ impl DocumentActorHandle {
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-006 — export text to `dest`. Non-blocking; the command awaits.
+    pub fn export_text_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<TextExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportText { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-006 — export text. Await-holding for tests.
+    pub async fn export_text(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<TextExportSummary, CommandError> {
+        let rx = self.export_text_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
     /// SPEC: P7-OCR-001 — OCR pages into a searchable layer. Non-blocking; the
@@ -4093,6 +4125,25 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::ExportText { pages, dest, reply } => {
+                // SPEC: P7-OCR-006 (P7.B3) — a read of the document and a write
+                // of a *text* file; the PDF is untouched, so there is no edit
+                // and nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| document_text(&doc, &pages))
+                    .and_then(|(text, summary)| {
+                        std::fs::write(&dest, text.as_bytes())?;
+                        Ok(summary)
+                    });
                 let _ = reply.send(result);
             }
             Message::RunOcr {

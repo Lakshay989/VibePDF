@@ -42,6 +42,7 @@ export interface ZoomToolbarProps {
   /** SPEC: P6-SEC-012 (P6.D3) — open the clean-document dialog. */
   onClean?: (() => void) | undefined;
   onOcr?: (() => void) | undefined;
+  onExportText?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
   onSign?: (() => void) | undefined;
   /** SPEC: P6-SEC-011 (P6.D2b) — open the find-and-redact dialog. */
@@ -73,6 +74,7 @@ export function ZoomToolbar({
   onProtect,
   onClean,
   onOcr,
+  onExportText,
   onSign,
   onFindRedact,
   onUnlock,
@@ -313,6 +315,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Read text…
+        </button>
+      ) : null}
+
+      {onExportText ? (
+        <button
+          type="button"
+          onClick={onExportText}
+          title="Save the document's text as a .txt file"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export text…
         </button>
       ) : null}
 

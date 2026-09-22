@@ -19,6 +19,7 @@ import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { CleanDialog } from "@/app/CleanDialog";
 import { OcrDialog } from "@/app/OcrDialog";
+import { exportText } from "@/ipc/export-text";
 import { LicensesDialog } from "@/app/LicensesDialog";
 import { FindRedactDialog } from "@/app/FindRedactDialog";
 import { ProtectDialog } from "@/app/ProtectDialog";
@@ -159,6 +160,31 @@ export function PdfViewer({ documentId, path }: Props) {
     },
     [documentId],
   );
+
+  // SPEC: P7-OCR-006 (P7.B3) — export the document's text. Read-only on the
+  // PDF, so there is no epoch bump and nothing to undo; the same native save
+  // dialog as extract/split picks the destination.
+  const handleExportText = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.txt`,
+        filters: [{ name: "Plain text", extensions: ["txt"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportText(documentId, dest);
+      if (summary.characters === 0) {
+        reportError(
+          "No text to export",
+          new Error(
+            "This document has no text — if it is a scan, use Read text… first to recognise it.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export the text", err);
+    }
+  }, [documentId, path]);
 
   // SPEC: P2-PAGE-007 — split: pick a mode, then a directory, then write N
   // numbered files. Read-only on the open document. The output stem is the
@@ -527,6 +553,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onProtect={doc ? () => setProtectOpen(true) : undefined}
         onClean={doc ? () => setCleanOpen(true) : undefined}
         onOcr={doc ? () => setOcrOpen(true) : undefined}
+        onExportText={doc ? () => void handleExportText() : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}
         onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}
         onUnlock={doc ? () => setUnlockOpen(true) : undefined}

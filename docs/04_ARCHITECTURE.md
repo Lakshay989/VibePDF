@@ -36,6 +36,7 @@ vibepdf/
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
 │   │   │   ├── ocr_text_layer.rs # Invisible text over a scan: render → OCR → place (P7-OCR-001)
+│   │   │   ├── export_text.rs    # Document → plain text in reading order (P7-OCR-006)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
