@@ -41,6 +41,7 @@ export interface ZoomToolbarProps {
   onUnlock?: (() => void) | undefined;
   /** SPEC: P6-SEC-012 (P6.D3) — open the clean-document dialog. */
   onClean?: (() => void) | undefined;
+  onOcr?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
   onSign?: (() => void) | undefined;
   /** SPEC: P6-SEC-011 (P6.D2b) — open the find-and-redact dialog. */
@@ -71,6 +72,7 @@ export function ZoomToolbar({
   onWatermark,
   onProtect,
   onClean,
+  onOcr,
   onSign,
   onFindRedact,
   onUnlock,
@@ -300,6 +302,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Clean…
+        </button>
+      ) : null}
+
+      {onOcr ? (
+        <button
+          type="button"
+          onClick={onOcr}
+          title="Read the text in a scanned page so it can be searched and selected"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Read text…
         </button>
       ) : null}
 

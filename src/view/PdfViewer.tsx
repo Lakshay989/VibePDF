@@ -18,6 +18,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { CleanDialog } from "@/app/CleanDialog";
+import { OcrDialog } from "@/app/OcrDialog";
 import { LicensesDialog } from "@/app/LicensesDialog";
 import { FindRedactDialog } from "@/app/FindRedactDialog";
 import { ProtectDialog } from "@/app/ProtectDialog";
@@ -211,6 +212,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [watermarkOpen, setWatermarkOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
   const [cleanOpen, setCleanOpen] = useState(false);
+  const [ocrOpen, setOcrOpen] = useState(false);
   const [licencesOpen, setLicencesOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
   const [findRedactOpen, setFindRedactOpen] = useState(false);
@@ -524,6 +526,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
         onProtect={doc ? () => setProtectOpen(true) : undefined}
         onClean={doc ? () => setCleanOpen(true) : undefined}
+        onOcr={doc ? () => setOcrOpen(true) : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}
         onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}
         onUnlock={doc ? () => setUnlockOpen(true) : undefined}
@@ -592,6 +595,16 @@ export function PdfViewer({ documentId, path }: Props) {
         open={cleanOpen}
         documentId={documentId}
         onClose={() => setCleanOpen(false)}
+      />
+      {/* SPEC: P7-OCR-001 — the surface for Track A's engine. `currentPage` is
+          read when the dialog opens, the same imperative snap the form panel
+          uses (the virtualizer has no re-render signal for scroll). */}
+      <OcrDialog
+        open={ocrOpen}
+        documentId={documentId}
+        currentPage={Math.max((virtRef.current?.getCurrentPage() ?? 1) - 1, 0)}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setOcrOpen(false)}
       />
       <UnlockDialog
         open={unlockOpen}
