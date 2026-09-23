@@ -133,6 +133,21 @@ Two findings worth keeping from building it:
 
 ---
 
+## Image encoders — `png` direct, `image` for the rest (P7.B2)
+
+P7-OCR-005 names four output formats — PNG, JPG, TIFF, WebP — and until P7.B2 the tree had an encoder for exactly one of them (`png = "0.17"`, added in P1.B3 for the render IPC reply).
+
+**Why `image` 0.25:** it was **already in `Cargo.lock`** as a transitive dependency of `pdfium-render`, so taking a direct edge on it with `default-features = false, features = ["jpeg", "tiff", "webp"]` adds three codecs and no new top-level supply chain. Six crates came with them — `tiff`, `image-webp`, `fax`, `half`, `crunchy`, `quick-error` — all permissive, and the licence gate (`npm run licenses`) is the check. The alternative, hand-writing a TIFF and a WebP encoder, is strictly worse than using the image-rs maintainers' own.
+
+**PNG stays on the `png` crate.** It is the hot path — every page render on the view layer goes through `render.rs::encode_png` — and it is the thinner call. `export_image.rs` reuses that same function rather than routing PNG through `image`, so the two paths cannot drift.
+
+Two limits worth stating rather than discovering:
+
+- **WebP is lossless only.** `image` 0.25 ships the VP8L encoder; lossy WebP needs the C `libwebp`, which would cost us the "compiles anywhere with no system library" property that `tesseract-rs` already strains. A lossless WebP page is smaller than the PNG and larger than a lossy WebP would be.
+- **JPEG is three-channel, so the RGBA render is composited down.** Measured 2026-09-23: PDFium renders fully opaque (0 of 484,704 pixels of `hello.pdf` at 72 DPI had `a != 255`), so compositing over *white* rather than simply dropping the alpha channel is insurance, not a live fix — but it is the difference between a correct page and a black one if a future PDFium, or a caller that sets a clear colour, ever hands us real transparency.
+
+---
+
 ## Crypto & signing — `rsa`, `x509-cert`, `cms`
 
 **Why these crates:** RustCrypto's pure-Rust ecosystem. Apache 2.0 / MIT. No OpenSSL dependency to wrestle with at install time.

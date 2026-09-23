@@ -18,7 +18,7 @@ Obligations that a *release* must satisfy, as opposed to this inventory, are in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Attribution text for the
 Apache-2.0 components is in [`NOTICE`](NOTICE).
 
-- **404** Rust crates
+- **410** Rust crates
 - **62** npm packages
 - **9** bundled components
 - **0** with a licence outside the reviewed-permissive set
@@ -165,6 +165,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [equivalent](https://github.com/indexmap-rs/equivalent) | 1.0.2 | Apache-2.0 OR MIT |
 | [erased-serde](https://github.com/dtolnay/erased-serde) | 0.4.10 | MIT OR Apache-2.0 |
 | [fastrand](https://github.com/smol-rs/fastrand) | 2.4.1 | Apache-2.0 OR MIT |
+| [fax](https://github.com/pdf-rs/fax) | 0.2.7 | MIT |
 | [fdeflate](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 |
 | [field-offset](https://github.com/Diggsey/rust-field-offset) | 0.3.6 | MIT OR Apache-2.0 |
 | [flagset](https://github.com/enarx/flagset) | 0.4.7 | Apache-2.0 |
@@ -203,6 +204,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [gtk](https://github.com/gtk-rs/gtk3-rs (*)) | 0.18.2 | MIT |
 | [gtk-sys](https://github.com/gtk-rs/gtk3-rs (*)) | 0.18.2 | MIT |
 | [gtk3-macros](https://github.com/gtk-rs/gtk3-rs) | 0.18.2 | MIT |
+| [half](https://github.com/VoidStarKat/half-rs) | 2.7.1 | MIT OR Apache-2.0 |
 | [hashbrown](https://github.com/rust-lang/hashbrown) | 0.12.3 | MIT OR Apache-2.0 |
 | [hashbrown](https://github.com/rust-lang/hashbrown) | 0.17.1 | MIT OR Apache-2.0 |
 | [heck](https://github.com/withoutboats/heck) | 0.4.1 | MIT OR Apache-2.0 |
@@ -223,7 +225,8 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [ident_case](https://github.com/TedDriggs/ident_case) | 1.0.1 | MIT/Apache-2.0 |
 | [idna](https://github.com/servo/rust-url/) | 1.1.0 | MIT OR Apache-2.0 |
 | [idna_adapter](https://github.com/hsivonen/idna_adapter) | 1.2.2 | Apache-2.0 OR MIT |
-| [image](https://github.com/image-rs/image) | 0.25.10 | MIT OR Apache-2.0 |
+| [image](https://github.com/image-rs/image (*)) | 0.25.10 | MIT OR Apache-2.0 |
+| [image-webp](https://github.com/image-rs/image-webp) | 0.2.4 | MIT OR Apache-2.0 |
 | [indexmap](https://github.com/bluss/indexmap) | 1.9.3 | Apache-2.0 OR MIT |
 | [indexmap](https://github.com/indexmap-rs/indexmap (*)) | 2.14.0 | Apache-2.0 OR MIT |
 | [infer](https://github.com/bojand/infer) | 0.19.0 | MIT |
@@ -305,6 +308,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [proc-macro-error-attr](https://gitlab.com/CreepySkeleton/proc-macro-error) | 1.0.4 | MIT OR Apache-2.0 |
 | [proc-macro2](https://github.com/dtolnay/proc-macro2 (*)) | 1.0.106 | MIT OR Apache-2.0 |
 | [pxfm](https://github.com/awxkee/pxfm) | 0.1.29 | BSD-3-Clause OR Apache-2.0 |
+| [quick-error](http://github.com/tailhook/quick-error) | 2.0.1 | MIT/Apache-2.0 |
 | [quick-xml](https://github.com/tafia/quick-xml) | 0.39.4 | MIT |
 | [quote](https://github.com/dtolnay/quote (*)) | 1.0.45 | MIT OR Apache-2.0 |
 | [rand](https://github.com/rust-random/rand) | 0.8.7 | MIT OR Apache-2.0 |
@@ -391,6 +395,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [thiserror-impl](https://github.com/dtolnay/thiserror (*)) | 1.0.69 | MIT OR Apache-2.0 |
 | [thiserror-impl](https://github.com/dtolnay/thiserror (*)) | 2.0.18 | MIT OR Apache-2.0 |
 | [thread_local](https://github.com/Amanieu/thread_local-rs) | 1.1.9 | MIT OR Apache-2.0 |
+| [tiff](https://github.com/image-rs/image-tiff (*)) | 0.11.3 | MIT |
 | [time](https://github.com/time-rs/time (*)) | 0.3.47 | MIT OR Apache-2.0 |
 | [time-core](https://github.com/time-rs/time) | 0.1.8 | MIT OR Apache-2.0 |
 | [time-macros](https://github.com/time-rs/time) | 0.2.27 | MIT OR Apache-2.0 |
@@ -476,7 +481,8 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [x509-cert](https://github.com/RustCrypto/formats/tree/master/x509-cert (*)) | 0.2.5 | Apache-2.0 OR MIT |
 | [yoke](https://github.com/unicode-org/icu4x (*)) | 0.8.2 | Unicode-3.0 |
 | [yoke-derive](https://github.com/unicode-org/icu4x (*)) | 0.8.2 | Unicode-3.0 |
-| [zerocopy](https://github.com/google/zerocopy) | 0.8.50 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| [zerocopy](https://github.com/google/zerocopy (*)) | 0.8.50 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| [zerocopy-derive](https://github.com/google/zerocopy) | 0.8.50 | BSD-2-Clause OR Apache-2.0 OR MIT |
 | [zerofrom](https://github.com/unicode-org/icu4x (*)) | 0.1.8 | Unicode-3.0 |
 | [zerofrom-derive](https://github.com/unicode-org/icu4x (*)) | 0.1.7 | Unicode-3.0 |
 | [zeroize](https://github.com/RustCrypto/utils) | 1.9.0 | Apache-2.0 OR MIT |
@@ -486,7 +492,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) | 0.6.8 | Zlib |
 | [zmij](https://github.com/dtolnay/zmij) | 1.0.21 | MIT |
 | [zune-core](https://github.com/etemesi254/zune-image) | 0.5.1 | MIT OR Apache-2.0 OR Zlib |
-| [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg) | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
+| [zune-jpeg](https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg (*)) | 0.5.15 | MIT OR Apache-2.0 OR Zlib |
 
 ## npm packages
 
@@ -559,11 +565,11 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 
 | Licence | Count |
 |---|---|
-| MIT OR Apache-2.0 | 190 |
-| MIT | 150 |
+| MIT OR Apache-2.0 | 192 |
+| MIT | 152 |
 | Apache-2.0 OR MIT | 40 |
 | Unicode-3.0 | 18 |
-| MIT/Apache-2.0 | 16 |
+| MIT/Apache-2.0 | 17 |
 | Zlib OR Apache-2.0 OR MIT | 7 |
 | Apache-2.0 | 5 |
 | BSD-3-Clause | 5 |
@@ -574,6 +580,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | ISC | 3 |
 | Apache-2.0 OR ISC OR MIT | 2 |
 | BSD-2-Clause | 2 |
+| BSD-2-Clause OR Apache-2.0 OR MIT | 2 |
 | BSD-3-Clause OR Apache-2.0 | 2 |
 | Unlicense/MIT | 2 |
 | Zlib | 2 |
@@ -584,7 +591,6 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | Apache-2.0 / MIT | 1 |
 | Apache-2.0 AND ISC | 1 |
 | Apache-2.0 AND MIT | 1 |
-| BSD-2-Clause OR Apache-2.0 OR MIT | 1 |
 | BSD-3-Clause AND MIT | 1 |
 | BSD-3-Clause/MIT | 1 |
 | CC0-1.0 | 1 |

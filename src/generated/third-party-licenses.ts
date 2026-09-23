@@ -569,6 +569,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/smol-rs/fastrand"
   },
   {
+    "name": "fax",
+    "version": "0.2.7",
+    "license": "MIT",
+    "repository": "https://github.com/pdf-rs/fax"
+  },
+  {
     "name": "fdeflate",
     "version": "0.3.7",
     "license": "MIT OR Apache-2.0",
@@ -797,6 +803,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/gtk-rs/gtk3-rs"
   },
   {
+    "name": "half",
+    "version": "2.7.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/VoidStarKat/half-rs"
+  },
+  {
     "name": "hashbrown",
     "version": "0.12.3",
     "license": "MIT OR Apache-2.0",
@@ -920,7 +932,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "image",
     "version": "0.25.10",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/image-rs/image"
+    "repository": "https://github.com/image-rs/image (*)"
+  },
+  {
+    "name": "image-webp",
+    "version": "0.2.4",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/image-rs/image-webp"
   },
   {
     "name": "indexmap",
@@ -1407,6 +1425,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "version": "0.1.29",
     "license": "BSD-3-Clause OR Apache-2.0",
     "repository": "https://github.com/awxkee/pxfm"
+  },
+  {
+    "name": "quick-error",
+    "version": "2.0.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "http://github.com/tailhook/quick-error"
   },
   {
     "name": "quick-xml",
@@ -1925,6 +1949,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/Amanieu/thread_local-rs"
   },
   {
+    "name": "tiff",
+    "version": "0.11.3",
+    "license": "MIT",
+    "repository": "https://github.com/image-rs/image-tiff (*)"
+  },
+  {
     "name": "time",
     "version": "0.3.47",
     "license": "MIT OR Apache-2.0",
@@ -2438,6 +2468,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "zerocopy",
     "version": "0.8.50",
     "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
+    "repository": "https://github.com/google/zerocopy (*)"
+  },
+  {
+    "name": "zerocopy-derive",
+    "version": "0.8.50",
+    "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
     "repository": "https://github.com/google/zerocopy"
   },
   {
@@ -2498,7 +2534,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "zune-jpeg",
     "version": "0.5.15",
     "license": "MIT OR Apache-2.0 OR Zlib",
-    "repository": "https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg"
+    "repository": "https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg (*)"
   }
 ];
 

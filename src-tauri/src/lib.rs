@@ -163,6 +163,7 @@ pub fn run() {
             commands::pdf::pdf_add_header_footer,
             commands::pdf::pdf_ocr_run,
             commands::pdf::pdf_export_text,
+            commands::pdf::pdf_export_images,
             commands::languages::ocr_list_languages,
             commands::languages::ocr_install_language_file,
             commands::languages::ocr_download_language,

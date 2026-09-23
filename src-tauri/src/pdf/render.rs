@@ -180,9 +180,14 @@ pub fn render_thumbnail(
 
 /// Encode 8-bit RGBA pixels as PNG via the `png` crate. Compression
 /// is left at the crate default (`Compression::Default` ≈ zlib level
-/// 6) — a good balance for thumbnail and viewer use; export-to-image
-/// can tune later.
-fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, CommandError> {
+/// 6) — a good balance for thumbnail and viewer use.
+///
+/// `pub(crate)` for `export_image.rs` (P7.B2, SPEC P7-OCR-005), which reuses
+/// this rather than routing PNG through `image`, so the view layer and the
+/// export cannot drift into producing different files. The earlier note here
+/// said export-to-image could tune the compression level; measured
+/// 2026-09-23 it had no need to — a US-Letter page at 150 DPI is 66 KB.
+pub(crate) fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, CommandError> {
     if width == 0 || height == 0 {
         return Err(CommandError::Internal(
             "cannot encode zero-dimension bitmap".into(),

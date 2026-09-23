@@ -15,6 +15,7 @@ use crate::pdf::form_data::ExportFormat;
 use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
 use crate::ocr::preprocess::PreprocessOptions;
+use crate::pdf::export_image::{ImageExportFormat, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::TextExportSummary;
 use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
 use crate::pdf::text_extract::TextRun;
@@ -1547,6 +1548,45 @@ pub async fn pdf_export_text(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.export_text_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-005 (P7.B2) — render pages into `dest_dir` as image files
+/// named `{stem}-{n:03}.{ext}`, where `n` is the page's own 1-based number.
+/// `pages` empty means the whole document. The PDF is not modified.
+///
+/// `format` is one of `png`, `jpeg`, `tiff`, `webp`; `dpi` must be within
+/// 72–600 (the spec's range) and `quality` applies to JPEG only.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_export_images(
+    state: State<'_, AppState>,
+    id: String,
+    dest_dir: String,
+    stem: String,
+    pages: Vec<i32>,
+    format: String,
+    dpi: f32,
+    quality: u8,
+) -> Result<ImageExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let options = ImageExportOptions {
+        format: ImageExportFormat::parse(&format)?,
+        dpi,
+        quality,
+    };
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_images_request(pages, PathBuf::from(dest_dir), stem, options)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

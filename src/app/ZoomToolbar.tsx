@@ -43,6 +43,8 @@ export interface ZoomToolbarProps {
   onClean?: (() => void) | undefined;
   onOcr?: (() => void) | undefined;
   onExportText?: (() => void) | undefined;
+  /** SPEC: P7-OCR-005 (P7.B2) — open the export-as-images dialog. */
+  onExportImages?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
   onSign?: (() => void) | undefined;
   /** SPEC: P6-SEC-011 (P6.D2b) — open the find-and-redact dialog. */
@@ -75,6 +77,7 @@ export function ZoomToolbar({
   onClean,
   onOcr,
   onExportText,
+  onExportImages,
   onSign,
   onFindRedact,
   onUnlock,
@@ -326,6 +329,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Export text…
+        </button>
+      ) : null}
+
+      {onExportImages ? (
+        <button
+          type="button"
+          onClick={onExportImages}
+          title="Save each page as a PNG, JPG, TIFF or WebP image"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export images…
         </button>
       ) : null}
 

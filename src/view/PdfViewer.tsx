@@ -18,6 +18,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { CleanDialog } from "@/app/CleanDialog";
+import { ExportImageDialog } from "@/app/ExportImageDialog";
 import { OcrDialog } from "@/app/OcrDialog";
 import { exportText } from "@/ipc/export-text";
 import { LicensesDialog } from "@/app/LicensesDialog";
@@ -239,6 +240,7 @@ export function PdfViewer({ documentId, path }: Props) {
   const [protectOpen, setProtectOpen] = useState(false);
   const [cleanOpen, setCleanOpen] = useState(false);
   const [ocrOpen, setOcrOpen] = useState(false);
+  const [exportImagesOpen, setExportImagesOpen] = useState(false);
   const [licencesOpen, setLicencesOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
   const [findRedactOpen, setFindRedactOpen] = useState(false);
@@ -554,6 +556,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onClean={doc ? () => setCleanOpen(true) : undefined}
         onOcr={doc ? () => setOcrOpen(true) : undefined}
         onExportText={doc ? () => void handleExportText() : undefined}
+        onExportImages={doc ? () => setExportImagesOpen(true) : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}
         onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}
         onUnlock={doc ? () => setUnlockOpen(true) : undefined}
@@ -632,6 +635,26 @@ export function PdfViewer({ documentId, path }: Props) {
         currentPage={Math.max((virtRef.current?.getCurrentPage() ?? 1) - 1, 0)}
         pageCount={doc?.numPages ?? 0}
         onClose={() => setOcrOpen(false)}
+      />
+      {/* SPEC: P7-OCR-005 (P7.B2) — export pages as images. Read-only on the
+          PDF. The page size comes from the virtualizer so the dialog can state
+          the pixel size before the run; a rotated page reports as displayed.
+          The US-Letter fallback only applies before the document is measured,
+          which is before the toolbar button exists — it keeps the estimate a
+          number rather than a NaN, and the export itself never uses it. */}
+      <ExportImageDialog
+        open={exportImagesOpen}
+        documentId={documentId}
+        currentPage={Math.max((virtRef.current?.getCurrentPage() ?? 1) - 1, 0)}
+        pageCount={doc?.numPages ?? 0}
+        pageWidthPoints={
+          virtRef.current?.getPageSize(virtRef.current.getCurrentPage())?.width ?? 612
+        }
+        pageHeightPoints={
+          virtRef.current?.getPageSize(virtRef.current.getCurrentPage())?.height ?? 792
+        }
+        stem={basename(path).replace(/\.pdf$/i, "") || "page"}
+        onClose={() => setExportImagesOpen(false)}
       />
       <UnlockDialog
         open={unlockOpen}

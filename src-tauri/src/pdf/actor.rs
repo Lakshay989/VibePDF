@@ -48,6 +48,7 @@ use crate::pdf::annotation::{
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
+use crate::pdf::export_image::{export_pages, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::{document_text, TextExportSummary};
 use crate::pdf::ocr_text_layer::{
     prepare_words, recognise_pages, OcrOptions, OcrSummary, OcrTextLayerEdit,
@@ -596,6 +597,16 @@ pub enum Message {
         pages: Vec<i32>,
         dest: std::path::PathBuf,
         reply: oneshot::Sender<Result<TextExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-005 — render the 0-based `pages` into `dest_dir` as
+    /// `{stem}-{n:03}.{ext}`, one image file per page. Read-only on the
+    /// document.
+    ExportImages {
+        pages: Vec<i32>,
+        dest_dir: std::path::PathBuf,
+        stem: String,
+        options: ImageExportOptions,
+        reply: oneshot::Sender<Result<ImageExportSummary, CommandError>>,
     },
     /// SPEC: P7-OCR-001 — OCR the 0-based `pages` and add an invisible text
     /// layer over the picture of the text, so the page becomes searchable.
@@ -2317,6 +2328,43 @@ impl DocumentActorHandle {
         dest: std::path::PathBuf,
     ) -> Result<TextExportSummary, CommandError> {
         let rx = self.export_text_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-005 — export pages as images. Non-blocking; the command
+    /// awaits. A page at 600 DPI takes a moment and the actor handles one
+    /// message at a time, so a long run holds the mailbox — the same trade the
+    /// OCR path makes.
+    pub fn export_images_request(
+        &self,
+        pages: Vec<i32>,
+        dest_dir: std::path::PathBuf,
+        stem: String,
+        options: ImageExportOptions,
+    ) -> Result<oneshot::Receiver<Result<ImageExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportImages {
+                pages,
+                dest_dir,
+                stem,
+                options,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-005 — export images. Await-holding for tests.
+    pub async fn export_images(
+        &self,
+        pages: Vec<i32>,
+        dest_dir: std::path::PathBuf,
+        stem: String,
+        options: ImageExportOptions,
+    ) -> Result<ImageExportSummary, CommandError> {
+        let rx = self.export_images_request(pages, dest_dir, stem, options)?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
@@ -4144,6 +4192,27 @@ fn run_worker(
                         std::fs::write(&dest, text.as_bytes())?;
                         Ok(summary)
                     });
+                let _ = reply.send(result);
+            }
+            Message::ExportImages {
+                pages,
+                dest_dir,
+                stem,
+                options,
+                reply,
+            } => {
+                // SPEC: P7-OCR-005 (P7.B2) — renders of the document and writes
+                // of image files; the PDF is untouched, so there is no edit and
+                // nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_pages(&doc, &pages, &dest_dir, &stem, options));
                 let _ = reply.send(result);
             }
             Message::RunOcr {

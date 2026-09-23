@@ -9,6 +9,7 @@ pub mod crop;
 pub mod delete_page;
 pub mod doc_cache;
 pub mod document;
+pub mod export_image;
 pub mod export_text;
 pub mod extract;
 pub mod flatten;

@@ -29,11 +29,31 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 pdfium-render = "0.9"
 # Encoder-only PNG library; written by the image-rs maintainers.
 # Justification: PDFium emits raw RGBA; we need PNG bytes for the
-# RenderPage IPC reply (B3). Using `png` directly instead of going
-# through `image = "0.25"` (transitive via pdfium-render) keeps the
-# surface area minimal — we don't want decoders or manipulation
-# routines we'll never call.
+# RenderPage IPC reply (B3). The PNG path still goes through this crate
+# directly rather than through `image` below: it is the hot one (every
+# page render on the view layer) and `png` is the thinner call.
 png = "0.17"
+# P7.B2 (SPEC P7-OCR-005): the JPEG, TIFF and WebP encoders. The spec names
+# four output formats and the tree had an encoder for exactly one of them.
+# `image` is **already in Cargo.lock** as a transitive dependency of
+# pdfium-render, so this adds a direct edge and three feature flags, not a new
+# crate; `default-features = false` keeps AVIF, EXR, ravif and rayon out. Only
+# `pdf/export_image.rs` (and its tests, which decode the output back) use it.
+# Note WebP here is lossless-only — lossy needs the C libwebp, which would cost
+# us the "compiles anywhere with no system library" property.
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "tiff",
+    "webp",
+] }
+# P7.B2 (SPEC P7-OCR-005): the TIFF encoder, one level below `image`. `image`'s
+# own TiffEncoder hardcodes no compression — measured 2026-09-23, one US-Letter
+# page at 150 DPI came out 8.4 MB, so a 50-page export would be 420 MB — and it
+# exposes no way to change that. This crate, which `image` already depends on
+# and which is therefore **already in Cargo.lock at this version**, takes a
+# `with_compression(Deflate)`. Adds no crate to the tree; `image`'s tiff feature
+# stays on because the tests decode TIFF back with it.
+tiff = "0.11"
 uuid = { version = "1", features = ["v4", "serde"] }
 # P7.A1 (SPEC P7-OCR-001, P7-OCR-003): Tesseract, the OCR engine the spec
 # names. `leptess`, the binding docs/03_TECH_STACK.md originally picked, has
