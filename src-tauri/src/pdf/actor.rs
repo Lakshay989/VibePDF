@@ -48,6 +48,7 @@ use crate::pdf::annotation::{
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
+use crate::pdf::compress::{compress_document, CompressLevel, CompressReport};
 use crate::pdf::export_image::{export_pages, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::{document_text, TextExportSummary};
 use crate::pdf::ocr_text_layer::{
@@ -758,6 +759,14 @@ pub enum Message {
         dest_dir: PathBuf,
         stem: String,
         reply: oneshot::Sender<Result<SplitOutcome, CommandError>>,
+    },
+    /// SPEC: P7-OCR-010 — write a compressed copy to `dest` at `level`.
+    /// Read-only on the source: compression is lossy, so it produces a new
+    /// file rather than an undoable edit. No undo, no dirty.
+    CompressDocument {
+        level: CompressLevel,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<CompressReport, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
     /// recovery copy iff the document is dirty; no reply (best-effort).
@@ -2354,6 +2363,33 @@ impl DocumentActorHandle {
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-010 — write a compressed copy. Non-blocking; the command
+    /// awaits. Recompressing a page costs on the order of a second, and the
+    /// actor handles one message at a time, so a long document holds the
+    /// mailbox — the same trade OCR and image export make.
+    pub fn compress_request(
+        &self,
+        level: CompressLevel,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<CompressReport, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::CompressDocument { level, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-010 — compress to `dest`. Await-holding for tests.
+    pub async fn compress(
+        &self,
+        level: CompressLevel,
+        dest: std::path::PathBuf,
+    ) -> Result<CompressReport, CommandError> {
+        let rx = self.compress_request(level, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
     /// SPEC: P7-OCR-005 — export images. Await-holding for tests.
@@ -4463,6 +4499,12 @@ fn run_worker(
                 // SPEC: P2-PAGE-007 — read-only: emit N files from the source.
                 // No undo, no dirty (the open doc is unchanged).
                 let _ = reply.send(split_document(&doc, &mode, &dest_dir, &stem));
+            }
+            Message::CompressDocument { level, dest, reply } => {
+                // SPEC: P7-OCR-010 — read-only: write a smaller copy. No undo,
+                // no dirty (the open doc is unchanged, and deliberately so —
+                // the recompression is lossy).
+                let _ = reply.send(compress_document(&doc, level, &dest));
             }
             Message::Autosave => {
                 // SPEC: P2.A2 — write a recovery copy only when dirty, i.e.

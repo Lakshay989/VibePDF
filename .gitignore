@@ -84,6 +84,12 @@ Sample PDFs/
 # Generated Phase 1 acceptance fixtures (rebuild via the script)
 tests/fixtures/acceptance/*.pdf
 
+# P7.C2a: the noisy scan that compression is measured on. A fixture that can
+# actually be compressed is megabytes by nature — the whole point is that Flate
+# cannot squeeze scanner noise. Rebuild with:
+#   python3 tests/fixtures/basic/generate-noisy-scan.py
+tests/fixtures/basic/noisy-scan.pdf
+
 # Python virtualenv for the fixture generator (PEP 668 forces a venv
 # on system Python installs; the venv itself is a per-machine artifact).
 .venv*/

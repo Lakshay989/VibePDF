@@ -307,7 +307,7 @@ fn number_as_f32(obj: &Object) -> Option<f32> {
 
 /// The effective `/MediaBox` of `page_id` as `[llx, lly, urx, ury]`, walking up
 /// the `/Parent` chain for an inherited box. `None` if absent/malformed.
-fn effective_media_box(doc: &Document, page_id: ObjectId) -> Option<[f32; 4]> {
+pub(crate) fn effective_media_box(doc: &Document, page_id: ObjectId) -> Option<[f32; 4]> {
     let mut current = Some(page_id);
     for _ in 0..32 {
         let id = current?;

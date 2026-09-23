@@ -38,6 +38,7 @@ vibepdf/
 │   │   │   ├── ocr_text_layer.rs # Invisible text over a scan: render → OCR → place (P7-OCR-001)
 │   │   │   ├── export_text.rs    # Document → plain text in reading order (P7-OCR-006)
 │   │   │   ├── export_image.rs   # Pages → PNG/JPG/TIFF/WebP at 72–600 DPI (P7-OCR-005)
+│   │   │   ├── compress.rs      # Smaller file: image recompression + stream deflation (P7-OCR-010)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)

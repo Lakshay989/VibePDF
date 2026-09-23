@@ -4,6 +4,7 @@ pub mod autosave;
 pub mod background;
 pub mod bates;
 pub mod clean;
+pub mod compress;
 pub mod cos;
 pub mod crop;
 pub mod delete_page;

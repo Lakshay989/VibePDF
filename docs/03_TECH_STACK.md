@@ -148,6 +148,29 @@ Two limits worth stating rather than discovering:
 
 ---
 
+## Compression — `lopdf` + the `image` encoders (P7.C2a)
+
+P7-OCR-010 names three targets. Two are implemented in `pdf/compress.rs`; the third, font subsetting, is deliberately deferred to its own step (decided 2026-09-23) — doing it properly means walking every content stream to learn which glyphs are used, and it saves nothing on the scanned documents the feature exists for.
+
+**Where the bytes actually are**, measured 2026-09-23 on a 20-page 300 DPI grayscale scan with sensor noise (81.6 MB, `tests/fixtures/basic/generate-noisy-scan.py`):
+
+| | 300 DPI | 200 DPI | 150 DPI |
+|---|---|---|---|
+| JPEG q85 | 20.4% | 9.1% | 5.2% |
+| JPEG q60 | 5.6% | 2.5% | 1.5% |
+
+Stream deflation is the opposite shape: nothing on a scan (every image stream is already Flate), and 92.8% on `unicode-text.pdf`, which stores its embedded font program uncompressed.
+
+**Why `lopdf` and not `PDFium` for the image pass.** `PdfPageImageObject::set_image` calls `FPDFImageObj_SetBitmap`, which stores a **raw BGRA bitmap** — it would inflate every image fourfold and turn a `DeviceGray` scan into four channels. PDFium's only compressing path, `FPDFImageObj_LoadJpegFileInline`, is reachable through `pdfium-render` solely when *creating* an object, not when replacing one.
+
+**Triangle, not Lanczos3, for the downsample.** Measured on a 2550×3300 scan page reduced to 200 DPI: Triangle took 3.3 s against Lanczos3's 6.7 s *and* produced a 21% smaller JPEG (241 KB against 305 KB). Lanczos3 rings, which preserves exactly the sensor noise the JPEG then has to spend bits on; a bilinear kernel low-passes it away. Faster and smaller on the same input is not a trade-off.
+
+**Two rules keep it safe to offer.** Nothing is replaced unless the replacement is smaller — per image *and* for the file as a whole — and nothing is touched whose colour cannot survive the trip. The colour space is read only to learn the channel count; the `/ColorSpace` entry itself is never rewritten, so ICC-managed and calibrated images keep their profile across the re-encode. `/Indexed`, `/Separation` and `/DeviceN` are refused outright, because a sample there is an index or an ink quantity rather than a colour.
+
+Compression writes a **new file** rather than becoming an undoable edit: the image pass is lossy, and an edit would let the next Ctrl-S overwrite the user's original with the degraded version.
+
+---
+
 ## Crypto & signing — `rsa`, `x509-cert`, `cms`
 
 **Why these crates:** RustCrypto's pure-Rust ecosystem. Apache 2.0 / MIT. No OpenSSL dependency to wrestle with at install time.

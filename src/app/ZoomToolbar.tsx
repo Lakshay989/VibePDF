@@ -45,6 +45,8 @@ export interface ZoomToolbarProps {
   onExportText?: (() => void) | undefined;
   /** SPEC: P7-OCR-005 (P7.B2) — open the export-as-images dialog. */
   onExportImages?: (() => void) | undefined;
+  /** SPEC: P7-OCR-010 (P7.C2a) — open the compress dialog. */
+  onCompress?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
   onSign?: (() => void) | undefined;
   /** SPEC: P6-SEC-011 (P6.D2b) — open the find-and-redact dialog. */
@@ -78,6 +80,7 @@ export function ZoomToolbar({
   onOcr,
   onExportText,
   onExportImages,
+  onCompress,
   onSign,
   onFindRedact,
   onUnlock,
@@ -340,6 +343,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Export images…
+        </button>
+      ) : null}
+
+      {onCompress ? (
+        <button
+          type="button"
+          onClick={onCompress}
+          title="Save a smaller copy of this PDF"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Compress…
         </button>
       ) : null}
 

@@ -18,6 +18,7 @@ import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
 import { CleanDialog } from "@/app/CleanDialog";
+import { CompressDialog } from "@/app/CompressDialog";
 import { ExportImageDialog } from "@/app/ExportImageDialog";
 import { OcrDialog } from "@/app/OcrDialog";
 import { exportText } from "@/ipc/export-text";
@@ -241,6 +242,11 @@ export function PdfViewer({ documentId, path }: Props) {
   const [cleanOpen, setCleanOpen] = useState(false);
   const [ocrOpen, setOcrOpen] = useState(false);
   const [exportImagesOpen, setExportImagesOpen] = useState(false);
+  const [compressOpen, setCompressOpen] = useState(false);
+  // SPEC: P7-OCR-010 — the file's size on disk, for the compress dialog's
+  // estimate. PDF.js already knows it (it loaded the bytes), so this asks it
+  // rather than adding a backend round-trip for a number we have.
+  const [documentBytes, setDocumentBytes] = useState(0);
   const [licencesOpen, setLicencesOpen] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
   const [findRedactOpen, setFindRedactOpen] = useState(false);
@@ -338,6 +344,16 @@ export function PdfViewer({ documentId, path }: Props) {
         }
         setDoc(localDoc);
         setError(null);
+        void localDoc
+          .getDownloadInfo()
+          .then(({ length }) => {
+            if (!cancelled) setDocumentBytes(length);
+          })
+          .catch(() => {
+            // A size we cannot read is not worth failing a document load over;
+            // the dialog simply omits its estimate.
+            if (!cancelled) setDocumentBytes(0);
+          });
         // This reload's bytes bake every edit up to `epoch`; once its pages
         // paint, drop the optimistic overlays that were bridging the gap. One
         // rAF lets PDF.js render the delta first, so there's never a blank frame
@@ -557,6 +573,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onOcr={doc ? () => setOcrOpen(true) : undefined}
         onExportText={doc ? () => void handleExportText() : undefined}
         onExportImages={doc ? () => setExportImagesOpen(true) : undefined}
+        onCompress={doc ? () => setCompressOpen(true) : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}
         onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}
         onUnlock={doc ? () => setUnlockOpen(true) : undefined}
@@ -655,6 +672,17 @@ export function PdfViewer({ documentId, path }: Props) {
         }
         stem={basename(path).replace(/\.pdf$/i, "") || "page"}
         onClose={() => setExportImagesOpen(false)}
+      />
+      {/* SPEC: P7-OCR-010 (P7.C2a) — compress. Read-only on the open document
+          by design: the recompression is lossy, so it writes a copy and leaves
+          the original alone. */}
+      <CompressDialog
+        open={compressOpen}
+        documentId={documentId}
+        suggestedName={`${basename(path).replace(/\.pdf$/i, "") || "document"}-compressed.pdf`}
+        currentBytes={documentBytes}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setCompressOpen(false)}
       />
       <UnlockDialog
         open={unlockOpen}

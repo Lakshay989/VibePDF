@@ -15,6 +15,7 @@ use crate::pdf::form_data::ExportFormat;
 use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
 use crate::ocr::preprocess::PreprocessOptions;
+use crate::pdf::compress::{CompressLevel, CompressReport};
 use crate::pdf::export_image::{ImageExportFormat, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::TextExportSummary;
 use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
@@ -1548,6 +1549,35 @@ pub async fn pdf_export_text(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.export_text_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-010 (P7.C2a) — write a smaller copy of the document to `path`
+/// at `level` (`low`, `medium` or `high`), and report the before/after sizes.
+///
+/// The open document is **not** modified: image recompression is lossy, so the
+/// result is a new file rather than an undoable edit.
+#[tauri::command]
+pub async fn pdf_compress_document(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    level: String,
+) -> Result<CompressReport, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let level = CompressLevel::parse(&level)?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.compress_request(level, PathBuf::from(path))?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
