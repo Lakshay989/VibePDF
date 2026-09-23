@@ -16,6 +16,7 @@ use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
 use crate::ocr::preprocess::PreprocessOptions;
 use crate::pdf::compress::{CompressLevel, CompressReport};
+use crate::pdf::export_docx::DocxExportSummary;
 use crate::pdf::export_image::{ImageExportFormat, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::TextExportSummary;
 use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
@@ -1549,6 +1550,32 @@ pub async fn pdf_export_text(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.export_text_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-004 (P7.B1a) — write the document to `path` as a Word `.docx`,
+/// preserving reading order, bold/italic, headings and images. `pages` empty
+/// means the whole document. The PDF is not modified.
+#[tauri::command]
+pub async fn pdf_export_docx(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<DocxExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_docx_request(pages, PathBuf::from(path))?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

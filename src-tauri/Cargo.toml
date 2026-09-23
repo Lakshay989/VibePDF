@@ -54,6 +54,16 @@ image = { version = "0.25", default-features = false, features = [
 # `with_compression(Deflate)`. Adds no crate to the tree; `image`'s tiff feature
 # stays on because the tests decode TIFF back with it.
 tiff = "0.11"
+# P7.B1a (SPEC P7-OCR-004): the two halves of a ZIP entry, for the Office Open
+# XML container a .docx is. Both are **already in Cargo.lock and reachable from
+# the normal dependency tree** — flate2 via lopdf, crc32fast via flate2 — so
+# these are direct edges, not new crates. The `zip` crate was the alternative;
+# it is in the lock only as a build dependency of the Tauri bundler, so taking
+# it would have pulled zip, zopfli, typed-path and friends into the shipped
+# binary for a container we write in ~150 lines (`pdf/ooxml.rs`): no Zip64, no
+# encryption, no streaming.
+flate2 = "1"
+crc32fast = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 # P7.A1 (SPEC P7-OCR-001, P7-OCR-003): Tesseract, the OCR engine the spec
 # names. `leptess`, the binding docs/03_TECH_STACK.md originally picked, has

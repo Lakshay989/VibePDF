@@ -171,6 +171,22 @@ Compression writes a **new file** rather than becoming an undoable edit: the ima
 
 ---
 
+## Word export — hand-written OOXML (P7.B1a)
+
+A `.docx` is a ZIP of five small XML parts. `pdf/ooxml.rs` writes that container directly: local file headers, a central directory, an end-of-central-directory record, and nothing else — no Zip64 (the parts are kilobytes), no encryption, no streaming.
+
+**Why not the `zip` crate.** It is in `Cargo.lock`, but only as a build dependency of the Tauri bundler; `cargo tree -e normal -i zip` finds nothing, so taking it would have pulled `zip`, `zopfli`, `typed-path` and friends into the shipped binary. `flate2` (via lopdf) and `crc32fast` (via flate2) were already reachable, and they are the whole of what a ZIP entry needs — so the two direct edges added here cost **zero new crates**, which the licence report confirms (410 before and after).
+
+The risk of a hand-written container is that a subtle error produces a file Word silently refuses, so it is checked three ways: our own reader for content, `unzip -t` in the test suite for the format, and Word itself in the acceptance pass. That layering earned its keep immediately — a deliberately corrupted central-directory offset was invisible to our reader (which walks local headers) and caught only by `unzip -t`.
+
+**Headings are relative, never absolute.** A PDF has no heading flag; it has type that is larger than its neighbours. The body size is whichever size the most *characters* are set in — counting runs would let a three-word title outvote a paragraph — and a line materially larger than that is a heading, ranked by size. A document set in one size gets no headings at all.
+
+Measured 2026-09-23: the first width rule (a heading must be under 60% of its column) rejected a plain 20 pt title that ran to 63%. The rule now applies only below 1.5× the body size, where length is genuinely the tie-breaker between a heading and a lead paragraph.
+
+Tables are **not** here — that is P7.B1b. Detecting a table is a different problem with a different failure mode, because a wrong table is worse for a reader than no table.
+
+---
+
 ## Crypto & signing — `rsa`, `x509-cert`, `cms`
 
 **Why these crates:** RustCrypto's pure-Rust ecosystem. Apache 2.0 / MIT. No OpenSSL dependency to wrestle with at install time.

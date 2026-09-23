@@ -45,6 +45,8 @@ export interface ZoomToolbarProps {
   onExportText?: (() => void) | undefined;
   /** SPEC: P7-OCR-005 (P7.B2) — open the export-as-images dialog. */
   onExportImages?: (() => void) | undefined;
+  /** SPEC: P7-OCR-004 (P7.B1a) — export the document as Word. */
+  onExportDocx?: (() => void) | undefined;
   /** SPEC: P7-OCR-010 (P7.C2a) — open the compress dialog. */
   onCompress?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
@@ -80,6 +82,7 @@ export function ZoomToolbar({
   onOcr,
   onExportText,
   onExportImages,
+  onExportDocx,
   onCompress,
   onSign,
   onFindRedact,
@@ -343,6 +346,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Export images…
+        </button>
+      ) : null}
+
+      {onExportDocx ? (
+        <button
+          type="button"
+          onClick={onExportDocx}
+          title="Save this PDF as a Word document"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export to Word…
         </button>
       ) : null}
 

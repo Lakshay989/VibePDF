@@ -47,3 +47,39 @@ describe("ZoomToolbar theme control", () => {
     expect(screen.getByLabelText("Toggle outline sidebar")).toBeTruthy();
   });
 });
+
+// SPEC: P7-OCR-004 (P7.B1a) — the same "shipped but unreachable" guard as the
+// theme control above, for the conversions.
+//
+// This is the failure P7.A4 was written to fix: Track A built an OCR engine
+// that nothing in the app could reach, and the phase's own acceptance demo
+// could not be performed. A handler that is never wired to a button is a
+// feature that does not exist, and no amount of backend testing sees it.
+describe("ZoomToolbar conversion entries", () => {
+  it("shows an entry for each conversion only when a handler is supplied", () => {
+    const { rerender } = render(<ZoomToolbar />);
+    for (const label of [/Export to Word/, /Export images/, /Export text/, /Compress/]) {
+      expect(screen.queryByRole("button", { name: label })).toBeNull();
+    }
+
+    const calls: string[] = [];
+    rerender(
+      <ZoomToolbar
+        onExportDocx={() => calls.push("docx")}
+        onExportImages={() => calls.push("images")}
+        onExportText={() => calls.push("text")}
+        onCompress={() => calls.push("compress")}
+      />,
+    );
+    for (const [label, expected] of [
+      [/Export to Word/, "docx"],
+      [/Export images/, "images"],
+      [/Export text/, "text"],
+      [/Compress/, "compress"],
+    ] as const) {
+      const button = screen.getByRole("button", { name: label });
+      fireEvent.click(button);
+      expect(calls).toContain(expected);
+    }
+  });
+});

@@ -49,6 +49,7 @@ use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::compress::{compress_document, CompressLevel, CompressReport};
+use crate::pdf::export_docx::{export_docx, DocxExportSummary};
 use crate::pdf::export_image::{export_pages, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::{document_text, TextExportSummary};
 use crate::pdf::ocr_text_layer::{
@@ -598,6 +599,13 @@ pub enum Message {
         pages: Vec<i32>,
         dest: std::path::PathBuf,
         reply: oneshot::Sender<Result<TextExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-004 — write the 0-based `pages` to `dest` as a Word
+    /// document. Read-only on the source.
+    ExportDocx {
+        pages: Vec<i32>,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<DocxExportSummary, CommandError>>,
     },
     /// SPEC: P7-OCR-005 — render the 0-based `pages` into `dest_dir` as
     /// `{stem}-{n:03}.{ext}`, one image file per page. Read-only on the
@@ -2363,6 +2371,30 @@ impl DocumentActorHandle {
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-004 — export as Word. Non-blocking; the command awaits.
+    pub fn export_docx_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<DocxExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportDocx { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-004 — export as Word. Await-holding for tests.
+    pub async fn export_docx(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<DocxExportSummary, CommandError> {
+        let rx = self.export_docx_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
     /// SPEC: P7-OCR-010 — write a compressed copy. Non-blocking; the command
@@ -4499,6 +4531,20 @@ fn run_worker(
                 // SPEC: P2-PAGE-007 — read-only: emit N files from the source.
                 // No undo, no dirty (the open doc is unchanged).
                 let _ = reply.send(split_document(&doc, &mode, &dest_dir, &stem));
+            }
+            Message::ExportDocx { pages, dest, reply } => {
+                // SPEC: P7-OCR-004 (P7.B1a) — a read of the document and a
+                // write of a .docx; the PDF is untouched, nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_docx(&doc, &pages, &dest));
+                let _ = reply.send(result);
             }
             Message::CompressDocument { level, dest, reply } => {
                 // SPEC: P7-OCR-010 — read-only: write a smaller copy. No undo,

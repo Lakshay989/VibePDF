@@ -21,6 +21,7 @@ import { CleanDialog } from "@/app/CleanDialog";
 import { CompressDialog } from "@/app/CompressDialog";
 import { ExportImageDialog } from "@/app/ExportImageDialog";
 import { OcrDialog } from "@/app/OcrDialog";
+import { exportDocx } from "@/ipc/export-docx";
 import { exportText } from "@/ipc/export-text";
 import { LicensesDialog } from "@/app/LicensesDialog";
 import { FindRedactDialog } from "@/app/FindRedactDialog";
@@ -185,6 +186,30 @@ export function PdfViewer({ documentId, path }: Props) {
       }
     } catch (err) {
       reportError("Couldn't export the text", err);
+    }
+  }, [documentId, path]);
+
+  // SPEC: P7-OCR-004 (P7.B1a) — export as Word. Read-only on the PDF, so no
+  // epoch bump and nothing to undo; the same native save dialog as the others.
+  const handleExportDocx = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.docx`,
+        filters: [{ name: "Word document", extensions: ["docx"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportDocx(documentId, dest);
+      if (summary.paragraphs === 0 && summary.images === 0) {
+        reportError(
+          "Nothing to export",
+          new Error(
+            "This document has no text or images — if it is a scan, use Read text… first to recognise it.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export to Word", err);
     }
   }, [documentId, path]);
 
@@ -573,6 +598,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onOcr={doc ? () => setOcrOpen(true) : undefined}
         onExportText={doc ? () => void handleExportText() : undefined}
         onExportImages={doc ? () => setExportImagesOpen(true) : undefined}
+        onExportDocx={doc ? () => void handleExportDocx() : undefined}
         onCompress={doc ? () => setCompressOpen(true) : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}
         onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}

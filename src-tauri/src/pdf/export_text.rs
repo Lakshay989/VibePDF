@@ -67,23 +67,45 @@ const COLUMN_GAP: f32 = 36.0;
 /// geometry stops meaning "read this side first", so fall back to line order.
 const MAX_COLUMNS: usize = 4;
 
-/// SPEC: P7-OCR-006 — order one page's runs the way a person reads them.
+/// SPEC: P7-OCR-006 — group one page's runs the way a person reads them:
+/// columns left to right, lines down each column, runs across each line.
 ///
-/// Columns first (left to right), then lines down each column, then runs across
-/// each line. Pure: rectangles in, text out.
+/// Returns indices into `pieces` rather than text, so a caller that needs to
+/// carry something else through the ordering — DOCX carries each run's font and
+/// size (P7-OCR-004) — uses the same geometry instead of a second copy of it.
+/// [`order_pieces`] is the text-only wrapper.
+///
+/// Pure: rectangles in, an ordering out.
+#[must_use]
+pub fn group_pieces(pieces: &[TextPiece]) -> Vec<Vec<Vec<usize>>> {
+    if pieces.is_empty() {
+        return Vec::new();
+    }
+    split_columns(pieces)
+        .into_iter()
+        .map(|column| {
+            split_lines(pieces, &column)
+                .into_iter()
+                .map(|mut line| {
+                    line.sort_by(|a, b| pieces[*a].left.total_cmp(&pieces[*b].left));
+                    line
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// SPEC: P7-OCR-006 — one page's text, in reading order.
+///
+/// The text-only view of [`group_pieces`].
 #[must_use]
 pub fn order_pieces(pieces: &[TextPiece]) -> String {
-    if pieces.is_empty() {
-        return String::new();
-    }
-    let columns = split_columns(pieces);
     let mut out = String::new();
-    for column in columns {
-        for line in split_lines(&column) {
-            let mut sorted = line;
-            sorted.sort_by(|a, b| a.left.total_cmp(&b.left));
+    for column in group_pieces(pieces) {
+        for line in column {
             let mut text = String::new();
-            for piece in sorted {
+            for index in line {
+                let piece = &pieces[index];
                 // PDF has no spaces, only positions. A run that starts well
                 // after the previous one ended is a word break; anything
                 // tighter is the same word split across runs.
@@ -104,7 +126,7 @@ pub fn order_pieces(pieces: &[TextPiece]) -> String {
 
 /// Group runs into columns by looking for vertical corridors with no text in
 /// them. Returns one group when the page has no such corridor.
-fn split_columns(pieces: &[TextPiece]) -> Vec<Vec<&TextPiece>> {
+fn split_columns(pieces: &[TextPiece]) -> Vec<Vec<usize>> {
     let mut spans: Vec<(f32, f32)> = pieces.iter().map(|p| (p.left, p.right)).collect();
     spans.sort_by(|a, b| a.0.total_cmp(&b.0));
 
@@ -117,16 +139,16 @@ fn split_columns(pieces: &[TextPiece]) -> Vec<Vec<&TextPiece>> {
         }
     }
     if merged.len() < 2 || merged.len() > MAX_COLUMNS {
-        return vec![pieces.iter().collect()];
+        return vec![(0..pieces.len()).collect()];
     }
 
     merged
         .iter()
         .map(|(left, right)| {
-            pieces
-                .iter()
-                .filter(|p| {
-                    let centre = (p.left + p.right) / 2.0;
+            (0..pieces.len())
+                .filter(|i| {
+                    let piece = &pieces[*i];
+                    let centre = (piece.left + piece.right) / 2.0;
                     centre >= *left && centre <= *right
                 })
                 .collect()
@@ -135,24 +157,25 @@ fn split_columns(pieces: &[TextPiece]) -> Vec<Vec<&TextPiece>> {
 }
 
 /// Group a column's runs into lines by vertical position, top first.
-fn split_lines<'a>(column: &[&'a TextPiece]) -> Vec<Vec<&'a TextPiece>> {
-    let mut sorted: Vec<&TextPiece> = column.to_vec();
-    sorted.sort_by(|a, b| a.middle_y().total_cmp(&b.middle_y()));
+fn split_lines(pieces: &[TextPiece], column: &[usize]) -> Vec<Vec<usize>> {
+    let mut sorted: Vec<usize> = column.to_vec();
+    sorted.sort_by(|a, b| pieces[*a].middle_y().total_cmp(&pieces[*b].middle_y()));
 
-    let mut lines: Vec<Vec<&TextPiece>> = Vec::new();
-    for piece in sorted {
+    let mut lines: Vec<Vec<usize>> = Vec::new();
+    for index in sorted {
+        let piece = &pieces[index];
         // Half a line's height: enough to hold a line together through
         // superscripts and mixed sizes, tight enough to keep lines apart.
         let tolerance = (piece.height() / 2.0).max(1.0);
         match lines.last_mut() {
             Some(line)
-                if line
-                    .first()
-                    .is_some_and(|first| (first.middle_y() - piece.middle_y()).abs() <= tolerance) =>
+                if line.first().is_some_and(|first| {
+                    (pieces[*first].middle_y() - piece.middle_y()).abs() <= tolerance
+                }) =>
             {
-                line.push(piece);
+                line.push(index);
             }
-            _ => lines.push(vec![piece]),
+            _ => lines.push(vec![index]),
         }
     }
     lines
@@ -192,7 +215,10 @@ fn page_pieces(doc: &PdfDocument<'_>, index: i32) -> Result<Vec<TextPiece>, Comm
 }
 
 /// Page space (y up, unrotated) → the displayed frame (y down).
-fn to_visual(rotate: i64, vw: f32, vh: f32, x: f32, y: f32) -> (f32, f32) {
+///
+/// `pub(crate)` for `export_docx` (P7-OCR-004), which walks the same objects for
+/// a different payload and must land them in the same frame.
+pub(crate) fn to_visual(rotate: i64, vw: f32, vh: f32, x: f32, y: f32) -> (f32, f32) {
     match rotate {
         90 => (vw - y, vh - x),
         180 => (vw - x, y),
