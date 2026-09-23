@@ -32,7 +32,7 @@ pdfium-render = "0.9"
 # RenderPage IPC reply (B3). The PNG path still goes through this crate
 # directly rather than through `image` below: it is the hot one (every
 # page render on the view layer) and `png` is the thinner call.
-png = "0.17"
+png = "0.18"
 # P7.B2 (SPEC P7-OCR-005): the JPEG, TIFF and WebP encoders. The spec names
 # four output formats and the tree had an encoder for exactly one of them.
 # `image` is **already in Cargo.lock** as a transitive dependency of
