@@ -40,6 +40,7 @@ pub mod resize;
 pub mod restore;
 pub mod rotate;
 pub mod split;
+pub mod table_detect;
 pub mod text_extract;
 pub mod undo;
 pub mod watermark;

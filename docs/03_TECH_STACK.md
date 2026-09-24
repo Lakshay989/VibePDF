@@ -183,7 +183,11 @@ The risk of a hand-written container is that a subtle error produces a file Word
 
 Measured 2026-09-23: the first width rule (a heading must be under 60% of its column) rejected a plain 20 pt title that ran to 63%. The rule now applies only below 1.5× the body size, where length is genuinely the tie-breaker between a heading and a lead paragraph.
 
-Tables are **not** here — that is P7.B1b. Detecting a table is a different problem with a different failure mode, because a wrong table is worse for a reader than no table.
+**Tables are detected from ruling lines only** (P7.B1b). There are two ways to guess that some text is a table: ruling lines are *evidence* — the document drew a grid — while alignment is a *guess* that fires on two-column layouts, contents lists and forms. A wrong table is worse for a reader than no table, because it locks prose into cells they then have to unpick, so an unruled table comes out as paragraphs.
+
+Four guards stand between a page's rules and a table: at least two horizontal and two vertical grid lines, lines that actually bound a region, at least 2×2 cells, and text inside. A section rule under a masthead has no verticals; a box round a pull-quote has one cell; a bordered sidebar has one column. The fixture carries a decoy rule so that failure stays visible.
+
+One measured trap: **`PDFium` reports a path segment's point before the object matrix is applied, while its bounding box is after.** Measured 2026-09-23 — a line written `10 10 m 100 10 l` under `2 0 0 2 20 40 cm` reports points `(10,10)-(100,10)` and bounds `(38.5,58.5)-(221.5,61.5)`. A detector that trusts the raw points mislocates every rule in a transformed document, and most real documents are transformed, so one fixture page is drawn under a `cm` purely to keep that regression caught.
 
 ---
 

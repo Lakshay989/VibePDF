@@ -22,12 +22,15 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use pdfium_render::prelude::{PdfDocument, PdfPageObjectCommon, PdfPageObjectsCommon};
+use pdfium_render::prelude::{
+    PdfDocument, PdfPageObjectCommon, PdfPageObjectsCommon, PdfPathSegmentType, PdfPathSegments,
+};
 use serde::Serialize;
 
 use crate::error::CommandError;
 use crate::pdf::export_text::{group_pieces, TextPiece};
 use crate::pdf::ooxml::{escape_xml, ZipWriter};
+use crate::pdf::table_detect::{detect_tables, usable, Cell, Rule, Table};
 
 /// One run of text with the formatting Word needs for it.
 #[derive(Clone, Debug, PartialEq)]
@@ -65,6 +68,7 @@ pub struct DocxExportSummary {
     pub paragraphs: u32,
     pub headings: u32,
     pub images: u32,
+    pub tables: u32,
     pub bytes: u64,
 }
 
@@ -218,6 +222,11 @@ fn styles_xml() -> String {
             outline = level - 1
         );
     }
+    // The style `table_xml` names. Word tolerates a missing style reference,
+    // but LibreOffice renders the table without borders, so it is defined.
+    out.push_str(
+        r#"<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/><w:left w:val="single" w:sz="4" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:color="auto"/><w:right w:val="single" w:sz="4" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:color="auto"/></w:tblBorders></w:tblPr></w:style>"#,
+    );
     out.push_str("</w:styles>");
     out
 }
@@ -268,6 +277,56 @@ fn image_xml(index: usize, image: &EmbeddedImage) -> String {
     )
 }
 
+/// One table as `WordprocessingML`.
+///
+/// Word wants an explicit grid (`w:tblGrid`) as well as the cells, and a cell
+/// must contain at least one paragraph — an empty `w:tc` is one of the ways to
+/// get "the file is corrupt", so an empty cell gets an empty paragraph.
+fn table_xml(table: &FilledTable) -> String {
+    // A single width for every column. The PDF's own column widths are known,
+    // but Word lays a table out from its grid and the text almost never fits
+    // the original measure; an even grid that Word then autofits reads better
+    // than a faithful one that clips.
+    let width = if table.columns == 0 {
+        0
+    } else {
+        // Fiftieths of a percent, which is what `pct` means here: 100% = 5000.
+        5000 / i32::try_from(table.columns).unwrap_or(1)
+    };
+    let mut out = String::from(
+        r#"<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/><w:left w:val="single" w:sz="4" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:color="auto"/><w:right w:val="single" w:sz="4" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:color="auto"/></w:tblBorders></w:tblPr><w:tblGrid>"#,
+    );
+    for _ in 0..table.columns {
+        let _ = write!(out, r#"<w:gridCol w:w="{width}"/>"#);
+    }
+    out.push_str("</w:tblGrid>");
+
+    for row in &table.rows {
+        out.push_str("<w:tr>");
+        for cell in row {
+            let _ = write!(
+                out,
+                r#"<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="pct"/></w:tcPr>"#
+            );
+            if cell.is_empty() {
+                // Word requires a paragraph in every cell.
+                out.push_str("<w:p/>");
+            } else {
+                for paragraph in cell {
+                    out.push_str(&paragraph_xml(paragraph));
+                }
+            }
+            out.push_str("</w:tc>");
+        }
+        out.push_str("</w:tr>");
+    }
+    out.push_str("</w:tbl>");
+    // A table immediately followed by another, or ending the body, needs a
+    // paragraph after it or Word merges them.
+    out.push_str("<w:p/>");
+    out
+}
+
 /// The whole `word/document.xml`.
 fn document_xml(blocks: &[Block]) -> String {
     let mut out = String::from(
@@ -278,6 +337,7 @@ fn document_xml(blocks: &[Block]) -> String {
     for block in blocks {
         match block {
             Block::Paragraph(p) => out.push_str(&paragraph_xml(p)),
+            Block::Table(table) => out.push_str(&table_xml(table)),
             Block::Image(image) => {
                 out.push_str(&image_xml(image_index, image));
                 image_index += 1;
@@ -311,6 +371,15 @@ fn document_rels(image_count: usize) -> String {
 pub enum Block {
     Paragraph(Paragraph),
     Image(EmbeddedImage),
+    Table(FilledTable),
+}
+
+/// A detected table with each cell's text put back into it.
+#[derive(Clone, Debug)]
+pub struct FilledTable {
+    pub columns: usize,
+    /// Row-major: `rows[r][c]` is the paragraphs of cell `(r, c)`.
+    pub rows: Vec<Vec<Vec<Paragraph>>>,
 }
 
 /// SPEC: P7-OCR-004 — assemble the `.docx` archive.
@@ -322,7 +391,7 @@ pub fn build_docx(blocks: &[Block]) -> Result<Vec<u8>, CommandError> {
         .iter()
         .filter_map(|b| match b {
             Block::Image(i) => Some(i),
-            Block::Paragraph(_) => None,
+            Block::Paragraph(_) | Block::Table(_) => None,
         })
         .collect();
 
@@ -345,6 +414,7 @@ pub fn build_docx(blocks: &[Block]) -> Result<Vec<u8>, CommandError> {
 }
 
 /// One styled run with where it sits, in the frame a reader sees.
+#[derive(Clone)]
 struct Placed {
     piece: TextPiece,
     bold: bool,
@@ -392,11 +462,12 @@ fn font_style(name: &str, weight: Option<i32>, italic_flag: bool, italic_angle: 
     (bold, italic)
 }
 
-/// Read one page into styled runs and images, in the displayed frame.
-fn page_content(
-    doc: &PdfDocument<'_>,
-    index: i32,
-) -> Result<(Vec<Placed>, Vec<EmbeddedImage>), CommandError> {
+/// What one page contributes: its styled runs, its images, and the rules a
+/// table might be detected from.
+type PageContent = (Vec<Placed>, Vec<EmbeddedImage>, Vec<Rule>);
+
+/// Read one page into styled runs, images and rules, in the displayed frame.
+fn page_content(doc: &PdfDocument<'_>, index: i32) -> Result<PageContent, CommandError> {
     use crate::pdf::cos::visual_transform;
     use crate::pdf::export_text::to_visual;
 
@@ -408,6 +479,7 @@ fn page_content(
 
     let mut runs = Vec::new();
     let mut images = Vec::new();
+    let mut rules = Vec::new();
     for object in page.objects().iter() {
         let Ok(bounds) = object.bounds() else { continue };
         let (x0, y0) = to_visual(rotate, vw, vh, bounds.left().value, bounds.top().value);
@@ -449,10 +521,74 @@ fn page_content(
                 width_points: (right - left).abs().max(1.0),
                 height_points: (bottom - top).abs().max(1.0),
             });
+        } else if let Some(path) = object.as_path_object() {
+            // SPEC: P7-OCR-004 — the rules a table is detected from.
+            //
+            // Segment points are in the object's **own** space, not the page's:
+            // measured 2026-09-23, a line written `10 10 m 100 10 l` under a
+            // `2 0 0 2 20 40 cm` reports its points as (10,10)-(100,10) while
+            // its bounds report (38.5,58.5)-(221.5,61.5). So the object matrix
+            // has to be applied, and a detector that trusted the raw points
+            // would mislocate every rule in any document that uses a transform.
+            let matrix = object.matrix().ok();
+            let apply = |x: f32, y: f32| -> (f32, f32) {
+                matrix.map_or((x, y), |m| {
+                    (
+                        m.a().mul_add(x, m.c() * y) + m.e(),
+                        m.b().mul_add(x, m.d() * y) + m.f(),
+                    )
+                })
+            };
+
+            let mut previous: Option<(f32, f32)> = None;
+            for segment in path.segments().iter() {
+                let (px, py) = segment.point();
+                let point = apply(px.value, py.value);
+                let is_line = segment.segment_type() == PdfPathSegmentType::LineTo;
+                if let (true, Some(start)) = (is_line, previous) {
+                    if let Some(rule) = rule_between(start, point, rotate, vw, vh) {
+                        rules.push(rule);
+                    }
+                }
+                previous = Some(point);
+            }
         }
     }
-    Ok((runs, images))
+    Ok((runs, images, usable(&rules)))
 }
+
+/// Two points make a rule when the line between them is axis-aligned. Anything
+/// else — a diagonal, a curve's control polygon — is not part of a grid.
+fn rule_between(
+    start: (f32, f32),
+    end: (f32, f32),
+    rotate: i64,
+    vw: f32,
+    vh: f32,
+) -> Option<Rule> {
+    use crate::pdf::export_text::to_visual;
+    // Straightness is judged in page space, before the y-flip, so the test is
+    // the same one the content stream wrote.
+    let flat_y = (start.1 - end.1).abs() <= STRAIGHT_TOLERANCE;
+    let flat_x = (start.0 - end.0).abs() <= STRAIGHT_TOLERANCE;
+    if flat_y == flat_x {
+        return None; // a point, or a diagonal
+    }
+    let a = to_visual(rotate, vw, vh, start.0, start.1);
+    let b = to_visual(rotate, vw, vh, end.0, end.1);
+    // A page turned 90 degrees turns rows into columns, so which axis a rule
+    // lies on is decided *after* the rotation, not before.
+    let horizontal = (a.1 - b.1).abs() <= STRAIGHT_TOLERANCE;
+    Some(if horizontal {
+        Rule { horizontal: true, position: (a.1 + b.1) / 2.0, from: a.0.min(b.0), to: a.0.max(b.0) }
+    } else {
+        Rule { horizontal: false, position: (a.0 + b.0) / 2.0, from: a.1.min(b.1), to: a.1.max(b.1) }
+    })
+}
+
+/// How far from axis-aligned a rule may be and still count. Half a point
+/// absorbs rounding in the content stream without admitting a real diagonal.
+const STRAIGHT_TOLERANCE: f32 = 0.5;
 
 /// A vertical gap wider than this many line-heights ends a paragraph.
 const PARAGRAPH_GAP: f32 = 1.5;
@@ -463,6 +599,109 @@ const PARAGRAPH_GAP: f32 = 1.5;
 /// vertical gap over [`PARAGRAPH_GAP`] line-heights, a change of heading level,
 /// or a change of left edge (an indent starts a new paragraph, which is what an
 /// indent is *for*).
+/// [`paragraphs_from_lines`] with each paragraph's top edge, so blocks can be
+/// interleaved with tables in reading order.
+fn paragraphs_with_position(
+    runs: &[Placed],
+    columns: &[Vec<Vec<usize>>],
+    body: f32,
+    sizes: &[i32],
+) -> Vec<(f32, Paragraph)> {
+    let tops = column_line_tops(runs, columns);
+    let paragraphs = paragraphs_from_lines(runs, columns, body, sizes);
+    // `paragraphs_from_lines` merges lines into paragraphs, so there are at
+    // most as many paragraphs as lines; pairing in order is exact because both
+    // walk the columns and lines in the same order.
+    paragraphs
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| (tops.get(i).copied().unwrap_or(0.0), p))
+        .collect()
+}
+
+/// The top edge of each paragraph, in the order `paragraphs_from_lines` emits
+/// them. Recomputed rather than threaded through, so that function keeps its
+/// single job.
+fn column_line_tops(runs: &[Placed], columns: &[Vec<Vec<usize>>]) -> Vec<f32> {
+    let mut tops = Vec::new();
+    for column in columns {
+        let mut previous: Option<(f32, f32, f32)> = None;
+        for line in column {
+            if line.is_empty() {
+                continue;
+            }
+            let top = line.iter().fold(f32::MAX, |v, i| v.min(runs[*i].piece.top));
+            let bottom = line.iter().fold(0.0_f32, |v, i| v.max(runs[*i].piece.bottom));
+            let left = line.iter().fold(f32::MAX, |v, i| v.min(runs[*i].piece.left));
+            let height = (bottom - top).abs().max(1.0);
+            let starts = match previous {
+                None => true,
+                Some((prev_bottom, prev_height, prev_left)) => {
+                    (top - prev_bottom) > prev_height * PARAGRAPH_GAP
+                        || (left - prev_left).abs() > prev_height
+                }
+            };
+            if starts {
+                tops.push(top);
+            }
+            previous = Some((bottom, height, left));
+        }
+    }
+    tops
+}
+
+/// SPEC: P7-OCR-004 — put each run back in the cell it was drawn in.
+fn fill_table(table: &Table, runs: &[&Placed]) -> FilledTable {
+    let columns = table.column_count();
+    let mut rows: Vec<Vec<Vec<Paragraph>>> =
+        vec![vec![Vec::new(); columns]; table.row_count()];
+
+    for cell in &table.cells {
+        let inside: Vec<Placed> = runs
+            .iter()
+            .filter(|placed| in_cell(cell, &placed.piece))
+            .map(|placed| (*placed).clone())
+            .collect();
+        if inside.is_empty() {
+            continue;
+        }
+        // A cell's own runs go through the same ordering as anything else, so
+        // a cell of two lines reads in the right order.
+        let pieces: Vec<TextPiece> = inside.iter().map(|r| r.piece.clone()).collect();
+        let grouped = group_pieces(&pieces);
+        // Inside a cell there are no headings — a cell is not a document
+        // section — so the body size is passed as zero, which disables them.
+        let mut paragraphs = paragraphs_from_lines(&inside, &grouped, 0.0, &[]);
+        // Trim the cell's edges. `PDFium` inserts a space between runs that sit
+        // apart on a line, which across a cell boundary leaves "Region " rather
+        // than "Region" — harmless in prose, wrong in a cell, where the text is
+        // a value someone may sort or compare.
+        for paragraph in &mut paragraphs {
+            if let Some(first) = paragraph.runs.first_mut() {
+                first.text = first.text.trim_start().to_owned();
+            }
+            if let Some(last) = paragraph.runs.last_mut() {
+                last.text = last.text.trim_end().to_owned();
+            }
+        }
+        paragraphs.retain(|p| p.runs.iter().any(|r| !r.text.is_empty()));
+        if let Some(row) = rows.get_mut(cell.row) {
+            if let Some(slot) = row.get_mut(cell.column) {
+                *slot = paragraphs;
+            }
+        }
+    }
+    FilledTable { columns, rows }
+}
+
+/// Is this run drawn inside this cell? By its centre, so a glyph that overhangs
+/// a rule by a hair still belongs to the cell it was written in.
+fn in_cell(cell: &Cell, piece: &TextPiece) -> bool {
+    let x = (piece.left + piece.right) / 2.0;
+    let y = (piece.top + piece.bottom) / 2.0;
+    x >= cell.left && x <= cell.right && y >= cell.top && y <= cell.bottom
+}
+
 fn paragraphs_from_lines(
     runs: &[Placed],
     columns: &[Vec<Vec<usize>>],
@@ -595,7 +834,7 @@ pub fn export_docx(
 
     let all_runs: Vec<StyledRun> = per_page
         .iter()
-        .flat_map(|(runs, _)| {
+        .flat_map(|(runs, _, _)| {
             runs.iter().map(|r| StyledRun {
                 text: r.piece.text.clone(),
                 bold: r.bold,
@@ -612,16 +851,50 @@ pub fn export_docx(
         pages: u32::try_from(wanted.len()).unwrap_or(u32::MAX),
         ..DocxExportSummary::default()
     };
-    for (runs, images) in per_page {
-        let pieces: Vec<TextPiece> = runs.iter().map(|r| r.piece.clone()).collect();
+    for (runs, images, rules) in per_page {
+        let tables = detect_tables(&rules);
+
+        // A cell's text must not also be a paragraph, or the document says
+        // everything twice. The split happens here, before any ordering, so
+        // neither side ever sees the other's runs.
+        let (in_table, outside): (Vec<&Placed>, Vec<&Placed>) = runs.iter().partition(|placed| {
+            let x = (placed.piece.left + placed.piece.right) / 2.0;
+            let y = (placed.piece.top + placed.piece.bottom) / 2.0;
+            tables.iter().any(|table| table.contains(x, y))
+        });
+
+        let outside: Vec<Placed> = outside.into_iter().cloned().collect();
+        let pieces: Vec<TextPiece> = outside.iter().map(|r| r.piece.clone()).collect();
         let columns = group_pieces(&pieces);
-        for paragraph in paragraphs_from_lines(&runs, &columns, body, &sizes) {
+        let positioned = paragraphs_with_position(&outside, &columns, body, &sizes);
+
+        // A table is inserted *into* the paragraph sequence, immediately before
+        // the first paragraph that starts below it. The sequence itself is
+        // never re-sorted: it is already in reading order, which on a
+        // two-column page is not the same as top-to-bottom order. Sorting every
+        // block by its top edge — which this did at first — interleaves the
+        // columns again and undoes `group_pieces` entirely.
+        let mut pending: Vec<&Table> = tables.iter().collect();
+        pending.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        let mut pending = pending.into_iter().peekable();
+
+        for (top, paragraph) in positioned {
+            while pending.peek().is_some_and(|table| table.top() <= top) {
+                let table = pending.next().unwrap_or_else(|| unreachable!("peeked"));
+                summary.tables += 1;
+                blocks.push(Block::Table(fill_table(table, &in_table)));
+            }
             if paragraph.heading.is_some() {
                 summary.headings += 1;
             }
             summary.paragraphs += 1;
             blocks.push(Block::Paragraph(paragraph));
         }
+        for table in pending {
+            summary.tables += 1;
+            blocks.push(Block::Table(fill_table(table, &in_table)));
+        }
+
         for image in images {
             summary.images += 1;
             blocks.push(Block::Image(image));

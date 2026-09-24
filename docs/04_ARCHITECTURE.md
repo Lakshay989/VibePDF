@@ -41,6 +41,7 @@ vibepdf/
 │   │   │   ├── compress.rs      # Smaller file: image recompression + stream deflation (P7-OCR-010)
 │   │   │   ├── export_docx.rs    # Document → Word: paragraphs, headings, images (P7-OCR-004)
 │   │   │   ├── ooxml.rs         # The ZIP container a .docx is, hand-written (P7-OCR-004)
+│   │   │   ├── table_detect.rs   # Ruled grids → tables, pure geometry (P7-OCR-004)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)

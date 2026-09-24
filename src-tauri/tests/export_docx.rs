@@ -223,7 +223,7 @@ async fn a_document_of_one_size_gets_no_headings() {
 async fn writes_the_verification_file() {
     let dir = PathBuf::from("../Sample PDFs/verify-docx");
     std::fs::create_dir_all(&dir).expect("verification dir");
-    for name in ["report.pdf", "two-column.pdf", "unicode-text.pdf"] {
+    for name in ["report.pdf", "table.pdf", "two-column.pdf", "unicode-text.pdf"] {
         let dest = dir.join(name.replace(".pdf", ".docx"));
         let handle = DocumentActorHandle::spawn(None, uuid::Uuid::new_v4(), fixture(name), None)
             .expect("opens");
