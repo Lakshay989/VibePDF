@@ -58,7 +58,7 @@ describe("ZoomToolbar theme control", () => {
 describe("ZoomToolbar conversion entries", () => {
   it("shows an entry for each conversion only when a handler is supplied", () => {
     const { rerender } = render(<ZoomToolbar />);
-    for (const label of [/Export to Word/, /Export images/, /Export text/, /Compress/]) {
+    for (const label of [/Export to Word/, /Export to Excel/, /Export images/, /Export text/, /Compress/]) {
       expect(screen.queryByRole("button", { name: label })).toBeNull();
     }
 
@@ -66,6 +66,7 @@ describe("ZoomToolbar conversion entries", () => {
     rerender(
       <ZoomToolbar
         onExportDocx={() => calls.push("docx")}
+        onExportXlsx={() => calls.push("xlsx")}
         onExportImages={() => calls.push("images")}
         onExportText={() => calls.push("text")}
         onCompress={() => calls.push("compress")}
@@ -73,6 +74,7 @@ describe("ZoomToolbar conversion entries", () => {
     );
     for (const [label, expected] of [
       [/Export to Word/, "docx"],
+      [/Export to Excel/, "xlsx"],
       [/Export images/, "images"],
       [/Export text/, "text"],
       [/Compress/, "compress"],

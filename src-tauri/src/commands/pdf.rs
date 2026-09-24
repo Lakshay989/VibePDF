@@ -17,6 +17,7 @@ use crate::pdf::image_extract::ImageInfo;
 use crate::ocr::preprocess::PreprocessOptions;
 use crate::pdf::compress::{CompressLevel, CompressReport};
 use crate::pdf::export_docx::DocxExportSummary;
+use crate::pdf::export_xlsx::XlsxExportSummary;
 use crate::pdf::export_image::{ImageExportFormat, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::TextExportSummary;
 use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
@@ -1605,6 +1606,34 @@ pub async fn pdf_compress_document(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.compress_request(level, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-008 (P7.B5) — write the document's detected tables to `path` as
+/// an Excel `.xlsx`, one sheet a table. `pages` empty means the whole document.
+///
+/// When no tables are found the reply's `tables` is zero and **no file is
+/// written** — the caller warns. The PDF is not modified.
+#[tauri::command]
+pub async fn pdf_export_xlsx(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<XlsxExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_xlsx_request(pages, PathBuf::from(path))?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

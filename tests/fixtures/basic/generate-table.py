@@ -30,15 +30,19 @@ from pathlib import Path
 TARGET = Path(__file__).resolve().parent / "table.pdf"
 WIDTH, HEIGHT = 612, 792
 
-# The grid: three columns, four rows (a header and three of data).
-COLUMN_X = [72.0, 220.0, 360.0, 500.0]
+# The grid: four columns, four rows (a header and three of data).
+COLUMN_X = [72.0, 190.0, 300.0, 400.0, 500.0]
 ROW_Y = [640.0, 616.0, 592.0, 568.0, 544.0]     # top edge down to bottom edge
 
+# The last column is plain integers on purpose. Every other value here carries
+# a thousands separator or a percent sign and therefore stays text in a
+# spreadsheet (P7-OCR-008), so without one unambiguous number the numeric-cell
+# path would never be exercised end to end.
 CELLS = [
-    ["Region", "Revenue", "Change"],
-    ["North", "412,000", "+6%"],
-    ["South", "298,500", "-2%"],
-    ["Overseas", "77,250", "+31%"],
+    ["Region", "Revenue", "Change", "Units"],
+    ["North", "412,000", "+6%", "1240"],
+    ["South", "298,500", "-2%", "980"],
+    ["Overseas", "77,250", "+31%", "310"],
 ]
 
 

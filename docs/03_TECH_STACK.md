@@ -191,6 +191,18 @@ One measured trap: **`PDFium` reports a path segment's point before the object m
 
 ---
 
+## Excel export — the same container, one decision about numbers (P7.B5)
+
+P7-OCR-008 cost almost no new machinery: `table_detect` finds the grids (P7.B1b), `ooxml` writes the ZIP (P7.B1a), and `page_content` — lifted out of `export_docx` in this step, when a second exporter needed the same page reading — supplies the runs and rules. What is new is the SpreadsheetML and one judgement call.
+
+**Numbers become numbers only when they are unambiguous.** `-12`, `3.5` and `0` are written as numeric cells, because a spreadsheet of text-formatted figures is a poor deliverable. `412,000` stays **text**: a comma is a thousands separator in one locale and a decimal point in another — `1,000` is one thousand in en-US and one in de-DE — and a PDF carries no locale to decide with. Quietly turning someone's `1,000` into `1000` corrupts a figure they will then do arithmetic on, which is worse than making them convert a column. Percent signs, currency symbols, exponents and spaces are text for the same reason. Parsing grouped numbers against a locale the user picks is a reasonable follow-up.
+
+**No tables means no file.** The spec says warn. A workbook of prose is useless and an empty one is worse, so nothing is written, the reply reports zero, and the UI says only ruled tables can be found.
+
+Text cells are written inline (`t="inlineStr"`), which removes the shared-strings part and the index that would have to agree with it. Sheet names are a small pure function with its own tests, because Excel caps them at 31 characters, forbids `[ ] : * ? / \`, and treats a duplicate — which truncation can create by accident — as a corrupt file.
+
+---
+
 ## Crypto & signing — `rsa`, `x509-cert`, `cms`
 
 **Why these crates:** RustCrypto's pure-Rust ecosystem. Apache 2.0 / MIT. No OpenSSL dependency to wrestle with at install time.

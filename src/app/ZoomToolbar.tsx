@@ -47,6 +47,8 @@ export interface ZoomToolbarProps {
   onExportImages?: (() => void) | undefined;
   /** SPEC: P7-OCR-004 (P7.B1a) — export the document as Word. */
   onExportDocx?: (() => void) | undefined;
+  /** SPEC: P7-OCR-008 (P7.B5) — export detected tables as a workbook. */
+  onExportXlsx?: (() => void) | undefined;
   /** SPEC: P7-OCR-010 (P7.C2a) — open the compress dialog. */
   onCompress?: (() => void) | undefined;
   /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
@@ -83,6 +85,7 @@ export function ZoomToolbar({
   onExportText,
   onExportImages,
   onExportDocx,
+  onExportXlsx,
   onCompress,
   onSign,
   onFindRedact,
@@ -357,6 +360,17 @@ export function ZoomToolbar({
           className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           Export to Word…
+        </button>
+      ) : null}
+
+      {onExportXlsx ? (
+        <button
+          type="button"
+          onClick={onExportXlsx}
+          title="Save the tables in this PDF as an Excel workbook"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export to Excel…
         </button>
       ) : null}
 

@@ -50,6 +50,7 @@ use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
 use crate::pdf::compress::{compress_document, CompressLevel, CompressReport};
 use crate::pdf::export_docx::{export_docx, DocxExportSummary};
+use crate::pdf::export_xlsx::{export_xlsx, XlsxExportSummary};
 use crate::pdf::export_image::{export_pages, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::{document_text, TextExportSummary};
 use crate::pdf::ocr_text_layer::{
@@ -606,6 +607,14 @@ pub enum Message {
         pages: Vec<i32>,
         dest: PathBuf,
         reply: oneshot::Sender<Result<DocxExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-008 — write the tables in the 0-based `pages` to `dest` as
+    /// an Excel workbook. Read-only on the source; nothing is written when no
+    /// tables are found.
+    ExportXlsx {
+        pages: Vec<i32>,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<XlsxExportSummary, CommandError>>,
     },
     /// SPEC: P7-OCR-005 — render the 0-based `pages` into `dest_dir` as
     /// `{stem}-{n:03}.{ext}`, one image file per page. Read-only on the
@@ -2393,6 +2402,30 @@ impl DocumentActorHandle {
         dest: std::path::PathBuf,
     ) -> Result<DocxExportSummary, CommandError> {
         let rx = self.export_docx_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-008 — export tables as a workbook. Non-blocking.
+    pub fn export_xlsx_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<XlsxExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportXlsx { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-008 — export tables as a workbook. Await-holding for tests.
+    pub async fn export_xlsx(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<XlsxExportSummary, CommandError> {
+        let rx = self.export_xlsx_request(pages, dest)?;
         rx.await
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
@@ -4544,6 +4577,20 @@ fn run_worker(
                     })
                     .collect::<Result<Vec<usize>, CommandError>>()
                     .and_then(|pages| export_docx(&doc, &pages, &dest));
+                let _ = reply.send(result);
+            }
+            Message::ExportXlsx { pages, dest, reply } => {
+                // SPEC: P7-OCR-008 (P7.B5) — a read of the document and a write
+                // of a .xlsx; the PDF is untouched, nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_xlsx(&doc, &pages, &dest));
                 let _ = reply.send(result);
             }
             Message::CompressDocument { level, dest, reply } => {

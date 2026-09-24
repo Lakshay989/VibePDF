@@ -72,8 +72,8 @@ async fn a_ruled_grid_becomes_a_real_table() {
     assert_eq!(summary.tables, 3, "one table per page");
     assert_eq!(xml.matches("<w:tbl>").count(), 3);
     assert_eq!(xml.matches("<w:tr>").count(), 12, "four rows a table");
-    assert_eq!(xml.matches("<w:tc>").count(), 36, "three columns a row");
-    assert_eq!(xml.matches("<w:gridCol").count(), 9);
+    assert_eq!(xml.matches("<w:tc>").count(), 48, "four columns a row");
+    assert_eq!(xml.matches("<w:gridCol").count(), 12);
     cleanup(&dest);
 }
 
@@ -115,11 +115,11 @@ async fn cell_text_lands_in_the_right_cell() {
     let table = table_n(&xml, 0);
     let first_row = table.split("<w:tr>").nth(1).expect("a row");
     let header: Vec<String> = texts(first_row.split("</w:tr>").next().unwrap_or(""));
-    assert_eq!(header, vec!["Region", "Revenue", "Change"]);
+    assert_eq!(header, vec!["Region", "Revenue", "Change", "Units"]);
 
     let last_row = table.split("<w:tr>").nth(4).expect("the fourth row");
     let values: Vec<String> = texts(last_row.split("</w:tr>").next().unwrap_or(""));
-    assert_eq!(values, vec!["Overseas", "77,250", "+31%"]);
+    assert_eq!(values, vec!["Overseas", "77,250", "+31%", "310"]);
     cleanup(&dest);
 }
 

@@ -166,6 +166,7 @@ pub fn run() {
             commands::pdf::pdf_export_images,
             commands::pdf::pdf_compress_document,
             commands::pdf::pdf_export_docx,
+            commands::pdf::pdf_export_xlsx,
             commands::languages::ocr_list_languages,
             commands::languages::ocr_install_language_file,
             commands::languages::ocr_download_language,
