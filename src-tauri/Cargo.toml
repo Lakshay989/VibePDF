@@ -88,7 +88,7 @@ getrandom = "0.3"
 # not others. Not a cryptographic design: no key derivation, no mode choice —
 # the key is already in hand and the block is fixed by ISO 32000-2 Algorithm 10.
 # Same version lopdf already resolves to, so no second copy in the tree.
-aes = "0.8"
+aes = "0.9"
 # COS / object-model layer for the structural edits PDFium's high-level API
 # can't do: rewriting /Outlines, /AcroForm, the page tree, and indirect refs.
 # Pure Rust, MIT. Operates on serialized bytes *between* PDFium passes — never
@@ -125,25 +125,25 @@ lopdf = { version = "0.36.0", default-features = false }
 #
 # MSRV 1.80 pins x509-cert to 0.2.x; 0.3 requires 1.85.
 cms = { version = "0.2.3", features = ["builder"] }
-x509-cert = "0.2.5"
+x509-cert = "0.3.0"
 # `sha2` feature: supplies RsaSignatureAssociatedOid, so a SHA-256 signing key
 # can name its own algorithm in the CMS structure.
 rsa = { version = "0.9", features = ["sha2"] }
-sha2 = { version = "0.10", features = ["oid"] }
-der = { version = "0.7", features = ["alloc", "oid"] }
-const-oid = { version = "0.9", features = ["db"] }
+sha2 = { version = "0.11", features = ["oid"] }
+der = { version = "0.8", features = ["alloc", "oid"] }
+const-oid = { version = "0.10", features = ["db"] }
 pkcs12 = { version = "0.1.0", features = ["kdf"] }
-pkcs5 = { version = "0.7", features = ["alloc", "pbes2"] }
-pkcs8 = { version = "0.10", features = ["alloc", "encryption"] }
+pkcs5 = { version = "0.8", features = ["alloc", "pbes2"] }
+pkcs8 = { version = "0.11", features = ["alloc", "encryption"] }
 # Legacy PKCS#12 encryption (pbeWithSHAAnd3-KeyTripleDES-CBC): the KDF comes
 # from `pkcs12`, these supply the cipher and the MAC it feeds. SHA-1 and 3DES
 # are here only to *read* existing certificate files — never to produce a
 # signature, which is SHA-256 per PAdES.
-cbc = { version = "0.1", features = ["alloc"] }
-des = "0.8"
-sha1 = "0.10"
-hmac = "0.12"
-digest = "0.10"
+cbc = { version = "0.2", features = ["alloc"] }
+des = "0.9"
+sha1 = "0.11"
+hmac = "0.13"
+digest = "0.11"
 # P6.D2 (SPEC P6-SEC-011): pattern-based redaction needs a regex engine, and
 # the spec names user-supplied regexes as well as the built-ins. Already in
 # Cargo.lock transitively (tracing-subscriber's env-filter → matchers → regex),
