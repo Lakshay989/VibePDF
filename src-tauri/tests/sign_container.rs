@@ -268,7 +268,7 @@ fn an_existing_form_survives_signing() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let out = prepare(&fixture("hello.pdf"), &spec())
         .expect("prepare")

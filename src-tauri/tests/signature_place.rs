@@ -232,7 +232,7 @@ fn an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect(
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn signature_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-signature.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p6-security/vibepdf-verify-signature.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

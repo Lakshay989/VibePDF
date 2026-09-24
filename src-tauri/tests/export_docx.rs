@@ -221,7 +221,7 @@ async fn a_document_of_one_size_gets_no_headings() {
 #[tokio::test]
 #[ignore = "writes a verification file for a human to open"]
 async fn writes_the_verification_file() {
-    let dir = PathBuf::from("../Sample PDFs/verify-docx");
+    let dir = PathBuf::from("../Sample PDFs/out/p7-docx");
     std::fs::create_dir_all(&dir).expect("verification dir");
     for name in ["report.pdf", "table.pdf", "two-column.pdf", "unicode-text.pdf"] {
         let dest = dir.join(name.replace(".pdf", ".docx"));

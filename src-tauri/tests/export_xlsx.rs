@@ -195,7 +195,7 @@ async fn a_scan_has_no_tables_to_find() {
 #[tokio::test]
 #[ignore = "writes a verification file for a human to open"]
 async fn writes_the_verification_file() {
-    let dir = PathBuf::from("../Sample PDFs/verify-xlsx");
+    let dir = PathBuf::from("../Sample PDFs/out/p7-xlsx");
     std::fs::create_dir_all(&dir).expect("verification dir");
     let dest = dir.join("table.xlsx");
     let handle = DocumentActorHandle::spawn(None, uuid::Uuid::new_v4(), fixture("table.pdf"), None)

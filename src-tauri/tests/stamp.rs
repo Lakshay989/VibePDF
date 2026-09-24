@@ -250,7 +250,7 @@ async fn stamp_rejects_empty_text() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn stamp_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-stamp.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-stamp.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }
@@ -286,7 +286,7 @@ async fn stamp_writes_verification_artifact() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn stamp_embedded_unicode_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-stamp-unicode.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-stamp-unicode.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

@@ -292,7 +292,7 @@ async fn exports_at_the_top_of_the_dpi_range() {
 #[tokio::test]
 #[ignore = "writes verification files for a human to open"]
 async fn writes_the_verification_set() {
-    let dir = PathBuf::from("../Sample PDFs/verify-images");
+    let dir = PathBuf::from("../Sample PDFs/out/p7-images");
     std::fs::create_dir_all(&dir).expect("verification dir");
 
     // One page, each format, at a DPI worth eyeballing.

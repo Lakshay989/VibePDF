@@ -13,9 +13,13 @@ Tick a box when done. When a step's checks pass, flip its status in
 
 - **`Sample PDFs/`** (repo root, **git-ignored**) — all sample + verification
   PDFs go here, **not the Desktop**. Large, often copyrighted, and
-  regenerable, so they are never committed. The `/ship` verification
-  artifacts (`vibepdf-verify-*.pdf`) and any PDFs you download for manual
-  testing belong here. `TestPDFs/` is also ignored if you prefer that name.
+  regenerable, so they are never committed. Reorganised 2026-09-24 around one
+  rule: **`in/` is what you open, `out/` is what VibePDF wrote.** Inputs are
+  grouped by kind (`in/normal`, `in/scanned`, `in/tables`, `in/protected`,
+  `in/signed`, `in/forms`, `in/corpus`); every `/ship` verification artifact
+  lands under `out/<phase>/` rather than in a single flat pile. Backups and
+  old scratch work moved to `archive/` — nothing was deleted. The full map is
+  in `Sample PDFs/README.md`.
 - **`tests/fixtures/`** (committed) — the *deterministic* fixtures the
   automated suite depends on (`hello.pdf`, `links.pdf`, `bookmarks.pdf`).
   These are small, hand-generated, and checked in. Don't put scratch PDFs here.
@@ -37,27 +41,27 @@ Open each in **a mainstream PDF reader + a platform viewer + a third reader** (C
 works as the third). A passing unit test does *not* prove cross-reader
 validity.
 
-- [x] **`Sample PDFs/vibepdf-verify-rotated.pdf`** (B1 rotate) — page 1 should
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-rotated.pdf`** (B1 rotate) — page 1 should
   render **rotated 90°** and the file must not be flagged corrupt.
   → **PASS (2026-06-13, Preview).** P2.B1 flipped to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-deleted.pdf`** (B2 delete) — **2 pages**
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-deleted.pdf`** (B2 delete) — **2 pages**
   ("Page 1 (link to page 3)" then "Page 3"); page 2 gone; not corrupt.
   → **PASS (2026-06-13, Preview).** P2.B2 flipped to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-inserted.pdf`** (B3 insert) — **4 pages**:
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-inserted.pdf`** (B3 insert) — **4 pages**:
   "Page 1", then a **blank** page, then "Page 2", "Page 3"; not corrupt.
   → **PASS (2026-06-13, Preview).** P2.B3 flipped to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-cropped.pdf`** (B4 crop) — page 1 shows
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-cropped.pdf`** (B4 crop) — page 1 shows
   only its **centre** (100pt trimmed each edge); pages 2–3 full; not corrupt.
   → **PASS (2026-06-13, Preview).** P2.B4 flipped to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-extracted.pdf`** (C2 extract) — **2 pages**:
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-extracted.pdf`** (C2 extract) — **2 pages**:
   "Page 1 (link to page 3)" and "Page 3"; renders correctly; not corrupt.
   → **PASS (2026-06-13, Preview).** P2.C2 flipped to `[x]`.
-- [ ] **`Sample PDFs/vibepdf-verify-split-001/002/003.pdf`** (C3 split) — **three
+- [ ] **`Sample PDFs/out/p1-pages/vibepdf-verify-split-00{1,2,3}.pdf`** (C3 split) — **three
   files, 2 pages each** ("Page 1"+"Page 2", "Page 3"+"Page 4", "Page 5"+"Page
   6"); each opens cleanly and is not corrupt. (Produced by splitting the
   6-page `bookmarks.pdf` every 2 pages.)
   → on pass, flip **P2.C3** to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-merged.pdf`** (C4 merge) — **7 pages**:
   bookmarks.pdf (Page 1–6) → forms.pdf ("Form", page 7). The **bookmarks panel
   shows 3 bookmarks** (Chapter 1/2/3, navigating to the right pages) **and** a
   **form field** is present on the last page. Opens cleanly. *(Full P2-PAGE-008
@@ -65,33 +69,33 @@ validity.
   → **PASS (2026-06-13):** 7 pages + form field (Preview); **3-bookmark outline
   confirmed in Chrome's outline sidebar** (Preview hides outlines by default).
   P2.C4 flipped to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-insertfrom.pdf`** (D1 insert-from) — **5
   pages**: "Hello, Vibe.PDF.", then links.pdf's 3 pages (the first keeps its
   annotation), then forms.pdf ("Form"). The **last page has a fillable form
   field** (`name`). Opens cleanly. *(Full P2-PAGE-005 — form fields preserved.)*
   → **PASS (2026-06-13):** field present and fillable, **confirmed rendering in
   Chrome** (was camouflaged white-on-white in Preview — cosmetic, BACKLOG).
   P2.D1 flipped to `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-reordered.pdf`** (C1 reorder) — **3 pages**
   in the order **"Page 3", "Page 1 (link to page 3)", "Page 2"** (links.pdf
   reordered `[2,0,1]`); opens cleanly, and the link on the "Page 1" page still
   jumps to the "Page 3" page (reference integrity).
   → **PASS (2026-06-13):** in-app drag-reorder fixed (pointer events) and
   verified live; backend output was always correct.
-- [x] **`Sample PDFs/vibepdf-verify-pruned.pdf`** (B2/C3 dangling cleanup) —
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-pruned.pdf`** (B2/C3 dangling cleanup) —
   `bookmarks.pdf` with page 3 deleted. The **bookmarks panel shows 2 entries**
   (Chapter 1 + Chapter 3; **Chapter 2 — which pointed at the deleted page — is
   gone**), and no broken bookmark remains. 5 pages, opens cleanly.
   → **PASS (2026-06-13):** Ch2 removal confirmed in bytes (Ch1 + Ch3 only,
   `/Count 2`); folded into P2.B2 `[x]`.
-- [x] **`Sample PDFs/vibepdf-verify-resized.pdf`** (B5 resize) — `hello.pdf`
+- [x] **`Sample PDFs/out/p1-pages/vibepdf-verify-resized.pdf`** (B5 resize) — `hello.pdf`
   (Letter) resized to **A4 (595×842 pt)** with preserve-aspect. The text
   "Hello, Vibe.PDF." should be **scaled to fit** the A4 page (not clipped, not
   sitting at the old position with empty space), and the page should measure A4.
   Opens cleanly. → **PASS (2026-06-13):** content-scale byte-verified (cos
   `q…cm` wrapper + A4 MediaBox + PDFium reopen) and confirmed in-app via PDF.js.
   P2.B5 flipped to `[x]`.
-- [x] `Sample PDFs/vibepdf-verify.pdf` (A1 save) — already verified.
+- [x] `Sample PDFs/out/p1-pages/vibepdf-verify.pdf` (A1 save) — already verified.
 
 ## B. In-app checks (`npm run dev`)
 
@@ -229,7 +233,7 @@ the rest still want a pass.
   decision:** select text → **Highlight** → after a brief reload the highlight
   **shows in the main view** (the PDF.js canvas renders the `/AP`). **Cmd+Z**
   removes it; **Cmd+S** → reopen in VibePDF → still there. Then the
-  **cross-reader**: open `Sample PDFs/vibepdf-verify-highlight.pdf` (and your own
+  **cross-reader**: open `Sample PDFs/out/p3-annotations/vibepdf-verify-highlight.pdf` (and your own
   saved file) in **Preview + Chrome + a mainstream reader** — the highlight must be visible
   and correctly placed over the text. Repeat for underline/strikethrough/squiggly.
   → on pass, flip **P3.B1b** to `[x]`. *(If the highlight does NOT appear in the

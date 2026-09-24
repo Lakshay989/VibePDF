@@ -210,7 +210,7 @@ fn the_verification_helper_catches_both_kinds_of_wrong() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let (out, _) = redact_text_in_region(&fixture(), 0, OVER_THE_NUMBER).expect("redact");
     let path = dir.join("vibepdf-verify-redacted.pdf");

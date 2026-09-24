@@ -251,7 +251,7 @@ fn our_own_output_can_be_decrypted_again() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifacts() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let src = fixture_bytes("hello.pdf");
 

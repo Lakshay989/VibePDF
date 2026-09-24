@@ -235,7 +235,7 @@ fn openssl_path() -> Option<&'static str> {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let path = dir.join("vibepdf-verify-signed.pdf");
     std::fs::write(&path, sign("signer.pfx")).expect("write");
@@ -412,7 +412,7 @@ fn a_certified_document_still_opens() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_certified_artifact() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let path = dir.join("vibepdf-verify-certified.pdf");
     std::fs::write(&path, certified(DocMdpLevel::NoChanges)).expect("write");

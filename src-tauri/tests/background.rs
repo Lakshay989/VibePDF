@@ -317,7 +317,7 @@ fn background_is_tagged() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn bg_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-background.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-background.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

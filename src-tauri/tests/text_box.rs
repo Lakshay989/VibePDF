@@ -20,7 +20,7 @@ fn fixture(name: &str) -> PathBuf {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn text_box_embedded_unicode_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-text-box-unicode.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-text-box-unicode.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }
@@ -53,7 +53,7 @@ async fn text_box_embedded_unicode_artifact() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn text_box_ascii_reedit_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-text-box-ascii.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-text-box-ascii.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

@@ -172,7 +172,7 @@ async fn measure_rejects_bad_kind() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn measure_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-measure.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-measure.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

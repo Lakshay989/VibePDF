@@ -235,7 +235,7 @@ async fn a_mixed_script_page_keeps_its_reading_order() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-ocr-cyrillic.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p7-ocr/vibepdf-verify-ocr-cyrillic.pdf");
     std::fs::copy(fixture("scan-cyrillic.pdf"), &out).expect("copy fixture");
     let handle =
         DocumentActorHandle::spawn(None, uuid::Uuid::new_v4(), out.clone(), None).expect("opens");

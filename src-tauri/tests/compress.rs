@@ -238,7 +238,7 @@ fn a_page_that_is_not_a_scan_still_opens() {
 #[ignore = "writes verification files for a human to open"]
 fn writes_the_verification_set() {
     let Some(bytes) = scan_or_skip() else { return };
-    let dir = PathBuf::from("../Sample PDFs/verify-compress");
+    let dir = PathBuf::from("../Sample PDFs/out/p7-compress");
     std::fs::create_dir_all(&dir).expect("verification dir");
 
     std::fs::write(dir.join("00-original.pdf"), &bytes).expect("write original");

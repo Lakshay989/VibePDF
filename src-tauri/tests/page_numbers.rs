@@ -240,7 +240,7 @@ async fn actor_page_numbers_then_undo() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn pn_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-page-numbers.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-page-numbers.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

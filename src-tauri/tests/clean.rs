@@ -308,7 +308,7 @@ fn a_document_with_nothing_to_clean_is_handled() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
 
     for (name, opts) in [

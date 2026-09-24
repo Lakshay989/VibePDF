@@ -282,7 +282,7 @@ fn openssl_path() -> Option<&'static str> {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn writes_verification_artifact() {
-    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Sample PDFs/vibepdf-verify-signed-then-edited.pdf");
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Sample PDFs/out/p6-security/vibepdf-verify-signed-then-edited.pdf");
     std::fs::write(&out, signed_hello(None)).expect("write signed");
     let handle = open(out.clone(), None);
     add_note(&handle).await;
