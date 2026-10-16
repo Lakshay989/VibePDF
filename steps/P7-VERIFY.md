@@ -181,7 +181,12 @@ open -e "Sample PDFs/out/p7-text/vibepdf-verify-text-two-column.txt" "Sample PDF
 
 ---
 
-## Part 3 — Word and Excel
+## Part 3 — Word and Excel files
+
+`open` uses whatever app is your default for `.docx` / `.xlsx`. If Microsoft
+Word or Excel ask for a subscription, use **Pages** and **Numbers** instead —
+they are free and open both formats. Either is a genuine outside reader, which
+is the point.
 
 ```bash
 open "Sample PDFs/out/p7-docx/report.docx"
@@ -189,7 +194,8 @@ open "Sample PDFs/out/p7-docx/report.docx"
 
 - [ ] **It opens at all.** "The file is corrupt" is the failure mode this
       format is famous for, and no test we have can see it.
-- [ ] Turn on the navigation/sidebar pane. **Four headings should be listed**,
+- [ ] Turn on the navigation pane (Word) or the sidebar's Table of Contents
+      (Pages). **Four headings should be listed**,
       at three levels: "Quarterly Report" (1), "Revenue & Costs" and "Risks"
       (2), "Outlook" (3). Headings that are merely *large text* will not appear
       here — that is exactly the distinction being checked.
@@ -225,17 +231,18 @@ open "Sample PDFs/out/p7-xlsx/table.xlsx"
 
 ---
 
-## Part 4 — Optional, if these work on your machine
-
-Acrobat, Firefox, Chrome, Pages and Numbers are all installed here. You said
-Preview is the only external PDF editor available, so treat this section as
-"only if it actually opens":
+## Part 4 — Optional
 
 - [ ] Any `out/p7-ocr/*.pdf` in **Firefox** — search should find the OCR'd text.
-- [ ] `out/p6-security/vibepdf-verify-signed.pdf` in **Acrobat** — would settle
-      the P6 signature rows that were parked when Acrobat was unavailable. The
-      pyHanko checker in `Sample PDFs/tools/` is the substitute we built:
-      `bash "Sample PDFs/tools/check-signature.sh" "Sample PDFs/out/p6-security/vibepdf-verify-signed.pdf"`
+      Optional: Preview in Part 2 is the check that counts.
+
+Acrobat is not part of this pass: it is installed but paywalled, so it is not a
+usable reader. Signature validation, which is what it would have been for, is
+already covered by the pyHanko checker built in P6:
+
+```bash
+bash "Sample PDFs/tools/check-signature.sh" "Sample PDFs/out/p6-security/vibepdf-verify-signed.pdf"
+```
 
 ---
 
