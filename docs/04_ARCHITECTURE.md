@@ -27,6 +27,7 @@ vibepdf/
 │   │   ├── pdf/                  # Core PDF engine (PDFium wrapper)
 │   │   │   ├── document.rs       # Open, save, metadata
 │   │   │   ├── cos.rs            # lopdf object-model layer (structural edits) + annotation add_* incl. add_link (P4.C3)
+│   │   │   ├── create.rs         # New PDF from images + text files: lopdf builder, CID text layout (P7-OCR-009)
 │   │   │   ├── page.rs           # Page operations
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations
@@ -761,7 +762,10 @@ Most commands take a `DocumentId` and route to that document's actor (the
 actor owns the bytes and serializes mutations). A few operations don't fit
 that shape: they read **one or more files from disk that need not be open**
 and produce a **new** file, mutating nothing. **Merge** (`pdf_merge_documents`,
-P2-PAGE-008) is the first.
+P2-PAGE-008) is the first; **Create PDF** (`pdf_create_from_files`,
+P7-OCR-009) builds a document from images and text with lopdf, then hands the
+bytes to the same verified save path. Create's entry point is the app header,
+not the viewer toolbar, because it needs no open document.
 
 These run as **standalone commands** that take file paths instead of a
 `DocumentId`. They still obey the two invariants that matter:

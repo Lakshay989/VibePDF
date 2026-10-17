@@ -2989,6 +2989,26 @@ pub async fn pdf_split_document(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P7-OCR-009 (P7.C1a) — create a new PDF at `dest` from image and
+/// plain-text files, in the order given. Standalone, like merge: it reads files
+/// from disk and needs no open document. `page_size` is `a4`, `letter` or
+/// `image`. Runs on a `spawn_blocking` thread.
+#[tauri::command]
+pub async fn pdf_create_from_files(
+    sources: Vec<String>,
+    dest: String,
+    page_size: crate::pdf::create::PageSize,
+) -> Result<crate::pdf::create::CreateSummary, CommandError> {
+    if dest.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no output file".into()));
+    }
+    let sources: Vec<PathBuf> = sources.into_iter().map(PathBuf::from).collect();
+    let dest = PathBuf::from(dest);
+    tokio::task::spawn_blocking(move || crate::pdf::create::create_pdf_from_files(&sources, &dest, page_size))
+        .await
+        .map_err(|e| CommandError::Internal(format!("create task panicked: {e}")))?
+}
+
 /// SPEC: P2-PAGE-008 (partial) — merge `paths` (≥ 2, in order) into a new PDF
 /// at `dest`. Standalone: reads files from disk, not an open document (see
 /// `docs/04_ARCHITECTURE.md` §"Stateless multi-file operations"). Runs the
