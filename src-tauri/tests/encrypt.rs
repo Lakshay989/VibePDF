@@ -239,12 +239,20 @@ fn refuses_a_document_that_is_already_protected() {
 // SPEC: P6-SEC-008 (P6.C2) depends on this: whatever we encrypt, we must be
 // able to decrypt again. Cheap to assert here, and it is the property that a
 // stray `/Length` silently destroyed.
+//
+// Decrypted through the loader and checked for content. On lopdf 0.42 the old
+// form — `load_mem`, then `decrypt` — still returns Ok, but on a parse that
+// held only the encryption dictionary, so it "decrypted" a document with no
+// pages and this test passed while checking nothing.
 #[test]
 fn our_own_output_can_be_decrypted_again() {
     let out = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some("pw"), None)).expect("encrypt");
-    let mut doc = Document::load_mem(&out).expect("load");
-    assert!(doc.is_encrypted());
-    doc.decrypt("pw").expect("lopdf must be able to decrypt what it wrote");
+    assert!(Document::load_mem(&out).expect("load").is_encrypted());
+
+    let doc = Document::load_mem_with_options(&out, lopdf::LoadOptions::with_password("pw"))
+        .expect("lopdf must be able to decrypt what it wrote");
+    assert!(!doc.is_encrypted());
+    assert_eq!(doc.get_pages().len(), 1, "decrypted, but the page is gone");
 }
 
 /// SPEC: P6-SEC-007 — a file to open in a mainstream reader / Preview / a third reader.
@@ -313,10 +321,32 @@ fn p_records_the_permissions_that_were_chosen() {
     o.permissions = perms;
     let dict = encrypt_dict(&encrypt_document(&fixture_bytes("hello.pdf"), &o).expect("encrypt"));
 
-    // Compared against `p_value()` rather than a literal: the reserved bits are
-    // the standard's business, and hard-coding them here would pin our own
-    // arithmetic rather than the requirement.
-    assert_eq!(int(&dict, b"P"), perms.to_flags().p_value() as i64);
+    // Print clears bit 3 and its high-quality companion, bit 12; copy clears 5.
+    assert_eq!(int(&dict, b"P"), spec_p(&[3, 5, 12]));
+}
+
+/// `/P` as ISO 32000-1 Table 22 defines it, given the bits a restriction
+/// clears (numbered from 1, as the table numbers them).
+///
+/// Written from the table rather than taken from lopdf: these tests compared
+/// against lopdf's own `p_value()` until 0.42 removed it, which checked that
+/// lopdf agreed with itself. Bits 1–2 must be 0, every other bit is 1 unless
+/// a restriction clears it, and the 32-bit word is stored as a signed integer.
+fn spec_p(cleared: &[u32]) -> i64 {
+    let mut word: u32 = !0b11;
+    for bit in cleared {
+        word &= !(1 << (bit - 1));
+    }
+    i64::from(i32::from_ne_bytes(word.to_ne_bytes()))
+}
+
+// The helper, worked by hand: everything allowed is 0xFFFFFFFC, i.e. -4 — the
+// value most writers emit. Clearing bit 3 (4) and bit 12 (2048) as well gives
+// -4 - 4 - 2048 = -2056.
+#[test]
+fn spec_p_matches_the_table_worked_by_hand() {
+    assert_eq!(spec_p(&[]), -4);
+    assert_eq!(spec_p(&[3, 12]), -2056);
 }
 
 #[test]
@@ -328,7 +358,7 @@ fn an_unrestricted_document_grants_everything() {
         )
         .expect("encrypt"),
     );
-    assert_eq!(int(&dict, b"P"), lopdf::Permissions::all().p_value() as i64);
+    assert_eq!(int(&dict, b"P"), spec_p(&[]));
 }
 
 #[test]

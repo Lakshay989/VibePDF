@@ -21,6 +21,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::SystemTime;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -73,6 +74,7 @@ use crate::pdf::form::{
 use crate::pdf::form_flatten::FlattenFormEdit;
 use crate::pdf::clean::{clean_into, CleanOptions, CleanOutcome};
 use crate::security::redact::{redact_into, RedactOptions, RedactOutcome};
+use crate::security::verify::{verify_signatures_opened_with, SignatureReport};
 use crate::pdf::form_import::{import_into, ImportOutcome};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -214,6 +216,14 @@ pub enum Message {
     /// password and must not be given one. Never written to disk.
     GetViewBytes {
         reply: oneshot::Sender<Result<Vec<u8>, CommandError>>,
+    },
+    /// SPEC: P6-SEC-006 — verify the signatures in `file`, the document's bytes
+    /// as saved on disk, with the password this document was opened with.
+    /// The check runs here so the password never leaves this thread.
+    VerifySignatures {
+        file: Vec<u8>,
+        now: SystemTime,
+        reply: oneshot::Sender<Result<Vec<SignatureReport>, CommandError>>,
     },
     /// SPEC: P2-PAGE-001 — rotate `pages` by `quarter_turns` × 90°.
     /// Applies the edit, records its inverse on the undo stack, and marks
@@ -1050,6 +1060,30 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::GetViewBytes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P6-SEC-006 — verify the signatures in `file` (the document as
+    /// saved), using the password the document was opened with.
+    pub async fn verify_signatures(
+        &self,
+        file: Vec<u8>,
+        now: SystemTime,
+    ) -> Result<Vec<SignatureReport>, CommandError> {
+        let rx = self.verify_signatures_request(file, now)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn verify_signatures_request(
+        &self,
+        file: Vec<u8>,
+        now: SystemTime,
+    ) -> Result<oneshot::Receiver<Result<Vec<SignatureReport>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::VerifySignatures { file, now, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -3499,6 +3533,10 @@ fn run_worker(
                     doc.save_to_bytes().map_err(CommandError::from)
                 });
                 let _ = reply.send(result);
+            }
+            Message::VerifySignatures { file, now, reply } => {
+                // Pure lopdf over the file's own bytes: no PDFium, no lock.
+                let _ = reply.send(verify_signatures_opened_with(&file, password.as_deref(), now));
             }
             Message::GetViewBytes { reply } => {
                 // Same lock, same serialisation — then, only for a document

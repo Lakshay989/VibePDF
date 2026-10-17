@@ -25,6 +25,7 @@ use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{Document, EncryptionState, EncryptionVersion, Object, Permissions, StringFormat};
 
 use crate::error::CommandError;
+use crate::pdf::document::load_cos;
 
 /// AES-256 file encryption key length, in bytes. Fixed by the V5 handler.
 const KEY_BYTES: usize = 32;
@@ -253,7 +254,8 @@ fn fix_permissions_entry(doc: &mut Document, key: &[u8; KEY_BYTES]) -> Result<()
         .and_then(Object::as_dict_mut)
         .map_err(|e| CommandError::PdfError(format!("/Encrypt is not a dictionary: {e}")))?;
 
-    // `lopdf` writes `/P` as `p_value() as i64`. Going through the raw bytes
+    // `lopdf` writes `/P` as the 64-bit permission word — reserved bits set,
+    // sign-extended — cast to `i64`. Going through the raw bytes
     // reinterprets those 64 bits rather than converting the number, which is
     // the point: `/P` is a bit field the standard happens to store in a signed
     // integer, and Algorithm 10 wants the bits verbatim in bytes 0–7.
@@ -327,8 +329,7 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
         ));
     }
 
-    let mut doc = Document::load_mem(bytes)
-        .map_err(|e| CommandError::PdfError(format!("could not read the PDF: {e}")))?;
+    let mut doc = load_cos(bytes, |e| CommandError::PdfError(format!("could not read the PDF: {e}")))?;
 
     if doc.is_encrypted() {
         return Err(CommandError::InvalidInput(
@@ -414,7 +415,7 @@ mod tests {
     #[test]
     fn perms_carries_the_bits_it_was_given() {
         let key = [7u8; KEY_BYTES];
-        let p = restricted().to_flags().p_value();
+        let p = restricted().to_flags().bits();
         let block = decode_perms(&key, &permissions_entry(&key, p).expect("build /Perms"));
 
         assert_eq!(
@@ -430,7 +431,7 @@ mod tests {
     #[test]
     fn perms_is_actually_encrypted() {
         let key = [7u8; KEY_BYTES];
-        let entry = permissions_entry(&key, restricted().to_flags().p_value()).expect("build");
+        let entry = permissions_entry(&key, restricted().to_flags().bits()).expect("build");
         assert_ne!(&entry[9..12], b"adb");
     }
 
@@ -439,8 +440,8 @@ mod tests {
     #[test]
     fn the_default_allows_everything() {
         assert_eq!(
-            DocumentPermissions::default().to_flags().p_value(),
-            Permissions::all().p_value(),
+            DocumentPermissions::default().to_flags().bits(),
+            Permissions::all().bits(),
         );
     }
 

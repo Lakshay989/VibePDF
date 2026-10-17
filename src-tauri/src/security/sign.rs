@@ -39,6 +39,7 @@ use std::ops::Range;
 use lopdf::{Dictionary, Document, IncrementalDocument, Object, ObjectId, StringFormat};
 
 use crate::error::CommandError;
+use crate::pdf::document::load_cos;
 
 /// Bytes reserved for the signature blob. The hex string in the file is twice
 /// this.
@@ -266,7 +267,7 @@ const HEX: [u8; 16] = *b"0123456789ABCDEF";
 /// field. Nothing here is irreversible, which is what makes it testable on its
 /// own.
 pub fn prepare(bytes: &[u8], spec: &SignatureSpec) -> Result<PreparedSignature, CommandError> {
-    let prev = Document::load_mem(bytes).map_err(sign_err)?;
+    let prev = load_cos(bytes, sign_err)?;
     let mut doc = IncrementalDocument::create_from(bytes.to_vec(), prev);
 
     let sig_id = add_signature_dict(&mut doc, spec);
@@ -736,7 +737,7 @@ fn unsigned_field_id(doc: &Document, name: &str) -> Result<ObjectId, CommandErro
 /// Used to decide whether to offer signing into a field at all: a document with
 /// none can only be signed by adding one.
 pub fn unsigned_signature_fields(bytes: &[u8]) -> Result<Vec<String>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(sign_err)?;
+    let doc = load_cos(bytes, sign_err)?;
     let mut names: Vec<String> = doc
         .objects
         .values()

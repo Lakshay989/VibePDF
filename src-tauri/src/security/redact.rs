@@ -37,6 +37,7 @@ use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::error::CommandError;
+use crate::pdf::document::load_cos;
 use crate::pdf::font_metrics::{has_exact_metrics, text_width};
 
 #[allow(clippy::needless_pass_by_value)]
@@ -174,7 +175,7 @@ pub fn redact_region(
     rect: [f32; 4],
     options: RedactOptions,
 ) -> Result<(Vec<u8>, RedactReport), CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(redact_err)?;
+    let mut doc = load_cos(bytes, redact_err)?;
     let page_id = nth_page(&doc, page)?;
 
     refuse_if_text_hides_in_an_xobject(&doc, page_id)?;
@@ -912,7 +913,7 @@ impl PlacedRun {
 
 /// SPEC: P6-SEC-011 — every text run on `page`, with its geometry.
 pub fn placed_runs(bytes: &[u8], page: usize) -> Result<Vec<PlacedRun>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(redact_err)?;
+    let doc = load_cos(bytes, redact_err)?;
     let page_id = nth_page(&doc, page)?;
     placed_runs_in(&doc, page_id)
 }
@@ -1012,7 +1013,7 @@ pub fn find_matches(
     set: &crate::security::patterns::PatternSet,
 ) -> Result<Vec<MatchHit>, CommandError> {
     let matcher = crate::security::patterns::Matcher::new(set)?;
-    let doc = Document::load_mem(bytes).map_err(redact_err)?;
+    let doc = load_cos(bytes, redact_err)?;
     let mut hits = Vec::new();
 
     for (page, page_id) in doc.get_pages().into_values().enumerate() {

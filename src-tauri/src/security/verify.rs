@@ -45,6 +45,7 @@ use std::time::SystemTime;
 use x509_cert::Certificate;
 
 use crate::error::CommandError;
+use crate::pdf::document::{declares_encryption, load_cos, load_cos_with_password};
 
 /// How much we can say about the certificate's issuer.
 ///
@@ -134,11 +135,34 @@ pub fn verify_signatures(
     bytes: &[u8],
     now: SystemTime,
 ) -> Result<Vec<SignatureReport>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(|e| pdf_err("could not read the PDF", e))?;
+    verify_signatures_opened_with(bytes, None, now)
+}
+
+/// SPEC: P6-SEC-006 — [`verify_signatures`] for a document opened with
+/// `password`, which a protected file needs.
+///
+/// lopdf parses a file that needs an open password as nothing but its
+/// encryption dictionary, so without the password a signed, protected document
+/// reported no signatures at all. `password` is the one the document was
+/// opened with, handed over by its actor for this call; it is not kept.
+///
+/// For any protected file, `/Contents` is read from the file's bytes rather
+/// than from the parse — see [`contents_from_gap`].
+pub fn verify_signatures_opened_with(
+    bytes: &[u8],
+    password: Option<&str>,
+    now: SystemTime,
+) -> Result<Vec<SignatureReport>, CommandError> {
+    let read_err = |e| pdf_err("could not read the PDF", e);
+    let doc = match password {
+        Some(password) => load_cos_with_password(bytes, password, read_err)?,
+        None => load_cos(bytes, read_err)?,
+    };
+    let protected = declares_encryption(bytes);
 
     let mut reports = Vec::new();
     for id in signature_object_ids(&doc) {
-        reports.push(verify_one(&doc, bytes, id, now));
+        reports.push(verify_one(&doc, bytes, id, now, protected));
     }
     Ok(reports)
 }
@@ -170,6 +194,7 @@ fn verify_one(
     bytes: &[u8],
     id: ObjectId,
     now: SystemTime,
+    protected: bool,
 ) -> SignatureReport {
     let mut report = SignatureReport {
         field_name: field_name_for(doc, id),
@@ -213,7 +238,8 @@ fn verify_one(
         return report;
     };
 
-    let Some(blob) = contents_der(dict) else {
+    let blob = if protected { contents_from_gap(bytes, &ranges) } else { contents_der(dict) };
+    let Some(blob) = blob else {
         report
             .problems
             .push("The signature has no readable content.".into());
@@ -317,6 +343,43 @@ fn contents_der(dict: &lopdf::Dictionary) -> Option<Vec<u8>> {
     let raw = dict.get(b"Contents").and_then(Object::as_str).ok()?;
     let end = raw.iter().rposition(|b| *b != 0)? + 1;
     Some(raw[..end].to_vec())
+}
+
+/// `/Contents` as the signer wrote it: the hex string in the gap between the
+/// two signed byte ranges, padding removed.
+///
+/// Used for a protected file. ISO 32000 exempts a signature's `/Contents` from
+/// encryption, but lopdf decrypts every string it parses, this one included.
+/// With AES that decryption usually fails and leaves the value alone; with RC4
+/// it always "succeeds" and returns garbage — measured on 2026-10-17 against a
+/// pyHanko-signed RC4 file, whose signature would have read as broken. The
+/// gap is where the value sits and exactly what the signed ranges leave out,
+/// so reading it there needs no decryption at all.
+fn contents_from_gap(bytes: &[u8], ranges: &[(usize, usize)]) -> Option<Vec<u8>> {
+    let [(first, len), (second, _)] = ranges else {
+        return None;
+    };
+    let gap = bytes.get(first.checked_add(*len)?..*second)?;
+    let hex: Vec<u8> = gap
+        .strip_prefix(b"<")?
+        .strip_suffix(b">")?
+        .iter()
+        .copied()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    let raw = hex
+        .chunks(2)
+        .map(|pair| Some(hex_digit(pair[0])? << 4 | hex_digit(pair[1])?))
+        .collect::<Option<Vec<u8>>>()?;
+    let end = raw.iter().rposition(|b| *b != 0)? + 1;
+    Some(raw[..end].to_vec())
+}
+
+fn hex_digit(c: u8) -> Option<u8> {
+    char::from(c).to_digit(16).and_then(|d| u8::try_from(d).ok())
 }
 
 struct CmsOutcome {
@@ -521,5 +584,49 @@ fn certificate_signed_by(subject: &Certificate, issuer: &Certificate) -> bool {
             .verify(&tbs, &signature)
             .is_ok(),
         _ => true, // unchecked, not failed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contents_from_gap;
+
+    /// `prefix`, then `gap`, then `suffix`, with the two ranges around the gap.
+    fn file(gap: &[u8]) -> (Vec<u8>, Vec<(usize, usize)>) {
+        let (prefix, suffix) = (b"%PDF-1.7 /Contents ".as_slice(), b" /ByteRange [...] %%EOF".as_slice());
+        let bytes = [prefix, gap, suffix].concat();
+        let second = prefix.len() + gap.len();
+        (bytes, vec![(0, prefix.len()), (second, suffix.len())])
+    }
+
+    #[test]
+    fn the_gap_decodes_to_its_bytes_without_the_padding() {
+        let (bytes, ranges) = file(b"<3082 01ff00\n0000>");
+        assert_eq!(contents_from_gap(&bytes, &ranges), Some(vec![0x30, 0x82, 0x01, 0xff]));
+    }
+
+    #[test]
+    fn anything_but_one_hex_string_in_the_gap_is_unreadable() {
+        for gap in [b"3082".as_slice(), b"<308>", b"<30zz>", b"(0)", b"<3082"] {
+            let (bytes, ranges) = file(gap);
+            assert_eq!(contents_from_gap(&bytes, &ranges), None, "{:?}", String::from_utf8_lossy(gap));
+        }
+    }
+
+    // One gap is the shape the standard describes; anything else is not a
+    // place a signature can be read from.
+    #[test]
+    fn ranges_that_are_not_two_have_no_gap() {
+        let (bytes, mut ranges) = file(b"<30>");
+        ranges.push((bytes.len(), 0));
+        assert_eq!(contents_from_gap(&bytes, &ranges), None);
+        assert_eq!(contents_from_gap(&bytes, &ranges[..1]), None);
+    }
+
+    #[test]
+    fn ranges_past_the_end_are_unreadable_not_a_panic() {
+        let (bytes, _) = file(b"<30>");
+        assert_eq!(contents_from_gap(&bytes, &[(0, 10), (bytes.len() + 5, 1)]), None);
+        assert_eq!(contents_from_gap(&bytes, &[(usize::MAX, 2), (3, 1)]), None);
     }
 }

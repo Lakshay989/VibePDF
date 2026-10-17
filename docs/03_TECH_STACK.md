@@ -300,9 +300,11 @@ tauri-build  = "2.11"
 
 # Rust PDF
 pdfium-render = "0.9"        # current stable as of May 2026
-lopdf        = "0.36"        # COS/object-model layer (structural edits PDFium
-                             # can't do); default-features off. 0.41 exists but
-                             # needs a newer Rust than our 1.80 floor.
+lopdf        = "0.42"        # COS/object-model layer (structural edits PDFium
+                             # can't do); default-features off. 0.42 is the
+                             # first release fixing GHSA-6fj4-rcr3-r7rr (unbounded
+                             # nesting -> stack-overflow abort) and raised our
+                             # Rust floor to 1.85. Parse only via load_cos.
 
 # OCR
 leptess = "0.14"             # WARNING: last release 2023-02-21. Re-evaluate before Phase 7;

@@ -4,7 +4,7 @@
 //! The notes, text-box and form-field panels are lopdf reads. lopdf cannot
 //! decrypt a document that needs an open password, and it does not say so:
 //! 0.36 hands back the objects with every string still encrypted, and 0.42
-//! hands back a document with no objects at all. So a protected document's
+//! hands back nothing but the encryption dictionary. So a protected document's
 //! notes read as ciphertext, or as nothing — and a file picked as a merge input
 //! or a page background was imported as ciphertext without a word.
 //!

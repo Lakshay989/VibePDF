@@ -2243,7 +2243,27 @@ pub async fn pdf_verify_signatures(
     let bytes = std::fs::read(&path).map_err(|e| {
         CommandError::Internal(format!("could not read {}: {e}", path.display()))
     })?;
-    crate::security::verify::verify_signatures(&bytes, std::time::SystemTime::now())
+
+    // Only a protected file needs the password its document was opened with,
+    // and only the actor holds that. Everything else is checked here, as it
+    // always was: on the actor, a large file's parse would queue ahead of the
+    // renders the view is waiting for.
+    let now = std::time::SystemTime::now();
+    if !crate::pdf::document::declares_encryption(&bytes) {
+        return crate::security::verify::verify_signatures(&bytes, now);
+    }
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?
+            .verify_signatures_request(bytes, now)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
 /// SPEC: P6-SEC-005 (P6.B1a) — write a certificate-signed copy of the open

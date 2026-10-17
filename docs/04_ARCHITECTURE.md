@@ -147,6 +147,21 @@ bookmarks/form-fields (P2-PAGE-008). These go through `pdf::cos` (the `lopdf`
 object model), **not** PDFium. See `docs/03` "Structural edits — `lopdf`" for
 the why.
 
+**One way in: `pdf::document::load_cos` (since 2026-10-17).** lopdf does not fail
+on a PDF it cannot decrypt — 0.36 returned the objects still encrypted, 0.42
+returns only the encryption dictionary — and callers carried on with ciphertext
+or with nothing. `load_cos(bytes, map_err)` refuses such a document with
+`NEEDS_PASSWORD` and keeps each caller's own error for real parse failures;
+`load_cos_with_password` is the same for a read that has the open password (the
+signature check, via the document's actor). `tests/lopdf_load_policy.rs` fails
+on any other loader call in production code; `security/decrypt.rs` is the one
+allowed exception, because Unlock needs the undecrypted encryption dictionary.
+Three helpers keep protected documents honest around the round trip:
+`bytes_for_cos_edit` refuses a protected document *before* an edit starts (Insert
+used to copy pages in first and refuse after), `bytes_for_cos_read` gives the
+actor's parse cache the decrypted in-memory copy the view already uses, and
+`refuse_locked_source` names a merge or background source that needs a password.
+
 **Page resize (P2-PAGE-010) also lives here, for a different reason.** Scaling a
 page's content is something PDFium *can* nominally do (`FPDFPage_TransFormWithClip`),
 but pdfium-render's wrapper forces a `reload_in_place()` (a documented PDFium

@@ -173,9 +173,9 @@ pub(crate) fn is_protected(doc: &PdfDocument<'_>) -> bool {
 ///
 /// [`replace_with_edited_bytes`] already refuses at the end of the round trip,
 /// but by then the transform has run on bytes lopdf may not be able to read.
-/// lopdf 0.42 loads a document that needs a password as one with no objects at
-/// all, so the transform failed first with "page out of range: 0" and the
-/// person never saw why. Checking here gives the real reason, and does it
+/// lopdf 0.42 loads a document that needs a password as its encryption
+/// dictionary and nothing else, so the transform failed first with "page out
+/// of range: 0" and the person never saw why. Checking here gives the real reason, and does it
 /// before anything is computed. The end-of-trip check stays as a second layer.
 /// The caller must hold `pdfium_lock`.
 pub(crate) fn bytes_for_cos_edit(doc: &PdfDocument<'_>) -> Result<Vec<u8>, CommandError> {
@@ -195,7 +195,8 @@ pub const NEEDS_PASSWORD: &str = "This PDF is password protected, so VibePDF can
 /// fails the build on a direct `Document::load_mem`. Without this, a document
 /// that needs a password reaches the caller as something that looks fine:
 /// lopdf 0.36 returns its objects still encrypted (every string and stream is
-/// ciphertext), and 0.42 logs a warning and returns `Ok` with **no objects**.
+/// ciphertext), and 0.42 logs a warning and returns `Ok` holding nothing but
+/// the encryption dictionary.
 /// Neither is an error, so a read came back empty and an edit failed on a
 /// missing page. `map_err` keeps each caller's own wording for real parse
 /// failures.
@@ -204,6 +205,25 @@ pub(crate) fn load_cos(
     map_err: impl FnOnce(lopdf::Error) -> CommandError,
 ) -> Result<lopdf::Document, CommandError> {
     let doc = lopdf::Document::load_mem(bytes).map_err(map_err)?;
+    if could_not_decrypt(bytes, &doc) {
+        return Err(CommandError::InvalidInput(NEEDS_PASSWORD.into()));
+    }
+    Ok(doc)
+}
+
+/// [`load_cos`] for a document opened with `password`, decrypted as it parses.
+///
+/// For reads that need the content of a protected file as it is *on disk* —
+/// signature checks, whose byte ranges point into those exact bytes — rather
+/// than the decrypted copy `PDFium` re-serialises. A wrong password comes back
+/// through `map_err`, never as an empty document.
+pub(crate) fn load_cos_with_password(
+    bytes: &[u8],
+    password: &str,
+    map_err: impl FnOnce(lopdf::Error) -> CommandError,
+) -> Result<lopdf::Document, CommandError> {
+    let doc = lopdf::Document::load_mem_with_options(bytes, lopdf::LoadOptions::with_password(password))
+        .map_err(map_err)?;
     if could_not_decrypt(bytes, &doc) {
         return Err(CommandError::InvalidInput(NEEDS_PASSWORD.into()));
     }
@@ -237,13 +257,13 @@ pub(crate) fn refuse_locked_source(path: &Path, bytes: &[u8]) -> Result<(), Comm
 
 /// Did lopdf load `bytes` without being able to decrypt them?
 ///
-/// Two shapes, one per lopdf generation. `is_encrypted` resolves the trailer's
-/// `/Encrypt` dictionary, so it is true only while that dictionary is still in
-/// the object table — which lopdf leaves in place when it kept the ciphertext
-/// (0.36) and removes when it decrypted. When lopdf loaded nothing (0.42) the
-/// dictionary is gone too, so that case is caught by bytes that declare
-/// encryption arriving with no catalog. A document lopdf *did* decrypt — a
-/// permissions-only file with an empty open password — passes both.
+/// `is_encrypted` resolves the trailer's `/Encrypt` dictionary, so it is true
+/// exactly while lopdf has *not* decrypted the document: it removes the
+/// dictionary when it decrypts, and keeps it when it can't — beside the
+/// still-encrypted objects on 0.36, and alone on 0.42 (measured: one object).
+/// The second test is a backstop for a parse that kept neither — bytes that
+/// declare encryption arriving with no catalog. A document lopdf *did*
+/// decrypt, such as a permissions-only file, passes both.
 fn could_not_decrypt(bytes: &[u8], doc: &lopdf::Document) -> bool {
     doc.is_encrypted() || (declares_encryption(bytes) && doc.catalog().is_err())
 }
@@ -288,7 +308,7 @@ pub(crate) fn load_edited_bytes<'a>(bytes: Vec<u8>) -> Result<PdfDocument<'a>, C
 /// The notes, text-box and form-field panels are lopdf reads. Handed the
 /// protected serialisation they cannot decrypt it, so a protected document's
 /// panels showed ciphertext (lopdf 0.36) or nothing at all (0.42, which loads
-/// such bytes as an empty document). This is the same decryption the view
+/// such bytes as a document with no pages). This is the same decryption the view
 /// already gets, for the same purpose — showing the person what is on the
 /// page — and like the view's copy it is parsed in memory and never written.
 /// The protected serialisation is still what saving and every edit see.
