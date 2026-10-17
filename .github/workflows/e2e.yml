@@ -64,6 +64,9 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
+        with:
+          # Pinned to match `rust-toolchain.toml` — see ci.yml for why.
+          toolchain: 1.95.0
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

@@ -15,6 +15,14 @@ src-tauri/gen/
 # PDFium prebuilt binary (fetched by scripts/fetch-pdfium.sh)
 src-tauri/resources/pdfium/*
 !src-tauri/resources/pdfium/.gitkeep
+# `tauri.conf.json` bundles `resources/pdfium/licenses/*`, and tauri-build
+# refuses a glob that matches nothing. Windows CI never fetches PDFium, so the
+# directory has to exist in the checkout. Git cannot re-include a file inside
+# an excluded directory, so the directory is re-included first and its
+# contents excluded again — the real licence files stay ignored.
+!src-tauri/resources/pdfium/licenses/
+src-tauri/resources/pdfium/licenses/*
+!src-tauri/resources/pdfium/licenses/.gitkeep
 
 # Tesseract language data (fetched by scripts/fetch-tessdata.sh)
 src-tauri/resources/tessdata/*

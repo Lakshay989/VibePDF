@@ -24,14 +24,25 @@ const IN_A_FORM: &str = "987-65-4321";
 /// generator, which lays this out on purpose.
 const OVER_THE_NUMBER: [f32; 4] = [102.0, 695.0, 175.0, 713.0];
 
-fn fixture() -> Vec<u8> {
+/// The P6 acceptance document, or `None` with a printed reason.
+///
+/// The fixture is git-ignored and generated on demand, so a fresh clone does
+/// not have it. Asserting it existed — as this did until 2026-10-17 — panicked
+/// in CI, and because cargo stops at the first failing test binary, hid every
+/// later binary's result too. CI generates it before the Rust tests (its
+/// generator is stdlib-only), so these tests still run there; locally they
+/// skip with the command to run instead.
+fn fixture_or_skip() -> Option<Vec<u8>> {
     let p = PathBuf::from("../tests/fixtures/acceptance/p6-document.pdf");
-    assert!(
-        p.is_file(),
-        "fixture missing at {} — run tests/fixtures/acceptance/generate-p6-document.py",
+    if p.is_file() {
+        return Some(std::fs::read(p).expect("read fixture"));
+    }
+    eprintln!(
+        "skipping: fixture missing at {}\n  regenerate with: \
+         python3 tests/fixtures/acceptance/generate-p6-document.py",
         p.display()
     );
-    std::fs::read(p).expect("read fixture")
+    None
 }
 
 struct TempPdf(PathBuf);
@@ -83,7 +94,8 @@ fn leaks(bytes: &[u8], needle: &str) -> bool {
 // SPEC: P6-SEC-010 — the roadmap's acceptance, both ways round.
 #[test]
 fn the_ssn_is_gone_from_the_saved_file() {
-    let (out, report) = redact_text_in_region(&fixture(), 0, OVER_THE_NUMBER).expect("redact");
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, report) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
 
     assert!(!leaks(&out, SSN), "the SSN is still in the file's bytes");
     let text = extracted(&out, 0);
@@ -99,7 +111,8 @@ fn the_ssn_is_gone_from_the_saved_file() {
 // still be on the page, so a reader can see *that* something was removed.
 #[test]
 fn a_partly_covered_run_keeps_its_visible_half() {
-    let (out, _) = redact_text_in_region(&fixture(), 0, OVER_THE_NUMBER).expect("redact");
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
     let text = extracted(&out, 0);
 
     assert!(text.contains("SSN"), "the label went with the number: {text:?}");
@@ -108,7 +121,8 @@ fn a_partly_covered_run_keeps_its_visible_half() {
 
 #[test]
 fn text_outside_the_region_survives() {
-    let (out, _) = redact_text_in_region(&fixture(), 0, OVER_THE_NUMBER).expect("redact");
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
     let text = extracted(&out, 0);
 
     assert!(text.contains(SURVIVES));
@@ -122,7 +136,8 @@ fn text_outside_the_region_survives() {
 // doing the work, removing it would bring the SSN back.
 #[test]
 fn the_black_box_is_not_the_mechanism() {
-    let (out, _) = redact_text_in_region(&fixture(), 0, OVER_THE_NUMBER).expect("redact");
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
 
     // Strip every fill-rectangle from the page content and look again.
     let mut doc = lopdf::Document::load_mem(&out).expect("load");
@@ -149,7 +164,8 @@ fn the_black_box_is_not_the_mechanism() {
 // tell the user otherwise, which is the worst thing this module could do.
 #[test]
 fn a_page_whose_text_hides_in_a_form_is_refused() {
-    let err = redact_text_in_region(&fixture(), 1, [0.0, 0.0, 612.0, 792.0]).unwrap_err();
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let err = redact_text_in_region(&acceptance_pdf, 1, [0.0, 0.0, 612.0, 792.0]).unwrap_err();
     let msg = format!("{err:?}");
 
     assert!(msg.contains("form"), "the refusal should say why: {msg}");
@@ -158,14 +174,15 @@ fn a_page_whose_text_hides_in_a_form_is_refused() {
         "the refusal should say what to do about it: {msg}"
     );
     // …and the text really is there, so the refusal is not hypothetical.
-    assert!(leaks(&fixture(), IN_A_FORM));
+    assert!(leaks(&acceptance_pdf, IN_A_FORM));
 }
 
 // A region that touches nothing should not rewrite the document. Re-encoding a
 // file and calling it a redaction is the kind of no-op that looks like work.
 #[test]
 fn a_region_over_empty_space_changes_nothing() {
-    let source = fixture();
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let source = acceptance_pdf.clone();
     let (out, report) = redact_text_in_region(&source, 0, [400.0, 100.0, 500.0, 150.0])
         .expect("redact");
 
@@ -176,7 +193,8 @@ fn a_region_over_empty_space_changes_nothing() {
 // The whole line, not just the number.
 #[test]
 fn a_region_over_a_whole_run_removes_it() {
-    let (out, report) = redact_text_in_region(&fixture(), 0, [60.0, 695.0, 400.0, 713.0])
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, report) = redact_text_in_region(&acceptance_pdf, 0, [60.0, 695.0, 400.0, 713.0])
         .expect("redact");
 
     let text = extracted(&out, 0);
@@ -210,9 +228,10 @@ fn the_verification_helper_catches_both_kinds_of_wrong() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn writes_verification_artifact() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     let dir = PathBuf::from("../Sample PDFs/out/p6-security");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
-    let (out, _) = redact_text_in_region(&fixture(), 0, OVER_THE_NUMBER).expect("redact");
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
     let path = dir.join("vibepdf-verify-redacted.pdf");
     std::fs::write(&path, &out).expect("write");
     eprintln!("wrote {}", path.display());
@@ -226,7 +245,8 @@ fn writes_verification_artifact() {
 // is the failure this whole design exists to avoid.
 #[test]
 fn an_unmeasurable_run_is_removed_whole_and_reported() {
-    let source = fixture();
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let source = acceptance_pdf.clone();
     // Covers the *tail* of "Account: 555-0100", from mid-run to past its end.
     //
     // The region matters. Over the run's start, an implementation that wrongly
@@ -269,9 +289,10 @@ const IMAGE_MARKER: &str = "SECRETPIXELDATA";
 // would pass against that. This one reads the bytes.
 #[test]
 fn a_redacted_image_leaves_no_pixels_behind() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::redact::redact_region;
 
-    let source = fixture();
+    let source = acceptance_pdf.clone();
     assert!(leaks(&source, IMAGE_MARKER), "the fixture lost its image");
 
     // Page 4's image is placed at 100,600 and is 200pt square.
@@ -287,9 +308,10 @@ fn a_redacted_image_leaves_no_pixels_behind() {
 
 #[test]
 fn an_image_outside_the_region_is_untouched() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::redact::redact_region;
 
-    let (out, report) = redact_region(&fixture(), 3, [10.0, 10.0, 60.0, 60.0], Default::default())
+    let (out, report) = redact_region(&acceptance_pdf, 3, [10.0, 10.0, 60.0, 60.0], Default::default())
         .expect("redact");
 
     assert_eq!(report.images_removed, 0);
@@ -300,12 +322,13 @@ fn an_image_outside_the_region_is_untouched() {
 // often one of several passes; stripping metadata every time would surprise.
 #[test]
 fn metadata_goes_only_when_asked() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::redact::{redact_region, RedactOptions};
 
     let with = RedactOptions { remove_metadata: true };
-    let (kept, _) = redact_region(&fixture(), 0, OVER_THE_NUMBER, Default::default())
+    let (kept, _) = redact_region(&acceptance_pdf, 0, OVER_THE_NUMBER, Default::default())
         .expect("redact");
-    let (stripped, _) = redact_region(&fixture(), 0, OVER_THE_NUMBER, with).expect("redact");
+    let (stripped, _) = redact_region(&acceptance_pdf, 0, OVER_THE_NUMBER, with).expect("redact");
 
     // The fixture has no /Info of its own, so the observable difference is that
     // the option runs the cleaner at all — assert the redaction still holds and
@@ -338,10 +361,11 @@ fn matches_only(
 // redacted would remove the confirm step the spec is built around.
 #[test]
 fn finding_matches_changes_nothing() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
     use vibepdf_lib::security::redact::find_matches;
 
-    let source = fixture();
+    let source = acceptance_pdf.clone();
     let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
     let hits = matches_only(find_matches(&source, &set).expect("find"));
 
@@ -357,10 +381,11 @@ fn finding_matches_changes_nothing() {
 // fine and redact the wrong place.
 #[test]
 fn a_matchs_rect_redacts_that_match() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
     use vibepdf_lib::security::redact::find_matches;
 
-    let source = fixture();
+    let source = acceptance_pdf.clone();
     let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
     let hits = matches_only(find_matches(&source, &set).expect("find"));
 
@@ -379,6 +404,7 @@ fn a_matchs_rect_redacts_that_match() {
 // confirming it is agreeing to lose more than the highlighted text.
 #[test]
 fn an_unmeasurable_match_says_it_covers_the_whole_run() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::patterns::PatternSet;
     use vibepdf_lib::security::redact::find_matches;
 
@@ -389,7 +415,7 @@ fn an_unmeasurable_match_says_it_covers_the_whole_run() {
         kinds: Vec::new(),
         custom: vec![r"555-0100".into()],
     };
-    let hits = matches_only(find_matches(&fixture(), &set).expect("find"));
+    let hits = matches_only(find_matches(&acceptance_pdf, &set).expect("find"));
 
     assert_eq!(hits.len(), 1, "expected the account number: {hits:?}");
     assert!(
@@ -400,11 +426,12 @@ fn an_unmeasurable_match_says_it_covers_the_whole_run() {
 
 #[test]
 fn a_document_with_no_matches_reports_none() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
     use vibepdf_lib::security::redact::find_matches;
 
     let set = PatternSet { kinds: vec![PatternKind::Email], custom: Vec::new() };
-    assert!(matches_only(find_matches(&fixture(), &set).expect("find")).is_empty());
+    assert!(matches_only(find_matches(&acceptance_pdf, &set).expect("find")).is_empty());
 }
 
 // A page whose text lives in a form cannot be searched. Reporting it as clean
@@ -413,11 +440,12 @@ fn a_document_with_no_matches_reports_none() {
 // refuses these pages; the finder has to say the same thing.
 #[test]
 fn a_page_that_cannot_be_searched_is_listed_rather_than_skipped() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
     use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
     use vibepdf_lib::security::redact::find_matches;
 
     let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
-    let hits = find_matches(&fixture(), &set).expect("find");
+    let hits = find_matches(&acceptance_pdf, &set).expect("find");
 
     // Page 1's SSN, found. Page 2's, not found — but reported as unsearchable.
     let found: Vec<_> = hits.iter().filter(|h| !h.unreadable).collect();
@@ -428,5 +456,5 @@ fn a_page_that_cannot_be_searched_is_listed_rather_than_skipped() {
     assert_eq!(gaps.len(), 1, "page 2 was silently treated as clean");
     assert_eq!(gaps[0].page, 1);
     // …and the SSN it could not see really is in there.
-    assert!(leaks(&fixture(), IN_A_FORM));
+    assert!(leaks(&acceptance_pdf, IN_A_FORM));
 }

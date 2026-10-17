@@ -110,10 +110,24 @@ fn requires_the_owner_password_not_the_user_one() {
 
 // SPEC: P6-SEC-008 — the RC4-128 fixture, i.e. a file this project did not
 // write. Protection removal has to work on other people's documents.
+//
+// The fixture is git-ignored and built on demand (it needs pypdf, for the
+// encryption), so a fresh clone and CI do not have it. This test asserted it
+// existed from P6.C3 onwards, which failed every CI run that reached it from
+// 2026-08-13 — and because cargo stops at the first failing test binary, it
+// also hid every later binary's result. It now skips with the regenerate
+// command, the convention `encrypted_open.rs` already follows.
 #[test]
 fn unlocks_a_document_from_another_tool() {
     let p = PathBuf::from("../tests/fixtures/acceptance/p1-encrypted.pdf");
-    assert!(p.is_file(), "fixture missing");
+    if !p.is_file() {
+        eprintln!(
+            "skipping: fixture missing at {}\n  regenerate with: \
+             python3 tests/fixtures/acceptance/generate.py encrypted",
+            p.display(),
+        );
+        return;
+    }
     let bytes = std::fs::read(&p).expect("read");
 
     let out = remove_protection(&bytes, "vibepdf").expect("remove");

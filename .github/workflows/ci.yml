@@ -88,6 +88,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
         with:
+          # Pinned to match `rust-toolchain.toml`. Left at the default, this
+          # installs whatever `stable` is that day — 1.99 by 2026-10-16, whose
+          # new clippy lints failed CI on code that passed locally on 1.95.
+          toolchain: 1.95.0
           components: clippy
 
       - name: Cache cargo build
@@ -106,6 +110,15 @@ jobs:
 
       - name: Frontend tests (vitest)
         run: npm run test
+
+      # The P6 redaction fixture is git-ignored and generated on demand. Its
+      # generator is stdlib-only and byte-deterministic, so building it here
+      # keeps all 17 region- and find-redaction tests running in CI instead of
+      # skipping them — redaction is the feature least safe to leave untested.
+      # The encrypted fixture is not generated here: its generator needs pypdf,
+      # so `decrypt.rs` and `encrypted_open.rs` skip that one with a message.
+      - name: Generate acceptance fixtures (stdlib-only)
+        run: python3 tests/fixtures/acceptance/generate-p6-document.py
 
       - name: Rust tests (cargo)
         run: npm run test:rust
@@ -139,6 +152,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
         with:
+          # Pinned to match `rust-toolchain.toml`. Left at the default, this
+          # installs whatever `stable` is that day — 1.99 by 2026-10-16, whose
+          # new clippy lints failed CI on code that passed locally on 1.95.
+          toolchain: 1.95.0
           components: clippy
 
       - name: Cache cargo build
