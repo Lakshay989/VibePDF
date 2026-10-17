@@ -114,6 +114,14 @@ jobs:
       - name: Fetch PDFium
         run: npm run fetch-pdfium
 
+      # The OCR suites need the twelve bundled language packs (~25 MB, each
+      # SHA-256-pinned in the script). Like PDFium they are git-ignored, and
+      # this job never fetched them, so every OCR test that reads one failed —
+      # unseen until 2026-10-17, because earlier failures always stopped the
+      # run first.
+      - name: Fetch OCR language data
+        run: npm run fetch-tessdata
+
       - name: Check (tsc + eslint + clippy)
         run: npm run check
 
@@ -129,8 +137,11 @@ jobs:
       - name: Generate acceptance fixtures (stdlib-only)
         run: python3 tests/fixtures/acceptance/generate-p6-document.py
 
+      # --no-fail-fast: cargo otherwise stops at the first failing test binary,
+      # and every binary after it goes unreported. That is how several
+      # independent failures stacked up here, each hidden behind the last.
       - name: Rust tests (cargo)
-        run: npm run test:rust
+        run: npm run test:rust -- --no-fail-fast
 
   # Windows is a shipped target (docs/01_VISION) but was never built or tested
   # — FABLE_REVIEW §3.9. This leg compiles ALL Rust on Windows via
