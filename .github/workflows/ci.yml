@@ -38,6 +38,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run the full gates on demand: `gh workflow run ci.yml --ref main`.
+  #
+  # On pushes to main the `gate` job runs the heavy checks only every third
+  # commit, and a run whose checks were all skipped still reports success —
+  # which is how CI failed every real run from 2026-08-13 to 2026-10-16 without
+  # anyone seeing it. The gate already treats any non-push event as "run
+  # everything", so a manual dispatch tests `main` in full without changing the
+  # every-third-commit cost decision.
+  workflow_dispatch:
 
 # Cancel an in-progress run when a newer commit is pushed to the same ref.
 concurrency:
