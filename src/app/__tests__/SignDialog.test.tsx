@@ -119,7 +119,10 @@ describe("SignDialog", () => {
 
     await waitFor(() => expect(mockSign).toHaveBeenCalled());
     const details = mockSign.mock.calls[0]?.[4];
-    expect(details?.signedAt).toMatch(/^D:\d{14}(Z|[+-]\d{2})'\d{2}'$/);
+    // UTC is written `Z00'00'` (see pdf-date.ts), so the two branches differ in
+    // shape: CI runs in UTC, a laptop usually doesn't, and the test must hold
+    // in both.
+    expect(details?.signedAt).toMatch(/^D:\d{14}(?:Z00'00'|[+-]\d{2}'\d{2}')$/);
   });
 
   // SPEC: P6-SEC-005 (P6.B1b) — certification.

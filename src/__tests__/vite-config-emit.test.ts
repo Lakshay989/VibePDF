@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -36,8 +36,12 @@ describe("building vite.config.ts", () => {
   });
 
   it("writes whatever it does emit under node_modules/.tmp", () => {
-    for (const file of outputsOf("tsconfig.node.json", "vite.config.ts")) {
-      expect(relative(root, file)).toMatch(/^node_modules\/\.tmp\//);
+    const files = outputsOf("tsconfig.node.json", "vite.config.ts");
+    // An empty list would pass the loop below without checking anything.
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      // `relative` uses the platform separator, so Windows gives `node_modules\.tmp\…`.
+      expect(relative(root, file).split(sep).join("/")).toMatch(/^node_modules\/\.tmp\//);
     }
   });
 
