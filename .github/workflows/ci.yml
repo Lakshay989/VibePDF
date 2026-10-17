@@ -1,6 +1,6 @@
 name: CI
 
-# Runs the project's gates on every push to main and every PR:
+# Runs the project's gates on every push to main (bar docs-only ones) and every PR:
 #   npm run check   — tsc + eslint + cargo clippy (pedantic, -D warnings)
 #   npm run test    — vitest (frontend)
 #   npm run test:rust — cargo test (Rust + PDF, via the PDFium wrapper)
@@ -34,55 +34,32 @@ name: CI
 # PR runs its own code here, so the job must never hold anything worth stealing:
 # no secrets are referenced, and the workflow token is read-only.
 
+# Every push to main and every PR runs everything. Until 2026-10-18 a `gate`
+# job ran the heavy jobs on only every third push to main, to save macOS
+# minutes; a run whose jobs were all skipped still reported success, which is
+# how CI failed every real run from 2026-08-13 to 2026-10-16 unseen. The repo is
+# public, and GitHub's standard runners are free for public repositories, so
+# the gate was saving nothing.
 on:
   push:
     branches: [main]
+    # Pure documentation can't change a build or a test result.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
-  # Run the full gates on demand: `gh workflow run ci.yml --ref main`.
-  #
-  # On pushes to main the `gate` job runs the heavy checks only every third
-  # commit, and a run whose checks were all skipped still reports success —
-  # which is how CI failed every real run from 2026-08-13 to 2026-10-16 without
-  # anyone seeing it. The gate already treats any non-push event as "run
-  # everything", so a manual dispatch tests `main` in full without changing the
-  # every-third-commit cost decision.
+  # Re-run `main` on demand: `gh workflow run ci.yml --ref main`.
   workflow_dispatch:
 
-# Cancel an in-progress run when a newer commit is pushed to the same ref.
+# A newer commit cancels the run it supersedes. The event is part of the
+# group, so a manual run and a push run of the same commit no longer cancel
+# each other (that left "cancelled" checks on commits that had passed).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
-  # Cost throttle: the heavy job runs on macOS, billed at 10x the Linux rate.
-  # Since every gate is also run locally before each push, we don't pay 10x on
-  # *every* direct push to main — only every 3rd commit. PRs always run. This
-  # gate job is Linux (1x) and finishes in seconds, so the two skipped pushes in
-  # each cycle of three cost ~nothing (a skipped `if` job allocates no runner).
-  # To go back to every-push, delete this job + the `needs`/`if` below. To change
-  # the cadence, edit the `% 3` divisor.
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0 # need full history to count commits
-      - id: decide
-        run: |
-          if [ "${{ github.event_name }}" != "push" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT" # always run on PRs
-            exit 0
-          fi
-          n=$(git rev-list --count HEAD)
-          if [ $((n % 3)) -eq 0 ]; then run=true; else run=false; fi
-          echo "commit #$n on main -> run=$run (heavy CI every 3rd push)"
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-
   check-and-test:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -154,10 +131,8 @@ jobs:
   # `check` + the frontend tests need no PDFium binary (pdfium-render binds at
   # runtime, not link time), so no fetch step here. Wiring the Windows Rust PDF
   # suite (fetch-pdfium Windows branch + a per-platform golden skip) is a
-  # separate follow-up. Gated by the same throttle as the macOS job.
+  # separate follow-up.
   check-windows:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout
