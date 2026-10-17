@@ -22,6 +22,7 @@ import { CompressDialog } from "@/app/CompressDialog";
 import { ExportImageDialog } from "@/app/ExportImageDialog";
 import { OcrDialog } from "@/app/OcrDialog";
 import { exportDocx } from "@/ipc/export-docx";
+import { exportHtml } from "@/ipc/export-html";
 import { exportXlsx } from "@/ipc/export-xlsx";
 import { exportText } from "@/ipc/export-text";
 import { LicensesDialog } from "@/app/LicensesDialog";
@@ -211,6 +212,30 @@ export function PdfViewer({ documentId, path }: Props) {
       }
     } catch (err) {
       reportError("Couldn't export to Word", err);
+    }
+  }, [documentId, path]);
+
+  // SPEC: P7-OCR-007 (P7.B4) — export as a web page. Read-only on the PDF; the
+  // images land in a folder beside the file, named after it.
+  const handleExportHtml = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.html`,
+        filters: [{ name: "Web page", extensions: ["html", "htm"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportHtml(documentId, dest);
+      if (summary.paragraphs === 0 && summary.images === 0) {
+        reportError(
+          "Nothing to export",
+          new Error(
+            "This document has no text or images — if it is a scan, use Read text… first to recognise it.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export to HTML", err);
     }
   }, [documentId, path]);
 
@@ -626,6 +651,7 @@ export function PdfViewer({ documentId, path }: Props) {
         onExportText={doc ? () => void handleExportText() : undefined}
         onExportImages={doc ? () => setExportImagesOpen(true) : undefined}
         onExportDocx={doc ? () => void handleExportDocx() : undefined}
+        onExportHtml={doc ? () => void handleExportHtml() : undefined}
         onExportXlsx={doc ? () => void handleExportXlsx() : undefined}
         onCompress={doc ? () => setCompressOpen(true) : undefined}
         onSign={doc ? () => setSignOpen(true) : undefined}

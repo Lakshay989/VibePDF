@@ -17,6 +17,7 @@ use crate::pdf::image_extract::ImageInfo;
 use crate::ocr::preprocess::PreprocessOptions;
 use crate::pdf::compress::{CompressLevel, CompressReport};
 use crate::pdf::export_docx::DocxExportSummary;
+use crate::pdf::export_html::HtmlExportSummary;
 use crate::pdf::export_xlsx::XlsxExportSummary;
 use crate::pdf::export_image::{ImageExportFormat, ImageExportOptions, ImageExportSummary};
 use crate::pdf::export_text::TextExportSummary;
@@ -1578,6 +1579,32 @@ pub async fn pdf_export_docx(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.export_docx_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-007 (P7.B4) — write the document to `path` as semantic HTML,
+/// its images to `<name>_files/` beside it. `pages` empty means the whole
+/// document. The PDF is not modified.
+#[tauri::command]
+pub async fn pdf_export_html(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<HtmlExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_html_request(pages, PathBuf::from(path))?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?

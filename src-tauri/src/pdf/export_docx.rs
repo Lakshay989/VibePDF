@@ -1,9 +1,13 @@
 //! SPEC: P7-OCR-004 — export a document as Word (`.docx`), preserving text,
 //! bold/italic, headings and images.
 //!
-//! **Tables are not here.** P7-OCR-004's "table structures where detectable" is
-//! P7.B1b: detecting a table is a different problem with a different failure
-//! mode, because a *wrong* table is worse for a reader than no table at all.
+//! **Tables come from ruling lines only** (P7.B1b, [`crate::pdf::table_detect`]):
+//! a *wrong* table is worse for a reader than no table at all, so a table laid
+//! out with spacing alone stays text.
+//!
+//! **The block model is shared.** [`document_blocks`] produces the document as
+//! paragraphs, tables and images in reading order; this module writes those as
+//! `WordprocessingML` and [`crate::pdf::export_html`] (P7-OCR-007) as HTML.
 //!
 //! **Reading order is not reimplemented.** [`crate::pdf::export_text`] already
 //! solves it — columns left to right, lines down each column — and is unit
@@ -596,18 +600,30 @@ fn paragraphs_from_lines(
     out
 }
 
-/// SPEC: P7-OCR-004 — convert `pages` (0-based, empty meaning all of them) to a
-/// `.docx` and write it to `dest`.
+/// How many of each kind of block a document produced.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BlockCounts {
+    pub pages: u32,
+    pub paragraphs: u32,
+    pub headings: u32,
+    pub images: u32,
+    pub tables: u32,
+}
+
+/// SPEC: P7-OCR-004, P7-OCR-007 — `pages` (0-based, empty meaning all of them)
+/// as blocks in reading order: paragraphs with their heading level and runs,
+/// detected tables, and images.
 ///
-/// The PDF is only read; nothing here modifies the document.
+/// Shared by the Word and HTML exports, so that the two agree on reading order,
+/// headings and tables by construction rather than by keeping two copies in
+/// step. Only reads the document.
 ///
 /// # Errors
-/// When a page cannot be read, the archive cannot be built, or the write fails.
-pub fn export_docx(
+/// When a page is out of range or cannot be read.
+pub fn document_blocks(
     doc: &PdfDocument<'_>,
     pages: &[usize],
-    dest: &std::path::Path,
-) -> Result<DocxExportSummary, CommandError> {
+) -> Result<(Vec<Block>, BlockCounts), CommandError> {
     let wanted: Vec<i32> = {
         let _guard = crate::pdf::document::pdfium_lock()?;
         let count = doc.pages().len();
@@ -651,9 +667,9 @@ pub fn export_docx(
     let sizes = heading_sizes(&all_runs, body);
 
     let mut blocks = Vec::new();
-    let mut summary = DocxExportSummary {
+    let mut summary = BlockCounts {
         pages: u32::try_from(wanted.len()).unwrap_or(u32::MAX),
-        ..DocxExportSummary::default()
+        ..BlockCounts::default()
     };
     for (runs, images, rules) in per_page {
         let tables = detect_tables(&rules);
@@ -705,10 +721,32 @@ pub fn export_docx(
         }
     }
 
+    Ok((blocks, summary))
+}
+
+/// SPEC: P7-OCR-004 — convert `pages` (0-based, empty meaning all of them) to a
+/// `.docx` and write it to `dest`.
+///
+/// The PDF is only read; nothing here modifies the document.
+///
+/// # Errors
+/// When a page cannot be read, the archive cannot be built, or the write fails.
+pub fn export_docx(
+    doc: &PdfDocument<'_>,
+    pages: &[usize],
+    dest: &std::path::Path,
+) -> Result<DocxExportSummary, CommandError> {
+    let (blocks, counts) = document_blocks(doc, pages)?;
     let bytes = build_docx(&blocks)?;
-    summary.bytes = bytes.len() as u64;
     std::fs::write(dest, &bytes)?;
-    Ok(summary)
+    Ok(DocxExportSummary {
+        pages: counts.pages,
+        paragraphs: counts.paragraphs,
+        headings: counts.headings,
+        images: counts.images,
+        tables: counts.tables,
+        bytes: bytes.len() as u64,
+    })
 }
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]

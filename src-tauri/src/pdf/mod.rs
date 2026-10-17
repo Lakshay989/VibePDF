@@ -11,6 +11,7 @@ pub mod delete_page;
 pub mod doc_cache;
 pub mod document;
 pub mod export_docx;
+pub mod export_html;
 pub mod export_image;
 pub mod export_text;
 pub mod export_xlsx;
