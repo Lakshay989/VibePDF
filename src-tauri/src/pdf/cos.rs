@@ -31,6 +31,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use crate::error::CommandError;
 use crate::pdf::font_embed_cid::{build_cid_font, cid_run_fragment, CidRun};
 use crate::pdf::image_xobject::{embed_image, embed_png};
+use crate::pdf::document::load_cos;
 
 /// Map an `lopdf` error onto our typed error. Takes the error by value so it
 /// can be used directly as a `.map_err(cos_err)` adapter.
@@ -42,7 +43,7 @@ fn cos_err(e: lopdf::Error) -> CommandError {
 /// Read the titles of the top-level bookmarks (direct children of the document
 /// `/Outlines`), in order. Empty when the document has no outline.
 pub fn read_top_level_outline_titles(bytes: &[u8]) -> Result<Vec<String>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
 
     let Some(outlines_id) = doc
         .catalog()
@@ -80,7 +81,7 @@ pub fn add_top_level_bookmark(
     title: &str,
     page_index: u32,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
 
     // `get_pages` is keyed by 1-based page number → page object id.
     let pages = doc.get_pages();
@@ -187,7 +188,7 @@ fn acroform_field_ids(doc: &Document) -> Result<Vec<ObjectId>, CommandError> {
 
 /// Read the names (`/T`) of the top-level form fields, in order.
 pub fn read_form_field_names(bytes: &[u8]) -> Result<Vec<String>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     let mut names = Vec::new();
     for id in acroform_field_ids(&doc)? {
         if let Ok(t) = doc.get_dictionary(id).map_err(cos_err)?.get(b"T").and_then(Object::as_str) {
@@ -204,7 +205,7 @@ pub fn rename_form_fields_with_suffix(
     bytes: &[u8],
     suffix: &str,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
 
     // Read old names first (immutable), then apply (mutable) — no overlap.
     let mut renames: Vec<(ObjectId, Vec<u8>)> = Vec::new();
@@ -235,7 +236,7 @@ pub fn rename_form_fields_with_suffix(
 /// errors on a nested tree rather than risk dropping inherited attributes, so
 /// the document is never corrupted. Nested-tree reorder is a follow-up.
 pub fn reorder_pages(bytes: &[u8], new_order: &[usize]) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
 
     let pages_id = doc
         .catalog()
@@ -342,7 +343,7 @@ pub fn resize_pages(
     height: f32,
     preserve_aspect: bool,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_map = doc.get_pages();
     let page_count = page_map.len();
 
@@ -499,7 +500,7 @@ pub fn prune_dangling_destinations(bytes: Vec<u8>) -> Vec<u8> {
 /// dangled, or an error if the document couldn't be parsed/serialized.
 #[allow(clippy::too_many_lines)]
 fn prune_inner(bytes: &[u8]) -> Result<Option<Vec<u8>>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_set: HashSet<ObjectId> = doc.get_pages().into_values().collect();
     let mut changed = false;
 
@@ -705,7 +706,7 @@ pub fn merge_documents(sources: &[Vec<u8>]) -> Result<Vec<u8>, CommandError> {
     let mut catalog_ids: Vec<ObjectId> = Vec::new();
 
     for bytes in sources {
-        let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+        let mut doc = load_cos(bytes, cos_err)?;
         doc.renumber_objects_with(max_id);
         max_id = doc.max_id + 1;
 
@@ -945,7 +946,7 @@ pub fn register_inserted_form_fields(
     start: usize,
     count: usize,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
 
     // 1. Collect terminal widget fields (`/Subtype /Widget` with a `/T`) on the
     //    inserted pages. `get_pages` is keyed by 1-based page number.
@@ -1087,7 +1088,7 @@ pub fn add_text_markup(
     let (r, g, b) = parse_hex_color(color)?;
     let opacity = opacity.clamp(0.0, 1.0);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1242,7 +1243,7 @@ pub fn add_free_text(
     }
     let rect = grow_free_text_rect(rect, text, size, font_avg_em(base));
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1377,7 +1378,7 @@ pub fn add_text_box(
         );
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1437,7 +1438,7 @@ fn add_text_box_embedded(
     let y_top = y1 - size; // first baseline a little below the top edge
     let lines = wrap_lines(text, size, em, free_text_inner_width(rect));
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1518,7 +1519,7 @@ pub struct TextBoxInfo {
 /// pre-metadata content (no `/Text`) is skipped — it falls back to per-run editing
 /// (P4-EDIT-001).
 pub fn read_text_boxes(bytes: &[u8], page: usize) -> Result<Vec<TextBoxInfo>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     read_text_boxes_doc(&doc, page)
 }
 
@@ -1620,7 +1621,7 @@ fn dict_rect(d: &Dictionary, key: &[u8]) -> Option<[f32; 4]> {
 /// into one stream — the same consolidation [`crate::pdf::reflow::delete_text_run`]
 /// does. Never mutates the input.
 pub fn remove_text_box(bytes: &[u8], page: usize, id: &str) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -1769,7 +1770,7 @@ pub(crate) fn remove_decorations_on_page(
 /// watermarks). lopdf-only; a document with none round-trips unchanged. Never
 /// mutates the input.
 pub fn clear_decorations(bytes: &[u8], kind: &str) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
     for page_id in page_ids {
         remove_decorations_on_page(&mut doc, page_id, kind)?;
@@ -1789,7 +1790,7 @@ pub fn add_image(bytes: &[u8], page: usize, rect: [f32; 4], image: &[u8]) -> Res
         return Err(CommandError::InvalidInput("image rect is empty".into()));
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -2199,7 +2200,7 @@ pub fn update_free_text(
     let base = base_font(font_family, bold, italic)?;
     let size = font_size.max(1.0);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let id = find_annotation_by_nm(&doc, nm)
         .ok_or_else(|| CommandError::InvalidInput(format!("free-text not found: {nm}")))?;
     let dict = doc.get_dictionary(id).map_err(cos_err)?;
@@ -2246,7 +2247,7 @@ pub struct FreeTextData {
 /// bold/italic); a foreign annotation that doesn't match our format falls back to
 /// defaults.
 pub fn read_free_text(bytes: &[u8], nm: &str) -> Result<Option<FreeTextData>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     read_free_text_doc(&doc, nm)
 }
 
@@ -2674,7 +2675,7 @@ pub fn add_stamp(
     let (r, g, b) = parse_hex_color(color)?;
     let opacity = opacity.clamp(0.0, 1.0);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -2750,7 +2751,7 @@ pub fn add_image_stamp(
     let opacity = opacity.clamp(0.0, 1.0);
     let label = text.map(str::trim).filter(|t| !t.is_empty());
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -3004,7 +3005,7 @@ pub fn add_shape(
         return Err(CommandError::InvalidInput("shape rect is empty".into()));
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -3088,7 +3089,7 @@ pub fn add_line(
         return Err(CommandError::InvalidInput("line is zero-length".into()));
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -3241,7 +3242,7 @@ pub fn add_polygon(
     let width = stroke_width.max(0.0);
     let subtype: &[u8] = if closed { b"Polygon" } else { b"PolyLine" };
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -3381,7 +3382,7 @@ pub fn add_measure(
     let opacity = opacity.clamp(0.0, 1.0);
     let width = stroke_width.max(0.0);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -3496,7 +3497,7 @@ fn measure_dict(units_per_point: f32, unit: &str) -> Dictionary {
 /// of forcing a re-calibrate. Returns the first measurement's scale + unit (the
 /// `/X` `/C` conversion + `/U` label), or `None` if no annotation carries one.
 pub fn read_measure_calibration(bytes: &[u8]) -> Result<Option<MeasureCalibration>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     read_measure_calibration_doc(&doc)
 }
 
@@ -3612,7 +3613,7 @@ pub fn add_ink(
     let opacity = opacity.clamp(0.0, 1.0);
     let width = base_width.max(0.1);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -3914,7 +3915,7 @@ fn write_squiggle(out: &mut String, x0: f32, x1: f32, y: f32, amp: f32) {
 /// / `StrikeOut` / Squiggly) from all pages, keeping any other annotations. GCs
 /// the orphaned annotation dicts + their `/AP` streams via `prune_objects`.
 pub fn clear_text_markup(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_ids: Vec<ObjectId> = doc.get_pages().values().copied().collect();
     let mut changed = false;
 
@@ -4121,7 +4122,7 @@ pub fn add_reply(
     author: &str,
     content: &str,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let parent_id = resolve_handle(&doc, parent_handle)
         .ok_or_else(|| CommandError::InvalidInput(format!("reply target not found: {parent_handle}")))?;
     let parent = doc.get_dictionary(parent_id).map_err(cos_err)?;
@@ -4173,7 +4174,7 @@ pub fn add_text_note(
     content: &str,
     author: &str,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -4241,7 +4242,7 @@ pub fn add_link(
     style: &str,
     color: &str,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let page_id = page_id_at(&doc, page)?;
 
     // Normalize so x1<x2, y1<y2 regardless of drag direction.
@@ -4374,7 +4375,7 @@ fn page_id_at(doc: &Document, page: usize) -> Result<ObjectId, CommandError> {
 /// SPEC: P3-ANN-002 — update the note with `/NM == note_id`: new `/Contents` and
 /// a fresh `/M` (modification date).
 pub fn update_text_note(bytes: &[u8], note_id: &str, content: &str) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let id = find_annotation_by_nm(&doc, note_id)
         .ok_or_else(|| CommandError::InvalidInput(format!("note not found: {note_id}")))?;
     let date = pdf_date_now();
@@ -4400,7 +4401,7 @@ fn parse_object_id(s: &str) -> Option<ObjectId> {
 /// stamp on every annotation) or, for an annotation that lacks one, the
 /// `obj:<num> <gen>` object id `read_annotations` synthesized.
 pub fn delete_annotation(bytes: &[u8], handle: &str) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let target = match handle.strip_prefix("obj:") {
         Some(obj) => parse_object_id(obj),
         None => find_annotation_by_nm(&doc, handle),
@@ -4472,7 +4473,7 @@ pub struct NoteData {
 /// `PDFDocEncoding` is out of scope (we only guarantee round-trip of notes we
 /// wrote).
 pub fn read_text_notes(bytes: &[u8]) -> Result<Vec<NoteData>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     read_text_notes_doc(&doc)
 }
 
@@ -4625,7 +4626,7 @@ fn annotation_kind(subtype: &[u8]) -> Option<&'static str> {
 /// particular — it surfaces whatever the write paths put on the page. Foreign
 /// subtypes (`/Link`, `/Widget`, `/Popup`, …) are skipped.
 pub fn read_annotations(bytes: &[u8]) -> Result<Vec<AnnotationInfo>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     read_annotations_doc(&doc)
 }
 

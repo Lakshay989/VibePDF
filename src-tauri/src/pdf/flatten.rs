@@ -25,6 +25,7 @@ use std::fmt::Write as _;
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 
 use crate::error::CommandError;
+use crate::pdf::document::load_cos;
 
 #[allow(clippy::needless_pass_by_value)]
 fn flat_err(e: lopdf::Error) -> CommandError {
@@ -35,7 +36,7 @@ fn flat_err(e: lopdf::Error) -> CommandError {
 /// page content streams, returning the new document. Annotations without a
 /// renderable appearance are left untouched.
 pub fn flatten_annotations(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(flat_err)?;
+    let mut doc = load_cos(bytes, flat_err)?;
     flatten_annots_where(&mut doc, &|_| false)?;
     let mut buf = Vec::new();
     doc.save_to(&mut buf)?;

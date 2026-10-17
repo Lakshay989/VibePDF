@@ -20,7 +20,7 @@ use pdfium_render::prelude::PdfDocument;
 use crate::error::CommandError;
 use crate::pdf::cos::register_inserted_form_fields;
 use crate::pdf::delete_page::{range_string, validate};
-use crate::pdf::document::{open_pdf, pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::document::{bytes_for_cos_edit, open_pdf, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -67,7 +67,7 @@ impl<'a> Edit<PdfDocument<'a>> for InsertFromEdit {
         // Snapshot the pre-insert document — it becomes the undo target.
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
 
         // Open the source first: `open_pdf` takes the lock internally, so we

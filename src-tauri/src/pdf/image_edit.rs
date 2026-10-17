@@ -18,7 +18,7 @@ use lopdf::{Document, Object};
 use pdfium_render::prelude::*;
 
 use crate::error::CommandError;
-use crate::pdf::document::{load_edited_bytes, pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, load_edited_bytes, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::image_extract::extract_images_from_bytes;
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
@@ -127,7 +127,7 @@ pub fn delete_image(bytes: &[u8], page: usize, index: usize) -> Result<Vec<u8>, 
 /// re-encode. Pure lopdf. An image `Do` is one whose `/XObject` resource has
 /// `/Subtype /Image` (a Form `XObject`'s `Do` is left alone).
 fn splice_out_image_do(bytes: &[u8], page: usize, index: usize) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lopdf_err)?;
+    let mut doc = load_cos(bytes, lopdf_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -229,7 +229,7 @@ pub fn replace_image(
         )));
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(lopdf_err)?;
+    let mut doc = load_cos(bytes, lopdf_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -366,7 +366,7 @@ fn image_edit_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {

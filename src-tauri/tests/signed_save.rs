@@ -249,6 +249,44 @@ async fn a_signed_and_protected_document_refuses_instead_of_breaking() {
     assert_eq!(std::fs::read(&path).expect("read"), protected, "the file on disk must be untouched");
 }
 
+// The same refusal for protection lopdf *can* decrypt — RC4 with no open
+// password, as other tools write it. lopdf opens that kind quietly and drops
+// its encryption dictionary, so a check made after parsing saw an unprotected
+// file; the save then failed its own read-back check with "object 5 0 did not
+// survive saving". The check is made on the bytes, before parsing.
+#[tokio::test]
+async fn a_signed_permissions_only_document_refuses_too() {
+    let scratch = Scratch::new("permissions-only");
+    let protected = rc4_permissions_only(&signed_hello(None));
+    let path = scratch.write("permissions-only.pdf", &protected);
+
+    let handle = open(path.clone(), None);
+    handle.rotate_pages(vec![0], 1).await.expect("rotate");
+    let err = handle.save(None).await.expect_err("saving must refuse");
+    assert!(format!("{err:?}").contains("signed and password protected"), "{err:?}");
+    assert_eq!(std::fs::read(&path).expect("read"), protected, "the file on disk must be untouched");
+}
+
+/// RC4, an owner password and no open password, built by lopdf.
+fn rc4_permissions_only(bytes: &[u8]) -> Vec<u8> {
+    use lopdf::{EncryptionState, EncryptionVersion, Object, Permissions, StringFormat};
+    let mut doc = lopdf::Document::load_mem(bytes).expect("load");
+    let file_id = Object::String(b"0123456789abcdef".to_vec(), StringFormat::Hexadecimal);
+    doc.trailer.set("ID", Object::Array(vec![file_id.clone(), file_id]));
+    let state = EncryptionState::try_from(EncryptionVersion::V2 {
+        document: &doc,
+        owner_password: "owner-rc4",
+        user_password: "",
+        key_length: 128,
+        permissions: Permissions::all(),
+    })
+    .expect("RC4 state");
+    doc.encrypt(&state).expect("encrypt");
+    let mut out = Vec::new();
+    doc.save_to(&mut out).expect("save");
+    out
+}
+
 fn extract(signed: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let at = signed.windows(10).position(|w| w == b"/ByteRange").expect("/ByteRange");
     let open = at + signed[at..].iter().position(|b| *b == b'[').expect("[");

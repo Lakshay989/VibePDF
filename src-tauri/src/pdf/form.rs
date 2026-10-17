@@ -19,7 +19,7 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::acroform_dict;
-use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -120,7 +120,7 @@ pub fn read_form_summary_doc(doc: &Document) -> Result<FormSummary, CommandError
 /// `bytes` with lopdf, then summarises. Used by tests and any caller that has
 /// bytes rather than a live document.
 pub fn read_form_summary(bytes: &[u8]) -> Result<FormSummary, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(lop)?;
+    let doc = load_cos(bytes, lop)?;
     read_form_summary_doc(&doc)
 }
 
@@ -208,7 +208,7 @@ pub fn read_text_fields_doc(doc: &Document, page: usize) -> Result<Vec<FormField
 
 /// Byte-level wrapper around [`read_text_fields_doc`].
 pub fn read_text_fields(bytes: &[u8], page: usize) -> Result<Vec<FormField>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(lop)?;
+    let doc = load_cos(bytes, lop)?;
     read_text_fields_doc(&doc, page)
 }
 
@@ -217,7 +217,7 @@ pub fn read_text_fields(bytes: &[u8], page: usize) -> Result<Vec<FormField>, Com
 /// `AcroForm` `/NeedAppearances` so viewers regenerate the appearance. Returns the
 /// re-serialised bytes; verification is by re-reading `/V`.
 pub fn set_text_field_value(bytes: &[u8], name: &str, value: &str) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let target = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
     set_text_field_value_doc(&mut doc, target, value)?;
@@ -461,7 +461,7 @@ impl<'a> Edit<PdfDocument<'a>> for FillTextFieldEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = set_text_field_value(&pre_bytes, &self.name, &self.value)?;
         {
@@ -562,7 +562,7 @@ pub fn read_button_fields_doc(doc: &Document, page: usize) -> Result<Vec<ButtonF
 
 /// Byte-level wrapper around [`read_button_fields_doc`].
 pub fn read_button_fields(bytes: &[u8], page: usize) -> Result<Vec<ButtonField>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(lop)?;
+    let doc = load_cos(bytes, lop)?;
     read_button_fields_doc(&doc, page)
 }
 
@@ -588,7 +588,7 @@ pub fn set_button_field(
     on_state: &str,
     checked: bool,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let field = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
     set_button_field_doc(&mut doc, field, on_state, checked)?;
@@ -646,7 +646,7 @@ impl<'a> Edit<PdfDocument<'a>> for SetButtonFieldEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = set_button_field(&pre_bytes, &self.name, &self.on_state, self.checked)?;
         {
@@ -784,7 +784,7 @@ pub fn read_choice_fields_doc(doc: &Document, page: usize) -> Result<Vec<ChoiceF
 
 /// Byte-level wrapper around [`read_choice_fields_doc`].
 pub fn read_choice_fields(bytes: &[u8], page: usize) -> Result<Vec<ChoiceField>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(lop)?;
+    let doc = load_cos(bytes, lop)?;
     read_choice_fields_doc(&doc, page)
 }
 
@@ -793,7 +793,7 @@ pub fn read_choice_fields(bytes: &[u8], page: usize) -> Result<Vec<ChoiceField>,
 /// for one, an array for many), `/I` (selected indices, list boxes), and
 /// `/NeedAppearances`. Returns the re-serialised bytes.
 pub fn set_choice_field(bytes: &[u8], name: &str, values: &[String]) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let field = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
     set_choice_field_doc(&mut doc, field, name, values)?;
@@ -859,7 +859,7 @@ impl<'a> Edit<PdfDocument<'a>> for SetChoiceFieldEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = set_choice_field(&pre_bytes, &self.name, &self.values)?;
         {
@@ -881,7 +881,7 @@ impl<'a> Edit<PdfDocument<'a>> for SetChoiceFieldEdit {
 /// static `AcroForm` fields) render. We don't render XFA; this is the honest
 /// "convert to flat content (read-only)". Errors if there is no `/XFA` to strip.
 pub fn strip_xfa(bytes: &[u8]) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let root = doc.trailer.get(b"Root").and_then(Object::as_reference).map_err(lop)?;
     let acro = doc.get_dictionary(root).map_err(lop)?.get(b"AcroForm").ok().cloned();
 
@@ -916,7 +916,7 @@ impl<'a> Edit<PdfDocument<'a>> for StripXfaEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = strip_xfa(&pre_bytes)?;
         {
@@ -1030,7 +1030,7 @@ pub fn add_text_field(
     if name.trim().is_empty() {
         return Err(CommandError::InvalidInput("field name is required".into()));
     }
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
 
     let page_no = u32::try_from(page)
         .map(|n| n + 1)
@@ -1107,7 +1107,7 @@ impl<'a> Edit<PdfDocument<'a>> for AddTextFieldEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = add_text_field(
             &pre_bytes,
@@ -1384,7 +1384,7 @@ pub fn add_field(
     if name.trim().is_empty() {
         return Err(CommandError::InvalidInput("field name is required".into()));
     }
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let page_no = u32::try_from(page)
         .map(|n| n + 1)
         .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
@@ -1554,7 +1554,7 @@ impl<'a> Edit<PdfDocument<'a>> for AddFieldEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = add_field(&pre_bytes, self.page, self.rect, &self.name, &self.kind)?;
         {
@@ -1677,7 +1677,7 @@ pub fn read_page_fields_doc(doc: &Document, page: usize) -> Result<Vec<PageField
 
 /// Byte-level wrapper around [`read_page_fields_doc`].
 pub fn read_page_fields(bytes: &[u8], page: usize) -> Result<Vec<PageField>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(lop)?;
+    let doc = load_cos(bytes, lop)?;
     read_page_fields_doc(&doc, page)
 }
 
@@ -1698,7 +1698,7 @@ pub fn update_field_properties(
     name: &str,
     props: &FieldProperties,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let field = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
     let acro_id = ensure_acroform(&mut doc)?;
@@ -1769,7 +1769,7 @@ pub fn update_field_properties(
 /// `/Tabs /S` (use annotation-array order). Unknown names are ignored; fields
 /// omitted from `names` keep their relative order after the listed ones.
 pub fn set_tab_order(bytes: &[u8], page: usize, names: &[String]) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let page_id = resolve_page(&doc, page)?;
     let annots = page_annots(&doc, page_id);
 
@@ -1822,7 +1822,7 @@ pub fn set_tab_order(bytes: &[u8], page: usize, names: &[String]) -> Result<Vec<
 /// remove its widget(s) — the field itself and any `/Kids` — from every page's
 /// `/Annots`.
 pub fn delete_field(bytes: &[u8], name: &str) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let field = find_field_by_name(&doc, name)
         .ok_or_else(|| CommandError::NotFound(format!("form field: {name}")))?;
     let acro_id = ensure_acroform(&mut doc)?;
@@ -1938,7 +1938,7 @@ fn form_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {

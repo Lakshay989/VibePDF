@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -1488,6 +1488,7 @@ pub async fn pdf_add_pdf_background(
 ) -> Result<HistoryState, CommandError> {
     let source = std::fs::read(&source_path)
         .map_err(|e| CommandError::InvalidInput(format!("cannot read {source_path}: {e}")))?;
+    crate::pdf::document::refuse_locked_source(Path::new(&source_path), &source)?;
     let page = usize::try_from(source_page)
         .map_err(|_| CommandError::InvalidInput(format!("negative source page: {source_page}")))?;
     run_background(&state, &id, pages, BackgroundKind::PdfPage { source, page }, opacity).await

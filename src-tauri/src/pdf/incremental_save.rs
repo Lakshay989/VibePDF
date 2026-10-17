@@ -22,10 +22,11 @@
 
 use std::path::Path;
 
-use lopdf::{Dictionary, Document, IncrementalDocument, Object, Stream};
+use lopdf::{Dictionary, IncrementalDocument, Object, Stream};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
+use crate::pdf::document::{declares_encryption, load_cos};
 
 /// The bytes a signed document was opened from, or `None` for an unsigned one.
 ///
@@ -56,14 +57,18 @@ pub fn signed_base_for(doc: &PdfDocument<'_>, path: &Path) -> Option<Vec<u8>> {
 /// result: a save that silently dropped an edit, or moved a signed byte, is
 /// worse than one that refuses.
 pub fn append_as_incremental_update(base: &[u8], rewrite: &[u8]) -> Result<Vec<u8>, CommandError> {
-    let prev = Document::load_mem(base).map_err(pdf_err("read the signed file"))?;
-    let edited = Document::load_mem(rewrite).map_err(pdf_err("read the edited document"))?;
-
     // Appending to an encrypted file means encrypting each appended object with
     // the document's key, which nothing here can do yet. Refusing keeps the
     // user's edits in the open document; rewriting would quietly break the
     // signature, which is the failure this module exists to prevent.
-    if prev.is_encrypted() || edited.is_encrypted() {
+    //
+    // Checked on the bytes, before parsing. lopdf opens a permissions-only file
+    // (no open password) by decrypting it and dropping its encryption
+    // dictionary, so a check on the parsed document passed it. The update was
+    // then built from decrypted objects for an encrypted file, and only the
+    // read-back check below stopped it — as "object 5 0 did not survive
+    // saving", which tells the person nothing (measured 2026-10-17).
+    if declares_encryption(base) || declares_encryption(rewrite) {
         return Err(CommandError::InvalidInput(
             "This document is both signed and password protected, and VibePDF can't save \
              changes to it without breaking the signature yet. Remove the protection first, \
@@ -71,6 +76,8 @@ pub fn append_as_incremental_update(base: &[u8], rewrite: &[u8]) -> Result<Vec<u
                 .into(),
         ));
     }
+    let prev = load_cos(base, pdf_err("read the signed file"))?;
+    let edited = load_cos(rewrite, pdf_err("read the edited document"))?;
 
     let mut update = IncrementalDocument::create_from(base.to_vec(), prev.clone());
     for (id, object) in &edited.objects {
@@ -100,7 +107,7 @@ pub fn append_as_incremental_update(base: &[u8], rewrite: &[u8]) -> Result<Vec<u
     if !out.starts_with(base) {
         return Err(CommandError::Internal("saving would have moved signed bytes".into()));
     }
-    let reread = Document::load_mem(&out).map_err(pdf_err("read the saved document back"))?;
+    let reread = load_cos(&out, pdf_err("read the saved document back"))?;
     for (id, object) in &edited.objects {
         if !reread.objects.get(id).is_some_and(|saved| equivalent(saved, object)) {
             return Err(CommandError::Internal(format!(

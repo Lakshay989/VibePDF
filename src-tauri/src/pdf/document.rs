@@ -168,6 +168,86 @@ pub(crate) fn is_protected(doc: &PdfDocument<'_>) -> bool {
     )
 }
 
+/// SPEC: P1-VIEW-003 — refuse a lopdf round-trip edit on a protected document
+/// *before* it starts, then return the bytes the edit begins from.
+///
+/// [`replace_with_edited_bytes`] already refuses at the end of the round trip,
+/// but by then the transform has run on bytes lopdf may not be able to read.
+/// lopdf 0.42 loads a document that needs a password as one with no objects at
+/// all, so the transform failed first with "page out of range: 0" and the
+/// person never saw why. Checking here gives the real reason, and does it
+/// before anything is computed. The end-of-trip check stays as a second layer.
+/// The caller must hold `pdfium_lock`.
+pub(crate) fn bytes_for_cos_edit(doc: &PdfDocument<'_>) -> Result<Vec<u8>, CommandError> {
+    if is_protected(doc) {
+        return Err(CommandError::InvalidInput(PROTECTED_EDIT_REFUSAL.into()));
+    }
+    doc.save_to_bytes().map_err(CommandError::from)
+}
+
+/// What a person sees when lopdf is handed a document it cannot decrypt.
+pub const NEEDS_PASSWORD: &str = "This PDF is password protected, so VibePDF can't read it \
+    here. Remove the protection with Unlock…, then try again.";
+
+/// Parse `bytes` with lopdf, refusing a document it could not decrypt.
+///
+/// The only way into lopdf for production code; `tests/lopdf_load_policy.rs`
+/// fails the build on a direct `Document::load_mem`. Without this, a document
+/// that needs a password reaches the caller as something that looks fine:
+/// lopdf 0.36 returns its objects still encrypted (every string and stream is
+/// ciphertext), and 0.42 logs a warning and returns `Ok` with **no objects**.
+/// Neither is an error, so a read came back empty and an edit failed on a
+/// missing page. `map_err` keeps each caller's own wording for real parse
+/// failures.
+pub(crate) fn load_cos(
+    bytes: &[u8],
+    map_err: impl FnOnce(lopdf::Error) -> CommandError,
+) -> Result<lopdf::Document, CommandError> {
+    let doc = lopdf::Document::load_mem(bytes).map_err(map_err)?;
+    if could_not_decrypt(bytes, &doc) {
+        return Err(CommandError::InvalidInput(NEEDS_PASSWORD.into()));
+    }
+    Ok(doc)
+}
+
+/// Refuse a file the person picked as a *source* — a merge input, a page
+/// background — that lopdf cannot decrypt, naming it.
+///
+/// [`load_cos`] would refuse it anyway, but deep inside the operation and with
+/// "This PDF", which reads as the open document. Checked only when the bytes
+/// declare encryption, so ordinary sources are not parsed twice. A
+/// permissions-only source lopdf can decrypt goes through as before.
+pub(crate) fn refuse_locked_source(path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
+    if !declares_encryption(bytes) {
+        return Ok(());
+    }
+    match load_cos(bytes, |e| CommandError::PdfError(e.to_string())) {
+        Err(CommandError::InvalidInput(message)) if message == NEEDS_PASSWORD => {
+            let name = path
+                .file_name()
+                .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+            Err(CommandError::InvalidInput(format!(
+                "{name} is password protected, so VibePDF can't read it here. Remove its \
+                 protection with Unlock…, then try again."
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Did lopdf load `bytes` without being able to decrypt them?
+///
+/// Two shapes, one per lopdf generation. `is_encrypted` resolves the trailer's
+/// `/Encrypt` dictionary, so it is true only while that dictionary is still in
+/// the object table — which lopdf leaves in place when it kept the ciphertext
+/// (0.36) and removes when it decrypted. When lopdf loaded nothing (0.42) the
+/// dictionary is gone too, so that case is caught by bytes that declare
+/// encryption arriving with no catalog. A document lopdf *did* decrypt — a
+/// permissions-only file with an empty open password — passes both.
+fn could_not_decrypt(bytes: &[u8], doc: &lopdf::Document) -> bool {
+    doc.is_encrypted() || (declares_encryption(bytes) && doc.catalog().is_err())
+}
+
 /// Replace the actor's document with the result of a lopdf round trip —
 /// unless the document being replaced is protected.
 ///
@@ -200,6 +280,31 @@ pub(crate) fn load_edited_bytes<'a>(bytes: Vec<u8>) -> Result<PdfDocument<'a>, C
     refuse_if_protected(&bytes)?;
     let engine: &'a Pdfium = pdfium()?;
     engine.load_pdf_from_byte_vec(bytes, None).map_err(CommandError::from)
+}
+
+/// SPEC: P1-VIEW-003 — the bytes the actor's lopdf parse cache reads a document
+/// from: its current state, with any protection removed.
+///
+/// The notes, text-box and form-field panels are lopdf reads. Handed the
+/// protected serialisation they cannot decrypt it, so a protected document's
+/// panels showed ciphertext (lopdf 0.36) or nothing at all (0.42, which loads
+/// such bytes as an empty document). This is the same decryption the view
+/// already gets, for the same purpose — showing the person what is on the
+/// page — and like the view's copy it is parsed in memory and never written.
+/// The protected serialisation is still what saving and every edit see.
+///
+/// A permissions-only document has no open password; `PDFium` takes the empty
+/// one, as it did when the document was opened. The caller must hold
+/// `pdfium_lock`.
+pub(crate) fn bytes_for_cos_read(
+    doc: &PdfDocument<'_>,
+    password: Option<&str>,
+) -> Result<Vec<u8>, CommandError> {
+    let bytes = doc.save_to_bytes().map_err(CommandError::from)?;
+    if is_protected(doc) {
+        return remove_security_for_view(&bytes, password.unwrap_or(""));
+    }
+    Ok(bytes)
 }
 
 /// A second binding to the same `PDFium` library, for the one call pdfium-render
@@ -258,8 +363,9 @@ extern "C" fn append_block(this: *mut FileSink, data: *const c_void, size: c_ulo
 /// The result goes over IPC to the webview, which renders and extracts exactly
 /// this content anyway. It must never reach a disk write: `save_document`
 /// keeps the protection, and `GetBytes` — what Protect, Unlock, Sign and Find
-/// operate on — still returns the protected document. `GetViewBytes` is the
-/// only caller.
+/// operate on — still returns the protected document. Two callers, both
+/// in-memory reads: `GetViewBytes`, and [`bytes_for_cos_read`] for the actor's
+/// lopdf parse cache.
 ///
 /// The caller must hold `pdfium_lock`.
 pub(crate) fn remove_security_for_view(bytes: &[u8], password: &str) -> Result<Vec<u8>, CommandError> {
@@ -506,6 +612,111 @@ mod declares_encryption_tests {
     fn encrypt_metadata_and_plain_files_are_not() {
         assert!(!declares_encryption(b"6 0 obj <</EncryptMetadata true/Filter/Standard>> endobj trailer <</Root 1 0 R>>"));
         assert!(!declares_encryption(b"%PDF-1.4 1 0 obj <</Type/Catalog>> endobj trailer <</Root 1 0 R>>"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod load_cos_tests {
+    use lopdf::{dictionary, Document, EncryptionState, EncryptionVersion, Object, Permissions, StringFormat};
+
+    use super::{could_not_decrypt, load_cos, NEEDS_PASSWORD};
+    use crate::error::CommandError;
+    use crate::security::encrypt::{encrypt_document, DocumentPermissions, EncryptOptions};
+
+    fn hello() -> Vec<u8> {
+        let mut doc = Document::with_version("1.7");
+        let tree = doc.new_object_id();
+        let leaf = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => tree,
+            "MediaBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
+        });
+        doc.objects.insert(
+            tree,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![leaf.into()], "Count" => 1,
+            }),
+        );
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => tree });
+        doc.trailer.set("Root", catalog);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    fn protect(bytes: &[u8], user: Option<&str>, owner: Option<&str>) -> Vec<u8> {
+        let opts = EncryptOptions {
+            user_password: user.map(str::to_string),
+            owner_password: owner.map(str::to_string),
+            permissions: DocumentPermissions::default(),
+        };
+        encrypt_document(bytes, &opts).expect("encrypt")
+    }
+
+    fn refused(result: Result<Document, CommandError>) -> bool {
+        matches!(result, Err(CommandError::InvalidInput(m)) if m == NEEDS_PASSWORD)
+    }
+
+    #[test]
+    fn a_plain_document_loads() {
+        let doc = load_cos(&hello(), |e| CommandError::PdfError(e.to_string())).expect("loads");
+        assert_eq!(doc.get_pages().len(), 1);
+    }
+
+    // RC4 with an empty open password: lopdf decrypts it on load, so the
+    // content is real and the refusal must not fire.
+    #[test]
+    fn a_permissions_only_document_lopdf_decrypts_loads() {
+        let mut doc = Document::load_mem(&hello()).unwrap();
+        let file_id = Object::String(b"0123456789abcdef".to_vec(), StringFormat::Hexadecimal);
+        doc.trailer.set("ID", Object::Array(vec![file_id.clone(), file_id]));
+        let state = EncryptionState::try_from(EncryptionVersion::V2 {
+            document: &doc,
+            owner_password: "owner-rc4",
+            user_password: "",
+            key_length: 128,
+            permissions: Permissions::all(),
+        })
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        assert!(super::declares_encryption(&out), "the fixture itself must be protected");
+
+        let loaded = load_cos(&out, |e| CommandError::PdfError(e.to_string())).expect("loads");
+        assert_eq!(loaded.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn a_document_that_needs_an_open_password_is_refused() {
+        let locked = protect(&hello(), Some("open-me"), None);
+        assert!(refused(load_cos(&locked, |e| CommandError::PdfError(e.to_string()))));
+    }
+
+    // The lopdf 0.42 shape, built by hand so it is tested on any version: the
+    // bytes declare encryption and the parse has nothing in it.
+    #[test]
+    fn declared_encryption_with_nothing_loaded_could_not_be_decrypted() {
+        let mut empty = Document::with_version("1.7");
+        empty.trailer.set("Encrypt", Object::Reference((6, 0)));
+        empty.trailer.set("Root", Object::Reference((1, 0)));
+        assert!(could_not_decrypt(b"trailer\n<</Root 1 0 R/Encrypt 6 0 R>>", &empty));
+    }
+
+    // An unreadable plain file is a parse problem, not a password problem; it
+    // must keep the caller's own error.
+    #[test]
+    fn no_catalog_without_declared_encryption_is_not_a_password_problem() {
+        let mut empty = Document::with_version("1.7");
+        empty.trailer.set("Root", Object::Reference((1, 0)));
+        assert!(!could_not_decrypt(b"trailer\n<</Root 1 0 R>>", &empty));
+    }
+
+    #[test]
+    fn a_parse_failure_keeps_the_callers_error() {
+        let result = load_cos(b"not a pdf", |_| CommandError::Internal("caller's own".into()));
+        assert!(matches!(result, Err(CommandError::Internal(m)) if m == "caller's own"));
     }
 }
 

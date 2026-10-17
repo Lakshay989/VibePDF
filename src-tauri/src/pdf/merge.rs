@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::CommandError;
 use crate::pdf::cos;
-use crate::pdf::document::{load_edited_bytes, pdfium_lock, save_document, SaveOutcome};
+use crate::pdf::document::{load_edited_bytes, pdfium_lock, refuse_locked_source, save_document, SaveOutcome};
 
 /// Merge `sources` (≥ 2 files, in order) into a new PDF at `dest`, preserving
 /// pages, annotations, bookmarks, and form fields (colliding field names are
@@ -32,6 +32,7 @@ pub fn merge_documents(sources: &[PathBuf], dest: &Path) -> Result<SaveOutcome, 
         let bytes = std::fs::read(path).map_err(|e| {
             CommandError::InvalidInput(format!("cannot read {}: {e}", path.display()))
         })?;
+        refuse_locked_source(path, &bytes)?;
         source_bytes.push(bytes);
     }
 

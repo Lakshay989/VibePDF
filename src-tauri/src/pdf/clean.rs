@@ -27,7 +27,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
 
@@ -100,7 +100,7 @@ pub fn clean_document(
     bytes: &[u8],
     opts: &CleanOptions,
 ) -> Result<(Vec<u8>, CleanReport), CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(clean_err)?;
+    let mut doc = load_cos(bytes, clean_err)?;
     let mut report = CleanReport::default();
 
     // Order matters in one place: attachments before embedded files, so the
@@ -564,7 +564,7 @@ pub fn clean_into<'a>(
 ) -> Result<(Box<dyn Edit<PdfDocument<'a>>>, CleanReport), CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let (new_bytes, report) = clean_document(&pre_bytes, opts)?;
     {

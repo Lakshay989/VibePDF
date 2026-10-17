@@ -17,6 +17,7 @@
 use lopdf::Document;
 
 use crate::error::CommandError;
+use crate::pdf::document::load_cos;
 
 /// Lazily-parsed, invalidate-on-write cache of the actor's `lopdf::Document`.
 #[derive(Default)]
@@ -45,8 +46,7 @@ impl CachedDoc {
     {
         if self.doc.is_none() {
             let bytes = produce()?;
-            let parsed = Document::load_mem(&bytes)
-                .map_err(|e| CommandError::Internal(format!("lopdf parse (doc cache): {e}")))?;
+            let parsed = load_cos(&bytes, |e| CommandError::Internal(format!("lopdf parse (doc cache): {e}")))?;
             self.doc = Some(parsed);
         }
         // Filled immediately above when `None`, so this is always `Some`; the

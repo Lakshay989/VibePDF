@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
 use crate::pdf::cos::effective_media_box;
+use crate::pdf::document::load_cos;
 
 #[allow(clippy::needless_pass_by_value)]
 fn cos_err(e: lopdf::Error) -> CommandError {
@@ -382,7 +383,7 @@ pub fn compress_bytes(
     bytes: &[u8],
     level: CompressLevel,
 ) -> Result<(Vec<u8>, CompressReport), CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let widths = page_widths(&doc);
     let mut report = CompressReport {
         before_bytes: bytes.len() as u64,

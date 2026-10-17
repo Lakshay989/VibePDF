@@ -35,7 +35,7 @@ use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::insert_from::InsertFromEdit;
 use crate::pdf::document::{
-    collect_metadata, is_protected, open_pdf, pdfium_lock, remove_security_for_view,
+    bytes_for_cos_read, collect_metadata, is_protected, open_pdf, pdfium_lock, remove_security_for_view,
     save_document_onto, DocumentMetadata, SaveOutcome, PROTECTED_EDIT_REFUSAL,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
@@ -3696,7 +3696,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_text_notes_doc);
                 let _ = reply.send(result);
@@ -3706,7 +3706,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_annotations_doc);
                 let _ = reply.send(result);
@@ -3753,7 +3753,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_free_text_doc(d, &nm));
                 let _ = reply.send(result);
@@ -3894,7 +3894,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_text_boxes_doc(d, page));
                 let _ = reply.send(result);
@@ -3906,7 +3906,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_form_summary_doc);
                 let _ = reply.send(result);
@@ -3916,7 +3916,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_text_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -3939,7 +3939,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_button_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -3961,7 +3961,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_choice_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -4027,7 +4027,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_page_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -4060,7 +4060,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(collect_form_data)
                     .and_then(|data| {
@@ -4536,7 +4536,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_measure_calibration_doc);
                 let _ = reply.send(result);

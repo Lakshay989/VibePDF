@@ -28,7 +28,7 @@
 //! come free: a password-protected document is refused (`P1-VIEW-003`), and a
 //! signed one is saved as an incremental update.
 
-use lopdf::{Document, Object, ObjectId};
+use lopdf::{Object, ObjectId};
 use pdfium_render::prelude::PdfDocument;
 use serde::Serialize;
 
@@ -41,7 +41,7 @@ use crate::pdf::cos::{
     page_rotation, register_page_resource, visual_cm_line, visual_transform, winansi_fits,
     wrap_decoration,
 };
-use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::font_embed_cid::{build_cid_font, cid_run_fragment, CidRun};
 use crate::pdf::font_resolver::covering_font_bytes;
 use crate::pdf::render::{render_page, ImageFormat};
@@ -233,7 +233,7 @@ fn base14_word(font: &str, base: &str, word: &Placed) -> String {
 /// render mode is graphics state, and `q` inherits it, so the embedded run is
 /// invisible for exactly the same reason the Latin one is.
 fn write_text_layer(bytes: &[u8], found: &[Recognised]) -> Result<(Vec<u8>, u32), CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(|e| CommandError::PdfError(e.to_string()))?;
+    let mut doc = load_cos(bytes, |e| CommandError::PdfError(e.to_string()))?;
     let base = base_font("Helvetica", false, false)?;
     let page_map = doc.get_pages();
     let mut written = 0;
@@ -370,7 +370,7 @@ impl<'a> Edit<PdfDocument<'a>> for OcrTextLayerEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let (new_bytes, _written) = write_text_layer(&pre_bytes, &self.found)?;
         {

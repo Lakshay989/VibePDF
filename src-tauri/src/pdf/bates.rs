@@ -21,7 +21,7 @@ use crate::pdf::cos::{
     page_effective_box, page_rotation, parse_hex_color, register_page_resource, visual_cm_line,
     visual_transform, winansi_fits, wrap_decoration,
 };
-use crate::pdf::document::{pdfium_lock, replace_with_edited_bytes};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::font_metrics::text_width;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -72,7 +72,7 @@ pub fn add_bates(
     let sz = size.max(1.0);
     let pad = padding as usize;
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     // `get_pages()` is keyed by 1-based page number, so iteration is in document
     // order; enumerate() gives the 0-based index the sequence counts from.
     let targets: Vec<(usize, ObjectId)> = doc.get_pages().into_values().enumerate().collect();
@@ -200,7 +200,7 @@ fn bates_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {
