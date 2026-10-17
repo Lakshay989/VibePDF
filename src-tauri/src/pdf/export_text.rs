@@ -44,7 +44,7 @@ pub struct TextPiece {
 
 impl TextPiece {
     fn middle_y(&self) -> f32 {
-        (self.top + self.bottom) / 2.0
+        f32::midpoint(self.top, self.bottom)
     }
 
     fn height(&self) -> f32 {
@@ -148,7 +148,7 @@ fn split_columns(pieces: &[TextPiece]) -> Vec<Vec<usize>> {
             (0..pieces.len())
                 .filter(|i| {
                     let piece = &pieces[*i];
-                    let centre = (piece.left + piece.right) / 2.0;
+                    let centre = f32::midpoint(piece.left, piece.right);
                     centre >= *left && centre <= *right
                 })
                 .collect()

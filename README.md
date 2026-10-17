@@ -73,7 +73,7 @@ covering it, pattern-based redaction with a confirm step, and document cleaning
 ### Prerequisites
 
 - **Node.js 22** or newer
-- **Rust 1.80** or newer (`rustup`)
+- **Rust 1.85** or newer (`rustup`)
 - Platform toolchain for Tauri 2 — see
   [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/).
   On macOS that is Xcode Command Line Tools; on Linux, `webkit2gtk` and

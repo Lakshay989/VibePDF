@@ -198,9 +198,9 @@ fn rule_between(
     // lies on is decided *after* the rotation, not before.
     let horizontal = (a.1 - b.1).abs() <= STRAIGHT_TOLERANCE;
     Some(if horizontal {
-        Rule { horizontal: true, position: (a.1 + b.1) / 2.0, from: a.0.min(b.0), to: a.0.max(b.0) }
+        Rule { horizontal: true, position: f32::midpoint(a.1, b.1), from: a.0.min(b.0), to: a.0.max(b.0) }
     } else {
-        Rule { horizontal: false, position: (a.0 + b.0) / 2.0, from: a.1.min(b.1), to: a.1.max(b.1) }
+        Rule { horizontal: false, position: f32::midpoint(a.0, b.0), from: a.1.min(b.1), to: a.1.max(b.1) }
     })
 }
 
@@ -213,8 +213,8 @@ const STRAIGHT_TOLERANCE: f32 = 0.5;
 /// a rule by a hair still belongs to the cell it was written in.
 #[must_use]
 pub fn in_cell(cell: &Cell, piece: &TextPiece) -> bool {
-    let x = (piece.left + piece.right) / 2.0;
-    let y = (piece.top + piece.bottom) / 2.0;
+    let x = f32::midpoint(piece.left, piece.right);
+    let y = f32::midpoint(piece.top, piece.bottom);
     x >= cell.left && x <= cell.right && y >= cell.top && y <= cell.bottom
 }
 

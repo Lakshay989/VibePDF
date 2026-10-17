@@ -662,8 +662,8 @@ pub fn export_docx(
         // everything twice. The split happens here, before any ordering, so
         // neither side ever sees the other's runs.
         let (in_table, outside): (Vec<&Placed>, Vec<&Placed>) = runs.iter().partition(|placed| {
-            let x = (placed.piece.left + placed.piece.right) / 2.0;
-            let y = (placed.piece.top + placed.piece.bottom) / 2.0;
+            let x = f32::midpoint(placed.piece.left, placed.piece.right);
+            let y = f32::midpoint(placed.piece.top, placed.piece.bottom);
             tables.iter().any(|table| table.contains(x, y))
         });
 

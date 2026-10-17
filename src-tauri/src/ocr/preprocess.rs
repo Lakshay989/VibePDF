@@ -217,7 +217,7 @@ pub fn despeckle(image: &GrayImage) -> GrayImage {
             }
             neighbours.sort_unstable();
             // (a + b) / 2 without midpoint(), which needs Rust 1.85 and our MSRV is 1.80.
-            let median = (u16::from(neighbours[3]) + u16::from(neighbours[4])) / 2;
+            let median = u16::midpoint(u16::from(neighbours[3]), u16::from(neighbours[4]));
             let centre16 = u16::from(centre);
             let contrast = centre16.abs_diff(median);
             if contrast <= SPECK_CONTRAST {

@@ -1203,7 +1203,7 @@ fn markup_appearance_content(subtype: &str, quads: &[[f32; 8]], (r, g, b): (f32,
         let line_w = ((qy1 - qy0) * 0.06).max(0.75);
         let _ = writeln!(content, "{line_w:.2} w");
         let y = if subtype == "strikethrough" {
-            (qy0 + qy1) / 2.0
+            f32::midpoint(qy0, qy1)
         } else {
             qy0 + (qy1 - qy0) * 0.12
         };
@@ -1825,7 +1825,7 @@ fn aspect_fit_rect(rect: [f32; 4], iw: u32, ih: u32) -> [f32; 4] {
     #[allow(clippy::cast_precision_loss)]
     let aspect = iw as f32 / ih as f32;
     let (w, h) = if aspect > bw / bh { (bw, bw / aspect) } else { (bh * aspect, bh) };
-    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let (cx, cy) = (f32::midpoint(x0, x1), f32::midpoint(y0, y1));
     [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
 }
 
@@ -2879,7 +2879,7 @@ fn image_stamp_content(rect: [f32; 4], label: Option<&str>, show: impl Fn(&str) 
         let size = by_width.min(h * 0.3).clamp(5.0, 48.0);
         let text_w = HELV_BOLD_EM * size * len;
         let tx = x0 + (w - text_w) / 2.0;
-        let baseline = (y0 + y1) / 2.0 - size * 0.34;
+        let baseline = f32::midpoint(y0, y1) - size * 0.34;
         let _ = writeln!(out, "0 0 0 rg");
         let _ = writeln!(out, "BT");
         let _ = writeln!(out, "/F1 {size:.2} Tf");
@@ -2957,7 +2957,7 @@ fn stamp_appearance_content(
     let size = by_width.min(by_height).clamp(5.0, 96.0);
     let text_w = HELV_BOLD_EM * size * len;
     let tx = x0 + (bw - text_w) / 2.0;
-    let baseline = (y0 + y1) / 2.0 - size * 0.34; // centre the cap height
+    let baseline = f32::midpoint(y0, y1) - size * 0.34; // centre the cap height
 
     let (inx, iny, inw, inh) = (x0 + pad, y0 + pad, bw - 2.0 * pad, bh - 2.0 * pad);
 
@@ -3806,8 +3806,8 @@ fn shape_appearance_content(
     } else {
         // Ellipse as four cubic Béziers (kappa ≈ 0.5523), starting at the right
         // anchor and going counter-clockwise: right→top→left→bottom→right.
-        let cx = (ix0 + ix1) / 2.0;
-        let cy = (iy0 + iy1) / 2.0;
+        let cx = f32::midpoint(ix0, ix1);
+        let cy = f32::midpoint(iy0, iy1);
         let rx = (ix1 - ix0) / 2.0;
         let ry = (iy1 - iy0) / 2.0;
         let kx = rx * 0.552_284_8;
