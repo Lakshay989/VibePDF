@@ -18,7 +18,10 @@
 
 use std::path::PathBuf;
 
-use lopdf::{Document, Object};
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::Aes256;
+use lopdf::{Document, EncryptionState, Object};
 use vibepdf_lib::error::CommandError;
 use vibepdf_lib::pdf::document::open_pdf;
 use vibepdf_lib::security::encrypt::{encrypt_document, DocumentPermissions, EncryptOptions};
@@ -109,26 +112,63 @@ fn encrypts_with_aes_256() {
 // lopdf 0.36.0's `compute_permissions` encrypts a temporary copy and returns
 // the plaintext, so `/Perms` goes out with `'T'` and `"adb"` sitting in the
 // clear. PDFium validates that entry and refuses the entire document — a
-// password error on a correct password. If this assertion ever fails, the
-// workaround in `permissions_entry` has stopped being applied and the files we
-// produce will open in some readers and not others.
+// password error on a correct password. If this test ever fails, `/Perms` is
+// wrong again and the files we produce will open in some readers and not
+// others.
+//
+// Checked by decrypting the entry, not by looking at the ciphertext. A correct
+// entry is one AES block under a random key, so any byte of it is 'T' or 'F'
+// about one time in 128 — an earlier version asserted byte 8 was neither, and
+// failed correct files at that rate. A block that decrypts under the file key
+// to the Algorithm 10 layout is both encrypted and right; the plaintext block
+// cannot decrypt to it.
+//
+// The key comes back through lopdf's R6 password path, which shares no code
+// with `permissions_entry`: we generate the key and hand the same one to both,
+// so `/Perms` written under anything else decrypts to noise.
 #[test]
 fn the_perms_entry_is_encrypted() {
-    let out = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some("pw"), None)).expect("encrypt");
+    // Restricted, so the `/P` it must agree with is not the all-allowed default
+    // that a hardcoded value would also produce.
+    let mut o = opts(Some("pw"), None);
+    o.permissions = DocumentPermissions {
+        print: false,
+        copy: false,
+        ..DocumentPermissions::default()
+    };
+    let out = encrypt_document(&fixture_bytes("hello.pdf"), &o).expect("encrypt");
+
+    let state = EncryptionState::decode(&Document::load_mem(&out).expect("load"), "pw")
+        .expect("lopdf recovers the file key");
     let dict = encrypt_dict(&out);
     let perms = dict.get(b"Perms").and_then(Object::as_str).expect("/Perms");
-
     assert_eq!(perms.len(), 16, "Algorithm 10 produces exactly one AES block");
-    assert_ne!(
-        &perms[9..12],
+
+    // Algorithm 10 is ECB with one block: no IV, no padding.
+    let mut block = GenericArray::clone_from_slice(perms);
+    Aes256::new(GenericArray::from_slice(state.file_encryption_key())).decrypt_block(&mut block);
+
+    assert_eq!(
+        &block[9..12],
         b"adb",
-        "/Perms is the plaintext permission block — the lopdf bug is back"
+        "/Perms does not decrypt under the file key{}",
+        if &perms[9..12] == b"adb" {
+            " — it is the plaintext block: the lopdf bug is back"
+        } else {
+            ""
+        }
     );
-    // Byte 8 is 'T'/'F' before encryption; seeing either there is the same tell.
-    assert!(
-        perms[8] != b'T' && perms[8] != b'F',
-        "/Perms looks unencrypted at byte 8"
-    );
+    // Bytes 0–3 are `/P`, low byte first; 4–7 are the all-ones extension to 64 bits.
+    let mut expected = [0xFF; 8];
+    expected[..4].copy_from_slice(&int(&dict, b"P").to_le_bytes()[..4]);
+    assert_eq!(&block[..8], &expected, "/Perms disagrees with /P");
+    assert_eq!(block[8], b'T', "metadata is encrypted, so byte 8 is 'T'");
+
+    // The outside check: PDFium runs Algorithm 13 on open, and it is the reader
+    // that refused the files the lopdf bug produced.
+    let file = TempPdf::new(&out);
+    let (doc, _) = open_pdf(&file.0, Some("pw")).expect("PDFium accepts /Perms");
+    drop(doc);
 }
 
 // SPEC: P6-SEC-007 — a user password gates opening. Checked through PDFium,
