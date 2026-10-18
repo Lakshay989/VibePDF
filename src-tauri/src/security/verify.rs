@@ -337,12 +337,39 @@ fn collect_ranges(bytes: &[u8], ranges: &[(usize, usize)]) -> Option<Vec<u8>> {
 /// `/Contents` with the placeholder's zero padding removed.
 ///
 /// The gap is a fixed size, so a signature shorter than the gap is followed by
-/// zeros. DER decoding demands an exact length, so they have to go — but only
-/// the trailing ones, and only after the last non-zero byte.
+/// zeros. DER decoding demands an exact length, so they have to go; where they
+/// start is decided by [`without_padding`].
 fn contents_der(dict: &lopdf::Dictionary) -> Option<Vec<u8>> {
     let raw = dict.get(b"Contents").and_then(Object::as_str).ok()?;
-    let end = raw.iter().rposition(|b| *b != 0)? + 1;
-    Some(raw[..end].to_vec())
+    without_padding(raw).map(<[u8]>::to_vec)
+}
+
+/// `raw` without the placeholder's zero padding: the one DER value it starts
+/// with, its length read from that value's own header.
+///
+/// **Not "everything up to the last non-zero byte".** That was the rule until
+/// 2026-10-18, and a signature's final byte is the RSA signature's own — or a
+/// timestamp token's — which is zero about one time in 256. Stripping it
+/// handed [`check_cms`] a truncated blob, and a valid signature was reported as
+/// unreadable.
+///
+/// `None` when there is nothing but padding: a reserved field never signed.
+/// Anything that is not one DER value followed only by zeros is returned
+/// whole, so [`check_cms`] rejects it exactly as it always has.
+fn without_padding(raw: &[u8]) -> Option<&[u8]> {
+    if raw.iter().all(|b| *b == 0) {
+        return None;
+    }
+    let value_len = der::SliceReader::new(raw)
+        .and_then(|mut reader| der::Header::decode(&mut reader))
+        .and_then(|header| header.encoded_len()? + header.length)
+        .ok()
+        .and_then(|len| usize::try_from(len).ok());
+    let value = value_len
+        .and_then(|len| raw.split_at_checked(len))
+        .filter(|(_, padding)| padding.iter().all(|b| *b == 0))
+        .map(|(value, _)| value);
+    Some(value.unwrap_or(raw))
 }
 
 /// `/Contents` as the signer wrote it: the hex string in the gap between the
@@ -374,8 +401,7 @@ fn contents_from_gap(bytes: &[u8], ranges: &[(usize, usize)]) -> Option<Vec<u8>>
         .chunks(2)
         .map(|pair| Some(hex_digit(pair[0])? << 4 | hex_digit(pair[1])?))
         .collect::<Option<Vec<u8>>>()?;
-    let end = raw.iter().rposition(|b| *b != 0)? + 1;
-    Some(raw[..end].to_vec())
+    without_padding(&raw).map(<[u8]>::to_vec)
 }
 
 fn hex_digit(c: u8) -> Option<u8> {
@@ -589,7 +615,10 @@ fn certificate_signed_by(subject: &Certificate, issuer: &Certificate) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::contents_from_gap;
+    use super::{contents_der, contents_from_gap, without_padding};
+
+    /// SEQUENCE { INTEGER 0 }: a complete DER value whose last byte is 0x00.
+    const ENDS_IN_ZERO: [u8; 5] = [0x30, 0x03, 0x02, 0x01, 0x00];
 
     /// `prefix`, then `gap`, then `suffix`, with the two ranges around the gap.
     fn file(gap: &[u8]) -> (Vec<u8>, Vec<(usize, usize)>) {
@@ -601,8 +630,63 @@ mod tests {
 
     #[test]
     fn the_gap_decodes_to_its_bytes_without_the_padding() {
-        let (bytes, ranges) = file(b"<3082 01ff00\n0000>");
-        assert_eq!(contents_from_gap(&bytes, &ranges), Some(vec![0x30, 0x82, 0x01, 0xff]));
+        let (bytes, ranges) = file(b"<3003 0201\n00 0000>");
+        assert_eq!(contents_from_gap(&bytes, &ranges), Some(ENDS_IN_ZERO.to_vec()));
+    }
+
+    // The bug `without_padding` replaced: the padding was found by stripping
+    // trailing zeros, which also stripped a value's own final 0x00 — the RSA
+    // signature's last byte, so about one valid signature in 256.
+    #[test]
+    fn a_value_ending_in_zero_keeps_its_last_byte() {
+        let padded = [ENDS_IN_ZERO.as_slice(), &[0; 8]].concat();
+        assert_eq!(without_padding(&padded), Some(ENDS_IN_ZERO.as_slice()));
+
+        // Long-form length, as a real signature's is: SEQUENCE (131 bytes)
+        // { OCTET STRING (128 bytes), the last of them 0x00 }.
+        let mut long = vec![0x30, 0x81, 0x83, 0x04, 0x81, 0x80];
+        long.extend([0xAB; 127]);
+        long.push(0x00);
+        let padded = [long.as_slice(), &[0; 16]].concat();
+        assert_eq!(without_padding(&padded), Some(long.as_slice()));
+    }
+
+    #[test]
+    fn both_readers_keep_a_final_zero() {
+        let mut dict = lopdf::Dictionary::new();
+        let padded = [ENDS_IN_ZERO.as_slice(), &[0; 8]].concat();
+        dict.set("Contents", lopdf::Object::String(padded, lopdf::StringFormat::Hexadecimal));
+        assert_eq!(contents_der(&dict), Some(ENDS_IN_ZERO.to_vec()));
+
+        let (bytes, ranges) = file(b"<300302010000000000>");
+        assert_eq!(contents_from_gap(&bytes, &ranges), Some(ENDS_IN_ZERO.to_vec()));
+    }
+
+    #[test]
+    fn a_value_with_no_padding_comes_back_as_it_is() {
+        assert_eq!(without_padding(&ENDS_IN_ZERO), Some(ENDS_IN_ZERO.as_slice()));
+    }
+
+    // A reserved field that was never signed: "no readable content", not a
+    // malformed signature.
+    #[test]
+    fn nothing_but_padding_is_no_content() {
+        assert_eq!(without_padding(&[0; 32]), None);
+        assert_eq!(without_padding(&[]), None);
+    }
+
+    // Each of these was unreadable before, and is still handed on whole so it
+    // stays unreadable — never trimmed into something that might parse.
+    #[test]
+    fn anything_but_one_value_then_zeros_is_returned_whole() {
+        let junk_after = [ENDS_IN_ZERO.as_slice(), &[0x00, 0x01, 0x00]].concat();
+        // A header claiming 511 bytes, with two present.
+        let too_long = [0x30, 0x82, 0x01, 0xff, 0x00, 0x00];
+        // Indefinite length: BER, which DER forbids.
+        let indefinite = [0x30, 0x80, 0x02, 0x01, 0x00, 0x00, 0x00];
+        for raw in [junk_after.as_slice(), &too_long, &indefinite] {
+            assert_eq!(without_padding(raw), Some(raw), "{raw:02x?}");
+        }
     }
 
     #[test]
