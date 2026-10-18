@@ -51,7 +51,11 @@ async function decodedImage(fixture: string): Promise<DecodedImage> {
   }
 }
 
-describe("PDF.js image decoders", () => {
+// The first test in this block pays for importing PDF.js and compiling its
+// decoder WebAssembly. That is 2.6–2.8 s for all three tests on a Windows CI
+// runner, and more than the default 5 s on a slow one: on 2026-10-18 the CCITT
+// test timed out with nothing wrong. The limit is for hangs, not speed.
+describe("PDF.js image decoders", { timeout: 30_000 }, () => {
   it("decode a CCITT fax image (the JBIG2 module) to the generated pattern", async () => {
     // Mirrors BLACK in tests/fixtures/basic/generate-ccitt.py.
     const black = [
