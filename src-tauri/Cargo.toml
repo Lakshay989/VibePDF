@@ -81,14 +81,6 @@ tesseract-rs = "0.4.0"
 # was already in Cargo.lock transitively, so this adds a direct edge and no new
 # supply-chain surface. lopdf supplies the cryptography itself.
 getrandom = "0.3"
-# P6.C1 (SPEC P6-SEC-007): one AES-256-ECB block, to write the /Perms entry
-# that lopdf 0.36.0 leaves in plaintext (its compute_permissions encrypts a
-# temporary copy and returns the original). PDFium validates /Perms and refuses
-# the document, so without this our "protected" files open in some readers and
-# not others. Not a cryptographic design: no key derivation, no mode choice —
-# the key is already in hand and the block is fixed by ISO 32000-2 Algorithm 10.
-# Same version lopdf already resolves to, so no second copy in the tree.
-aes = "0.8"
 # COS / object-model layer for the structural edits PDFium's high-level API
 # can't do: rewriting /Outlines, /AcroForm, the page tree, and indirect refs.
 # Pure Rust, MIT. Operates on serialized bytes *between* PDFium passes — never
@@ -175,6 +167,11 @@ ureq = { version = "3.2.1", default-features = false, features = ["rustls", "pla
 
 [dev-dependencies]
 pdfium-render = "0.9"
+# tests/encrypt.rs decrypts the /Perms block lopdf writes (ISO 32000-2
+# Algorithm 10) to check it against /P. Test-only since lopdf 0.37 fixed
+# writing that block in plaintext; before, it was a runtime dependency used
+# to rewrite the block. Same version lopdf resolves to, so no second copy.
+aes = "0.8"
 
 [profile.release]
 panic = "abort"

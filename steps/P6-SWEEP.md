@@ -35,9 +35,12 @@ whether the signed bytes are intact, and what was appended after signing.
 
 Two diffs: `8e8394b`, `f7384e3`, `536510b`.
 
-- [ ] `security/encrypt.rs::permissions_entry` — the workaround for lopdf 0.36
+- [ ] ~~`security/encrypt.rs::permissions_entry` — the workaround for lopdf 0.36
       writing `/Perms` in plaintext. Check it encrypts a **named** binding and
-      returns that; the upstream bug is encrypting a temporary copy.
+      returns that; the upstream bug is encrypting a temporary copy.~~
+      **Obsolete (2026-10-18):** removed. lopdf 0.37 fixed the bug upstream and
+      0.42 writes `/Perms` itself; `tests/encrypt.rs::the_perms_entry_is_encrypted`
+      checks it against `/P` and through PDFium.
 - [ ] `security/encrypt.rs::file_encryption_key` — OS CSPRNG, nothing derived
       from the passwords or the clock.
 - [ ] `commands/pdf.rs::pdf_protect` / `pdf_remove_protection` — no password
@@ -45,10 +48,12 @@ Two diffs: `8e8394b`, `f7384e3`, `536510b`.
       path on every message).
 - [ ] `security/decrypt.rs` — the two named failures are honest about what went
       wrong rather than blaming the password.
-- [ ] `security/encrypt.rs::fix_permissions_entry` (C3) — `/Perms` is built from
+- [ ] ~~`security/encrypt.rs::fix_permissions_entry` (C3) — `/Perms` is built from
       the `/P` read back out of the document, not from a second copy of the
       permission set. Two values that must agree are one value here; check it
-      stayed that way.
+      stayed that way.~~ **Obsolete (2026-10-18):** removed with
+      `permissions_entry`. lopdf writes `/P` and `/Perms` from the one
+      `Permissions` value `encrypt_document` hands it.
 - [ ] `DocumentPermissions::default()` — hand-written, granting everything. The
       derived `Default` would clear every bit and silently produce the most
       restricted document possible.
@@ -387,5 +392,6 @@ Listed so a sweep does not re-report them.
 
 ## Upstream
 
-- [ ] File the lopdf report (`/Perms` written in plaintext, plus the R6
-      user-authentication finding). Draft prepared 2026-08-12; not yet filed.
+- [ ] File the lopdf report (the R6 user-authentication finding). Draft
+      prepared 2026-08-12; not yet filed. Its `/Perms`-in-plaintext half is moot:
+      lopdf 0.37 fixed that upstream ("consistently iterating over blocks").

@@ -107,14 +107,15 @@ fn encrypts_with_aes_256() {
     assert!(dict.get(b"Length").is_err(), "/Length must not be written for V5");
 }
 
-// The regression test for the upstream defect this module works around.
+// The guard on lopdf's own `/Perms` (ISO 32000-2 Algorithm 10).
 //
-// lopdf 0.36.0's `compute_permissions` encrypts a temporary copy and returns
-// the plaintext, so `/Perms` goes out with `'T'` and `"adb"` sitting in the
+// lopdf 0.36.0's `compute_permissions` encrypted a temporary copy and returned
+// the plaintext, so `/Perms` went out with `'T'` and `"adb"` sitting in the
 // clear. PDFium validates that entry and refuses the entire document — a
-// password error on a correct password. If this test ever fails, `/Perms` is
-// wrong again and the files we produce will open in some readers and not
-// others.
+// password error on a correct password. `security/encrypt.rs` rewrote the
+// entry to work around it until lopdf 0.37 fixed it upstream; now nothing of
+// ours touches `/Perms`, and this test is what fails if a lopdf upgrade brings
+// the bug back.
 //
 // Checked by decrypting the entry, not by looking at the ciphertext. A correct
 // entry is one AES block under a random key, so any byte of it is 'T' or 'F'
@@ -123,9 +124,15 @@ fn encrypts_with_aes_256() {
 // to the Algorithm 10 layout is both encrypted and right; the plaintext block
 // cannot decrypt to it.
 //
-// The key comes back through lopdf's R6 password path, which shares no code
-// with `permissions_entry`: we generate the key and hand the same one to both,
-// so `/Perms` written under anything else decrypts to noise.
+// The key comes back through lopdf's R6 password path, not from the code that
+// wrote `/Perms`: we generate the key and hand it over, so `/Perms` written
+// under anything else decrypts to noise.
+//
+// The byte-by-byte asserts are not redundant with the PDFium open at the end.
+// PDFium checks the `"adb"` marker and bytes 0–3 against `/P`, but accepts a
+// block whose bytes 4–7 are not all ones or whose byte 8 says 'F' (measured
+// 2026-10-18 by tampering with `/Perms`), so those bytes are checked here or
+// nowhere.
 #[test]
 fn the_perms_entry_is_encrypted() {
     // Restricted, so the `/P` it must agree with is not the all-allowed default
@@ -153,7 +160,7 @@ fn the_perms_entry_is_encrypted() {
         b"adb",
         "/Perms does not decrypt under the file key{}",
         if &perms[9..12] == b"adb" {
-            " — it is the plaintext block: the lopdf bug is back"
+            " — it is the plaintext block: lopdf's 0.36 /Perms bug is back"
         } else {
             ""
         }

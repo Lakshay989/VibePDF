@@ -222,7 +222,7 @@ Text cells are written inline (`t="inlineStr"`), which removes the shared-string
 - `rsa` — RSA operations (signing, encryption)
 - `x509-cert` — Certificate parsing and chain validation
 - `cms` — Cryptographic Message Syntax (the structure inside PKCS#7 signatures)
-- `aes` + `aes-gcm` — Document encryption (256-bit AES per PDF 2.0)
+- Document encryption (256-bit AES per PDF 2.0) is `lopdf`'s standard security handler, not ours. `aes` is a dev-dependency only, for `tests/encrypt.rs` to decrypt the `/Perms` block lopdf writes; `aes-gcm` was never needed.
 
 **PDF signature flow:**
 1. Compute a SHA-256 hash of the byte range being signed
@@ -326,8 +326,8 @@ leptess = "0.14"             # WARNING: last release 2023-02-21. Re-evaluate bef
 rsa       = "0.9"
 x509-cert = "0.2"
 cms       = "0.2"
-aes       = "0.8"
-aes-gcm   = "0.10"
+aes       = "0.8"             # dev-dependency only since 2026-10-18 (tests/encrypt.rs)
+aes-gcm   = "0.10"            # never added: lopdf owns document AES
 
 # AI
 ort     = "2.0.0-rc"          # only RC releases exist as of May 2026; stable 2.x not yet out

@@ -18,9 +18,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockEncrypt, KeyInit};
-use aes::Aes256;
 use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{Document, EncryptionState, EncryptionVersion, Object, Permissions, StringFormat};
 
@@ -193,89 +190,6 @@ fn ensure_file_id(doc: &mut Document) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// ISO 32000-2 Algorithm 10 — the `/Perms` block, encrypted.
-///
-/// **This exists because `lopdf` 0.36.0 gets it wrong.** Its
-/// `compute_permissions` builds the 16-byte block correctly and then does
-/// `encrypt_block_mut(&mut bytes.into())` — `into()` materialises a *temporary*
-/// `GenericArray`, the encryption lands in that temporary, and the function
-/// returns the untouched plaintext. The `/Perms` it writes reads literally
-/// `…54 61 64 62 …` — `'T'`, `"adb"` — in the clear.
-///
-/// The consequence is not cosmetic. `PDFium` validates `/Perms` and **refuses the
-/// whole document**, reporting a password error even when the password is
-/// right; `pypdf` logs "ignore '/Perms' verify failed" and carries on. A file
-/// that some readers open and others reject, with nothing on screen to say
-/// which, is exactly the failure `security/` exists to prevent.
-///
-/// This is not cryptographic design: no key derivation, no mode selection, no
-/// IV. One AES-256-ECB block over a layout the standard fixes exactly, with a
-/// key that is already in hand. Note the deliberate shape of the call below —
-/// a *named* block encrypted in place, then read back — which is the mistake
-/// upstream made.
-///
-/// `p_value` is read back out of the `/P` that was actually written, rather
-/// than passed in alongside it — see `fix_permissions_entry`.
-fn permissions_entry(key: &[u8; KEY_BYTES], p_value: u64) -> Result<Vec<u8>, CommandError> {
-    let mut block = [0u8; 16];
-    // 0–7: the permission bits, low byte first.
-    block[..8].copy_from_slice(&p_value.to_le_bytes());
-    // 8: 'T' or 'F' for EncryptMetadata — we always encrypt it.
-    block[8] = b'T';
-    // 9–11: the literal marker a reader checks for after decrypting.
-    block[9..12].copy_from_slice(b"adb");
-    // 12–15: random filler, ignored on read.
-    getrandom::fill(&mut block[12..16])
-        .map_err(|e| CommandError::Internal(format!("could not obtain random bytes: {e}")))?;
-
-    let cipher = Aes256::new(GenericArray::from_slice(key));
-    let mut out = GenericArray::clone_from_slice(&block);
-    cipher.encrypt_block(&mut out);
-    Ok(out.to_vec())
-}
-
-/// Replace the `/Perms` entry lopdf just produced with a correctly encrypted one.
-///
-/// **The permission bits come from the document's own `/P`, not from a
-/// parameter.** They are written twice — once as `/P`, once encrypted inside
-/// `/Perms` — and a reader that validates `/Perms` compares the two. Taking
-/// them as an argument alongside the set handed to `lopdf` would leave two
-/// values that are *supposed* to be equal free to drift apart, and the symptom
-/// would be a document some readers reject with nothing to say why. Deriving
-/// one from the other makes that unrepresentable rather than merely tested.
-fn fix_permissions_entry(doc: &mut Document, key: &[u8; KEY_BYTES]) -> Result<(), CommandError> {
-    let id = doc
-        .trailer
-        .get(b"Encrypt")
-        .and_then(Object::as_reference)
-        .map_err(|e| CommandError::PdfError(format!("no /Encrypt after encrypting: {e}")))?;
-    let dict = doc
-        .get_object_mut(id)
-        .and_then(Object::as_dict_mut)
-        .map_err(|e| CommandError::PdfError(format!("/Encrypt is not a dictionary: {e}")))?;
-
-    // `lopdf` writes `/P` as the 64-bit permission word — reserved bits set,
-    // sign-extended — cast to `i64`. Going through the raw bytes
-    // reinterprets those 64 bits rather than converting the number, which is
-    // the point: `/P` is a bit field the standard happens to store in a signed
-    // integer, and Algorithm 10 wants the bits verbatim in bytes 0–7.
-    // (`i64::cast_unsigned` says this more directly but postdates our MSRV.)
-    let signed = dict
-        .get(b"P")
-        .and_then(Object::as_i64)
-        .map_err(|e| CommandError::PdfError(format!("no /P after encrypting: {e}")))?;
-    let p_value = u64::from_ne_bytes(signed.to_ne_bytes());
-
-    let perms = permissions_entry(key, p_value)?;
-    let dict = doc
-        .get_object_mut(id)
-        .and_then(Object::as_dict_mut)
-        .map_err(|e| CommandError::PdfError(format!("/Encrypt is not a dictionary: {e}")))?;
-    dict.set("Perms", Object::String(perms, StringFormat::Literal));
-    Ok(())
-}
-
-
 /// Write `/Length` into the crypt filter, where `CoreGraphics` requires it.
 ///
 /// Without it, `PDFKit` — Preview, Safari, Quick Look — accepts the correct
@@ -348,12 +262,16 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     let key = file_encryption_key()?;
     let filter: Arc<dyn CryptFilter> = Arc::new(Aes256CryptFilter);
 
-    // Computed once and used twice, on purpose. The permission bits are written
-    // in two places — `/P`, and encrypted inside the `/Perms` block below — and
-    // a reader that validates `/Perms` compares the two. Two calls to
-    // `Permissions::all()` used to sit here instead; the moment the value stops
-    // being a constant, that shape is a disagreement waiting to happen, and the
-    // symptom would be a document some readers reject with no clue why.
+    // Computed once and handed to `lopdf`, which writes it twice: as `/P`, and
+    // encrypted inside the `/Perms` block. A reader that validates `/Perms`
+    // compares the two and refuses the document when they differ — a password
+    // error on the right password — so both come from this one value.
+    //
+    // This module used to rewrite `/Perms` itself, because `lopdf` 0.36 wrote
+    // the block in plaintext. 0.37 fixed that upstream, and the rewrite had
+    // become a second writer of a value that must match the first.
+    // `tests/encrypt.rs::the_perms_entry_is_encrypted` checks `lopdf`'s block
+    // against `/P`, and is what fails if a `lopdf` upgrade breaks it again.
     let permissions = opts.permissions.to_flags();
 
     let version = EncryptionVersion::V5 {
@@ -375,7 +293,6 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     doc.encrypt(&state)
         .map_err(|e| CommandError::PdfError(format!("could not encrypt the document: {e}")))?;
 
-    fix_permissions_entry(&mut doc, &key)?;
     state_crypt_filter_key_length(&mut doc)?;
 
     let mut out = Vec::new();
@@ -388,15 +305,6 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use aes::cipher::BlockDecrypt;
-
-    /// Undo `permissions_entry`, so a test can read the bits a reader would.
-    fn decode_perms(key: &[u8; KEY_BYTES], entry: &[u8]) -> [u8; 16] {
-        let cipher = Aes256::new(GenericArray::from_slice(key));
-        let mut block = GenericArray::clone_from_slice(entry);
-        cipher.decrypt_block(&mut block);
-        block.into()
-    }
 
     fn restricted() -> DocumentPermissions {
         DocumentPermissions {
@@ -404,35 +312,6 @@ mod tests {
             copy: false,
             ..DocumentPermissions::default()
         }
-    }
-
-    // SPEC: P6-SEC-009 — the bits inside `/Perms` are the bits handed to it.
-    //
-    // This is the encoding only. That `/Perms` agrees with `/P` is not tested
-    // here and does not need to be: `fix_permissions_entry` reads the value out
-    // of `/P` itself, so there is no second value to disagree with. A test
-    // passing the same flags to both sides would have proved nothing.
-    #[test]
-    fn perms_carries_the_bits_it_was_given() {
-        let key = [7u8; KEY_BYTES];
-        let p = restricted().to_flags().bits();
-        let block = decode_perms(&key, &permissions_entry(&key, p).expect("build /Perms"));
-
-        assert_eq!(
-            u64::from_le_bytes(block[..8].try_into().expect("8 bytes")),
-            p
-        );
-        assert_eq!(block[8], b'T', "metadata is encrypted");
-        assert_eq!(&block[9..12], b"adb");
-    }
-
-    // The upstream bug this whole function exists to work around: `lopdf`
-    // returns the block unencrypted, so the marker survives in the clear.
-    #[test]
-    fn perms_is_actually_encrypted() {
-        let key = [7u8; KEY_BYTES];
-        let entry = permissions_entry(&key, restricted().to_flags().bits()).expect("build");
-        assert_ne!(&entry[9..12], b"adb");
     }
 
     // Not `#[derive(Default)]`: that would clear every bit and produce the most
