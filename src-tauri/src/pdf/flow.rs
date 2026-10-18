@@ -225,8 +225,12 @@ pub enum TableWidth {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlowTable {
     /// Grid column widths, points. Scaled to `width`, and down if the table is
-    /// wider than the page.
+    /// wider than the page. For an `auto` table, each is a declared width (0
+    /// where none was), which its content can widen.
     pub columns: Vec<f32>,
+    /// Columns sized from their content, as a browser sizes an HTML table,
+    /// rather than taken from a saved grid as Word's are.
+    pub auto: bool,
     pub width: TableWidth,
     pub rows: Vec<FlowRow>,
     /// From the left margin, points.
@@ -239,6 +243,10 @@ pub enum FlowBlock {
     Paragraph(Paragraph),
     Image(FlowImage),
     Table(FlowTable),
+    /// A horizontal line across the text width, less the indents (points).
+    Rule { thickness: f32, color: [u8; 3], indent_left: f32, indent_right: f32 },
+    /// Vertical space, points; dropped at the top of a page like paragraph spacing.
+    Gap(f32),
     PageBreak,
 }
 
@@ -822,8 +830,154 @@ fn lay_out_image(image: &FlowImage, left: f32, right: f32, max_height: f32, buil
     Ok(Item::Line { height: h, marks: vec![Mark::Image { xobject: embedded.xobject, matrix: placement(embedded.orientation, x, -h, w, h) }] })
 }
 
+/// A rule as one line `thickness` tall.
+fn rule_item(left: f32, right: f32, thickness: f32, color: [u8; 3], (indent_left, indent_right): (f32, f32)) -> Item {
+    let (x, width) = (left + indent_left, (right - left - indent_left - indent_right).max(0.0));
+    Item::Line { height: thickness, marks: vec![Mark::Rect { x, y: -thickness, width, height: thickness, color }] }
+}
+
 // ---------------------------------------------------------------------------
 // Tables
+
+/// The narrowest and widest `blocks` can be laid out: the widest word that
+/// can't be broken, and every line unbroken (CSS's min- and max-content).
+fn content_widths(blocks: &[FlowBlock], faces: &mut Faces, warnings: &mut Vec<String>) -> Result<(f32, f32), CommandError> {
+    let (mut narrowest, mut widest) = (0.0f32, 0.0f32);
+    for block in blocks {
+        let (low, high) = match block {
+            FlowBlock::Paragraph(p) => {
+                let (mut word, mut longest_word, mut line, mut longest_line) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+                for piece in pieces(&p.runs, faces, warnings)? {
+                    if piece.break_before {
+                        longest_word = longest_word.max(word);
+                        word = 0.0;
+                    }
+                    match piece.kind {
+                        Kind::Word => {
+                            word += piece.width;
+                            line += piece.width;
+                        }
+                        Kind::Space => line += piece.width,
+                        // A tab's width depends on where it lands; one stop is the usual.
+                        Kind::Tab => line += TAB_INTERVAL,
+                        Kind::Break => {
+                            longest_line = longest_line.max(line);
+                            line = 0.0;
+                        }
+                    }
+                }
+                let extra = p.indent_left.max(0.0) + p.indent_right.max(0.0) + p.first_line.max(0.0);
+                (longest_word.max(word) + extra, longest_line.max(line) + extra)
+            }
+            FlowBlock::Image(image) => (image.width, image.width),
+            FlowBlock::Table(table) => {
+                let ranges = column_ranges(table, faces, warnings)?;
+                (ranges.iter().map(|r| r.0).sum::<f32>() + table.indent, ranges.iter().map(|r| r.1).sum::<f32>() + table.indent)
+            }
+            FlowBlock::Rule { .. } | FlowBlock::Gap(_) | FlowBlock::PageBreak => (0.0, 0.0),
+        };
+        narrowest = narrowest.max(low);
+        widest = widest.max(high);
+    }
+    Ok((narrowest, widest.max(narrowest)))
+}
+
+/// How many grid columns `table` has.
+fn grid_count(table: &FlowTable) -> usize {
+    table.rows.iter().map(|r| r.cells.iter().map(|c| c.span.max(1)).sum::<usize>()).max().unwrap_or(1).max(table.columns.len()).max(1)
+}
+
+/// Each grid column's narrowest and widest, cell margins included. A
+/// declared width is both, unless the content needs more; a cell spanning
+/// columns spreads what they lack evenly over them.
+fn column_ranges(table: &FlowTable, faces: &mut Faces, warnings: &mut Vec<String>) -> Result<Vec<(f32, f32)>, CommandError> {
+    let count = grid_count(table);
+    let mut ranges = vec![(0.0f32, 0.0f32); count];
+    let mut spanning = Vec::new();
+    for row in &table.rows {
+        let mut column = 0;
+        for cell in &row.cells {
+            let span = cell.span.max(1);
+            if cell.merge != Merge::Continue && column < count {
+                let (low, high) = content_widths(&cell.blocks, faces, warnings)?;
+                let padding = cell.margins[1] + cell.margins[3];
+                if span == 1 {
+                    ranges[column].0 = ranges[column].0.max(low + padding);
+                    ranges[column].1 = ranges[column].1.max(high + padding);
+                } else {
+                    spanning.push((column, span, low + padding, high + padding));
+                }
+            }
+            column += span;
+        }
+    }
+    for (range, declared) in ranges.iter_mut().zip(&table.columns) {
+        if *declared > 0.0 {
+            // A declared width holds the content to it, as browsers do — but
+            // one a hair short of the content is the writer's own measurement,
+            // rounded, and shouldn't push the last word onto a new line.
+            let fits = range.1 <= declared * 1.03 + 0.5;
+            let width = if fits { range.1.max(*declared) } else { range.0.max(*declared) };
+            *range = (width, width);
+        }
+    }
+    for (column, span, low, high) in spanning {
+        let covered = column..(column + span).min(count);
+        let n = covered.len() as f32;
+        let (have_low, have_high) = ranges[covered.clone()].iter().fold((0.0, 0.0), |(l, h), r| (l + r.0, h + r.1));
+        for range in &mut ranges[covered] {
+            range.0 += (low - have_low).max(0.0) / n;
+            range.1 += (high - have_high).max(0.0) / n;
+        }
+    }
+    for range in &mut ranges {
+        range.1 = range.1.max(range.0);
+    }
+    Ok(ranges)
+}
+
+/// An `auto` table's column widths: as wide as their content wants when that
+/// fits, and between their narrowest and widest in proportion when it
+/// doesn't (CSS 2.1's automatic table layout, simplified).
+fn auto_widths(table: &FlowTable, (left, right): (f32, f32), faces: &mut Faces, warnings: &mut Vec<String>) -> Result<Vec<f32>, CommandError> {
+    let ranges = column_ranges(table, faces, warnings)?;
+    let room = (right - left - table.indent).max(1.0);
+    let (low, high): (f32, f32) = ranges.iter().fold((0.0, 0.0), |(l, h), r| (l + r.0, h + r.1));
+    if high <= 0.0 {
+        // Nothing in it to measure: share the width.
+        return Ok(vec![room / ranges.len() as f32; ranges.len()]);
+    }
+    let target = match table.width {
+        TableWidth::Grid => high,
+        TableWidth::Points(points) => points,
+        TableWidth::Fraction(fraction) => (right - left) * fraction,
+    }
+    .min(room)
+    .max(low.min(room));
+    let widths = if target >= high {
+        // A table wider than its content gives the extra to the columns
+        // without a declared width, by their content; all, if all have one.
+        let open: Vec<bool> = (0..ranges.len()).map(|i| table.columns.get(i).is_none_or(|w| *w <= 0.0)).collect();
+        let open_high: f32 = ranges.iter().zip(&open).filter(|(_, o)| **o).map(|(r, _)| r.1).sum();
+        let open_count = open.iter().filter(|o| **o).count();
+        let extra = target - high;
+        ranges
+            .iter()
+            .zip(&open)
+            .map(|(r, &o)| match (open_count, o) {
+                (0, _) => r.1 * target / high,
+                (_, false) => r.1,
+                _ if open_high > 0.0 => r.1 + extra * r.1 / open_high,
+                _ => r.1 + extra / open_count as f32,
+            })
+            .collect()
+    } else if target >= low && high > low {
+        ranges.iter().map(|r| r.0 + (target - low) * (r.1 - r.0) / (high - low)).collect()
+    } else {
+        ranges.iter().map(|r| r.0 * target / low.max(0.01)).collect()
+    };
+    Ok(widths)
+}
 
 /// Blocks laid out between `left` and `right` with no page breaks — a table
 /// cell's content. A nested table becomes one line per row.
@@ -846,6 +1000,10 @@ fn lay_out_blocks(
                     items.push(Item::Line { height: rows[index].height, marks: row_marks(&rows, index) });
                 }
             }
+            FlowBlock::Rule { thickness, color, indent_left, indent_right } => {
+                items.push(rule_item(left, right, *thickness, *color, (*indent_left, *indent_right)));
+            }
+            FlowBlock::Gap(gap) => items.push(Item::Gap(*gap)),
             FlowBlock::PageBreak => {}
         }
     }
@@ -875,21 +1033,28 @@ struct RowBox {
 }
 
 /// Grid column boundaries in page x, from the left edge of the first column.
-fn column_edges(table: &FlowTable, (left, right): (f32, f32)) -> Vec<f32> {
-    let count = table.rows.iter().map(|r| r.cells.iter().map(|c| c.span.max(1)).sum::<usize>()).max().unwrap_or(1).max(table.columns.len()).max(1);
-    let mut widths = table.columns.clone();
+/// `measured` are an `auto` table's widths, used as they are.
+fn column_edges(table: &FlowTable, (left, right): (f32, f32), measured: Option<Vec<f32>>) -> Vec<f32> {
+    let count = grid_count(table);
     let room = (right - left - table.indent).max(1.0);
-    if widths.len() < count || widths.iter().any(|w| *w <= 0.0) {
-        // No grid to go by: share the width evenly.
-        widths = vec![room / count as f32; count];
-    }
-    let total: f32 = widths.iter().sum();
-    let wanted = match table.width {
-        TableWidth::Grid => total,
-        TableWidth::Points(points) => points,
-        TableWidth::Fraction(fraction) => (right - left) * fraction,
+    let (widths, scale) = if let Some(widths) = measured {
+        (widths, 1.0)
+    } else {
+        let mut widths = table.columns.clone();
+        if widths.len() < count || widths.iter().any(|w| *w <= 0.0) {
+            // No grid to go by: share the width evenly.
+            widths = vec![room / count as f32; count];
+        }
+        let total: f32 = widths.iter().sum();
+        let wanted = match table.width {
+            TableWidth::Grid => total,
+            TableWidth::Points(points) => points,
+            TableWidth::Fraction(fraction) => (right - left) * fraction,
+        };
+        let scale = (wanted / total).min(room / total);
+        (widths, scale)
     };
-    let scale = (wanted / total).min(room / total);
+    let total: f32 = widths.iter().sum();
     let table_width = total * scale;
     let start = match table.align {
         Align::Center => left + (right - left - table_width) / 2.0,
@@ -912,7 +1077,8 @@ fn lay_out_rows(
     builder: &mut Builder,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<RowBox>, CommandError> {
-    let edges = column_edges(table, region);
+    let measured = if table.auto { Some(auto_widths(table, region, faces, warnings)?) } else { None };
+    let edges = column_edges(table, region, measured);
     let last_edge = edges.len() - 1;
     let mut rows = Vec::with_capacity(table.rows.len());
     // The grid column each cell starts at, row by row, to find merges.
@@ -1202,6 +1368,10 @@ pub(crate) fn render_flow(builder: &mut Builder, document: &FlowDocument, index:
                 pages.place(vec![item]);
             }
             FlowBlock::Table(table) => place_table(table, &mut pages, &mut faces, builder, warnings)?,
+            FlowBlock::Rule { thickness, color, indent_left, indent_right } => {
+                pages.place(vec![rule_item(left, right, *thickness, *color, (*indent_left, *indent_right))]);
+            }
+            FlowBlock::Gap(gap) => pages.place(vec![Item::Gap(*gap)]),
             FlowBlock::PageBreak => pages.new_page(),
         }
     }

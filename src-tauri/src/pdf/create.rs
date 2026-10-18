@@ -19,6 +19,10 @@
 //! spaces — and otherwise the broad-coverage face the app already uses for
 //! Unicode. A character no font on the computer can draw is refused by name
 //! rather than drawn as an empty box.
+//!
+//! **Documents.** Word files (P7.C1b) and HTML pages (P7.C1c) are read into
+//! the flow model and laid out by [`crate::pdf::flow`]: their own fonts,
+//! embedded, on as many pages as they need.
 
 // Pixel and glyph counts become PDF coordinates (f32). They are bounded —
 // images by `MAX_PIXELS`, text by the page — so the precision loss in those
@@ -38,10 +42,11 @@ use serde::{Deserialize, Serialize};
 use crate::error::CommandError;
 use crate::pdf::docx_read::read_docx;
 use crate::pdf::document::{load_edited_bytes, pdfium_lock, save_document};
-use crate::pdf::flow::render_flow;
+use crate::pdf::flow::{render_flow, PageSetup};
 use crate::pdf::font_embed_cid::{build_cid_font, CidFont};
 use crate::pdf::font_index::FontIndex;
 use crate::pdf::font_resolver::broad_coverage_font_paths;
+use crate::pdf::html_read::read_html;
 
 /// The page every image or text page is placed on.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -72,7 +77,7 @@ pub struct CreateSummary {
     pub pages: u32,
     pub images: u32,
     pub text_files: u32,
-    /// Word documents.
+    /// Word documents and HTML pages.
     pub documents: u32,
     pub bytes: u64,
     /// Things done that the person should know about, such as a text file
@@ -432,7 +437,7 @@ fn draw_image(builder: &mut Builder, page: (f32, f32), xobject: ObjectId, matrix
 /// Decode a text file: UTF-8 or UTF-16 by byte-order mark, UTF-8 without
 /// one, and otherwise Windows-1252 — the commonest single-byte encoding —
 /// with a warning, since that is a guess.
-fn decode_text(name: &str, bytes: &[u8], warnings: &mut Vec<String>) -> String {
+pub(crate) fn decode_text(name: &str, bytes: &[u8], warnings: &mut Vec<String>) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         return String::from_utf8_lossy(rest).into_owned();
     }
@@ -458,7 +463,7 @@ fn decode_text(name: &str, bytes: &[u8], warnings: &mut Vec<String>) -> String {
 
 /// One Windows-1252 byte. Matches Latin-1 except 0x80–0x9F, where 1252 has
 /// printable characters (curly quotes, the euro sign) and Latin-1 has controls.
-fn windows_1252(byte: u8) -> char {
+pub(crate) fn windows_1252(byte: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}',
         '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',
@@ -659,6 +664,7 @@ enum Source {
     Image,
     Text,
     Word,
+    Html,
 }
 
 fn classify(path: &Path, bytes: &[u8]) -> Result<Source, CommandError> {
@@ -670,14 +676,13 @@ fn classify(path: &Path, bytes: &[u8]) -> Result<Source, CommandError> {
     if extension == "docx" && bytes.starts_with(b"PK") {
         return Ok(Source::Word);
     }
+    if matches!(extension.as_str(), "html" | "htm" | "xhtml") {
+        return Ok(Source::Html);
+    }
     match image::guess_format(bytes) {
         Ok(ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Tiff | ImageFormat::WebP) => Ok(Source::Image),
-        _ if matches!(extension.as_str(), "html" | "htm") => Err(CommandError::InvalidInput(format!(
-            "{} is an HTML file, which can't be turned into a PDF yet.",
-            file_label(path)
-        ))),
         _ => Err(CommandError::InvalidInput(format!(
-            "{} isn't a Word document, a JPEG, PNG, TIFF or WebP image, or a plain-text file.",
+            "{} isn't a Word document, an HTML page, a JPEG, PNG, TIFF or WebP image, or a plain-text file.",
             file_label(path)
         ))),
     }
@@ -706,6 +711,18 @@ pub fn build_pdf(sources: &[PathBuf], size: PageSize) -> Result<(Vec<u8>, Create
             }
             Source::Word => {
                 let (flow, warnings) = read_docx(&name, &bytes)?;
+                summary.warnings.extend(warnings);
+                if render_flow(&mut builder, &flow, FontIndex::system(), &mut summary.warnings)? == 0 {
+                    summary.warnings.push(format!("{name} has no text or images, so it added no pages."));
+                }
+                summary.documents += 1;
+            }
+            Source::Html => {
+                // A web page has no page size of its own: the chosen one, A4
+                // for "match each image", with 0.75 in margins like text files.
+                let (width, height) = size.portrait().unwrap_or((595.28, 841.89));
+                let page = PageSetup { width, height, top: 54.0, right: 54.0, bottom: 54.0, left: 54.0 };
+                let (flow, warnings) = read_html(&name, &bytes, path.parent(), page)?;
                 summary.warnings.extend(warnings);
                 if render_flow(&mut builder, &flow, FontIndex::system(), &mut summary.warnings)? == 0 {
                     summary.warnings.push(format!("{name} has no text or images, so it added no pages."));

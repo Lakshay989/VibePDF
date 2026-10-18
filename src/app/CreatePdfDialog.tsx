@@ -1,4 +1,5 @@
-// SPEC: P7-OCR-009 (P7.C1a) — create a PDF from images and text files.
+// SPEC: P7-OCR-009 (P7.C1a–c) — create a PDF from Word documents, HTML pages,
+// images and text files.
 //
 // Pick files (in order), choose a page size, then a save dialog; the backend
 // writes the PDF and the parent opens it. Self-contained like the compress
@@ -15,8 +16,23 @@ import { type CreatePageSize, createPdfFromFiles } from "@/ipc/create";
 import { useToastStore } from "@/state/toast-store";
 import { moveDown, moveUp, removeAt } from "@/tools/merge/reorder";
 
-/** What the native picker offers. HTML comes later (P7.C1c). */
-export const CREATE_EXTENSIONS = ["docx", "jpg", "jpeg", "png", "tif", "tiff", "webp", "txt", "text", "md", "log", "csv"];
+/** What the native picker offers. */
+export const CREATE_EXTENSIONS = [
+  "docx",
+  "html",
+  "htm",
+  "jpg",
+  "jpeg",
+  "png",
+  "tif",
+  "tiff",
+  "webp",
+  "txt",
+  "text",
+  "md",
+  "log",
+  "csv",
+];
 
 export interface CreatePdfDialogProps {
   open: boolean;
@@ -54,7 +70,7 @@ export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogPro
   const addFiles = async () => {
     const selected = await openFileDialog({
       multiple: true,
-      filters: [{ name: "Word documents, images and text", extensions: CREATE_EXTENSIONS }],
+      filters: [{ name: "Word documents, web pages, images and text", extensions: CREATE_EXTENSIONS }],
     });
     if (selected === null) return; // cancelled
     const added = Array.isArray(selected) ? selected : [selected];
@@ -94,8 +110,8 @@ export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogPro
         <Dialog.Content className="fixed left-1/2 top-1/2 w-[460px] max-w-[92%] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-900 dark:text-neutral-100">
           <Dialog.Title className="text-base font-semibold">Create PDF</Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Word documents, images (JPEG, PNG, TIFF, WebP) and plain-text files, one after another in
-            the order shown. Word documents keep their own page size.
+            Word documents, web pages (HTML), images (JPEG, PNG, TIFF, WebP) and plain-text files, one
+            after another in the order shown. Word documents keep their own page size.
           </Dialog.Description>
 
           <form

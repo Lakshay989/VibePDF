@@ -159,6 +159,18 @@ subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
 # Chosen over roxmltree, which would be new code, and over a hand-written XML
 # parser, which would be new risk.
 quick-xml = "0.39"
+# P7.C1c (SPEC P7-OCR-009): reading HTML. dom_query is html5ever (Servo's
+# spec-conformant HTML parser) with a DOM and CSS selector matching (Servo's
+# `selectors`), which a page's <style> rules need. Neither is a new crate:
+# both are already in Cargo.lock because Tauri uses them while building, so
+# nothing new is downloaded; they are new to the app binary. Pinned exactly,
+# since dom_query is 0.x with one maintainer, and only pdf/html_read.rs uses it.
+# Chosen over the system web view's print-to-PDF, which would mean three
+# platform APIs, no font or PDF/A guarantees, network fetches and running the
+# page's JavaScript. Default features off: no extra code, no extra crates.
+dom_query = { version = "=0.27.0", default-features = false }
+# P7.C1c: `data:` image URIs. Already in the app through Tauri's `plist`.
+base64 = "0.22"
 ureq = { version = "3.2.1", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]

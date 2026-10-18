@@ -418,8 +418,8 @@ impl Numbering {
     }
 }
 
-/// `value` in a list's number format.
-fn number(value: u32, format: &str) -> String {
+/// `value` in a list's number format (Word's names: `lowerRoman` …).
+pub(crate) fn number(value: u32, format: &str) -> String {
     let letters = |upper: bool| {
         // a..z, then aa..zz, as Word counts.
         let index = (value.max(1) - 1) % 26;
@@ -865,7 +865,7 @@ impl Reader<'_> {
             flow_rows.push(FlowRow { cells, min_height, exact, header });
         }
         self.table_context.pop();
-        Ok(FlowTable { columns, width, rows: flow_rows, indent, align })
+        Ok(FlowTable { columns, auto: false, width, rows: flow_rows, indent, align })
     }
 
     /// Emit the paragraph's runs so far. `last` is the paragraph's end: an

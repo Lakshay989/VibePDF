@@ -18,7 +18,7 @@ it** — a failure with symptoms is worth more than a red X.
 Regenerate every output file, so what you check matches what the code does now:
 
 ```bash
-cd src-tauri && cargo test --test export_image --test export_docx --test export_xlsx --test compress --test ocr_to_searchable --test ocr_languages --test create_docx -- --ignored --nocapture
+cd src-tauri && cargo test --test export_image --test export_docx --test export_xlsx --test compress --test ocr_to_searchable --test ocr_languages --test create_docx --test create_html -- --ignored --nocapture
 ```
 
 Then start the app and leave it running:
@@ -141,6 +141,25 @@ table made by a real word processor has been through this path yet.
       header row again at the top of page 2; the merged cells as one; the
       shading. Write down any warnings the dialog shows.
 
+### 1.9 Create PDF… from a saved web page (added with P7.C1c)
+
+The tests use hand-written pages, pages from macOS `textutil` and VibePDF's
+own HTML export. None of them is a real website.
+
+- [ ] In **Safari**, open a text-heavy article. **File → Save As…**, Format
+      **Page Source**, into `Sample PDFs/in/html/`. Use Page Source, not Web
+      Archive: a `.webarchive` isn't HTML.
+- [ ] In the app: **Create PDF…** → add the `.html` → **Create**.
+- [ ] **Expect:**
+  - The article's text, in order, in its own fonts.
+  - Headings larger than the body; lists with bullets or numbers.
+  - No pictures (Safari's Page Source keeps them on the web), with a
+    warning that says so.
+  - A warning about page layout if the site uses columns or sidebars:
+    the sidebar's text then follows the article instead of sitting
+    beside it.
+  - Nothing cut off at the right margin.
+
 ---
 
 ## Part 2 — PDFs in Preview
@@ -209,6 +228,27 @@ open -a Preview "Sample PDFs/out/p7-create/tables.pdf" "Sample PDFs/out/p7-creat
 - [ ] **`table-roundtrip.pdf`** (`table.pdf` exported to Word, then back) —
       each table's four columns line up from row to row, with the figures in
       their own columns.
+
+```bash
+open -a Preview "Sample PDFs/out/p7-create/from-html-features.pdf" "Sample PDFs/out/p7-create/from-html-textutil-table.pdf" "Sample PDFs/out/p7-create/from-html-textutil-memo.pdf"
+```
+
+- [ ] **`from-html-features.pdf`** (from `html-features.html` beside it).
+  - The blue Georgia heading.
+  - The line of bold, italic, underlined, struck, `code`, H₂O and x².
+  - A bulleted list with a numbered list inside it.
+  - Preformatted text keeping its spaces.
+  - A grey rule.
+  - A yellow box with a gold border.
+  - A grid table: blue header row, then a row spanning both columns. Its
+    **Item / Note** header is repeated at the top of page 2.
+- [ ] **`from-html-textutil-table.pdf`** (HTML written by macOS).
+  - A three-column table with black borders.
+  - "Drive shaft" on yellow.
+  - "Fasteners, assorted" spanning two columns.
+  - No cell text wrapped.
+- [ ] **`from-html-textutil-memo.pdf`** — the memo's heading, body, list
+      lines, centred line, red and underlined words, and the Cyrillic line.
 
 ---
 

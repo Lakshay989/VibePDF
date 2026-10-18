@@ -99,6 +99,16 @@ Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic,
 - **`ttf-parser` (0.25, MIT/Apache, zero-dependency)** — RazrFalcon's read-only parser, used only to map the runs' codepoints → glyph-ids for the subset set.
 
 - **`quick-xml` (0.39, MIT)** — added P7.C1b1 to read WordprocessingML for "create PDF from a Word document" (P7-OCR-009). Not new code to trust: Tauri already compiles this exact version into every build through `plist`, so naming it directly adds no crate. `roxmltree` (simpler, but genuinely new) and a hand-written XML parser (new risk) were passed over. `pdf::xml_tree` wraps it in a small namespace-aware tree. `ttf-parser` also gained a second job here: `pdf::font_index` reads each system font's `name` and `OS/2` tables to find faces by family and style.
+- **`dom_query` (=0.27.0, MIT) over `html5ever` (0.38, MIT/Apache)** — added P7.C1c to read HTML for "create PDF from files" (P7-OCR-009).
+  - **What they do.** html5ever is Servo's spec-conformant HTML parser, which mends broken markup exactly as browsers do. `dom_query` puts a DOM over it, with CSS selector matching through Servo's `selectors`, which a page's `<style>` rules need.
+  - **Already in the lockfile.** Both were in `Cargo.lock` before this step, because Tauri uses them while building. Nothing new is downloaded, but they are new to the app binary.
+  - **Kept contained.** `dom_query` has one maintainer and is at 0.x, so it is pinned exactly, with default features off (no extra code or crates), and only `pdf::html_read` touches it.
+  - **What was passed over.**
+    - The system web view's print-to-PDF: three platform APIs, no font-embedding or PDF/A guarantee, network fetches, and running the page's JavaScript.
+    - `html5ever` alone with our own tree and selector matching: more code, fewer selectors supported.
+  - **What we wrote.** `pdf::css` is our own small CSS parser: rules, declarations, specificity and values.
+  - **One guard on the parser.** html5ever is quadratic in nesting depth, so `html_read` caps the depth at 512 before parsing, as Chrome's parser does.
+- **`base64` (0.22, MIT/Apache)** — P7.C1c, for `data:` image URIs. Already in the app through Tauri's `plist`; same argument as `quick-xml`.
 
 **Why this is consistent with the "no double engine / minimal deps" rules:** both crates are permissive, zero-transitive-dependency, and read/produce font *bytes* — they don't render or edit PDFs (no overlap with PDFium or lopdf). They're the smallest tools that do exactly one thing PDFium won't. `subset_font` degrades gracefully — an unparseable or un-subsettable face embeds whole (bloated but correct), never a hard failure. *(The heavier `subsetter` 0.2.x / `fontations` stack and `allsorts` were passed over for tree size.)*
 

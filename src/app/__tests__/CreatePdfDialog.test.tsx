@@ -1,4 +1,4 @@
-// SPEC: P7-OCR-009 (P7.C1a) — the create-PDF dialog.
+// SPEC: P7-OCR-009 (P7.C1a–c) — the create-PDF dialog.
 //
 // What is pinned: files reach the backend in the order shown, after any
 // reordering; the chosen page size reaches it too; a cancelled save dialog
@@ -109,6 +109,14 @@ describe("CreatePdfDialog", () => {
 });
 
 describe("suggestedName", () => {
+  it("offers Word documents, web pages, images and text in the picker", async () => {
+    show();
+    await addFiles(["/in/page.html"]);
+    const filters = mockOpen.mock.calls[0]?.[0]?.filters ?? [];
+    const offered = filters.flatMap((f) => f.extensions);
+    for (const extension of ["docx", "html", "htm", "png", "jpg", "txt"]) expect(offered).toContain(extension);
+  });
+
   it("names the PDF after the first file", () => {
     expect(suggestedName(["/a/holiday photo.JPG", "/a/b.txt"])).toBe("holiday photo.pdf");
     expect(suggestedName([])).toBe("created.pdf");
