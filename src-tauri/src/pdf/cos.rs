@@ -2767,8 +2767,13 @@ pub fn add_image_stamp(
     }
     #[allow(clippy::cast_precision_loss)]
     let aspect = img.width as f32 / img.height as f32;
+    // The height floor is the anchor, and `w` scales with it, so it cannot distort.
+    // The width deliberately gets no floor of its own: one would stretch a tall,
+    // narrow image exactly as the old page clamp stretched a wide one — a 1:30
+    // source at height 8 came out 8×8, i.e. square. A sliver is the honest shape.
+    // `img.width` is non-zero above, so `w` is small but never zero.
     let h = height.max(8.0);
-    let w = (h * aspect).max(8.0);
+    let w = h * aspect;
     let mb = effective_media_box(&doc, page_id).unwrap_or([0.0, 0.0, 612.0, 792.0]);
     let rect = image_stamp_rect(x, y, w, h, mb);
 
@@ -2845,13 +2850,24 @@ pub fn add_image_stamp(
 
 /// Centre a `w`×`h` box on `(x, y)` and clamp it into the media box `[x0,y0,x1,y1]`
 /// (shrinking to fit if the image is larger than the page). `[rx0,ry0,rx1,ry1]`.
+///
+/// The shrink is **uniform**: both sides scale by one factor, so the box keeps its
+/// aspect ratio. Clamping each side on its own instead (`w.min(pw)`, `h.min(ph)`)
+/// squashed anything wider than the page flat against it — a 30:1 image on Letter
+/// came out 612×40, i.e. 15:1. Wide-and-short art (a signature above all) reaches
+/// the page-width limit at ordinary heights, so this is the common case, not an
+/// edge case.
 fn image_stamp_rect(x: f32, y: f32, w: f32, h: f32, mb: [f32; 4]) -> [f32; 4] {
     let pw = (mb[2] - mb[0]).max(1.0);
     let ph = (mb[3] - mb[1]).max(1.0);
-    let w = w.min(pw);
-    let h = h.min(ph);
-    let rx0 = (x - w / 2.0).clamp(mb[0], mb[2] - w);
-    let ry0 = (y - h / 2.0).clamp(mb[1], mb[3] - h);
+    let (w, h) = {
+        let scale = (pw / w).min(ph / h).min(1.0);
+        (w * scale, h * scale)
+    };
+    // `.max(mb[..])` keeps the clamp bounds ordered: a media box narrower than the
+    // 1.0 floor above would otherwise leave `mb[2] - w < mb[0]` and panic.
+    let rx0 = (x - w / 2.0).clamp(mb[0], (mb[2] - w).max(mb[0]));
+    let ry0 = (y - h / 2.0).clamp(mb[1], (mb[3] - h).max(mb[1]));
     [rx0, ry0, rx0 + w, ry0 + h]
 }
 

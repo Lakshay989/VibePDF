@@ -72,6 +72,44 @@ fn content_has_do(bytes: &[u8]) -> bool {
     String::from_utf8_lossy(&content).contains(" Do")
 }
 
+/// The `w h` scale operands of the `cm` that positions the painted image: the
+/// last `cm` before a `Do`, which is the fragment `add_image` appends.
+fn placed_size(bytes: &[u8]) -> (f32, f32) {
+    let doc = Document::load_mem(bytes).expect("load");
+    let page_id = *doc.get_pages().get(&1).expect("page 1");
+    let content = doc.get_page_content(page_id).expect("content");
+    let text = String::from_utf8_lossy(&content);
+    let mut last = None;
+    for line in text.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        match f.as_slice() {
+            [w, _, _, h, _, _, "cm"] => last = Some((w.parse::<f32>().unwrap(), h.parse::<f32>().unwrap())),
+            _ if line.contains(" Do") => {
+                if let Some(size) = last {
+                    return size;
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("no `cm` preceding a `Do` in the page content");
+}
+
+// SPEC: P4-EDIT-005 — the image-insert path letterboxes inside the drawn box, so
+// an extreme aspect ratio loses height, never its shape. (The sibling stamp path
+// once truncated width alone here; `aspect_fit_rect` never did — this pins that.)
+#[tokio::test]
+async fn extreme_aspect_ratio_is_letterboxed_not_stretched() {
+    let original = std::fs::read(fixture("hello.pdf")).expect("read hello.pdf");
+    // 30:1 into a 200×200 box → 200 wide, ~6.7 tall.
+    let edited = add_image(&original, 0, RECT, &make_png(1200, 40)).expect("add image");
+
+    let (w, h) = placed_size(&edited);
+    assert!((w - 200.0).abs() < 1.0, "fills the box's width: {w}");
+    assert!((w / h - 30.0).abs() < 0.5, "aspect 30:1 preserved inside the box: {w}×{h}");
+    assert_eq!(pdfium_page_count(&edited).await, 1, "round-trips through PDFium");
+}
+
 #[tokio::test]
 async fn embeds_png_as_content_xobject_not_annotation() {
     let original = std::fs::read(fixture("hello.pdf")).expect("read hello.pdf");

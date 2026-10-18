@@ -199,6 +199,51 @@ fn image_stamp_unicode_label_embeds_cid_font() {
     }
 }
 
+// SPEC: P3-ANN-006 (P3.C3b) — an image too wide to fit the page shrinks
+// *uniformly*: the page clamp bounds the rect without stretching the image. The
+// wide-and-short shape of a signature hits this limit long before a logo does,
+// so the clamp has to give up height, not aspect.
+#[test]
+fn an_extremely_wide_image_keeps_its_aspect_when_clamped_to_the_page() {
+    // 30:1 at height 40 wants a 1200-pt rect on a 612-pt-wide page.
+    let png = make_png(1200, 40, png::ColorType::Rgb);
+    let out = add_image_stamp(&fixture_bytes("hello.pdf"), 0, 306.0, 400.0, 40.0, &png, None, 1.0)
+        .expect("image stamp");
+    let doc = Document::load_mem(&out).expect("load");
+
+    let [x0, y0, x1, y1] = first_stamp_rect(&doc).expect("a /Stamp rect");
+    let (w, h) = (x1 - x0, y1 - y0);
+    assert!(w <= 612.0 + 0.5 && h <= 792.0 + 0.5, "the rect still fits the MediaBox: {w}×{h}");
+    assert!(
+        (w / h - 30.0).abs() < 0.5,
+        "aspect 30:1 survives the clamp (the height scales down with the width): {w}×{h}"
+    );
+    // Shrink only as far as the page forces: width is the binding limit, so the
+    // rect spans the page and the height lands at 612/30 ≈ 20.4.
+    assert!((w - 612.0).abs() < 1.0, "width fills the page it was clamped against: {w}");
+    assert!((h - 20.4).abs() < 0.5, "height gave way instead of the aspect ratio: {h}");
+    assert!(x0 >= -0.5 && y0 >= -0.5 && x1 <= 612.5 && y1 <= 792.5, "rect inside the page: {x0},{y0},{x1},{y1}");
+}
+
+// SPEC: P3-ANN-006 (P3.C3b) — the mirror of the case above. A tall, narrow image
+// is drawn as the sliver it is: there is no minimum width to square it off with,
+// because that would distort exactly as the old page clamp did.
+#[test]
+fn an_extremely_tall_image_keeps_its_aspect_instead_of_a_minimum_width() {
+    // 1:30 at height 40 wants a rect only ~1.3 pt wide.
+    let png = make_png(40, 1200, png::ColorType::Rgb);
+    let out = add_image_stamp(&fixture_bytes("hello.pdf"), 0, 306.0, 400.0, 40.0, &png, None, 1.0)
+        .expect("image stamp");
+    let doc = Document::load_mem(&out).expect("load");
+
+    let [x0, y0, x1, y1] = first_stamp_rect(&doc).expect("a /Stamp rect");
+    let (w, h) = (x1 - x0, y1 - y0);
+    assert!(w > 0.0, "the rect is thin but never degenerate: {w}");
+    assert!((h - 40.0).abs() < 0.5, "the requested height is honoured, not traded away: {h}");
+    assert!((h / w - 30.0).abs() < 0.5, "aspect 1:30 survives (no width floor squares it off): {w}×{h}");
+    assert!(x0 >= -0.5 && y0 >= -0.5 && x1 <= 612.5 && y1 <= 792.5, "rect inside the page: {x0},{y0},{x1},{y1}");
+}
+
 #[test]
 fn image_stamp_rejects_non_png() {
     let err = add_image_stamp(&fixture_bytes("hello.pdf"), 0, 100.0, 100.0, 48.0, b"\xff\xd8 not a png", None, 1.0);
