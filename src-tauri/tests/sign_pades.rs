@@ -71,10 +71,56 @@ fn extract(signed: &[u8]) -> (Vec<u8>, Vec<u8>) {
         let s = std::str::from_utf8(pair).expect("hex");
         der.push(u8::from_str_radix(s, 16).expect("hex byte"));
     }
-    while der.last() == Some(&0) {
-        der.pop();
-    }
+    let len = der_len(&der);
+    assert!(len <= der.len(), "the DER claims {len} bytes; the gap holds {}", der.len());
+    der.truncate(len);
     (der, message)
+}
+
+/// The length of the DER value at the start of `der`, read from its own
+/// header: the SEQUENCE tag, then a short- or long-form length.
+///
+/// Not "strip the trailing zeros". The padding is zeros, but so is about one
+/// signature's final byte in 256 — that byte is the RSA signature's last — and
+/// stripping it hands openssl a truncated blob ("not enough data"). CI failed
+/// on exactly that on 2026-10-18.
+fn der_len(der: &[u8]) -> usize {
+    assert_eq!(der[0], 0x30, "/Contents does not start with a DER SEQUENCE");
+    let first = usize::from(der[1]);
+    if first < 0x80 {
+        return 2 + first;
+    }
+    let n = first & 0x7f;
+    let len = der[2..2 + n].iter().fold(0, |acc, b| (acc << 8) | usize::from(*b));
+    2 + n + len
+}
+
+// The regression test for `der_len`: a blob whose own final byte is 0x00,
+// followed by the placeholder's padding, must come back whole. Real signatures
+// end in 0x00 too rarely (and only by the clock) to rely on one turning up.
+#[test]
+fn extract_keeps_a_signature_that_ends_in_zero() {
+    // A SEQUENCE with a long-form length (0x0104 = 260 content bytes), the
+    // last of them 0x00, then zero padding.
+    let mut der = vec![0x30, 0x82, 0x01, 0x04];
+    der.extend([0xAB; 259]);
+    der.push(0x00);
+    let hex: String = der.iter().chain(&[0u8; 64]).map(|b| format!("{b:02x}")).collect();
+    let gap = format!("<{hex}>");
+    let tail = "%%EOF";
+    // Fixed-width numbers, so the header's length doesn't depend on them.
+    let head_len = "/ByteRange [0 0000000000 0000000000 0000000000] ".len();
+    let head = format!(
+        "/ByteRange [0 {head_len:010} {:010} {:010}] ",
+        head_len + gap.len(),
+        tail.len()
+    );
+    let (got, message) = extract(format!("{head}{gap}{tail}").as_bytes());
+    assert_eq!(got, der, "the final 0x00 is the signature's, not padding");
+    assert_eq!(message, format!("{head}{tail}").into_bytes());
+
+    // Short-form length: 0x30 0x03 and three content bytes, the last 0x00.
+    assert_eq!(der_len(&[0x30, 0x03, 0x01, 0x02, 0x00, 0x00, 0x00]), 5);
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
