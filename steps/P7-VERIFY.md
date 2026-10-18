@@ -18,7 +18,7 @@ it** — a failure with symptoms is worth more than a red X.
 Regenerate every output file, so what you check matches what the code does now:
 
 ```bash
-cd src-tauri && cargo test --test export_image --test export_docx --test export_xlsx --test compress --test ocr_to_searchable --test ocr_languages -- --ignored --nocapture
+cd src-tauri && cargo test --test export_image --test export_docx --test export_xlsx --test compress --test ocr_to_searchable --test ocr_languages --test create_docx -- --ignored --nocapture
 ```
 
 Then start the app and leave it running:
@@ -124,6 +124,23 @@ Russian finds nothing (the language pack is not loading).
       ruled table. **Expect "No tables found" and no file written** — check the
       folder: there must be nothing at the path you chose.
 
+### 1.8 Create PDF… from a Word table (added with P7.C1b2)
+
+The automated tests build their Word tables by hand. macOS `textutil`, the
+outside writer used for plain text, writes tables as loose paragraphs, so no
+table made by a real word processor has been through this path yet.
+
+- [ ] In **Pages**, make a document with a table: a header row, three columns
+      of different widths, about 40 rows (so it runs onto a second page), one
+      cell holding a long sentence, one shaded cell and two cells merged.
+      **File → Export To → Word…**, saved as
+      `Sample PDFs/in/tables/pages-table.docx`.
+- [ ] In the app: header → **Create PDF…** → add that file → **Create**.
+- [ ] **Expect:** the columns at the widths Pages drew; the long sentence
+      wrapped inside its own cell; the grid lines where Pages had them; the
+      header row again at the top of page 2; the merged cells as one; the
+      shading. Write down any warnings the dialog shows.
+
 ---
 
 ## Part 2 — PDFs in Preview
@@ -178,6 +195,20 @@ open -e "Sample PDFs/out/p7-text/vibepdf-verify-text-two-column.txt" "Sample PDF
 
 - [ ] `two-column.txt` — all Alpha lines, then all Beta lines.
 - [ ] `article.txt` — reads as prose, in order, with no obvious scrambling.
+
+```bash
+open -a Preview "Sample PDFs/out/p7-create/tables.pdf" "Sample PDFs/out/p7-create/table-roundtrip.pdf"
+```
+
+- [ ] **`tables.pdf`** (made from a hand-built Word file) — page 1: a grid
+      with blue outer edges and red inside rules, a green cell with its text
+      readable on top, a heading spanning two columns, and a cell merged down
+      three rows with its word centred. The long table carries on to page 2
+      with its **Item / Note** header repeated, and no line or rule runs into
+      the bottom margin.
+- [ ] **`table-roundtrip.pdf`** (`table.pdf` exported to Word, then back) —
+      each table's four columns line up from row to row, with the figures in
+      their own columns.
 
 ---
 

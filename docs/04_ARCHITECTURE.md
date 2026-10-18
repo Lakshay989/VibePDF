@@ -28,8 +28,8 @@ vibepdf/
 │   │   │   ├── document.rs       # Open, save, metadata
 │   │   │   ├── cos.rs            # lopdf object-model layer (structural edits) + annotation add_* incl. add_link (P4.C3)
 │   │   │   ├── create.rs         # New PDF from images, text and Word files: lopdf builder, image embedding (P7-OCR-009)
-│   │   │   ├── docx_read.rs      # Word (.docx) → flow model: styles, numbering, images, tracked changes (P7.C1b1)
-│   │   │   ├── flow.rs           # Flowed text → pages: line breaking, alignment, lists, embedded faces (P7.C1b1)
+│   │   │   ├── docx_read.rs      # Word (.docx) → flow model: styles, numbering, images, tracked changes (P7.C1b1); tables (C1b2)
+│   │   │   ├── flow.rs           # Flowed text → pages: line breaking, alignment, lists, embedded faces (P7.C1b1); tables (C1b2)
 │   │   │   ├── font_index.rs     # System fonts by family + style, from their name tables (P7.C1b1)
 │   │   │   ├── xml_tree.rs       # Namespace-aware XML tree over quick-xml, for OOXML (P7.C1b1)
 │   │   │   ├── page.rs           # Page operations

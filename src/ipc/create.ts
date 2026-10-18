@@ -20,7 +20,7 @@ export interface CreateSummary {
  * documents, images (JPEG, PNG, TIFF, WebP) and plain-text files, in the order
  * given. Standalone, like merge: it reads files from disk and needs no open
  * document. Fonts are embedded; JPEGs go in unchanged. What a conversion
- * simplified (a missing font, a table, tracked changes) comes back as
+ * simplified (a missing font, a text box, tracked changes) comes back as
  * `warnings`.
  */
 export async function createPdfFromFiles(

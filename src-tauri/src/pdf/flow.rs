@@ -155,10 +155,90 @@ pub struct FlowImage {
     pub align: Align,
 }
 
+/// One side of a cell's border.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Border {
+    /// Points.
+    pub width: f32,
+    pub color: [u8; 3],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Borders {
+    pub top: Option<Border>,
+    pub right: Option<Border>,
+    pub bottom: Option<Border>,
+    pub left: Option<Border>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
+/// A cell's part in a vertical merge: the cell that holds the content, or one
+/// of the cells below it that it covers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Merge {
+    #[default]
+    None,
+    Start,
+    Continue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlowCell {
+    pub blocks: Vec<FlowBlock>,
+    /// Grid columns this cell covers.
+    pub span: usize,
+    pub merge: Merge,
+    pub fill: Option<[u8; 3]>,
+    pub borders: Borders,
+    pub valign: VAlign,
+    /// Inner margins, points: top, right, bottom, left.
+    pub margins: [f32; 4],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlowRow {
+    pub cells: Vec<FlowCell>,
+    /// Points; with `exact`, the row is exactly this tall.
+    pub min_height: f32,
+    pub exact: bool,
+    /// Repeated at the top of each page the table continues onto.
+    pub header: bool,
+}
+
+/// A table's declared width, which its grid is scaled to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TableWidth {
+    /// Whatever the grid adds up to (scaled down only if it won't fit).
+    Grid,
+    Points(f32),
+    /// A fraction of the space between the margins.
+    Fraction(f32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlowTable {
+    /// Grid column widths, points. Scaled to `width`, and down if the table is
+    /// wider than the page.
+    pub columns: Vec<f32>,
+    pub width: TableWidth,
+    pub rows: Vec<FlowRow>,
+    /// From the left margin, points.
+    pub indent: f32,
+    pub align: Align,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FlowBlock {
     Paragraph(Paragraph),
     Image(FlowImage),
+    Table(FlowTable),
     PageBreak,
 }
 
@@ -515,11 +595,41 @@ fn break_lines(pieces: Vec<Piece>, widths: &dyn Fn(usize) -> f32, origins: &dyn 
 }
 
 /// Something to draw, decided by layout, emitted once the fonts exist.
+#[derive(Clone, Debug)]
 enum Mark {
     /// `width` is the advance of `text`, so pieces that touch can be joined.
     Text { face: usize, text: String, x: f32, y: f32, width: f32, size: f32, color: [u8; 3] },
-    Rule { x: f32, y: f32, width: f32, thickness: f32, color: [u8; 3] },
+    /// A filled rectangle: an underline, a border, a cell's shading.
+    Rect { x: f32, y: f32, width: f32, height: f32, color: [u8; 3] },
     Image { xobject: ObjectId, matrix: [f32; 6] },
+}
+
+impl Mark {
+    /// The same mark, `dy` points higher up the page.
+    fn shifted(mut self, dy: f32) -> Self {
+        match &mut self {
+            Self::Text { y, .. } | Self::Rect { y, .. } => *y += dy,
+            Self::Image { matrix, .. } => matrix[5] += dy,
+        }
+        self
+    }
+}
+
+/// Layout's output: what goes down the page, in order. Marks in a `Line` are
+/// placed relative to the line's top (so their `y` is zero or negative); the
+/// placer decides which page the line is on.
+#[derive(Clone, Debug)]
+enum Item {
+    /// Paragraph spacing. Dropped at the top of a page, as Word drops it.
+    Gap(f32),
+    Line { height: f32, marks: Vec<Mark> },
+}
+
+fn item_height(item: &Item) -> f32 {
+    match item {
+        Item::Gap(g) => *g,
+        Item::Line { height, .. } => *height,
+    }
 }
 
 struct Pages {
@@ -543,9 +653,19 @@ impl Pages {
         self.y = self.setup.height - self.setup.top;
     }
 
+    /// The height a page holds between its margins.
+    fn body(&self) -> f32 {
+        self.setup.height - self.setup.top - self.setup.bottom
+    }
+
+    /// Whether `height` more fits on this page.
+    fn fits(&self, height: f32) -> bool {
+        self.y - height >= self.setup.bottom - 0.01
+    }
+
     /// Room for `height` more, starting a page if not (unless this one is empty).
     fn make_room(&mut self, height: f32) {
-        if self.y - height < self.setup.bottom - 0.01 && !self.at_top() {
+        if !self.fits(height) && !self.at_top() {
             self.new_page();
         }
     }
@@ -555,12 +675,33 @@ impl Pages {
             page.push(mark);
         }
     }
+
+    /// Put `items` on the pages, breaking pages between lines.
+    fn place(&mut self, items: Vec<Item>) {
+        for item in items {
+            match item {
+                Item::Gap(g) => {
+                    if !self.at_top() {
+                        self.y -= g;
+                    }
+                }
+                Item::Line { height, marks } => {
+                    self.make_room(height);
+                    let top = self.y;
+                    for mark in marks {
+                        self.draw(mark.shifted(top));
+                    }
+                    self.y -= height;
+                }
+            }
+        }
+    }
 }
 
-fn lay_out_paragraph(paragraph: &Paragraph, pages: &mut Pages, faces: &mut Faces, warnings: &mut Vec<String>) -> Result<(), CommandError> {
-    let setup = pages.setup;
-    let text_left = setup.left + paragraph.indent_left;
-    let right = setup.width - setup.right - paragraph.indent_right;
+/// Lay `paragraph` out between `left` and `right` (page x), as items.
+fn lay_out_paragraph(paragraph: &Paragraph, left: f32, right: f32, faces: &mut Faces, warnings: &mut Vec<String>) -> Result<Vec<Item>, CommandError> {
+    let text_left = left + paragraph.indent_left;
+    let right = right - paragraph.indent_right;
 
     // The label hangs to the left of the text; the first line's text starts
     // at the indent when the label fits in the hanging space.
@@ -577,12 +718,10 @@ fn lay_out_paragraph(paragraph: &Paragraph, pages: &mut Pages, faces: &mut Faces
 
     let measured = pieces(&paragraph.runs, faces, warnings)?;
     let widths = |i: usize| if i == 0 { right - first_start } else { right - text_left };
-    let origins = |i: usize| if i == 0 { first_start - setup.left } else { paragraph.indent_left };
+    let origins = |i: usize| if i == 0 { first_start - left } else { paragraph.indent_left };
     let lines = break_lines(measured, &widths, &origins, faces);
 
-    if !pages.at_top() {
-        pages.y -= paragraph.space_before;
-    }
+    let mut items = vec![Item::Gap(paragraph.space_before)];
     let mark_face = faces.face_for(&paragraph.mark, warnings)?;
 
     for (index, line) in lines.iter().enumerate() {
@@ -602,8 +741,9 @@ fn lay_out_paragraph(paragraph: &Paragraph, pages: &mut Pages, faces: &mut Faces
             LineSpacing::Exactly(h) => h,
             LineSpacing::AtLeast(h) => natural.max(h),
         };
-        pages.make_room(height);
-        let baseline = pages.y - if height >= ascent + descent { ascent } else { height * ascent / (ascent + descent).max(0.01) };
+        // Relative to the line's top.
+        let baseline = -if height >= ascent + descent { ascent } else { height * ascent / (ascent + descent).max(0.01) };
+        let mut marks = Vec::new();
 
         let start = if index == 0 { first_start } else { text_left };
         let available = right - start;
@@ -619,7 +759,7 @@ fn lay_out_paragraph(paragraph: &Paragraph, pages: &mut Pages, faces: &mut Faces
             if let Some((label_pieces, label_x)) = label_mark.take() {
                 let mut lx = label_x;
                 for piece in label_pieces.into_iter().filter(|p| p.kind == Kind::Word || p.kind == Kind::Space) {
-                    pages.draw(Mark::Text {
+                    marks.push(Mark::Text {
                         face: piece.face,
                         text: piece.text,
                         x: lx,
@@ -643,7 +783,7 @@ fn lay_out_paragraph(paragraph: &Paragraph, pages: &mut Pages, faces: &mut Faces
                 continue;
             }
             let width = piece.width + if piece.kind == Kind::Space { stretch } else { 0.0 };
-            pages.draw(Mark::Text {
+            marks.push(Mark::Text {
                 face: piece.face,
                 text: piece.text.clone(),
                 x,
@@ -654,34 +794,392 @@ fn lay_out_paragraph(paragraph: &Paragraph, pages: &mut Pages, faces: &mut Faces
             });
             let thickness = (piece.style.size * 0.06).max(0.5);
             if piece.style.underline {
-                pages.draw(Mark::Rule { x, y: baseline - piece.style.size * 0.12, width, thickness, color: piece.style.color });
+                let y = baseline - piece.style.size * 0.12 - thickness / 2.0;
+                marks.push(Mark::Rect { x, y, width, height: thickness, color: piece.style.color });
             }
             if piece.style.strike {
-                pages.draw(Mark::Rule { x, y: baseline + piece.style.size * 0.28, width, thickness, color: piece.style.color });
+                let y = baseline + piece.style.size * 0.28 - thickness / 2.0;
+                marks.push(Mark::Rect { x, y, width, height: thickness, color: piece.style.color });
             }
+        }
+        items.push(Item::Line { height, marks });
+    }
+    items.push(Item::Gap(paragraph.space_after));
+    Ok(items)
+}
+
+/// An image as one line, scaled down to fit `left..right` and `max_height`.
+fn lay_out_image(image: &FlowImage, left: f32, right: f32, max_height: f32, builder: &mut Builder) -> Result<Item, CommandError> {
+    let embedded = embed_image(&mut builder.doc, &image.name, &image.bytes)?;
+    let room = right - left;
+    let scale = (room / image.width).min(max_height / image.height).min(1.0);
+    let (w, h) = (image.width * scale, image.height * scale);
+    let x = match image.align {
+        Align::Center => left + (room - w) / 2.0,
+        Align::Right => right - w,
+        Align::Left | Align::Justify => left,
+    };
+    Ok(Item::Line { height: h, marks: vec![Mark::Image { xobject: embedded.xobject, matrix: placement(embedded.orientation, x, -h, w, h) }] })
+}
+
+// ---------------------------------------------------------------------------
+// Tables
+
+/// Blocks laid out between `left` and `right` with no page breaks — a table
+/// cell's content. A nested table becomes one line per row.
+fn lay_out_blocks(
+    blocks: &[FlowBlock],
+    (left, right): (f32, f32),
+    max_height: f32,
+    faces: &mut Faces,
+    builder: &mut Builder,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Item>, CommandError> {
+    let mut items = Vec::new();
+    for block in blocks {
+        match block {
+            FlowBlock::Paragraph(p) => items.extend(lay_out_paragraph(p, left, right, faces, warnings)?),
+            FlowBlock::Image(image) => items.push(lay_out_image(image, left, right, max_height, builder)?),
+            FlowBlock::Table(table) => {
+                let rows = lay_out_rows(table, (left, right), max_height, faces, builder, warnings)?;
+                for index in 0..rows.len() {
+                    items.push(Item::Line { height: rows[index].height, marks: row_marks(&rows, index) });
+                }
+            }
+            FlowBlock::PageBreak => {}
+        }
+    }
+    Ok(items)
+}
+
+/// A cell, laid out.
+struct CellBox {
+    x: f32,
+    width: f32,
+    items: Vec<Item>,
+    /// The content's height, without margins.
+    content: f32,
+    fill: Option<[u8; 3]>,
+    borders: Borders,
+    valign: VAlign,
+    margins: [f32; 4],
+    merge: Merge,
+    /// Rows this cell covers (more than one for the start of a vertical merge).
+    rows: usize,
+}
+
+struct RowBox {
+    cells: Vec<CellBox>,
+    height: f32,
+    header: bool,
+}
+
+/// Grid column boundaries in page x, from the left edge of the first column.
+fn column_edges(table: &FlowTable, (left, right): (f32, f32)) -> Vec<f32> {
+    let count = table.rows.iter().map(|r| r.cells.iter().map(|c| c.span.max(1)).sum::<usize>()).max().unwrap_or(1).max(table.columns.len()).max(1);
+    let mut widths = table.columns.clone();
+    let room = (right - left - table.indent).max(1.0);
+    if widths.len() < count || widths.iter().any(|w| *w <= 0.0) {
+        // No grid to go by: share the width evenly.
+        widths = vec![room / count as f32; count];
+    }
+    let total: f32 = widths.iter().sum();
+    let wanted = match table.width {
+        TableWidth::Grid => total,
+        TableWidth::Points(points) => points,
+        TableWidth::Fraction(fraction) => (right - left) * fraction,
+    };
+    let scale = (wanted / total).min(room / total);
+    let table_width = total * scale;
+    let start = match table.align {
+        Align::Center => left + (right - left - table_width) / 2.0,
+        Align::Right => right - table_width,
+        Align::Left | Align::Justify => left + table.indent,
+    };
+    let mut edges = vec![start];
+    for w in widths {
+        let last = *edges.last().unwrap_or(&start);
+        edges.push(last + w * scale);
+    }
+    edges
+}
+
+fn lay_out_rows(
+    table: &FlowTable,
+    region: (f32, f32),
+    max_height: f32,
+    faces: &mut Faces,
+    builder: &mut Builder,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<RowBox>, CommandError> {
+    let edges = column_edges(table, region);
+    let last_edge = edges.len() - 1;
+    let mut rows = Vec::with_capacity(table.rows.len());
+    // The grid column each cell starts at, row by row, to find merges.
+    let mut starts: Vec<Vec<usize>> = Vec::with_capacity(table.rows.len());
+    for row in &table.rows {
+        let mut column = 0;
+        let mut cells = Vec::with_capacity(row.cells.len());
+        let mut row_starts = Vec::with_capacity(row.cells.len());
+        for cell in &row.cells {
+            let (from, to) = (column.min(last_edge), (column + cell.span.max(1)).min(last_edge));
+            row_starts.push(column);
+            column += cell.span.max(1);
+            let (x, width) = (edges[from], (edges[to] - edges[from]).max(0.0));
+            let [top, right_margin, bottom, left_margin] = cell.margins;
+            let inner = (x + left_margin, (x + width - right_margin).max(x + left_margin + 1.0));
+            let items = if cell.merge == Merge::Continue {
+                Vec::new()
+            } else {
+                // A cell's own spacing at its very top and bottom is kept, as Word keeps it.
+                lay_out_blocks(&cell.blocks, inner, max_height - top - bottom, faces, builder, warnings)?
+            };
+            let content = items.iter().map(item_height).sum();
+            cells.push(CellBox {
+                x,
+                width,
+                items,
+                content,
+                fill: cell.fill,
+                borders: cell.borders,
+                valign: cell.valign,
+                margins: cell.margins,
+                merge: cell.merge,
+                rows: 1,
+            });
+        }
+        let natural = cells
+            .iter()
+            .filter(|c| c.merge == Merge::None)
+            .map(|c| c.content + c.margins[0] + c.margins[2])
+            .fold(0.0, f32::max);
+        let height = if row.exact { row.min_height } else { natural.max(row.min_height) };
+        rows.push(RowBox { cells, height, header: row.header });
+        starts.push(row_starts);
+    }
+
+    // Vertical merges: a start cell covers the cells below it that continue
+    // it; if its content needs more than those rows give, the last one grows.
+    for r in 0..rows.len() {
+        for c in 0..rows[r].cells.len() {
+            if rows[r].cells[c].merge != Merge::Start {
+                continue;
+            }
+            let column = starts[r][c];
+            let mut span = 1;
+            while r + span < rows.len()
+                && starts[r + span].iter().zip(&rows[r + span].cells).any(|(&s, cell)| s == column && cell.merge == Merge::Continue)
+            {
+                span += 1;
+            }
+            rows[r].cells[c].rows = span;
+            if span > 1 {
+                // The merged cell's bottom edge is the last covered row's.
+                let last = r + span - 1;
+                let bottom = starts[last].iter().zip(&rows[last].cells).find(|(&s, _)| s == column).and_then(|(_, cell)| cell.borders.bottom);
+                rows[r].cells[c].borders.bottom = bottom;
+            }
+            let cell = &rows[r].cells[c];
+            let needed = cell.content + cell.margins[0] + cell.margins[2];
+            let have: f32 = rows[r..r + span].iter().map(|row| row.height).sum();
+            if needed > have {
+                rows[r + span - 1].height += needed - have;
+            }
+        }
+    }
+    Ok(rows)
+}
+
+/// Row `index`'s marks, relative to its top: shading, then content, then borders.
+fn row_marks(rows: &[RowBox], index: usize) -> Vec<Mark> {
+    let row = &rows[index];
+    let mut fills = Vec::new();
+    let mut content = Vec::new();
+    let mut lines = Vec::new();
+    for cell in row.cells.iter().filter(|c| c.merge != Merge::Continue) {
+        let span = rows[index..(index + cell.rows).min(rows.len())].iter().map(|r| r.height).sum::<f32>();
+        if let Some(color) = cell.fill {
+            fills.push(Mark::Rect { x: cell.x, y: -span, width: cell.width, height: span, color });
+        }
+        let [top, _, bottom, _] = cell.margins;
+        let slack = (span - cell.content - top - bottom).max(0.0);
+        let mut y = -(top + match cell.valign {
+            VAlign::Top => 0.0,
+            VAlign::Center => slack / 2.0,
+            VAlign::Bottom => slack,
+        });
+        for item in &cell.items {
+            match item {
+                Item::Gap(g) => y -= g,
+                Item::Line { height, marks } => {
+                    content.extend(marks.iter().cloned().map(|m| m.shifted(y)));
+                    y -= height;
+                }
+            }
+        }
+        lines.extend(border_marks(cell.x, cell.width, span, &cell.borders));
+    }
+    fills.extend(content);
+    fills.extend(lines);
+    fills
+}
+
+/// A cell's four borders, centred on its edges, for a cell `height` tall
+/// whose top is at y = 0.
+fn border_marks(x: f32, width: f32, height: f32, borders: &Borders) -> Vec<Mark> {
+    let mut marks = Vec::new();
+    if let Some(b) = borders.top {
+        marks.push(Mark::Rect { x: x - b.width / 2.0, y: -b.width / 2.0, width: width + b.width, height: b.width, color: b.color });
+    }
+    if let Some(b) = borders.bottom {
+        marks.push(Mark::Rect { x: x - b.width / 2.0, y: -height - b.width / 2.0, width: width + b.width, height: b.width, color: b.color });
+    }
+    if let Some(b) = borders.left {
+        marks.push(Mark::Rect { x: x - b.width / 2.0, y: -height, width: b.width, height, color: b.color });
+    }
+    if let Some(b) = borders.right {
+        marks.push(Mark::Rect { x: x + width - b.width / 2.0, y: -height, width: b.width, height, color: b.color });
+    }
+    marks
+}
+
+type Header = (f32, Vec<Mark>);
+
+/// Start a page and draw `headers` at its top.
+fn new_page_with(pages: &mut Pages, headers: &[Header]) {
+    pages.new_page();
+    for (height, marks) in headers {
+        let top = pages.y;
+        for mark in marks {
+            pages.draw(mark.clone().shifted(top));
         }
         pages.y -= height;
     }
-    pages.y -= paragraph.space_after;
+}
+
+/// Put a table on the pages: a row that doesn't fit moves to the next page,
+/// where the header rows are drawn again; a row taller than a whole page is
+/// split between lines.
+fn place_table(table: &FlowTable, pages: &mut Pages, faces: &mut Faces, builder: &mut Builder, warnings: &mut Vec<String>) -> Result<(), CommandError> {
+    let region = (pages.setup.left, pages.setup.width - pages.setup.right);
+    let mut rows = lay_out_rows(table, region, pages.body(), faces, builder, warnings)?;
+    let headers = rows.iter().take_while(|r| r.header).count();
+    let header_marks: Vec<Header> = (0..headers).map(|i| (rows[i].height, row_marks(&rows, i))).collect();
+    // Headers that would take more than half of every page aren't repeated:
+    // the rows they head would get almost no room.
+    let header_height: f32 = header_marks.iter().map(|(h, _)| *h).sum();
+    let repeated: &[Header] = if header_height <= pages.body() / 2.0 { &header_marks } else { &[] };
+    let repeated_height: f32 = repeated.iter().map(|(h, _)| *h).sum();
+
+    for index in 0..rows.len() {
+        // The header rows themselves start a page plainly.
+        let heads = if index < headers { &[] } else { repeated };
+        // A vertical merge keeps its rows together when they fit on a page.
+        let group: f32 = {
+            let end = rows[index].cells.iter().map(|c| index + c.rows).max().unwrap_or(index + 1).min(rows.len());
+            rows[index..end].iter().map(|r| r.height).sum()
+        };
+        let height = rows[index].height;
+        if height <= pages.body() - repeated_height || height <= pages.body() && index < headers {
+            if !pages.fits(group.min(pages.body() - repeated_height)) && !pages.at_top() {
+                new_page_with(pages, heads);
+            }
+            let marks = row_marks(&rows, index);
+            let top = pages.y;
+            for mark in marks {
+                pages.draw(mark.shifted(top));
+            }
+            pages.y -= height;
+        } else {
+            split_row(&mut rows[index], pages, heads, warnings);
+        }
+    }
     Ok(())
 }
 
-fn lay_out_image(image: &FlowImage, builder: &mut Builder, pages: &mut Pages) -> Result<(), CommandError> {
-    let setup = pages.setup;
-    let embedded = embed_image(&mut builder.doc, &image.name, &image.bytes)?;
-    let (room_w, room_h) = (setup.width - setup.left - setup.right, setup.height - setup.top - setup.bottom);
-    let scale = (room_w / image.width).min(room_h / image.height).min(1.0);
-    let (w, h) = (image.width * scale, image.height * scale);
-    pages.make_room(h);
-    let x = match image.align {
-        Align::Center => setup.left + (room_w - w) / 2.0,
-        Align::Right => setup.width - setup.right - w,
-        Align::Left | Align::Justify => setup.left,
-    };
-    let y = pages.y - h;
-    pages.draw(Mark::Image { xobject: embedded.xobject, matrix: placement(embedded.orientation, x, y, w, h) });
-    pages.y = y;
-    Ok(())
+/// A row taller than a page: each cell's lines dealt out page by page, the
+/// row's shading and borders drawn around each page's part.
+fn split_row(row: &mut RowBox, pages: &mut Pages, heads: &[Header], warnings: &mut Vec<String>) {
+    let mut queues: Vec<std::collections::VecDeque<Item>> = row.cells.iter_mut().map(|c| std::mem::take(&mut c.items).into()).collect();
+    // Whether this page has had nothing but headers drawn on it yet: on such a
+    // page a line is placed even when it doesn't fit, or nothing would ever be.
+    let mut fresh = pages.at_top();
+    loop {
+        let room = pages.y - pages.setup.bottom;
+        // Measured through each cell's next line, not just its next item: a
+        // paragraph starts with its (often zero) space before, and a part of
+        // nothing but gaps would draw an empty slice of the row here.
+        let first_fits = row.cells.iter().zip(&queues).all(|(cell, queue)| {
+            let mut through_line = 0.0;
+            for item in queue {
+                through_line += item_height(item);
+                if matches!(item, Item::Line { .. }) {
+                    break;
+                }
+            }
+            through_line + cell.margins[0] + cell.margins[2] <= room
+        });
+        if !first_fits && !fresh {
+            new_page_with(pages, heads);
+            fresh = true;
+            continue;
+        }
+        let mut taken: Vec<Vec<Item>> = Vec::with_capacity(queues.len());
+        for (cell, queue) in row.cells.iter().zip(queues.iter_mut()) {
+            let budget = room - cell.margins[0] - cell.margins[2];
+            let (mut used, mut part) = (0.0, Vec::new());
+            while let Some(item) = queue.front() {
+                let h = item_height(item);
+                if used + h > budget && !part.is_empty() {
+                    break;
+                }
+                // At least one item a page, or the row would never end. One
+                // taller than the page can only be a nested table's row.
+                if h > budget && fresh && matches!(item, Item::Line { .. }) {
+                    let message = "A table inside a table cell has a row taller than a page; what runs past the bottom of the page is cut off.";
+                    if !warnings.iter().any(|w| w == message) {
+                        warnings.push(message.to_owned());
+                    }
+                }
+                used += h;
+                part.extend(queue.pop_front());
+            }
+            taken.push(part);
+        }
+        let fragment = row
+            .cells
+            .iter()
+            .zip(&taken)
+            .map(|(c, part)| part.iter().map(item_height).sum::<f32>() + c.margins[0] + c.margins[2])
+            .fold(0.0, f32::max);
+        let top = pages.y;
+        for (cell, part) in row.cells.iter().zip(taken) {
+            if let Some(color) = cell.fill {
+                pages.draw(Mark::Rect { x: cell.x, y: top - fragment, width: cell.width, height: fragment, color });
+            }
+            let mut y = top - cell.margins[0];
+            for item in part {
+                match item {
+                    Item::Gap(g) => y -= g,
+                    Item::Line { height, marks } => {
+                        for mark in marks {
+                            pages.draw(mark.shifted(y));
+                        }
+                        y -= height;
+                    }
+                }
+            }
+            for mark in border_marks(cell.x, cell.width, fragment, &cell.borders) {
+                pages.draw(mark.shifted(top));
+            }
+        }
+        pages.y -= fragment;
+        if queues.iter().all(std::collections::VecDeque::is_empty) {
+            break;
+        }
+        new_page_with(pages, heads);
+        fresh = true;
+    }
 }
 
 /// SPEC: P7-OCR-009 — lay `document` out and add its pages to `builder`.
@@ -692,10 +1190,18 @@ fn lay_out_image(image: &FlowImage, builder: &mut Builder, pages: &mut Pages) ->
 pub(crate) fn render_flow(builder: &mut Builder, document: &FlowDocument, index: &FontIndex, warnings: &mut Vec<String>) -> Result<usize, CommandError> {
     let mut faces = Faces::new(index);
     let mut pages = Pages::new(document.page);
+    let (left, right) = (document.page.left, document.page.width - document.page.right);
     for block in &document.blocks {
         match block {
-            FlowBlock::Paragraph(p) => lay_out_paragraph(p, &mut pages, &mut faces, warnings)?,
-            FlowBlock::Image(image) => lay_out_image(image, builder, &mut pages)?,
+            FlowBlock::Paragraph(p) => {
+                let items = lay_out_paragraph(p, left, right, &mut faces, warnings)?;
+                pages.place(items);
+            }
+            FlowBlock::Image(image) => {
+                let item = lay_out_image(image, left, right, pages.body(), builder)?;
+                pages.place(vec![item]);
+            }
+            FlowBlock::Table(table) => place_table(table, &mut pages, &mut faces, builder, warnings)?,
             FlowBlock::PageBreak => pages.new_page(),
         }
     }
@@ -740,8 +1246,8 @@ pub(crate) fn render_flow(builder: &mut Builder, document: &FlowDocument, index:
                         font.encode_hex(&text)
                     );
                 }
-                Mark::Rule { x, y, width, thickness, color } => {
-                    let _ = writeln!(content, "{} rg {} {} {} {} re f", rgb(color), num(x), num(y - thickness / 2.0), num(width), num(thickness));
+                Mark::Rect { x, y, width, height, color } => {
+                    let _ = writeln!(content, "{} rg {} {} {} {} re f", rgb(color), num(x), num(y), num(width), num(height));
                 }
                 Mark::Image { xobject, matrix } => {
                     let name = format!("Im{}", images.len());

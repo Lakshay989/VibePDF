@@ -354,6 +354,424 @@ fn an_inline_image_is_drawn_at_its_size() {
     assert!(close(at(230, 90), [255, 255, 255]), "the image is wider than 2 in");
 }
 
+// --- tables ---------------------------------------------------------------------
+
+/// A table: grid columns in twips, `tbl_pr` inside its `w:tblPr`, then rows.
+fn table(grid: &[u32], tbl_pr: &str, rows: &[String]) -> String {
+    let columns: String = grid.iter().map(|w| format!(r#"<w:gridCol w:w="{w}"/>"#)).collect();
+    format!("<w:tbl><w:tblPr>{tbl_pr}</w:tblPr><w:tblGrid>{columns}</w:tblGrid>{}</w:tbl>", rows.concat())
+}
+
+fn row(tr_pr: &str, cells: &[String]) -> String {
+    format!("<w:tr><w:trPr>{tr_pr}</w:trPr>{}</w:tr>", cells.concat())
+}
+
+/// A cell with `tc_pr` in its `w:tcPr` and one Arial paragraph per text.
+fn cell(tc_pr: &str, texts: &[&str]) -> String {
+    let paragraphs: String = texts.iter().map(|t| para(t, arial())).collect();
+    format!("<w:tc><w:tcPr>{tc_pr}</w:tcPr>{paragraphs}</w:tc>")
+}
+
+/// Where a run's text starts and its baseline, from its text matrix — exact,
+/// where the bounding box moves with each glyph's side bearing.
+fn origin(run: &TextRun) -> (f32, f32) {
+    (run.transform[4], run.transform[5])
+}
+
+/// The first run on a page: on the highest baseline, leftmost. (PDFium ends a
+/// run with a space when another follows on its line, so compare trimmed.)
+fn first_run(page: &[TextRun]) -> &TextRun {
+    page.iter()
+        .min_by(|a, b| {
+            let (a, b) = (origin(a), origin(b));
+            (b.1.round()).total_cmp(&a.1.round()).then(a.0.total_cmp(&b.0))
+        })
+        .expect("text on the page")
+}
+
+fn near(actual: f32, expected: f32, what: &str) {
+    assert!((actual - expected).abs() < 0.5, "{what}: {actual}, expected {expected}");
+}
+
+/// Page `page` rendered at 72 dpi; pixel (x, y) is point (x, y) from the
+/// page's top-left.
+fn pixels(pdf: &Path, page: u32) -> impl Fn(u32, u32) -> [u8; 3] {
+    let (doc, _) = open_pdf(pdf, None).expect("opens");
+    let rendered = render_page(&doc, page, 72.0, ImageFormat::Rgba8).expect("render");
+    move |x, y| {
+        let i = usize::try_from((y * rendered.width + x) * 4).expect("index");
+        [rendered.bytes[i], rendered.bytes[i + 1], rendered.bytes[i + 2]]
+    }
+}
+
+fn is_red([r, g, b]: [u8; 3]) -> bool {
+    r > 200 && g < 100 && b < 100
+}
+
+fn is_blue([r, g, b]: [u8; 3]) -> bool {
+    b > 200 && r < 100 && g < 100
+}
+
+fn is_white(p: [u8; 3]) -> bool {
+    p.iter().all(|c| *c > 245)
+}
+
+/// Nothing drawn at or next to (x, y). PDFium snaps a hairline to a whole
+/// pixel row, which may be the neighbour of the one its edge falls in.
+fn clear(at: &impl Fn(u32, u32) -> [u8; 3], x: u32, y: u32) -> bool {
+    (x - 1..=x + 1).all(|x| (y - 1..=y + 1).all(|y| is_white(at(x, y))))
+}
+
+/// A table style drawing every border 2 pt: the outer edges blue, the rules
+/// inside red, so an edge drawn as an inside rule (or back) shows.
+const GRID_STYLE: &str = r#"<w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="16" w:color="0000FF"/><w:left w:val="single" w:sz="16" w:color="0000FF"/><w:bottom w:val="single" w:sz="16" w:color="0000FF"/><w:right w:val="single" w:sz="16" w:color="0000FF"/><w:insideH w:val="single" w:sz="16" w:color="FF0000"/><w:insideV w:val="single" w:sz="16" w:color="FF0000"/></w:tblBorders></w:tblPr></w:style>"#;
+const ROW_36: &str = r#"<w:trHeight w:val="720" w:hRule="exact"/>"#;
+
+#[test]
+fn a_table_keeps_its_text_in_reading_order_without_a_warning() {
+    let scratch = Scratch::new("table");
+    let cell = |t: &str| format!("<w:tc><w:p><w:r><w:t>{t}</w:t></w:r></w:p></w:tc>");
+    let body = format!("<w:tbl><w:tr>{}{}</w:tr><w:tr>{}{}</w:tr></w:tbl>{LETTER}", cell("A1"), cell("B1"), cell("A2"), cell("B2"));
+    let (pdf, summary) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert_eq!(text(&pdf), "A1 B1 A2 B2");
+    assert!(summary.warnings.is_empty(), "{:?}", summary.warnings);
+    // No grid: the columns share the width between the margins.
+    near(origin(&run_with(&pdf, "B1")).0, 72.0 + 234.0 + 5.4, "B1");
+    near(origin(&run_with(&pdf, "B1")).1, origin(&run_with(&pdf, "A1")).1, "B1's baseline");
+}
+
+#[test]
+fn cells_sit_in_their_grid_columns() {
+    let scratch = Scratch::new("grid");
+    // 1.5 in, 2 in and 3 in columns; text starts 0.075 in into each.
+    let body = [table(&[2160, 2880, 4320], "", &[row("", &[cell("", &["Alpha"]), cell("", &["Bravo"]), cell("", &["Charlie"])])]), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let [alpha, bravo, charlie] = ["Alpha", "Bravo", "Charlie"].map(|t| origin(&run_with(&pdf, t)));
+    near(alpha.0, 77.4, "Alpha");
+    near(bravo.0, 185.4, "Bravo");
+    near(charlie.0, 329.4, "Charlie");
+    near(bravo.1, alpha.1, "Bravo's baseline");
+    near(charlie.1, alpha.1, "Charlie's baseline");
+}
+
+#[test]
+fn text_wraps_inside_its_column() {
+    let scratch = Scratch::new("wrap");
+    let words = "one two three four five six seven eight";
+    let body = [table(&[1440, 7920], "", &[row("", &[cell("", &[words]), cell("", &["Beside"])])]), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert_eq!(text(&pdf), format!("{words} Beside"));
+    let all = runs(&pdf).concat();
+    let narrow: Vec<&TextRun> = all.iter().filter(|r| r.text != "Beside").collect();
+    // The column is 1 in: 72 to 144, text between 77.4 and 138.6.
+    assert!(narrow.iter().all(|r| r.bbox[2] <= 139.0), "{:?}", narrow.iter().map(|r| r.bbox).collect::<Vec<_>>());
+    let mut baselines: Vec<i32> = narrow.iter().map(|r| origin(r).1.round() as i32).collect();
+    baselines.dedup();
+    assert!(baselines.len() >= 3, "only {} lines", baselines.len());
+    let beside = origin(&run_with(&pdf, "Beside"));
+    near(beside.0, 149.4, "Beside");
+    near(beside.1, origin(narrow[0]).1, "Beside is on the first line");
+}
+
+#[test]
+fn a_row_is_as_tall_as_its_tallest_cell() {
+    let scratch = Scratch::new("row-height");
+    let rows = [
+        row("", &[cell("", &["Aone", "Atwo", "Athree"]), cell("", &["Bonly"])]),
+        row("", &[cell("", &["Next"]), cell("", &["Beside"])]),
+    ];
+    let body = [table(&[4680, 4680], "", &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let y = |t: &str| origin(&run_with(&pdf, t)).1;
+    let line = y("Aone") - y("Atwo");
+    assert!(line > 10.0, "line height {line}");
+    near(y("Athree") - y("Next"), line, "Next follows the last line of the taller cell");
+    near(y("Beside"), y("Next"), "Beside");
+    near(y("Bonly"), y("Aone"), "Bonly");
+}
+
+#[test]
+fn a_row_height_is_a_minimum_unless_it_is_exact() {
+    let scratch = Scratch::new("row-rule");
+    let rows = [
+        row(r#"<w:trHeight w:val="1440"/>"#, &[cell("", &["Tall"])]),
+        // Exactly 12 pt, though its two lines need more: the next row starts
+        // 12 pt down regardless.
+        row(r#"<w:trHeight w:val="240" w:hRule="exact"/>"#, &[cell("", &["Eone", "Etwo"])]),
+        row("", &[cell("", &["Last"])]),
+    ];
+    let body = [table(&[9360], "", &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let y = |t: &str| origin(&run_with(&pdf, t)).1;
+    near(y("Tall") - y("Eone"), 72.0, "the 1 in row");
+    near(y("Eone") - y("Last"), 12.0, "the exact row");
+}
+
+#[test]
+fn a_table_is_sized_by_its_width_indent_and_alignment() {
+    let scratch = Scratch::new("table-width");
+    let one_row = |a: &str, b: &str| [row("", &[cell("", &[a]), cell("", &[b])])];
+    let body = [
+        // Half the text width, centred: two 117 pt columns from x = 189.
+        table(&[4680, 4680], r#"<w:tblW w:w="2500" w:type="pct"/><w:jc w:val="center"/>"#, &one_row("Pctone", "Pcttwo")),
+        para("gap", arial()),
+        // A grid twice the text width is scaled down to fit.
+        table(&[9360, 9360], "", &one_row("Wideone", "Widetwo")),
+        para("gap", arial()),
+        // Indented half an inch.
+        table(&[2880, 2880], r#"<w:tblInd w:w="720" w:type="dxa"/>"#, &one_row("Indone", "Indtwo")),
+        para("gap", arial()),
+        // 3 in wide, in twips.
+        table(&[4680, 4680], r#"<w:tblW w:w="4320" w:type="dxa"/>"#, &one_row("Dxaone", "Dxatwo")),
+        LETTER.into(),
+    ]
+    .concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let x = |t: &str| origin(&run_with(&pdf, t)).0;
+    near(x("Pctone"), 194.4, "Pctone");
+    near(x("Pcttwo"), 311.4, "Pcttwo");
+    near(x("Wideone"), 77.4, "Wideone");
+    near(x("Widetwo"), 311.4, "Widetwo");
+    near(x("Indone"), 113.4, "Indone");
+    near(x("Indtwo"), 257.4, "Indtwo");
+    near(x("Dxaone"), 77.4, "Dxaone");
+    near(x("Dxatwo"), 185.4, "Dxatwo");
+}
+
+#[test]
+fn borders_resolve_cell_over_table_over_style() {
+    let scratch = Scratch::new("borders");
+    let styles = Some(GRID_STYLE);
+    let two_rows = |first_right: &str| {
+        [row(ROW_36, &[cell("", &["Left"]), cell(first_right, &["Right"])]), row(ROW_36, &[cell("", &["Down"]), cell("", &["Under"])])]
+    };
+    // Columns 72–234–396, rows 72–108–144 from the top of the page.
+    let styled = [table(&[3240, 3240], r#"<w:tblStyle w:val="TableGrid"/>"#, &two_rows(r#"<w:tcBorders><w:top w:val="nil"/></w:tcBorders>"#)), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&styled, styles, None, &[]));
+    let at = pixels(&pdf, 0);
+    for (x, y) in [(72, 90), (396, 90), (72, 126), (396, 126), (150, 72), (150, 144), (315, 144)] {
+        assert!(is_blue(at(x, y)), "no outer edge at ({x}, {y}): {:?}", at(x, y));
+    }
+    for (x, y) in [(234, 90), (234, 126), (150, 108), (315, 108)] {
+        assert!(is_red(at(x, y)), "no inside rule at ({x}, {y}): {:?}", at(x, y));
+    }
+    assert!(clear(&at, 315, 72), "the cell's own nil top was drawn: {:?}", at(315, 72));
+
+    // The table's own `insideV: nil` beats its style's.
+    let direct = [
+        table(&[3240, 3240], r#"<w:tblStyle w:val="TableGrid"/><w:tblBorders><w:insideV w:val="nil"/></w:tblBorders>"#, &two_rows("")),
+        LETTER.into(),
+    ]
+    .concat();
+    let (pdf, _) = convert(&scratch, &docx(&direct, styles, None, &[]));
+    let at = pixels(&pdf, 0);
+    assert!(clear(&at, 234, 90) && clear(&at, 234, 126), "insideV was drawn: {:?}", at(234, 90));
+    assert!(is_blue(at(72, 90)) && is_red(at(150, 108)), "the style's other borders went missing");
+
+    // No style, no borders: nothing is drawn.
+    let plain = [table(&[3240, 3240], "", &two_rows("")), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&plain, styles, None, &[]));
+    let at = pixels(&pdf, 0);
+    for (x, y) in [(72, 90), (234, 90), (150, 72), (150, 108), (150, 144)] {
+        assert!(clear(&at, x, y), "a border at ({x}, {y}) on a plain table: {:?}", at(x, y));
+    }
+
+    // The document's default table style applies to a table that names none.
+    let defaulted = GRID_STYLE.replace(r#"w:styleId="TableGrid""#, r#"w:default="1" w:styleId="TableGrid""#);
+    let (pdf, _) = convert(&scratch, &docx(&plain, Some(&defaulted), None, &[]));
+    assert!(is_red(pixels(&pdf, 0)(234, 90)), "the default table style wasn't applied");
+}
+
+#[test]
+fn shading_fills_its_cell_under_the_text() {
+    let scratch = Scratch::new("shading");
+    let rows = [row(ROW_36, &[cell(r#"<w:shd w:val="clear" w:color="auto" w:fill="00C000"/>"#, &["Shaded"]), cell("", &["Plain"])])];
+    let body = [table(&[3240, 3240], "", &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let at = pixels(&pdf, 0);
+    let [r, g, b] = at(150, 100);
+    assert!(g > 150 && r < 60 && b < 60, "no fill: {:?}", [r, g, b]);
+    assert!(is_white(at(315, 100)), "the fill spread: {:?}", at(315, 100));
+    // The text is drawn over the fill, not hidden by it.
+    let shaded = run_with(&pdf, "Shaded");
+    let (top, bottom) = ((792.0 - shaded.bbox[3]) as u32, (792.0 - shaded.bbox[1]) as u32);
+    let dark = (shaded.bbox[0] as u32..shaded.bbox[2] as u32).any(|x| (top..bottom).any(|y| at(x, y).iter().all(|c| *c < 90)));
+    assert!(dark, "the shading covers the text");
+}
+
+#[test]
+fn a_cell_spanning_columns_is_as_wide_as_them() {
+    let scratch = Scratch::new("span");
+    let centred = r#"<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr><w:t>Wide</w:t></w:r></w:p>"#;
+    let rows = [
+        row("", &[format!(r#"<w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr>{centred}</w:tc>"#)]),
+        row("", &[cell("", &["Under"]), cell("", &["Right"])]),
+    ];
+    let body = [table(&[3240, 3240], "", &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let wide = run_with(&pdf, "Wide");
+    near((wide.bbox[0] + wide.bbox[2]) / 2.0, 234.0, "the spanning cell's centre");
+    near(origin(&run_with(&pdf, "Right")).0, 239.4, "Right");
+}
+
+#[test]
+fn a_vertically_merged_cell_shows_once_across_its_rows() {
+    let scratch = Scratch::new("vmerge");
+    let start = cell(r#"<w:vMerge w:val="restart"/><w:vAlign w:val="center"/>"#, &["Merged"]);
+    let covered = || cell(r#"<w:vMerge/>"#, &[""]);
+    let rows = [
+        row("", &[start, cell("", &["Rone"])]),
+        row("", &[covered(), cell("", &["Rtwo"])]),
+        row("", &[covered(), cell("", &["Rthree"])]),
+    ];
+    let body = [table(&[3240, 3240], r#"<w:tblStyle w:val="TableGrid"/>"#, &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, Some(GRID_STYLE), None, &[]));
+    assert_eq!(text(&pdf), "Merged Rone Rtwo Rthree");
+    let y = |t: &str| origin(&run_with(&pdf, t)).1;
+    // Centred over three equal rows, its one line sits level with the middle row's.
+    near(y("Merged"), y("Rtwo"), "Merged");
+
+    let row_height = y("Rone") - y("Rtwo");
+    let edge = |n: f32| (72.0 + n * row_height) as u32;
+    let at = pixels(&pdf, 0);
+    assert!(clear(&at, 150, edge(1.0)) && clear(&at, 150, edge(2.0)), "a rule crosses the merged cell");
+    assert!(is_red(at(315, edge(1.0))) && is_red(at(315, edge(2.0))), "the unmerged column lost its rules");
+    // The merged cell's bottom is the table's bottom edge (blue), not an inside rule.
+    for x in [150, 315] {
+        assert!(is_blue(at(x, edge(3.0))), "bottom edge at x = {x}: {:?}", at(x, edge(3.0)));
+    }
+
+    // Three lines over two one-line rows: the second row grows to hold them.
+    let rows = [
+        row("", &[cell(r#"<w:vMerge w:val="restart"/>"#, &["Mone", "Mtwo", "Mthree"]), cell("", &["Sone"])]),
+        row("", &[covered(), cell("", &["Stwo"])]),
+        row("", &[cell("", &["After"]), cell("", &["Afterb"])]),
+    ];
+    let body = [table(&[3240, 3240], "", &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let y = |t: &str| origin(&run_with(&pdf, t)).1;
+    near(y("Mthree") - y("After"), y("Mone") - y("Mtwo"), "After follows the merged cell's last line");
+}
+
+#[test]
+fn a_vertical_merge_moves_to_the_next_page_whole() {
+    let scratch = Scratch::new("vmerge-page");
+    // 52 lines of exactly 12 pt leave 24 pt on the first page: room for one
+    // of the merge's three rows, not all of them.
+    let filler: String = (1..=52)
+        .map(|i| format!(r#"<w:p><w:pPr><w:spacing w:line="240" w:lineRule="exact"/></w:pPr><w:r><w:rPr>{}</w:rPr><w:t>Filler{i}</w:t></w:r></w:p>"#, arial()))
+        .collect();
+    let covered = || cell(r#"<w:vMerge/>"#, &[""]);
+    let rows = [
+        row("", &[cell(r#"<w:vMerge w:val="restart"/>"#, &["Merged"]), cell("", &["Rone"])]),
+        row("", &[covered(), cell("", &["Rtwo"])]),
+        row("", &[covered(), cell("", &["Rthree"])]),
+    ];
+    let body = [filler, table(&[3240, 3240], r#"<w:tblStyle w:val="TableGrid"/>"#, &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, Some(GRID_STYLE), None, &[]));
+    let pages = runs(&pdf);
+    assert_eq!(pages.len(), 2);
+    assert!(pages[0].iter().all(|r| r.text.starts_with("Filler")), "part of the merge stayed on page 1");
+    assert_eq!(first_run(&pages[1]).text.trim(), "Merged");
+    // Nothing of the table is drawn in page 1's bottom margin.
+    let at = pixels(&pdf, 0);
+    assert!((60..=110).all(|x| (722..792).all(|y| is_white(at(x, y)))), "page 1 has a border in its margin");
+}
+
+#[test]
+fn header_rows_repeat_on_every_page() {
+    let scratch = Scratch::new("header");
+    let mut rows = vec![row("<w:tblHeader/>", &[cell("", &["Head"]), cell("", &["Column"])])];
+    rows.extend((1..=80).map(|i| row("", &[cell("", &[&format!("Row{i}")]), cell("", &[&format!("x{i}")])])));
+    let body = [table(&[4680, 4680], "", &rows), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    let pages = runs(&pdf);
+    assert!(pages.len() >= 2, "{} pages", pages.len());
+    for (n, page) in pages.iter().enumerate() {
+        assert_eq!(first_run(page).text.trim(), "Head", "page {}", n + 1);
+        assert_eq!(page.iter().filter(|r| r.text.trim() == "Head").count(), 1);
+        assert!(page.iter().all(|r| r.bbox[1] >= 71.5), "page {} runs into the bottom margin", n + 1);
+    }
+    let order: Vec<String> = pages.concat().into_iter().map(|r| r.text.trim().to_owned()).filter(|t| t.starts_with("Row")).collect();
+    assert_eq!(order, (1..=80).map(|i| format!("Row{i}")).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_row_taller_than_a_page_is_split_between_lines() {
+    let scratch = Scratch::new("tall-row");
+    // 54 lines of exactly 12 pt fill the first page to its bottom margin, so
+    // the row has to start on the next page: not one line past the margin,
+    // and not as an empty slice whose rules sit on the margin.
+    let filler: String = (1..=54)
+        .map(|i| format!(r#"<w:p><w:pPr><w:spacing w:line="240" w:lineRule="exact"/></w:pPr><w:r><w:rPr>{}</w:rPr><w:t>Filler{i}</w:t></w:r></w:p>"#, arial()))
+        .collect();
+    let lines: Vec<String> = (1..=90).map(|i| format!("Line{i}")).collect();
+    let tall = cell("", &lines.iter().map(String::as_str).collect::<Vec<_>>());
+    let grid = r#"<w:tblStyle w:val="TableGrid"/>"#;
+    let body = [filler, table(&[4680, 4680], grid, &[row("", &[tall, cell("", &["Side"])])]), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, Some(GRID_STYLE), None, &[]));
+    let pages = runs(&pdf);
+    assert!(pages.len() >= 3, "{} pages", pages.len());
+    let at = pixels(&pdf, 0);
+    assert!((60..=400).all(|x| (719..792).all(|y| is_white(at(x, y)))), "page 1 has a rule in its bottom margin");
+    assert!(pages[0].iter().all(|r| r.text.starts_with("Filler")), "the row began on the full page");
+    assert_eq!(first_run(&pages[1]).text.trim(), "Line1");
+    for (n, page) in pages.iter().enumerate() {
+        assert!(page.iter().all(|r| r.bbox[1] >= 71.5 && r.bbox[3] <= 720.5), "page {} runs into a margin", n + 1);
+    }
+    let order: Vec<String> = pages.concat().into_iter().map(|r| r.text.trim().to_owned()).filter(|t| t.starts_with("Line")).collect();
+    assert_eq!(order, lines);
+}
+
+#[test]
+fn a_table_style_sets_the_spacing_of_its_paragraphs() {
+    let scratch = Scratch::new("table-spacing");
+    // Word's own defaults: 8 pt after every paragraph, none inside Table Grid.
+    let styles = r#"
+        <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160"/></w:pPr></w:pPrDefault></w:docDefaults>
+        <w:style w:type="paragraph" w:styleId="Spaced"><w:pPr><w:spacing w:after="480"/></w:pPr></w:style>
+        <w:style w:type="table" w:styleId="TableGrid"><w:pPr><w:spacing w:after="0"/></w:pPr></w:style>"#;
+    let plain = |t: &str| format!("<w:p><w:r><w:t>{t}</w:t></w:r></w:p>");
+    let spaced = |t: &str| format!(r#"<w:p><w:pPr><w:pStyle w:val="Spaced"/></w:pPr><w:r><w:t>{t}</w:t></w:r></w:p>"#);
+    let inside = format!("<w:tc>{}{}{}{}</w:tc>", plain("Tone"), plain("Ttwo"), spaced("Tthree"), plain("Tfour"));
+    let body = [plain("Oone"), plain("Otwo"), table(&[9360], r#"<w:tblStyle w:val="TableGrid"/>"#, &[row("", &[inside])]), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, Some(styles), None, &[]));
+    let y = |t: &str| origin(&run_with(&pdf, t)).1;
+    let line = y("Tone") - y("Ttwo");
+    near(y("Oone") - y("Otwo"), line + 8.0, "outside the table, the default 8 pt after");
+    // A paragraph style still beats the table style.
+    near(y("Tthree") - y("Tfour"), line + 24.0, "the paragraph style's 24 pt after");
+}
+
+#[test]
+fn a_table_style_formatting_parts_of_the_table_is_reported() {
+    let scratch = Scratch::new("conditional");
+    let styles = r#"<w:style w:type="table" w:styleId="Banded"><w:tblPr/><w:tblStylePr w:type="firstRow"><w:rPr><w:b/></w:rPr></w:tblStylePr></w:style>"#;
+    let rows = [row("", &[cell("", &["Top"])]), row("", &[cell("", &["Body"])])];
+    let body = [table(&[9360], r#"<w:tblStyle w:val="Banded"/>"#, &rows), LETTER.into()].concat();
+    let (pdf, summary) = convert(&scratch, &docx(&body, Some(styles), None, &[]));
+    assert_eq!(text(&pdf), "Top Body");
+    assert!(summary.warnings.iter().any(|w| w.contains("banded rows")), "{:?}", summary.warnings);
+}
+
+#[test]
+fn a_table_inside_a_cell_is_laid_out_inside_it() {
+    let scratch = Scratch::new("nested");
+    let inner = table(&[2160, 2160], "", &[row("", &[cell("", &["Inone"]), cell("", &["Intwo"])])]);
+    let outer_cell = format!("<w:tc>{inner}{}</w:tc>", para("After", arial()));
+    let body = [table(&[4680, 4680], "", &[row("", &[outer_cell, cell("", &["Outtwo"])])]), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert_eq!(text(&pdf), "Inone Intwo After Outtwo");
+    let at = |t: &str| origin(&run_with(&pdf, t));
+    // The outer cell runs 72–306 (text 77.4–300.6); the inner table's
+    // columns are 1.5 in each from its left.
+    assert!(at("Inone").0 >= 77.0 && at("Intwo").0 > at("Inone").0 + 100.0 && at("Intwo").0 < 300.0, "{:?} {:?}", at("Inone"), at("Intwo"));
+    near(at("Inone").1, at("Intwo").1, "the inner cells share a line");
+    assert!(at("After").1 < at("Inone").1 - 10.0, "After isn't below the inner table");
+    near(at("Outtwo").0, 311.4, "Outtwo");
+    near(at("Outtwo").1, at("Inone").1, "Outtwo is level with the inner table's first line");
+}
+
 // --- what is simplified, and said ----------------------------------------------
 
 #[test]
@@ -396,16 +814,6 @@ fn tracked_changes_fields_and_hidden_text() {
     let (pdf, summary) = convert(&scratch, &docx(&body, None, None, &[]));
     assert_eq!(text(&pdf), "kept inserted page 7");
     assert!(summary.warnings.iter().any(|w| w.contains("Tracked changes are shown as if they had been accepted")), "{:?}", summary.warnings);
-}
-
-#[test]
-fn a_table_keeps_its_text_and_says_it_was_simplified() {
-    let scratch = Scratch::new("table");
-    let cell = |t: &str| format!("<w:tc><w:p><w:r><w:t>{t}</w:t></w:r></w:p></w:tc>");
-    let body = format!("<w:tbl><w:tr>{}{}</w:tr><w:tr>{}{}</w:tr></w:tbl>{LETTER}", cell("A1"), cell("B1"), cell("A2"), cell("B2"));
-    let (pdf, summary) = convert(&scratch, &docx(&body, None, None, &[]));
-    assert_eq!(text(&pdf), "A1 B1 A2 B2");
-    assert!(summary.warnings.iter().any(|w| w.contains("Tables are shown as their cells")), "{:?}", summary.warnings);
 }
 
 #[test]
@@ -510,13 +918,84 @@ async fn a_vibepdf_word_export_comes_back_with_its_headings_and_image() {
     );
 }
 
-/// `Sample PDFs/out/p7-create/` — the textutil memo and the round-tripped
-/// report, for Preview. `cargo test --test create_docx -- --ignored`
 #[test]
+fn a_nested_row_taller_than_a_page_ends_and_is_reported() {
+    let scratch = Scratch::new("nested-tall");
+    let lines: Vec<String> = (1..=70).map(|i| format!("Deep{i}")).collect();
+    let inner = table(&[4320], "", &[row("", &[cell("", &lines.iter().map(String::as_str).collect::<Vec<_>>())])]);
+    let body = [table(&[4680, 4680], "", &[row("", &[format!("<w:tc>{inner}</w:tc>"), cell("", &["Beside"])])]), para("Afterwards", arial()), LETTER.into()].concat();
+    let (pdf, summary) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert!(summary.warnings.iter().any(|w| w.contains("taller than a page")), "{:?}", summary.warnings);
+    assert!(text(&pdf).ends_with("Afterwards"), "the document after the table is missing");
+}
+
+// The PDF→Word export writes each detected table as a Word table with an
+// even grid; coming back, each column's cells must start at one x, in order.
+#[tokio::test]
+async fn a_vibepdf_word_export_of_a_table_comes_back_as_a_table() {
+    let scratch = Scratch::new("roundtrip-table");
+    let exported = scratch.path("table.docx");
+    let handle = DocumentActorHandle::spawn(None, uuid::Uuid::new_v4(), PathBuf::from("../tests/fixtures/basic/table.pdf"), None).expect("opens");
+    handle.export_docx(vec![], exported.clone()).await.expect("export");
+    let bytes = std::fs::read(&exported).expect("read");
+
+    let (pdf, summary) = convert(&scratch, &bytes);
+    assert_eq!(text(&pdf), docx_text(&bytes), "warnings: {:?}", summary.warnings);
+    let page = &runs(&pdf)[0];
+    // PDFium reports a cell's run with the space that ends it.
+    let x = |t: &str| origin(page.iter().find(|r| r.text.trim() == t).unwrap_or_else(|| panic!("no {t:?} on page 1"))).0;
+    let columns = [["Region", "North", "South", "Overseas"], ["Revenue", "412,000", "298,500", "77,250"], ["Change", "+6%", "-2%", "+31%"], ["Units", "1240", "980", "310"]];
+    let mut previous = 0.0;
+    for column in columns {
+        let start = x(column[0]);
+        for cell in column {
+            near(x(cell), start, cell);
+        }
+        assert!(start > previous + 50.0, "{} isn't right of the column before", column[0]);
+        previous = start;
+    }
+}
+
+/// `Sample PDFs/out/p7-create/` — the textutil memo, a hand-built tables
+/// document and `table.pdf` round-tripped through the Word export, for
+/// Preview. `cargo test --test create_docx -- --ignored`
+#[tokio::test]
 #[ignore = "writes verification files for a human to open"]
-fn writes_the_verification_files() {
+async fn writes_the_verification_files() {
     let dir = PathBuf::from("../Sample PDFs/out/p7-create");
     std::fs::create_dir_all(&dir).expect("dir");
     let summary = create_pdf_from_files(&[PathBuf::from("../tests/fixtures/basic/textutil-memo.docx")], &dir.join("from-textutil.pdf"), PageSize::A4).expect("create");
     println!("VERIFY from-textutil.pdf: {summary:?}");
+
+    // Page 1: the bordered grid, a shaded cell, a heading across two columns
+    // and a cell merged down three rows. Then a long table whose header
+    // repeats on page 2.
+    let grid = r#"<w:tblStyle w:val="TableGrid"/>"#;
+    let heading = r#"<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="22"/></w:rPr><w:t>Across two columns</w:t></w:r></w:p>"#;
+    let showcase = [
+        row(ROW_36, &[format!(r#"<w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr>{heading}</w:tc>"#), cell("", &["Third"])]),
+        row(ROW_36, &[cell(r#"<w:vMerge w:val="restart"/><w:vAlign w:val="center"/>"#, &["Merged"]), cell(r#"<w:shd w:val="clear" w:fill="00C000"/>"#, &["Shaded"]), cell("", &["Plain, with enough words to wrap inside its column"])]),
+        row(ROW_36, &[cell("<w:vMerge/>", &[""]), cell("", &["Two"]), cell("", &["Three"])]),
+        row(ROW_36, &[cell("<w:vMerge/>", &[""]), cell("", &["Four"]), cell("", &["Five"])]),
+    ];
+    let mut long = vec![row("<w:tblHeader/>", &[cell(r#"<w:shd w:val="clear" w:fill="D9E2F3"/>"#, &["Item"]), cell(r#"<w:shd w:val="clear" w:fill="D9E2F3"/>"#, &["Note"])])];
+    long.extend((1..=60).map(|i| row("", &[cell("", &[&format!("Item {i}")]), cell("", &[&format!("Note for item {i}")])])));
+    let body = [
+        para("Tables (P7.C1b2)", arial()),
+        table(&[3240, 2880, 3240], grid, &showcase),
+        para("A long table follows.", arial()),
+        table(&[2880, 6480], grid, &long),
+        LETTER.into(),
+    ]
+    .concat();
+    let tables_docx = dir.join("tables.docx");
+    std::fs::write(&tables_docx, docx(&body, Some(GRID_STYLE), None, &[])).expect("write");
+    let summary = create_pdf_from_files(&[tables_docx], &dir.join("tables.pdf"), PageSize::A4).expect("create");
+    println!("VERIFY tables.pdf: {summary:?}");
+
+    let exported = dir.join("table-roundtrip.docx");
+    let handle = DocumentActorHandle::spawn(None, uuid::Uuid::new_v4(), PathBuf::from("../tests/fixtures/basic/table.pdf"), None).expect("opens");
+    handle.export_docx(vec![], exported.clone()).await.expect("export");
+    let summary = create_pdf_from_files(&[exported], &dir.join("table-roundtrip.pdf"), PageSize::A4).expect("create");
+    println!("VERIFY table-roundtrip.pdf: {summary:?}");
 }

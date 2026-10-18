@@ -9,16 +9,22 @@
 //! It descends into hyperlinks, content controls and fields (showing a field's
 //! saved result, not its code), and shows tracked changes as if accepted.
 //!
-//! **What is simplified, and said.** Tables (until P7.C1b2) become their cells'
-//! paragraphs; text boxes follow the paragraph they're anchored in; floating
-//! images are placed inline; equations become their text. Headers, footers,
-//! footnotes and comments are left out. Each of these adds one warning, so a
+//! **Tables** (P7.C1b2) keep their grid, merged cells, borders (cell over table
+//! over table style), shading, margins, row heights and header rows.
+//!
+//! **What is simplified, and said.** A table style's formatting for its first
+//! row, banded rows and edge columns is left out; text boxes follow the
+//! paragraph they're anchored in; floating images are placed inline; equations
+//! become their text. Headers, footers, footnotes and comments are left out. Each of these adds one warning, so a
 //! person can see what changed — nothing is dropped without a word.
 
 use std::collections::{BTreeSet, HashMap};
 
 use crate::error::CommandError;
-use crate::pdf::flow::{Align, FlowBlock, FlowDocument, FlowImage, LineSpacing, PageSetup, Paragraph, Run, RunStyle};
+use crate::pdf::flow::{
+    Align, Border, Borders, FlowBlock, FlowCell, FlowDocument, FlowImage, FlowRow, FlowTable, LineSpacing, Merge, PageSetup, Paragraph, Run,
+    RunStyle, TableWidth, VAlign,
+};
 use crate::pdf::ooxml::ZipArchive;
 use crate::pdf::xml_tree::{parse, Element, A, MC, PKG_REL, R, V, W, WP};
 
@@ -214,6 +220,147 @@ struct Style {
     based_on: Option<String>,
     ppr: PProps,
     rpr: RProps,
+    table: TableProps,
+}
+
+/// One border side as a layer: not said here, explicitly none, or a line.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Side {
+    #[default]
+    Unset,
+    Nil,
+    Line(Border),
+}
+
+impl Side {
+    fn or(self, base: Self) -> Self {
+        if self == Self::Unset { base } else { self }
+    }
+
+    fn line(self) -> Option<Border> {
+        match self {
+            Self::Line(b) => Some(b),
+            Self::Unset | Self::Nil => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct SideSet {
+    top: Side,
+    right: Side,
+    bottom: Side,
+    left: Side,
+    inside_h: Side,
+    inside_v: Side,
+}
+
+impl SideSet {
+    fn over(&mut self, other: &Self) {
+        self.top = other.top.or(self.top);
+        self.right = other.right.or(self.right);
+        self.bottom = other.bottom.or(self.bottom);
+        self.left = other.left.or(self.left);
+        self.inside_h = other.inside_h.or(self.inside_h);
+        self.inside_v = other.inside_v.or(self.inside_v);
+    }
+}
+
+/// Table-level properties a table style or a table can set.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct TableProps {
+    borders: SideSet,
+    /// Cell margins, points: top, right, bottom, left.
+    margins: [Option<f32>; 4],
+    /// The style formats parts of the table on their own (`w:tblStylePr`:
+    /// the first row, banded rows, edge columns), which isn't applied.
+    conditional: bool,
+}
+
+impl TableProps {
+    fn over(&mut self, other: &Self) {
+        self.borders.over(&other.borders);
+        self.conditional |= other.conditional;
+        for (mine, theirs) in self.margins.iter_mut().zip(other.margins) {
+            if theirs.is_some() {
+                *mine = theirs;
+            }
+        }
+    }
+}
+
+/// `w:tblBorders` / `w:tcBorders`: sizes are eighths of a point.
+fn parse_sides(element: &Element) -> SideSet {
+    let mut out = SideSet::default();
+    for e in element.elements().filter(|e| e.ns == W) {
+        let side = match e.attr(W, "val") {
+            Some("nil" | "none") => Side::Nil,
+            _ => Side::Line(Border {
+                width: e.attr(W, "sz").and_then(|v| v.parse::<f32>().ok()).map_or(0.5, |eighths| (eighths / 8.0).max(0.25)),
+                color: e.attr(W, "color").and_then(hex_colour).unwrap_or([0, 0, 0]),
+            }),
+        };
+        match e.name.as_str() {
+            "top" => out.top = side,
+            "right" | "end" => out.right = side,
+            "bottom" => out.bottom = side,
+            "left" | "start" => out.left = side,
+            "insideH" => out.inside_h = side,
+            "insideV" => out.inside_v = side,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `w:tblW`: twips (`dxa`), fiftieths of a percent (`pct`), or a literal
+/// percentage in Strict files. Anything else follows the grid.
+fn table_width(w: &Element) -> TableWidth {
+    let value = w.attr(W, "w").unwrap_or("");
+    match w.attr(W, "type") {
+        Some("dxa") => twips(value).map_or(TableWidth::Grid, TableWidth::Points),
+        Some("pct") => value
+            .strip_suffix('%')
+            .and_then(|p| p.parse::<f32>().ok().map(|p| p / 100.0))
+            .or_else(|| value.parse::<f32>().ok().map(|f| f / 5000.0))
+            .filter(|f| *f > 0.0)
+            .map_or(TableWidth::Grid, TableWidth::Fraction),
+        _ => TableWidth::Grid,
+    }
+}
+
+/// `parent`'s children named `w:name`, looking through content controls
+/// (`w:sdt`) that wrap rows or cells.
+fn through_controls<'e>(parent: &'e Element, name: &str) -> Vec<&'e Element> {
+    parent
+        .elements()
+        .flat_map(|e| if e.is(W, "sdt") { e.child(W, "sdtContent").map(|c| c.elements().collect::<Vec<_>>()).unwrap_or_default() } else { vec![e] })
+        .filter(|e| e.is(W, name))
+        .collect()
+}
+
+/// `w:tblCellMar` / `w:tcMar`, in twips.
+fn parse_margins(element: &Element) -> [Option<f32>; 4] {
+    let mut out = [None; 4];
+    for e in element.elements().filter(|e| e.ns == W) {
+        let value = e.attr(W, "w").filter(|_| e.attr(W, "type").is_none_or(|t| t == "dxa")).and_then(twips);
+        match e.name.as_str() {
+            "top" => out[0] = value,
+            "right" | "end" => out[1] = value,
+            "bottom" => out[2] = value,
+            "left" | "start" => out[3] = value,
+            _ => {}
+        }
+    }
+    out
+}
+
+fn parse_table_props(tbl_pr: &Element) -> TableProps {
+    TableProps {
+        borders: tbl_pr.child(W, "tblBorders").map(parse_sides).unwrap_or_default(),
+        margins: tbl_pr.child(W, "tblCellMar").map(parse_margins).unwrap_or_default(),
+        conditional: false,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -336,6 +483,10 @@ struct Reader<'z> {
     numbering: Numbering,
     /// Relationship id → package path, for the main document part.
     rels: HashMap<String, (String, bool)>,
+    default_table: Option<String>,
+    /// The paragraph and run defaults of the table style around the current
+    /// cell; they sit between document defaults and paragraph styles.
+    table_context: Vec<(PProps, RProps)>,
     blocks: Vec<FlowBlock>,
     warnings: BTreeSet<&'static str>,
     notes: Vec<String>,
@@ -385,6 +536,11 @@ impl Reader<'_> {
     }
 
     fn style_chain(&self, id: &str) -> (PProps, RProps) {
+        let (ppr, rpr, _) = self.full_style_chain(id);
+        (ppr, rpr)
+    }
+
+    fn full_style_chain(&self, id: &str) -> (PProps, RProps, TableProps) {
         let mut chain = Vec::new();
         let mut at = Some(id.to_owned());
         while let Some(current) = at {
@@ -395,14 +551,15 @@ impl Reader<'_> {
             chain.push(current);
             at = next;
         }
-        let (mut ppr, mut rpr) = (PProps::default(), RProps::default());
+        let (mut ppr, mut rpr, mut table) = (PProps::default(), RProps::default(), TableProps::default());
         for id in chain.iter().rev() {
             if let Some(style) = self.styles.get(id) {
                 ppr.over(&style.ppr);
                 rpr.over(&style.rpr);
+                table.over(&style.table);
             }
         }
-        (ppr, rpr)
+        (ppr, rpr, table)
     }
 
     fn load_styles(&mut self, path: &str) -> Result<(), CommandError> {
@@ -417,8 +574,11 @@ impl Reader<'_> {
         }
         for style in root.elements().filter(|e| e.is(W, "style")) {
             let Some(id) = style.attr(W, "styleId") else { continue };
-            if style.attr(W, "type") == Some("paragraph") && matches!(style.attr(W, "default"), Some("1" | "true")) {
-                self.default_paragraph = Some(id.to_owned());
+            let is_default = matches!(style.attr(W, "default"), Some("1" | "true"));
+            match style.attr(W, "type") {
+                Some("paragraph") if is_default => self.default_paragraph = Some(id.to_owned()),
+                Some("table") if is_default => self.default_table = Some(id.to_owned()),
+                _ => {}
             }
             self.styles.insert(
                 id.to_owned(),
@@ -426,6 +586,10 @@ impl Reader<'_> {
                     based_on: style.child(W, "basedOn").and_then(|b| b.attr(W, "val")).map(str::to_owned),
                     ppr: style.child(W, "pPr").map(parse_ppr).unwrap_or_default(),
                     rpr: style.child(W, "rPr").map(|r| parse_rpr(r, &self.theme)).unwrap_or_default(),
+                    table: TableProps {
+                        conditional: style.child(W, "tblStylePr").is_some(),
+                        ..style.child(W, "tblPr").map(parse_table_props).unwrap_or_default()
+                    },
                 },
             );
         }
@@ -490,14 +654,8 @@ impl Reader<'_> {
             match element.name.as_str() {
                 "p" => return self.paragraph(element),
                 "tbl" => {
-                    self.warn("Tables are shown as their cells' paragraphs, one after another, until table layout is supported.");
-                    for row in element.elements().filter(|e| e.is(W, "tr")) {
-                        for cell in row.elements().filter(|e| e.is(W, "tc")) {
-                            for child in cell.elements() {
-                                self.block(child)?;
-                            }
-                        }
-                    }
+                    let table = self.table(element)?;
+                    self.blocks.push(FlowBlock::Table(table));
                 }
                 "sdt" => {
                     if let Some(content) = element.child(W, "sdtContent") {
@@ -534,8 +692,12 @@ impl Reader<'_> {
         let (from_style, run_from_style) = style_id.as_deref().map(|id| self.style_chain(id)).unwrap_or_default();
 
         let mut ppr = self.doc_ppr.clone();
-        ppr.over(&from_style);
         let mut rpr = self.doc_rpr.clone();
+        if let Some((table_ppr, table_rpr)) = self.table_context.last() {
+            ppr.over(table_ppr);
+            rpr.over(table_rpr);
+        }
+        ppr.over(&from_style);
         rpr.over(&run_from_style);
 
         // List numbering: the level's indents sit between the style and direct formatting.
@@ -595,6 +757,115 @@ impl Reader<'_> {
             self.block(&text_box)?;
         }
         Ok(())
+    }
+
+    /// A table: its grid, rows and cells, with borders resolved cell over
+    /// table over table style, and its style's paragraph defaults applied to
+    /// the paragraphs inside it.
+    fn table(&mut self, tbl: &Element) -> Result<FlowTable, CommandError> {
+        let tbl_pr = tbl.child(W, "tblPr");
+        let style_id = tbl_pr
+            .and_then(|p| p.child(W, "tblStyle"))
+            .and_then(|s| s.attr(W, "val"))
+            .map(str::to_owned)
+            .or_else(|| self.default_table.clone());
+        let (table_paragraph, table_run, mut props) = style_id.as_deref().map(|id| self.full_style_chain(id)).unwrap_or_default();
+        if let Some(direct) = tbl_pr.map(parse_table_props) {
+            props.over(&direct);
+        }
+        if props.conditional {
+            self.warn("A table style's own formatting for header rows, banded rows and first or last columns is left out; its borders are kept.");
+        }
+        // Word's built-in cell margins: 0.075 in either side, none above or below.
+        let margins = [props.margins[0].unwrap_or(0.0), props.margins[1].unwrap_or(5.4), props.margins[2].unwrap_or(0.0), props.margins[3].unwrap_or(5.4)];
+        let indent = tbl_pr.and_then(|p| p.child(W, "tblInd")).and_then(|i| i.attr(W, "w")).and_then(twips).unwrap_or(0.0);
+        let align = match tbl_pr.and_then(|p| p.child(W, "jc")).and_then(|j| j.attr(W, "val")) {
+            Some("center") => Align::Center,
+            Some("right" | "end") => Align::Right,
+            _ => Align::Left,
+        };
+        let width = tbl_pr.and_then(|p| p.child(W, "tblW")).map_or(TableWidth::Grid, table_width);
+        let columns: Vec<f32> = tbl
+            .child(W, "tblGrid")
+            .map(|g| g.elements().filter(|e| e.is(W, "gridCol")).filter_map(|c| c.attr(W, "w").and_then(twips)).collect())
+            .unwrap_or_default();
+
+        let rows = through_controls(tbl, "tr");
+        let grid = columns.len().max(1);
+        let row_count = rows.len();
+
+        self.table_context.push((table_paragraph, table_run));
+        let mut flow_rows = Vec::with_capacity(row_count);
+        for (r, row) in rows.iter().enumerate() {
+            let row_props = row.child(W, "trPr");
+            let (min_height, exact) = row_props
+                .and_then(|p| p.child(W, "trHeight"))
+                .map_or((0.0, false), |h| (h.attr(W, "val").and_then(twips).unwrap_or(0.0), h.attr(W, "hRule") == Some("exact")));
+            let header = row_props.and_then(|p| p.child(W, "tblHeader")).is_some_and(on_off);
+            let mut cells = Vec::new();
+            let mut column = 0usize;
+            if let Some(before) = row_props.and_then(|p| p.child(W, "gridBefore")).and_then(|g| g.attr(W, "val")).and_then(|v| v.parse::<usize>().ok()) {
+                cells.push(FlowCell { blocks: Vec::new(), span: before, merge: Merge::None, fill: None, borders: Borders::default(), valign: VAlign::Top, margins });
+                column += before;
+            }
+            for tc in through_controls(row, "tc") {
+                let cell_props = tc.child(W, "tcPr");
+                let span = cell_props.and_then(|p| p.child(W, "gridSpan")).and_then(|g| g.attr(W, "val")).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).max(1);
+                let merge = match cell_props.and_then(|p| p.child(W, "vMerge")) {
+                    Some(m) if m.attr(W, "val") == Some("restart") => Merge::Start,
+                    Some(_) => Merge::Continue,
+                    None => Merge::None,
+                };
+                let first_col = column == 0;
+                let last_col = column + span >= grid;
+                let edge = |outer: Side, inside: Side, is_edge: bool| if is_edge { outer } else { inside };
+                let table_sides = props.borders;
+                let mut sides = SideSet {
+                    top: edge(table_sides.top, table_sides.inside_h, r == 0),
+                    bottom: edge(table_sides.bottom, table_sides.inside_h, r + 1 == row_count),
+                    left: edge(table_sides.left, table_sides.inside_v, first_col),
+                    right: edge(table_sides.right, table_sides.inside_v, last_col),
+                    ..SideSet::default()
+                };
+                if let Some(own) = cell_props.and_then(|p| p.child(W, "tcBorders")).map(parse_sides) {
+                    sides.over(&own);
+                }
+                let mut cell_margins = margins;
+                if let Some(own) = cell_props.and_then(|p| p.child(W, "tcMar")).map(parse_margins) {
+                    for (m, o) in cell_margins.iter_mut().zip(own) {
+                        if let Some(v) = o {
+                            *m = v;
+                        }
+                    }
+                }
+                let fill = cell_props.and_then(|p| p.child(W, "shd")).and_then(|s| s.attr(W, "fill")).and_then(hex_colour);
+                let valign = match cell_props.and_then(|p| p.child(W, "vAlign")).and_then(|v| v.attr(W, "val")) {
+                    Some("center") => VAlign::Center,
+                    Some("bottom") => VAlign::Bottom,
+                    _ => VAlign::Top,
+                };
+
+                // The cell's content, collected apart from the body's.
+                let outer = std::mem::take(&mut self.blocks);
+                for child in tc.elements().filter(|e| !e.is(W, "tcPr")) {
+                    self.block(child)?;
+                }
+                let blocks = std::mem::replace(&mut self.blocks, outer).into_iter().filter(|b| !matches!(b, FlowBlock::PageBreak)).collect();
+                cells.push(FlowCell {
+                    blocks,
+                    span,
+                    merge,
+                    fill,
+                    borders: Borders { top: sides.top.line(), right: sides.right.line(), bottom: sides.bottom.line(), left: sides.left.line() },
+                    valign,
+                    margins: cell_margins,
+                });
+                column += span;
+            }
+            flow_rows.push(FlowRow { cells, min_height, exact, header });
+        }
+        self.table_context.pop();
+        Ok(FlowTable { columns, width, rows: flow_rows, indent, align })
     }
 
     /// Emit the paragraph's runs so far. `last` is the paragraph's end: an
@@ -823,6 +1094,8 @@ pub fn read_docx(name: &str, bytes: &[u8]) -> Result<(FlowDocument, Vec<String>)
         theme: Theme::default(),
         numbering: Numbering::default(),
         rels: HashMap::new(),
+        default_table: None,
+        table_context: Vec::new(),
         blocks: Vec::new(),
         warnings: BTreeSet::new(),
         notes: Vec::new(),
