@@ -153,6 +153,12 @@ digest = "0.10"
 regex = "1"
 ttf-parser = "0.25.1"       # RazrFalcon; read-only: codepoint → glyph-id lookup
 subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
+# P7.C1b1 (SPEC P7-OCR-009): reading WordprocessingML. Not a new crate:
+# Tauri already compiles quick-xml 0.39 into every build (through `plist`),
+# so this names a dependency the app already carries rather than adding one.
+# Chosen over roxmltree, which would be new code, and over a hand-written XML
+# parser, which would be new risk.
+quick-xml = "0.39"
 ureq = { version = "3.2.1", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]

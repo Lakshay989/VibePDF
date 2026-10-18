@@ -16,6 +16,7 @@
 //!
 //! Everything here is written little-endian, as the format requires.
 
+use std::collections::HashMap;
 use std::io::Write;
 
 use flate2::write::DeflateEncoder;
@@ -196,104 +197,221 @@ pub fn escape_xml(text: &str) -> String {
     out
 }
 
-/// Read one entry back out of an archive this module wrote.
+/// Where one entry is, from the central directory.
+#[derive(Clone, Copy, Debug)]
+struct EntryRecord {
+    method: u16,
+    compressed: usize,
+    uncompressed: usize,
+    local_header: usize,
+}
+
+/// The most one entry may inflate to. A `.docx` part is a few megabytes; a
+/// crafted archive claiming gigabytes is refused instead of inflated.
+pub const MAX_ENTRY_BYTES: usize = 256 << 20;
+
+/// A ZIP archive read through its **central directory** (P7.C1b1).
 ///
-/// Deliberately minimal — it walks the local headers rather than the central
-/// directory, and understands only the two methods [`ZipWriter`] emits. It
-/// exists so the tests can assert on what a `.docx` actually contains.
-///
-/// A reader of mine validating a writer of mine proves nothing about the
-/// format, which is why the archive is *also* checked with `unzip -t` and, in
-/// the acceptance pass, opened in Word.
+/// The central directory is the archive's index, and the only reliable one.
+/// Many writers — `LibreOffice`, Java and `.NET` packaging, anything streaming —
+/// write each entry's sizes *after* its data, in a data descriptor, and leave
+/// zeros in the local header; walking local headers reads those as empty.
+pub struct ZipArchive<'a> {
+    data: &'a [u8],
+    entries: HashMap<String, EntryRecord>,
+}
+
+fn le16(data: &[u8], at: usize) -> Option<usize> {
+    Some(usize::from(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?)))
+}
+
+fn le32(data: &[u8], at: usize) -> Option<usize> {
+    usize::try_from(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?)).ok()
+}
+
+impl<'a> ZipArchive<'a> {
+    /// Index `data`'s entries.
+    ///
+    /// # Errors
+    /// When there is no end-of-central-directory record, the directory is
+    /// damaged, or the archive is ZIP64 (over 4 GB or 65 535 entries).
+    pub fn parse(data: &'a [u8]) -> Result<Self, CommandError> {
+        let bad = |what: &str| CommandError::InvalidInput(format!("not a readable ZIP archive: {what}"));
+        // The record is 22 bytes plus a comment of up to 65 535.
+        let last = data.len().checked_sub(22).ok_or_else(|| bad("too short"))?;
+        let earliest = last.saturating_sub(65_535);
+        let eocd = (earliest..=last)
+            .rev()
+            .find(|&at| le32(data, at) == usize::try_from(END_OF_CENTRAL_DIRECTORY).ok())
+            .ok_or_else(|| bad("no end-of-directory record"))?;
+        let count = le16(data, eocd + 10).ok_or_else(|| bad("truncated"))?;
+        let offset = le32(data, eocd + 16).ok_or_else(|| bad("truncated"))?;
+        if count == 0xFFFF || offset == 0xFFFF_FFFF {
+            return Err(bad("ZIP64 archives aren't supported"));
+        }
+        let mut entries = HashMap::with_capacity(count);
+        let mut at = offset;
+        for _ in 0..count {
+            if le32(data, at) != usize::try_from(CENTRAL_HEADER).ok() {
+                return Err(bad("damaged central directory"));
+            }
+            let field = |o: usize| le16(data, at + o).ok_or_else(|| bad("truncated"));
+            let wide = |o: usize| le32(data, at + o).ok_or_else(|| bad("truncated"));
+            let (name_len, extra_len, comment_len) = (field(28)?, field(30)?, field(32)?);
+            let name = data.get(at + 46..at + 46 + name_len).ok_or_else(|| bad("truncated"))?;
+            entries.insert(
+                String::from_utf8_lossy(name).into_owned(),
+                EntryRecord { method: u16::try_from(field(10)?).unwrap_or(u16::MAX), compressed: wide(20)?, uncompressed: wide(24)?, local_header: wide(42)? },
+            );
+            at += 46 + name_len + extra_len + comment_len;
+        }
+        Ok(Self { data, entries })
+    }
+
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.entries.contains_key(name)
+    }
+
+    /// Entry names, in the order their data appears in the archive.
+    #[must_use]
+    pub fn names(&self) -> Vec<String> {
+        let mut named: Vec<(&String, usize)> = self.entries.iter().map(|(n, r)| (n, r.local_header)).collect();
+        named.sort_by_key(|(_, at)| *at);
+        named.into_iter().map(|(n, _)| n.clone()).collect()
+    }
+
+    /// The entry's bytes, inflated.
+    ///
+    /// # Errors
+    /// When it is absent, damaged, uses a method other than stored or deflate,
+    /// or would inflate past [`MAX_ENTRY_BYTES`].
+    pub fn read(&self, name: &str) -> Result<Vec<u8>, CommandError> {
+        self.read_capped(name, MAX_ENTRY_BYTES)
+    }
+
+    fn read_capped(&self, name: &str, cap: usize) -> Result<Vec<u8>, CommandError> {
+        let record = self.entries.get(name).ok_or_else(|| CommandError::NotFound(format!("{name} is not in the archive")))?;
+        let bad = |what: &str| CommandError::InvalidInput(format!("{name}: {what}"));
+        let too_big = || CommandError::InvalidInput(format!("{name} is too large when unpacked (over {} MB); it may be a damaged or hostile file.", cap >> 20));
+        if record.uncompressed > cap {
+            return Err(too_big());
+        }
+        let at = record.local_header;
+        if le32(self.data, at) != usize::try_from(LOCAL_HEADER).ok() {
+            return Err(bad("damaged entry header"));
+        }
+        let body_at = at + 30 + le16(self.data, at + 26).ok_or_else(|| bad("truncated"))? + le16(self.data, at + 28).ok_or_else(|| bad("truncated"))?;
+        let body = self.data.get(body_at..body_at + record.compressed).ok_or_else(|| bad("truncated"))?;
+        match record.method {
+            0 => Ok(body.to_vec()),
+            8 => {
+                use std::io::Read;
+                // The declared size is not trusted: read at most one byte past the cap.
+                let mut out = Vec::new();
+                flate2::read::DeflateDecoder::new(body)
+                    .take(u64::try_from(cap).unwrap_or(u64::MAX) + 1)
+                    .read_to_end(&mut out)
+                    .map_err(|e| bad(&format!("could not be inflated: {e}")))?;
+                if out.len() > cap {
+                    return Err(too_big());
+                }
+                Ok(out)
+            }
+            other => Err(bad(&format!("uses compression method {other}, which isn't supported"))),
+        }
+    }
+}
+
+/// Read one entry out of an archive.
 ///
 /// # Errors
 /// When the archive is malformed or the entry is absent or unreadable.
 pub fn read_entry(archive: &[u8], name: &str) -> Result<Vec<u8>, CommandError> {
-    let mut at = 0usize;
-    while at + 30 <= archive.len() {
-        let signature = u32::from_le_bytes(archive[at..at + 4].try_into().unwrap_or_default());
-        if signature != LOCAL_HEADER {
-            break;
-        }
-        let read16 = |offset: usize| -> usize {
-            u16::from_le_bytes(
-                archive[at + offset..at + offset + 2]
-                    .try_into()
-                    .unwrap_or_default(),
-            ) as usize
-        };
-        let read32 = |offset: usize| -> usize {
-            u32::from_le_bytes(
-                archive[at + offset..at + offset + 4]
-                    .try_into()
-                    .unwrap_or_default(),
-            ) as usize
-        };
-        let method = read16(8);
-        let compressed = read32(18);
-        let name_len = read16(26);
-        let extra_len = read16(28);
-        let name_at = at + 30;
-        let body_at = name_at + name_len + extra_len;
-        if body_at + compressed > archive.len() {
-            return Err(CommandError::Internal("truncated ZIP entry".into()));
-        }
-        let entry_name = std::str::from_utf8(&archive[name_at..name_at + name_len])
-            .map_err(|_| CommandError::Internal("non-UTF-8 ZIP entry name".into()))?;
-        if entry_name == name {
-            let body = &archive[body_at..body_at + compressed];
-            return match method {
-                0 => Ok(body.to_vec()),
-                8 => {
-                    use std::io::Read;
-                    let mut out = Vec::new();
-                    flate2::read::DeflateDecoder::new(body)
-                        .read_to_end(&mut out)
-                        .map_err(|e| CommandError::Internal(format!("inflate {name}: {e}")))?;
-                    Ok(out)
-                }
-                other => Err(CommandError::Internal(format!(
-                    "unsupported ZIP method {other}"
-                ))),
-            };
-        }
-        at = body_at + compressed;
-    }
-    Err(CommandError::NotFound(format!("{name} is not in the archive")))
+    ZipArchive::parse(archive)?.read(name)
 }
 
-/// Every entry name in the archive, in the order written.
+/// Every entry name in the archive, in the order their data appears.
 ///
 /// # Errors
 /// When the archive is malformed.
 pub fn entry_names(archive: &[u8]) -> Result<Vec<String>, CommandError> {
-    let mut names = Vec::new();
-    let mut at = 0usize;
-    while at + 30 <= archive.len() {
-        if u32::from_le_bytes(archive[at..at + 4].try_into().unwrap_or_default()) != LOCAL_HEADER {
-            break;
-        }
-        let read16 = |offset: usize| -> usize {
-            u16::from_le_bytes(archive[at + offset..at + offset + 2].try_into().unwrap_or_default())
-                as usize
-        };
-        let compressed =
-            u32::from_le_bytes(archive[at + 18..at + 22].try_into().unwrap_or_default()) as usize;
-        let name_len = read16(26);
-        let extra_len = read16(28);
-        let name_at = at + 30;
-        names.push(
-            String::from_utf8_lossy(&archive[name_at..name_at + name_len]).into_owned(),
-        );
-        at = name_at + name_len + extra_len + compressed;
-    }
-    Ok(names)
+    Ok(ZipArchive::parse(archive)?.names())
 }
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A one-entry archive written the way streaming writers do it: general
+    /// purpose bit 3 set, zeros for the CRC and sizes in the local header, and
+    /// the real values in a data descriptor after the data. Only the central
+    /// directory carries them where a reader can find them first.
+    fn with_data_descriptor(name: &str, data: &[u8]) -> Vec<u8> {
+        let mut compressed = Vec::new();
+        {
+            let mut encoder = DeflateEncoder::new(&mut compressed, Compression::default());
+            encoder.write_all(data).unwrap();
+            encoder.finish().unwrap();
+        }
+        let crc = crc32fast::hash(data);
+        let (csize, usize_) = (u32::try_from(compressed.len()).unwrap(), u32::try_from(data.len()).unwrap());
+        let name_len = u16::try_from(name.len()).unwrap();
+        let mut out = Vec::new();
+        out.extend_from_slice(&LOCAL_HEADER.to_le_bytes());
+        out.extend_from_slice(&[20, 0, 8, 0, 8, 0, 0, 0, 0, 0]); // version, flags (bit 3), deflate, time, date
+        out.extend_from_slice(&[0; 12]); // CRC and both sizes: deferred
+        out.extend_from_slice(&name_len.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&compressed);
+        out.extend_from_slice(&0x0807_4b50u32.to_le_bytes());
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&csize.to_le_bytes());
+        out.extend_from_slice(&usize_.to_le_bytes());
+        let central_at = u32::try_from(out.len()).unwrap();
+        out.extend_from_slice(&CENTRAL_HEADER.to_le_bytes());
+        out.extend_from_slice(&[20, 0, 20, 0, 8, 0, 8, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&csize.to_le_bytes());
+        out.extend_from_slice(&usize_.to_le_bytes());
+        out.extend_from_slice(&name_len.to_le_bytes());
+        out.extend_from_slice(&[0; 12]); // extra, comment, disk, attributes
+        out.extend_from_slice(&0u32.to_le_bytes()); // local header at 0
+        out.extend_from_slice(name.as_bytes());
+        let central_len = u32::try_from(out.len()).unwrap() - central_at;
+        out.extend_from_slice(&END_OF_CENTRAL_DIRECTORY.to_le_bytes());
+        out.extend_from_slice(&[0, 0, 0, 0, 1, 0, 1, 0]);
+        out.extend_from_slice(&central_len.to_le_bytes());
+        out.extend_from_slice(&central_at.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn sizes_kept_in_a_data_descriptor_are_found_through_the_directory() {
+        let archive = with_data_descriptor("word/document.xml", b"<w:document/> repeated repeated repeated");
+        let zip = ZipArchive::parse(&archive).unwrap();
+        assert_eq!(zip.read("word/document.xml").unwrap(), b"<w:document/> repeated repeated repeated");
+        assert_eq!(zip.names(), vec!["word/document.xml"]);
+    }
+
+    // The declared size is not trusted: the inflater itself stops at the cap.
+    #[test]
+    fn an_entry_that_inflates_past_the_cap_is_refused() {
+        let archive = with_data_descriptor("bomb.xml", &vec![0u8; 3 << 20]);
+        let zip = ZipArchive::parse(&archive).unwrap();
+        let err = zip.read_capped("bomb.xml", 1 << 20).unwrap_err();
+        assert!(matches!(err, CommandError::InvalidInput(ref m) if m.contains("too large when unpacked")), "{err:?}");
+        assert_eq!(zip.read_capped("bomb.xml", 4 << 20).unwrap().len(), 3 << 20);
+    }
+
+    #[test]
+    fn something_that_is_not_a_zip_is_an_error() {
+        assert!(ZipArchive::parse(b"not an archive at all, just words").is_err());
+        assert!(ZipArchive::parse(b"").is_err());
+    }
 
     #[test]
     fn an_archive_round_trips() {

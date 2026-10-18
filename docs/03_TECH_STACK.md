@@ -98,6 +98,8 @@ Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic,
 - **`subsetter` (0.1, MIT/Apache, zero-dependency)** — the Typst team's PDF font subsetter. `Profile::pdf(&glyph_ids)` keeps only the used glyphs *and preserves original glyph-ids + the `cmap`*, so PDFium's Unicode→GID lookup still resolves on the subset (verified: the same footer is now **60 KB**, ~256× smaller).
 - **`ttf-parser` (0.25, MIT/Apache, zero-dependency)** — RazrFalcon's read-only parser, used only to map the runs' codepoints → glyph-ids for the subset set.
 
+- **`quick-xml` (0.39, MIT)** — added P7.C1b1 to read WordprocessingML for "create PDF from a Word document" (P7-OCR-009). Not new code to trust: Tauri already compiles this exact version into every build through `plist`, so naming it directly adds no crate. `roxmltree` (simpler, but genuinely new) and a hand-written XML parser (new risk) were passed over. `pdf::xml_tree` wraps it in a small namespace-aware tree. `ttf-parser` also gained a second job here: `pdf::font_index` reads each system font's `name` and `OS/2` tables to find faces by family and style.
+
 **Why this is consistent with the "no double engine / minimal deps" rules:** both crates are permissive, zero-transitive-dependency, and read/produce font *bytes* — they don't render or edit PDFs (no overlap with PDFium or lopdf). They're the smallest tools that do exactly one thing PDFium won't. `subset_font` degrades gracefully — an unparseable or un-subsettable face embeds whole (bloated but correct), never a hard failure. *(The heavier `subsetter` 0.2.x / `fontations` stack and `allsorts` were passed over for tree size.)*
 
 ---

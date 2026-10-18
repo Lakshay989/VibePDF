@@ -23,7 +23,7 @@ const mockOpen = vi.mocked(openFileDialog);
 const mockSave = vi.mocked(saveFileDialog);
 const mockReport = vi.mocked(reportError);
 
-const summary = { pages: 2, images: 1, textFiles: 1, bytes: 1234, warnings: [] as string[] };
+const summary = { pages: 2, images: 1, textFiles: 1, documents: 0, bytes: 1234, warnings: [] as string[] };
 
 function show() {
   const onCreated = vi.fn();

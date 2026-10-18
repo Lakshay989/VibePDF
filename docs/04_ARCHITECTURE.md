@@ -27,7 +27,11 @@ vibepdf/
 │   │   ├── pdf/                  # Core PDF engine (PDFium wrapper)
 │   │   │   ├── document.rs       # Open, save, metadata
 │   │   │   ├── cos.rs            # lopdf object-model layer (structural edits) + annotation add_* incl. add_link (P4.C3)
-│   │   │   ├── create.rs         # New PDF from images + text files: lopdf builder, CID text layout (P7-OCR-009)
+│   │   │   ├── create.rs         # New PDF from images, text and Word files: lopdf builder, image embedding (P7-OCR-009)
+│   │   │   ├── docx_read.rs      # Word (.docx) → flow model: styles, numbering, images, tracked changes (P7.C1b1)
+│   │   │   ├── flow.rs           # Flowed text → pages: line breaking, alignment, lists, embedded faces (P7.C1b1)
+│   │   │   ├── font_index.rs     # System fonts by family + style, from their name tables (P7.C1b1)
+│   │   │   ├── xml_tree.rs       # Namespace-aware XML tree over quick-xml, for OOXML (P7.C1b1)
 │   │   │   ├── page.rs           # Page operations
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations

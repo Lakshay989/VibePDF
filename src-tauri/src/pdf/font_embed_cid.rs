@@ -74,7 +74,18 @@ pub(crate) fn build_cid_font(
     font_bytes: &[u8],
     text: &str,
 ) -> Result<CidFont, CommandError> {
-    let face = ttf_parser::Face::parse(font_bytes, 0)
+    build_cid_font_from(doc, font_bytes, 0, text)
+}
+
+/// [`build_cid_font`] for face `face_index` of a font collection (`.ttc`) —
+/// how macOS ships Helvetica, Menlo and most of its own faces.
+pub(crate) fn build_cid_font_from(
+    doc: &mut Document,
+    font_bytes: &[u8],
+    face_index: u32,
+    text: &str,
+) -> Result<CidFont, CommandError> {
+    let face = ttf_parser::Face::parse(font_bytes, face_index)
         .map_err(|_| CommandError::InvalidInput("could not parse the embedding font".into()))?;
     let scale = 1000.0 / f32::from(face.units_per_em().max(1));
     let scaled = |v: i32| -> i64 { (v as f32 * scale).round() as i64 };
@@ -94,8 +105,12 @@ pub(crate) fn build_cid_font(
 
     // Subset the face to those glyphs (preserves original gids, so Identity-H
     // codes stay valid); embed the whole face if subsetting can't run.
-    let subset = subsetter::subset(font_bytes, 0, subsetter::Profile::pdf(&gids))
-        .unwrap_or_else(|_| font_bytes.to_vec());
+    let subset = match subsetter::subset(font_bytes, face_index, subsetter::Profile::pdf(&gids)) {
+        Ok(subset) => subset,
+        // The whole file is only a valid `FontFile2` when it holds one face.
+        Err(_) if face_index == 0 && ttf_parser::fonts_in_collection(font_bytes).is_none() => font_bytes.to_vec(),
+        Err(_) => return Err(CommandError::InvalidInput("could not subset the embedding font".into())),
+    };
 
     // Real advances, scaled to 1000/em.
     let mut advance_by_gid: BTreeMap<u16, u16> = BTreeMap::new();
@@ -110,7 +125,15 @@ pub(crate) fn build_cid_font(
     ff_dict.set("Length1", Object::Integer(len1));
     let font_file = doc.add_object(Stream::new(ff_dict, subset));
 
-    let base_name = format!("{}+VibeEmbedded", subset_tag());
+    // The face's own PostScript name, so a reader's font list says "Arial-BoldMT"
+    // rather than something no one can match to a font. PDF names can't carry
+    // spaces or delimiters, so anything else is dropped.
+    let postscript: String = crate::pdf::font_index::english_name(face.names(), ttf_parser::name_id::POST_SCRIPT_NAME)
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| c.is_ascii_graphic() && !"()<>[]{}/%#".contains(*c))
+        .collect();
+    let base_name = format!("{}+{}", subset_tag(), if postscript.is_empty() { "VibeEmbedded" } else { &postscript });
 
     // /FontDescriptor.
     let bbox = face.global_bounding_box();

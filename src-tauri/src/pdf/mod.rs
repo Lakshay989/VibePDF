@@ -11,6 +11,7 @@ pub mod crop;
 pub mod delete_page;
 pub mod doc_cache;
 pub mod document;
+pub mod docx_read;
 pub mod export_docx;
 pub mod export_html;
 pub mod export_image;
@@ -18,7 +19,9 @@ pub mod export_text;
 pub mod export_xlsx;
 pub mod extract;
 pub mod flatten;
+pub mod flow;
 pub mod font_embed_cid;
+pub mod font_index;
 pub mod font_metrics;
 pub mod font_resolver;
 pub mod form;
@@ -49,6 +52,7 @@ pub mod text_extract;
 pub mod undo;
 pub mod watermark;
 pub mod xfdf;
+pub mod xml_tree;
 
 /// Register where user-installed OCR language packs live (SPEC: P7-OCR-002).
 /// Re-exported here so `lib.rs`'s setup hook has one thing to call.

@@ -15,8 +15,8 @@ import { type CreatePageSize, createPdfFromFiles } from "@/ipc/create";
 import { useToastStore } from "@/state/toast-store";
 import { moveDown, moveUp, removeAt } from "@/tools/merge/reorder";
 
-/** What the native picker offers. Word and HTML come later (P7.C1b/C1c). */
-export const CREATE_EXTENSIONS = ["jpg", "jpeg", "png", "tif", "tiff", "webp", "txt", "text", "md", "log", "csv"];
+/** What the native picker offers. HTML comes later (P7.C1c). */
+export const CREATE_EXTENSIONS = ["docx", "jpg", "jpeg", "png", "tif", "tiff", "webp", "txt", "text", "md", "log", "csv"];
 
 export interface CreatePdfDialogProps {
   open: boolean;
@@ -54,7 +54,7 @@ export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogPro
   const addFiles = async () => {
     const selected = await openFileDialog({
       multiple: true,
-      filters: [{ name: "Images and text", extensions: CREATE_EXTENSIONS }],
+      filters: [{ name: "Word documents, images and text", extensions: CREATE_EXTENSIONS }],
     });
     if (selected === null) return; // cancelled
     const added = Array.isArray(selected) ? selected : [selected];
@@ -94,7 +94,8 @@ export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogPro
         <Dialog.Content className="fixed left-1/2 top-1/2 w-[460px] max-w-[92%] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-900 dark:text-neutral-100">
           <Dialog.Title className="text-base font-semibold">Create PDF</Dialog.Title>
           <Dialog.Description className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Images (JPEG, PNG, TIFF, WebP) and plain-text files, one after another in the order shown.
+            Word documents, images (JPEG, PNG, TIFF, WebP) and plain-text files, one after another in
+            the order shown. Word documents keep their own page size.
           </Dialog.Description>
 
           <form

@@ -36,8 +36,11 @@ use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CommandError;
+use crate::pdf::docx_read::read_docx;
 use crate::pdf::document::{load_edited_bytes, pdfium_lock, save_document};
+use crate::pdf::flow::render_flow;
 use crate::pdf::font_embed_cid::{build_cid_font, CidFont};
+use crate::pdf::font_index::FontIndex;
 use crate::pdf::font_resolver::broad_coverage_font_paths;
 
 /// The page every image or text page is placed on.
@@ -69,6 +72,8 @@ pub struct CreateSummary {
     pub pages: u32,
     pub images: u32,
     pub text_files: u32,
+    /// Word documents.
+    pub documents: u32,
     pub bytes: u64,
     /// Things done that the person should know about, such as a text file
     /// read as Windows-1252 because it was not UTF-8.
@@ -88,20 +93,20 @@ const MAX_PIXELS: u64 = 100_000_000;
 const TEXT_EXTENSIONS: [&str; 5] = ["txt", "text", "log", "md", "csv"];
 
 /// A PDF being assembled: the objects, and the pages in order.
-struct Builder {
-    doc: Document,
+pub(crate) struct Builder {
+    pub(crate) doc: Document,
     pages_id: ObjectId,
     kids: Vec<ObjectId>,
 }
 
 impl Builder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut doc = Document::with_version("1.7");
         let pages_id = doc.new_object_id();
         Self { doc, pages_id, kids: Vec::new() }
     }
 
-    fn add_page(&mut self, (width, height): (f32, f32), content: &str, resources: Dictionary) {
+    pub(crate) fn add_page(&mut self, (width, height): (f32, f32), content: &str, resources: Dictionary) {
         let mut stream = Stream::new(Dictionary::new(), content.as_bytes().to_vec());
         // A content stream that would not shrink is simply stored.
         let _ = stream.compress();
@@ -116,7 +121,7 @@ impl Builder {
         self.kids.push(self.doc.add_object(page));
     }
 
-    fn finish(mut self) -> Result<Vec<u8>, CommandError> {
+    pub(crate) fn finish(mut self) -> Result<Vec<u8>, CommandError> {
         let count = i64::try_from(self.kids.len()).unwrap_or(i64::MAX);
         let kids: Vec<Object> = self.kids.iter().map(|id| Object::Reference(*id)).collect();
         self.doc.objects.insert(
@@ -136,7 +141,7 @@ impl Builder {
 }
 
 /// A number for a content stream: at most three decimals, no trailing zeros.
-fn num(value: f32) -> String {
+pub(crate) fn num(value: f32) -> String {
     let text = format!("{value:.3}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
     if text == "-0" { "0".into() } else { text.into() }
@@ -236,7 +241,7 @@ fn turns_sideways(orientation: Orientation) -> bool {
 ///
 /// Each case is where the stored image's corners land: for `Rotate90`
 /// (clockwise), its top-left corner goes to the box's top-right.
-fn placement(orientation: Orientation, x: f32, y: f32, width: f32, height: f32) -> [f32; 6] {
+pub(crate) fn placement(orientation: Orientation, x: f32, y: f32, width: f32, height: f32) -> [f32; 6] {
     match orientation {
         Orientation::NoTransforms => [width, 0.0, 0.0, height, x, y],
         Orientation::Rotate180 => [-width, 0.0, 0.0, -height, x + width, y + height],
@@ -333,8 +338,28 @@ fn refuse_if_too_large(name: &str, width: u32, height: u32) -> Result<(), Comman
 }
 
 /// Add one image as one page.
-fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], format: ImageFormat, size: PageSize) -> Result<(), CommandError> {
+/// An image added to a document and ready to draw.
+pub(crate) struct PageImage {
+    pub xobject: ObjectId,
+    /// How the stored pixels are turned to be shown upright; only a passed-
+    /// through JPEG is anything but `NoTransforms` (decoded ones are turned).
+    pub orientation: Orientation,
+    /// Width and height as shown, in pixels.
+    pub shown: (f32, f32),
+}
+
+/// SPEC: P7-OCR-009 — add the image in `bytes` to `doc` as an image `XObject`.
+/// A JPEG is copied in unchanged; anything else is decoded, turned upright and
+/// stored losslessly. Shared by image pages and by images inside documents.
+///
+/// # Errors
+/// When `bytes` isn't a JPEG, PNG, TIFF or WebP that can be read, or it is
+/// over the size limit.
+pub(crate) fn embed_image(doc: &mut Document, name: &str, bytes: &[u8]) -> Result<PageImage, CommandError> {
     let unreadable = |e: &dyn std::fmt::Display| CommandError::InvalidInput(format!("{name} could not be read as an image: {e}"));
+    let Ok(format @ (ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Tiff | ImageFormat::WebP)) = image::guess_format(bytes) else {
+        return Err(unreadable(&"it isn't a JPEG, PNG, TIFF or WebP image"));
+    };
 
     // JPEG: copied in unchanged; its orientation goes into the matrix.
     if format == ImageFormat::Jpeg {
@@ -344,8 +369,6 @@ fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], format: ImageForma
                 .unwrap_or(Orientation::NoTransforms);
             let (w, h) = (info.width as f32, info.height as f32);
             let shown = if turns_sideways(orientation) { (h, w) } else { (w, h) };
-            let (page, [x, y, bw, bh]) = image_page(size, shown);
-
             let space = match info.components {
                 1 => "DeviceGray",
                 3 => "DeviceRGB",
@@ -363,9 +386,8 @@ fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], format: ImageForma
             if info.components == 4 && info.adobe {
                 dict.set("Decode", (0..4).flat_map(|_| [Object::Integer(1), Object::Integer(0)]).collect::<Vec<_>>());
             }
-            let xobject = builder.doc.add_object(Stream::new(dict, bytes.to_vec()));
-            draw_image(builder, page, xobject, placement(orientation, x, y, bw, bh));
-            return Ok(());
+            let xobject = doc.add_object(Stream::new(dict, bytes.to_vec()));
+            return Ok(PageImage { xobject, orientation, shown });
         }
     }
 
@@ -386,9 +408,15 @@ fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], format: ImageForma
         let colour = if gray { image.to_luma8().into_raw() } else { image.to_rgb8().into_raw() };
         Decoded { width: image.width(), height: image.height(), colour, gray, alpha }
     };
-    let (page, [x, y, bw, bh]) = image_page(size, (width as f32, height as f32));
-    let xobject = decoded_xobject(&mut builder.doc, width, height, &colour, gray, alpha.as_deref());
-    draw_image(builder, page, xobject, placement(Orientation::NoTransforms, x, y, bw, bh));
+    let xobject = decoded_xobject(doc, width, height, &colour, gray, alpha.as_deref());
+    Ok(PageImage { xobject, orientation: Orientation::NoTransforms, shown: (width as f32, height as f32) })
+}
+
+/// Add one image as one page.
+fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], size: PageSize) -> Result<(), CommandError> {
+    let image = embed_image(&mut builder.doc, name, bytes)?;
+    let (page, [x, y, w, h]) = image_page(size, image.shown);
+    draw_image(builder, page, image.xobject, placement(image.orientation, x, y, w, h));
     Ok(())
 }
 
@@ -628,8 +656,9 @@ fn add_text(builder: &mut Builder, name: &str, text: &str, size: PageSize) -> Re
 // ---------------------------------------------------------------------------
 
 enum Source {
-    Image(ImageFormat),
+    Image,
     Text,
+    Word,
 }
 
 fn classify(path: &Path, bytes: &[u8]) -> Result<Source, CommandError> {
@@ -637,16 +666,18 @@ fn classify(path: &Path, bytes: &[u8]) -> Result<Source, CommandError> {
     if TEXT_EXTENSIONS.contains(&extension.as_str()) {
         return Ok(Source::Text);
     }
+    // A .docx is a ZIP; the reader checks the rest.
+    if extension == "docx" && bytes.starts_with(b"PK") {
+        return Ok(Source::Word);
+    }
     match image::guess_format(bytes) {
-        Ok(format @ (ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Tiff | ImageFormat::WebP)) => {
-            Ok(Source::Image(format))
-        }
-        _ if matches!(extension.as_str(), "docx" | "html" | "htm") => Err(CommandError::InvalidInput(format!(
-            "{} is a Word or HTML file, which can't be turned into a PDF yet.",
+        Ok(ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Tiff | ImageFormat::WebP) => Ok(Source::Image),
+        _ if matches!(extension.as_str(), "html" | "htm") => Err(CommandError::InvalidInput(format!(
+            "{} is an HTML file, which can't be turned into a PDF yet.",
             file_label(path)
         ))),
         _ => Err(CommandError::InvalidInput(format!(
-            "{} isn't a JPEG, PNG, TIFF or WebP image or a plain-text file.",
+            "{} isn't a Word document, a JPEG, PNG, TIFF or WebP image, or a plain-text file.",
             file_label(path)
         ))),
     }
@@ -669,9 +700,17 @@ pub fn build_pdf(sources: &[PathBuf], size: PageSize) -> Result<(Vec<u8>, Create
         let bytes = std::fs::read(path)
             .map_err(|e| CommandError::InvalidInput(format!("{name} could not be read: {e}")))?;
         match classify(path, &bytes)? {
-            Source::Image(format) => {
-                add_image(&mut builder, &name, &bytes, format, size)?;
+            Source::Image => {
+                add_image(&mut builder, &name, &bytes, size)?;
                 summary.images += 1;
+            }
+            Source::Word => {
+                let (flow, warnings) = read_docx(&name, &bytes)?;
+                summary.warnings.extend(warnings);
+                if render_flow(&mut builder, &flow, FontIndex::system(), &mut summary.warnings)? == 0 {
+                    summary.warnings.push(format!("{name} has no text or images, so it added no pages."));
+                }
+                summary.documents += 1;
             }
             Source::Text => {
                 let text = decode_text(&name, &bytes, &mut summary.warnings);
