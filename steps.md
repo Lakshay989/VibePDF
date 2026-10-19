@@ -11,7 +11,7 @@ shippable steps. The per-phase plans live under `steps/`.
 | Phase 4 — Content editing | [steps/P4.md](steps/P4.md) | 14 (A1..D5) | all 14 shipped, all still `[~]` — no sweep has been run |
 | Phase 5 — Forms | [steps/P5.md](steps/P5.md) | 10 (A1..C2) | all 10 shipped and swept — closed |
 | Phase 6 — Signing & security | [steps/P6.md](steps/P6.md) | 13 (A1..D3) | all 13 shipped (`[~]`); sweep open — 8 rows unrecorded, 2 marked Issue |
-| Phase 7 — OCR & conversion | [steps/P7.md](steps/P7.md) | 10 (A1..C2) | A1..A4, B1a/B1b, B2..B5, C1c, C2a shipped but still marked `[ ]`; C1a/C1b/C1d + C2b/C2c open |
+| Phase 7 — OCR & conversion | [steps/P7.md](steps/P7.md) | 10 (A1..C2) | 15/18 sub-steps shipped (`[~]`); C1d, C2b, C2c open; verify pass not started (0 of 62 rows) |
 | Phase 8 — AI & batch | [steps/P8.md](steps/P8.md) | 10 (A1..C2) | not started (no `P8.*` commits) |
 
 **Total:** 101 steps. Every `P<n>-...` spec line in
