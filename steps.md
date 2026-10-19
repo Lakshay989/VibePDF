@@ -10,7 +10,7 @@ shippable steps. The per-phase plans live under `steps/`.
 | Phase 3 — Annotations | [steps/P3.md](steps/P3.md) | 13 (A1..E2) | not started |
 | Phase 4 — Content editing | [steps/P4.md](steps/P4.md) | 14 (A1..D5) | not started |
 | Phase 5 — Forms | [steps/P5.md](steps/P5.md) | 10 (A1..C2) | not started |
-| Phase 6 — Signing & security | [steps/P6.md](steps/P6.md) | 13 (A1..D3) | not started |
+| Phase 6 — Signing & security | [steps/P6.md](steps/P6.md) | 13 (A1..D3) | all 13 shipped (`[~]`); sweep open — 8 rows unrecorded, 2 marked Issue |
 | Phase 7 — OCR & conversion | [steps/P7.md](steps/P7.md) | 10 (A1..C2) | not started |
 | Phase 8 — AI & batch | [steps/P8.md](steps/P8.md) | 10 (A1..C2) | not started |
 
