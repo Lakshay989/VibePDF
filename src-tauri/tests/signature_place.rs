@@ -188,19 +188,22 @@ fn a_signature_is_placed_at_its_own_proportions() {
 }
 
 // SPEC: P6-SEC-004 — an extreme aspect ratio must not push the stamp off the
-// page. A long flourish is a plausible signature, and 40pt tall at 30:1 is
-// wider than any page.
+// page, and must not be squashed flat to keep it on. A long flourish is a
+// plausible signature, and 40pt tall at 30:1 is wider than any page.
 //
-// This pins **existing** `add_image_stamp` behaviour (P3.C3b) rather than
-// asserting it is right, because it is not entirely: staying on the page wins,
-// and the aspect ratio is what pays for it. A 1200×40 image comes back as
-// 612×40 — squashed to roughly half its proper width — which contradicts that
-// function's own "never stretched". It is only reachable when the natural width
-// would exceed the page: a real signature is ~2.7:1, so at 40pt tall it is
-// ~108pt wide and nowhere near the limit. Recorded here so the behaviour is
-// visible instead of surprising, and so a later fix has something to change.
+// This test used to pin the opposite, recording it rather than endorsing it.
+// `add_image_stamp` clamped width and height independently, so a 1200×40 image
+// came back 612×40 — roughly 15:1 for a 30:1 source, contradicting that
+// function's own "never stretched". The clamp now scales both sides by one
+// factor: the page still wins, but it takes the height rather than the shape,
+// giving 612×20.4.
+//
+// Signatures are why this belongs here and not only in `stamp.rs`. A real
+// signature is ~2.7:1, so at 40pt tall it is ~108pt wide and nowhere near the
+// limit — but the wider the flourish, the sooner it lands here, and a signature
+// is the one stamp whose shape a reader may be asked to trust.
 #[test]
-fn an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect() {
+fn an_extremely_wide_signature_is_clamped_to_the_page_without_losing_its_aspect() {
     let png = signature_png(1200, 40);
     let out = add_image_stamp(&fixture_bytes("hello.pdf"), 0, 300.0, 400.0, PLACE_HEIGHT, &png, None, 1.0)
         .expect("place");
@@ -208,7 +211,8 @@ fn an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect(
 
     let [x0, y0, x1, y1] = first_stamp_rect(&doc).expect("a /Stamp rect");
     let [mx0, my0, mx1, my1] = media_box(&doc);
-    assert!(x1 - x0 > 0.0 && y1 - y0 > 0.0, "a real rect, not a degenerate one");
+    let (w, h) = (x1 - x0, y1 - y0);
+    assert!(w > 0.0 && h > 0.0, "a real rect, not a degenerate one");
     assert!(
         x0 >= mx0 - 0.5 && x1 <= mx1 + 0.5,
         "stays within the page horizontally: {x0}..{x1} in {mx0}..{mx1}"
@@ -217,12 +221,11 @@ fn an_extremely_wide_signature_is_clamped_to_the_page_at_the_cost_of_its_aspect(
         y0 >= my0 - 0.5 && y1 <= my1 + 0.5,
         "stays within the page vertically: {y0}..{y1} in {my0}..{my1}"
     );
-    // The distortion, stated rather than glossed: 30:1 in, ~15:1 out.
+    // The shape survives; the height is what pays for staying on the page.
     let natural = 1200.0 / 40.0;
-    assert!(
-        (x1 - x0) / (y1 - y0) < natural * 0.75,
-        "clamping squashes rather than shrinking — see the comment above"
-    );
+    assert!((w / h - natural).abs() < 0.5, "aspect {natural}:1 preserved, got {:.2}", w / h);
+    assert!((w - (mx1 - mx0)).abs() < 1.0, "width is the binding limit, so it fills the page: {w}");
+    assert!(h < PLACE_HEIGHT, "the requested height gave way instead: {h} < {PLACE_HEIGHT}");
 }
 
 /// SPEC: P6-SEC-004 (P6.A5a) — a file to open in a mainstream reader / Preview / a third
