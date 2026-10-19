@@ -14,7 +14,7 @@ import type { AnnotationDraft, PagePoint } from "@/tools/_framework/types";
 /** Default `/T` (author) stamped on a new note until per-user identity exists. */
 export const DEFAULT_NOTE_AUTHOR = "VibePDF User";
 
-/** The note icon colour — matches the backend `/C [1 0.82 0]` (Acrobat yellow). */
+/** The note icon colour — matches the backend `/C [1 0.82 0]` (a mainstream reader yellow). */
 export const NOTE_COLOR = "#ffd200";
 
 /** Build an empty note draft anchored at `(x, y)` (PDF points, lower-left). */

@@ -36,6 +36,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/pdfium/*"]
+    "resources": [
+      "resources/pdfium/*",
+      "resources/pdfium/licenses/*",
+      "resources/tessdata/*"
+    ]
   }
 }

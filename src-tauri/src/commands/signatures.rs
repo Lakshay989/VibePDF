@@ -20,7 +20,12 @@ use crate::AppState;
 
 /// Resolve `<app_data_dir>/signatures/`. No hardcoded paths — the directory is
 /// whatever Tauri reports for this platform.
-fn library_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
+///
+/// `pub(crate)` for `commands::pdf::pdf_place_signature` (P6.A5a), which resolves
+/// a library id to bytes before handing them to the document actor. Keeping one
+/// definition means placement can never disagree with the library about where
+/// the blobs are.
+pub(crate) fn library_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     let dir = app
         .path()
         .app_data_dir()

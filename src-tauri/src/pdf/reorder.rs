@@ -15,7 +15,7 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::reorder_pages;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::undo::Edit;
 
 /// Reorder pages: `order[new_pos] = old_index` (0-based), a permutation of
@@ -43,7 +43,7 @@ impl<'a> Edit<PdfDocument<'a>> for ReorderEdit {
         // 1. Serialize the live document (one locked FFI span).
         let bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
 
         // 2. Reorder the page tree via lopdf (pure Rust, no lock). This also
@@ -58,10 +58,7 @@ impl<'a> Edit<PdfDocument<'a>> for ReorderEdit {
         //    document is `'static` (it owns what it reads from).
         {
             let _guard = pdfium_lock()?;
-            let pdfium = pdfium()?;
-            *doc = pdfium
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
 
         // 4. The inverse reorder is the inverse permutation.

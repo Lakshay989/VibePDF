@@ -26,6 +26,6 @@ describe("PDF.js render-page smoke", () => {
 
     const doc = await loadDocument(new Uint8Array(pdfBytes));
     expect(doc.numPages).toBe(1);
-    await doc.destroy();
+    await doc.loadingTask.destroy();
   });
 });

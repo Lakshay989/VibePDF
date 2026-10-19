@@ -21,6 +21,7 @@ import type { FontFamily, MarkupSubtype } from "@/tools/_framework";
 import { FONT_FAMILIES } from "@/tools/free-text/free-text";
 import { MeasureControls } from "@/tools/measure/MeasureControls";
 import { StampPalette } from "@/tools/stamp/StampPalette";
+import { usesStampLayer } from "@/tools/stamp/stamps";
 import { applyMarkupToSelection } from "@/tools/text-markup/apply-markup";
 
 const SUBTYPES: { id: MarkupSubtype; label: string; title: string }[] = [
@@ -73,20 +74,40 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
   const polygonActive = activeTool === "polygon";
   const inkActive = activeTool === "ink";
   const stampActive = activeTool === "stamp";
+  // P6.A5a — armed with a signature from the library, waiting for a click.
+  const signatureArmed = activeTool === "signature";
   const measureActive = activeTool === "measure";
   const editTextActive = activeTool === "edit-text";
   const addTextActive = activeTool === "add-text";
   const addImageActive = activeTool === "add-image";
   const editImageActive = activeTool === "edit-image";
   const addLinkActive = activeTool === "add-link";
+  const redactActive = activeTool === "redact";
   const createFieldActive = activeTool === "create-text-field";
   const fillable = shapeActive || polygonActive;
 
   // Disarm the stamp whenever the stamp tool is left, so a later click with
   // another tool can't drop a stale stamp (the polygon rubber-band lesson).
   const armStamp = useStampStore((s) => s.arm);
+
+  // P6.A5a — Escape backs out of signature placement. The mode has no palette
+  // and no obvious affordance beyond the hint, so the key everyone already
+  // tries has to work.
   useEffect(() => {
-    if (activeTool !== "stamp") armStamp(null);
+    if (activeTool !== "signature") return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      armStamp(null);
+      setActiveTool(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeTool, armStamp, setActiveTool]);
+  // Disarm when the stamp layer is no longer driving. `"signature"` counts as
+  // driving it (P6.A5a) — treating it as "left the stamp tool" cleared the
+  // signature the dialog had just armed.
+  useEffect(() => {
+    if (!usesStampLayer(activeTool)) armStamp(null);
   }, [activeTool, armStamp]);
 
   // Disarm the picked image whenever the Add Image tool is left.
@@ -373,6 +394,25 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         Stamp
       </button>
       {stampActive ? <StampPalette /> : null}
+      {/* SPEC: P6-SEC-004 (P6.A5a) — armed with a signature. No palette: there
+          is nothing to choose, the choice was made in the dialog. What is
+          needed is a way out, since the mode is otherwise invisible. */}
+      {signatureArmed ? (
+        <span className="flex items-center gap-1 rounded bg-blue-100 px-2 py-0.5 dark:bg-blue-300/20">
+          <span>Click the page to place your signature</span>
+          <button
+            type="button"
+            onClick={() => {
+              armStamp(null);
+              setActiveTool(null);
+            }}
+            aria-label="Cancel placing the signature"
+            className="rounded border border-blue-400 px-1 hover:bg-blue-200 dark:hover:bg-blue-300/30"
+          >
+            Cancel
+          </button>
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={() => setActiveTool(measureActive ? null : "measure")}
@@ -451,6 +491,22 @@ export function MarkupToolbar({ documentId }: { documentId: string }) {
         }
       >
         Add Link
+      </button>
+      {/* SPEC: P6-SEC-010 (P6.D1c). Styled apart from the markup tools on
+          purpose: everything else on this bar adds something, and this one
+          deletes irreversibly. */}
+      <button
+        type="button"
+        onClick={() => setActiveTool(redactActive ? null : "redact")}
+        title="Redact an area — the text and images under it are deleted, not covered"
+        aria-label="Redact tool"
+        aria-pressed={redactActive}
+        className={
+          "rounded px-2 py-0.5 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 " +
+          (redactActive ? "bg-red-200 dark:bg-red-300/30" : "")
+        }
+      >
+        Redact
       </button>
       <button
         type="button"

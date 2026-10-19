@@ -2,6 +2,7 @@
   "name": "vibepdf",
   "private": true,
   "version": "0.0.1",
+  "license": "MIT OR Apache-2.0",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/copy-pdfjs-worker.mjs",
@@ -12,12 +13,15 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check": "tsc --noEmit && eslint src --max-warnings=0 && cd src-tauri && cargo clippy --all-targets -- -D warnings",
+    "licenses": "node scripts/generate-notices.mjs",
     "pretest": "node scripts/copy-pdfjs-worker.mjs",
     "test": "vitest run",
     "test:rust": "node scripts/cargo-test.mjs",
     "test:pdf": "node scripts/cargo-test.mjs --test render_compare --test render_to_png --test actor_smoke --test encrypted_open",
     "test:e2e": "wdio run tests/e2e/wdio.conf.ts",
-    "fetch-pdfium": "bash scripts/fetch-pdfium.sh"
+    "fetch-pdfium": "bash scripts/fetch-pdfium.sh",
+    "fetch-tessdata": "bash scripts/fetch-tessdata.sh",
+    "fetch-tesseract-src": "bash scripts/fetch-tesseract-src.sh"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.2",
@@ -26,7 +30,7 @@
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.2.0",
-    "pdfjs-dist": "^5.7.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zustand": "^5.0.0"
@@ -52,7 +56,7 @@
     "tailwindcss": "^4.3.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.0",
-    "vite": "^8.0.0",
-    "vitest": "^2.1.8"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
   }
 }

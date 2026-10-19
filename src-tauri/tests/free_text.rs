@@ -110,7 +110,7 @@ async fn free_text_rejects_empty_rect() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn free_text_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-freetext-b3b.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-freetext-b3b.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }
@@ -163,7 +163,7 @@ async fn free_text_writes_verification_artifact() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn free_text_embedded_unicode_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-freetext-unicode.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-freetext-unicode.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

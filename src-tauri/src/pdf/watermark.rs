@@ -12,7 +12,7 @@
 //! reload chassis ([`watermark_apply`]), inverse `RestoreDocEdit`, just like
 //! `image_edit`.
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Object, ObjectId};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
@@ -21,7 +21,7 @@ use crate::pdf::cos::{
     page_effective_box, page_rotation, parse_hex_color, prepend_page_content, register_page_resource,
     visual_cm_line, visual_transform, wrap_decoration,
 };
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
@@ -84,7 +84,7 @@ pub fn add_watermark(
     let theta = rotation_deg.to_radians();
     let (cos, sin) = (theta.cos(), theta.sin());
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
 
     // Resolve + range-check every target page before mutating, so a bad index
     // fails cleanly with nothing half-written.
@@ -193,7 +193,7 @@ fn add_watermark_embedded(
     let theta = rotation_deg.to_radians();
     let (cos, sin) = (theta.cos(), theta.sin());
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     // One shared CID subset; exact width centres the mark on the page centre.
     let cid = build_cid_font(&mut doc, font_bytes, text)?;
     let width = cid.width(text, sz);
@@ -376,14 +376,12 @@ fn watermark_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

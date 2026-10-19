@@ -85,7 +85,7 @@ async fn reply_rejects_unknown_parent() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn reply_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-reply.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-reply.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

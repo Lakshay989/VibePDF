@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "VibePDF — offline open-source PDF editor"
 authors = ["VibePDF contributors"]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 publish = false
 
@@ -29,19 +29,65 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 pdfium-render = "0.9"
 # Encoder-only PNG library; written by the image-rs maintainers.
 # Justification: PDFium emits raw RGBA; we need PNG bytes for the
-# RenderPage IPC reply (B3). Using `png` directly instead of going
-# through `image = "0.25"` (transitive via pdfium-render) keeps the
-# surface area minimal — we don't want decoders or manipulation
-# routines we'll never call.
+# RenderPage IPC reply (B3). The PNG path still goes through this crate
+# directly rather than through `image` below: it is the hot one (every
+# page render on the view layer) and `png` is the thinner call.
 png = "0.17"
+# P7.B2 (SPEC P7-OCR-005): the JPEG, TIFF and WebP encoders. The spec names
+# four output formats and the tree had an encoder for exactly one of them.
+# `image` is **already in Cargo.lock** as a transitive dependency of
+# pdfium-render, so this adds a direct edge and three feature flags, not a new
+# crate; `default-features = false` keeps AVIF, EXR, ravif and rayon out. Only
+# `pdf/export_image.rs` (and its tests, which decode the output back) use it.
+# Note WebP here is lossless-only — lossy needs the C libwebp, which would cost
+# us the "compiles anywhere with no system library" property.
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "tiff",
+    "webp",
+] }
+# P7.B2 (SPEC P7-OCR-005): the TIFF encoder, one level below `image`. `image`'s
+# own TiffEncoder hardcodes no compression — measured 2026-09-23, one US-Letter
+# page at 150 DPI came out 8.4 MB, so a 50-page export would be 420 MB — and it
+# exposes no way to change that. This crate, which `image` already depends on
+# and which is therefore **already in Cargo.lock at this version**, takes a
+# `with_compression(Deflate)`. Adds no crate to the tree; `image`'s tiff feature
+# stays on because the tests decode TIFF back with it.
+tiff = "0.11"
+# P7.B1a (SPEC P7-OCR-004): the two halves of a ZIP entry, for the Office Open
+# XML container a .docx is. Both are **already in Cargo.lock and reachable from
+# the normal dependency tree** — flate2 via lopdf, crc32fast via flate2 — so
+# these are direct edges, not new crates. The `zip` crate was the alternative;
+# it is in the lock only as a build dependency of the Tauri bundler, so taking
+# it would have pulled zip, zopfli, typed-path and friends into the shipped
+# binary for a container we write in ~150 lines (`pdf/ooxml.rs`): no Zip64, no
+# encryption, no streaming.
+flate2 = "1"
+crc32fast = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
+# P7.A1 (SPEC P7-OCR-001, P7-OCR-003): Tesseract, the OCR engine the spec
+# names. `leptess`, the binding docs/03_TECH_STACK.md originally picked, has
+# had no release since 2023-02-21; this one is maintained (0.4.0, 2026-07-31),
+# MIT, and with `build-tesseract` compiles Tesseract 5.5.2 + Leptonica 1.87.0
+# from source into our binary — so a user installs nothing and all three
+# platforms ship the same engine. Its build script would fetch those sources
+# over the network unverified; `scripts/fetch-tesseract-src.sh` pre-places
+# checksum-verified copies that it reuses instead. Confined to
+# `src-tauri/src/ocr/engine.rs`.
+tesseract-rs = "0.4.0"
+# P6.C1 (SPEC P6-SEC-007): the OS CSPRNG, for AES-256 file encryption keys.
+# Key material must not come from a seeded PRNG — `getrandom` is the thinnest
+# wrapper over getrandom(2)/BCryptGenRandom and holds no state of its own. It
+# was already in Cargo.lock transitively, so this adds a direct edge and no new
+# supply-chain surface. lopdf supplies the cryptography itself.
+getrandom = "0.3"
 # COS / object-model layer for the structural edits PDFium's high-level API
 # can't do: rewriting /Outlines, /AcroForm, the page tree, and indirect refs.
 # Pure Rust, MIT. Operates on serialized bytes *between* PDFium passes — never
 # a shared live handle (see docs/03 "Structural edits", docs/04 "COS layer").
 # default-features off: we need only the core object model + nom parser, not
 # date parsing (chrono/jiff/time) or rayon parallelism.
-lopdf = { version = "0.36.0", default-features = false }
+lopdf = { version = "0.42.0", default-features = false }
 # Font subsetting for embedded-Unicode text (P4.HF6 / docs/03 "Font embedding +
 # subsetting"). PDFium embeds the *whole* face and its native subset flag is
 # unreachable through pdfium-render 0.9.1, so we subset before embedding: a
@@ -49,11 +95,83 @@ lopdf = { version = "0.36.0", default-features = false }
 # transitive dependencies**, read/produce font bytes only (no PDF render/edit, no
 # overlap with PDFium/lopdf). `subsetter` pinned to 0.1 on purpose — 0.2.x pulls
 # the whole fontations stack (11 crates) and requires rustc 1.85 > our MSRV.
+# P6.B1 (SPEC P6-SEC-005): certificate-based signing. **No cryptography is
+# implemented in this repo** — these are the RustCrypto crates that own the
+# primitives and the formats, and `security/` only wires them together. Same
+# stance as P6.C1, where lopdf owns AES-256.
+#
+#   cms       — the PKCS#7/CMS SignedData structure a PDF signature *is*
+#   x509-cert — certificate parsing, for the chain we embed and the issuer
+#               + serial a verifier matches on
+#   rsa       — RSASSA-PKCS1-v1_5 signing with the key from the .pfx
+#   sha2      — SHA-256, the digest PAdES requires
+#   der       — encoding the signed attributes; already transitive via all four
+#   const-oid — algorithm identifiers, ditto
+#
+# PKCS#12 (.pfx) is the spec's named input and takes three crates because no
+# single one does it: `pkcs12` supplies the DER types and the RFC 7292 KDF,
+# `pkcs5` decrypts the PBES2-protected safe contents, `pkcs8` parses the
+# private key that falls out. The obvious one-call alternative, `p12` 0.6.3,
+# was tried and rejected: it hard-asserts a SHA-1 MAC and *panics* on any .pfx
+# OpenSSL 3 produces by default (SHA-256). Recorded in steps/P6.md.
+#
+# x509-cert stays on 0.2.x. 0.3 needs Rust 1.85, which was out of reach until
+# lopdf 0.42 raised our floor to 1.85 (2026-10-17); moving to 0.3 is its own change.
+cms = { version = "0.2.3", features = ["builder"] }
+x509-cert = "0.2.5"
+# `sha2` feature: supplies RsaSignatureAssociatedOid, so a SHA-256 signing key
+# can name its own algorithm in the CMS structure.
+rsa = { version = "0.9", features = ["sha2"] }
+sha2 = { version = "0.10", features = ["oid"] }
+der = { version = "0.7", features = ["alloc", "oid"] }
+const-oid = { version = "0.9", features = ["db"] }
+pkcs12 = { version = "0.1.0", features = ["kdf"] }
+pkcs5 = { version = "0.7", features = ["alloc", "pbes2"] }
+pkcs8 = { version = "0.10", features = ["alloc", "encryption"] }
+# Legacy PKCS#12 encryption (pbeWithSHAAnd3-KeyTripleDES-CBC): the KDF comes
+# from `pkcs12`, these supply the cipher and the MAC it feeds. SHA-1 and 3DES
+# are here only to *read* existing certificate files — never to produce a
+# signature, which is SHA-256 per PAdES.
+cbc = { version = "0.1", features = ["alloc"] }
+des = "0.8"
+sha1 = "0.10"
+hmac = "0.12"
+digest = "0.10"
+# P6.D2 (SPEC P6-SEC-011): pattern-based redaction needs a regex engine, and
+# the spec names user-supplied regexes as well as the built-ins. Already in
+# Cargo.lock transitively (tracing-subscriber's env-filter → matchers → regex),
+# so this adds a direct edge and **no new crates**. Same argument as getrandom
+# in P6.C1. rust-lang maintained, no unsafe in the default build.
+regex = "1"
 ttf-parser = "0.25.1"       # RazrFalcon; read-only: codepoint → glyph-id lookup
 subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
+# P7.C1b1 (SPEC P7-OCR-009): reading WordprocessingML. Not a new crate:
+# Tauri already compiles quick-xml 0.39 into every build (through `plist`),
+# so this names a dependency the app already carries rather than adding one.
+# Chosen over roxmltree, which would be new code, and over a hand-written XML
+# parser, which would be new risk.
+quick-xml = "0.39"
+# P7.C1c (SPEC P7-OCR-009): reading HTML. dom_query is html5ever (Servo's
+# spec-conformant HTML parser) with a DOM and CSS selector matching (Servo's
+# `selectors`), which a page's <style> rules need. Neither is a new crate:
+# both are already in Cargo.lock because Tauri uses them while building, so
+# nothing new is downloaded; they are new to the app binary. Pinned exactly,
+# since dom_query is 0.x with one maintainer, and only pdf/html_read.rs uses it.
+# Chosen over the system web view's print-to-PDF, which would mean three
+# platform APIs, no font or PDF/A guarantees, network fetches and running the
+# page's JavaScript. Default features off: no extra code, no extra crates.
+dom_query = { version = "=0.27.0", default-features = false }
+# P7.C1c: `data:` image URIs. Already in the app through Tauri's `plist`.
+base64 = "0.22"
+ureq = { version = "3.2.1", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]
 pdfium-render = "0.9"
+# tests/encrypt.rs decrypts the /Perms block lopdf writes (ISO 32000-2
+# Algorithm 10) to check it against /P. Test-only since lopdf 0.37 fixed
+# writing that block in plaintext; before, it was a runtime dependency used
+# to rewrite the block. Same version lopdf resolves to, so no second copy.
+aes = "0.8"
 
 [profile.release]
 panic = "abort"

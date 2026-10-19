@@ -1,0 +1,15 @@
+# Pin the Rust toolchain so a local `npm run check` and CI's are the same check.
+#
+# Before this file existed, CI installed whatever `stable` happened to be, and
+# by 2026-10-16 that was 1.99 while local development was on 1.95. clippy
+# 1.99 added the `assert_is_empty` lint, which fired 16 times under
+# `-D warnings`: CI failed on code that passed locally, and the two could not
+# be told apart from either side.
+#
+# 1.95.0 is the version the whole codebase has been verified on. Upgrading is a
+# deliberate change: bump `channel` here and in the three `toolchain:` inputs in
+# `.github/workflows/`, then fix whatever new lints appear, in one commit.
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

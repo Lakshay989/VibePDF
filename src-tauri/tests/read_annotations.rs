@@ -61,7 +61,7 @@ async fn read_annotations_empty_on_plain_pdf() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn writes_sidebar_demo_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-annots.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-annots.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

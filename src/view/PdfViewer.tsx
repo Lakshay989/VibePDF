@@ -17,6 +17,19 @@ import { ExtractDialog } from "@/app/ExtractDialog";
 import { SplitDialog } from "@/app/SplitDialog";
 import { MergeDialog } from "@/app/MergeDialog";
 import { InsertFromDialog } from "@/app/InsertFromDialog";
+import { CleanDialog } from "@/app/CleanDialog";
+import { CompressDialog } from "@/app/CompressDialog";
+import { ExportImageDialog } from "@/app/ExportImageDialog";
+import { OcrDialog } from "@/app/OcrDialog";
+import { exportDocx } from "@/ipc/export-docx";
+import { exportHtml } from "@/ipc/export-html";
+import { exportXlsx } from "@/ipc/export-xlsx";
+import { exportText } from "@/ipc/export-text";
+import { LicensesDialog } from "@/app/LicensesDialog";
+import { FindRedactDialog } from "@/app/FindRedactDialog";
+import { ProtectDialog } from "@/app/ProtectDialog";
+import { SignDialog } from "@/app/SignDialog";
+import { UnlockDialog } from "@/app/UnlockDialog";
 import { WatermarkDialog } from "@/app/WatermarkDialog";
 import { BackgroundDialog } from "@/app/BackgroundDialog";
 import { HeaderFooterDialog } from "@/app/HeaderFooterDialog";
@@ -24,9 +37,11 @@ import { PageNumbersDialog } from "@/app/PageNumbersDialog";
 import { BatesDialog } from "@/app/BatesDialog";
 import { SearchBar } from "@/app/SearchBar";
 import { FontFallbackBanner } from "@/app/FontFallbackBanner";
+import { SignatureBanner } from "@/app/SignatureBanner";
 import { XfaNotice } from "@/app/XfaNotice";
 import { FieldPropertiesPanel } from "@/app/FieldPropertiesPanel";
 import { useFontReport } from "@/app/use-font-report";
+import { useSignatures } from "@/app/use-signatures";
 import { useFormStore } from "@/state/form-store";
 import { extractPages } from "@/ipc/extract";
 import { splitDocument, type SplitMode } from "@/ipc/split";
@@ -55,6 +70,7 @@ import {
 import { useOptimisticEditStore } from "@/state/optimistic-edit-store";
 import { useRotationPreviewStore } from "@/state/rotation-preview-store";
 import { getPdfBytes, type DocumentId } from "@/ipc/pdf";
+import { loadViewDocument } from "@/view/load-view-document";
 
 interface Props {
   documentId: DocumentId;
@@ -117,6 +133,8 @@ export function PdfViewer({ documentId, path }: Props) {
   // SPEC: P4-EDIT-002 (P4.A2) — once-per-document warning when a font isn't
   // embedded or installed, so the user knows editing it will substitute.
   const fontReport = useFontReport(documentId);
+  // SPEC: P6-SEC-006 (P6.B2b) — verified on open, not on request.
+  const signatures = useSignatures(documentId);
 
   // SPEC: P5-FORM-006b (P5.B3) — the page whose fields the properties panel
   // lists. `getCurrentPage` is imperative (no re-render signal), so we snap it
@@ -147,6 +165,105 @@ export function PdfViewer({ documentId, path }: Props) {
     },
     [documentId],
   );
+
+  // SPEC: P7-OCR-006 (P7.B3) — export the document's text. Read-only on the
+  // PDF, so there is no epoch bump and nothing to undo; the same native save
+  // dialog as extract/split picks the destination.
+  const handleExportText = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.txt`,
+        filters: [{ name: "Plain text", extensions: ["txt"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportText(documentId, dest);
+      if (summary.characters === 0) {
+        reportError(
+          "No text to export",
+          new Error(
+            "This document has no text — if it is a scan, use Read text… first to recognise it.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export the text", err);
+    }
+  }, [documentId, path]);
+
+  // SPEC: P7-OCR-004 (P7.B1a) — export as Word. Read-only on the PDF, so no
+  // epoch bump and nothing to undo; the same native save dialog as the others.
+  const handleExportDocx = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.docx`,
+        filters: [{ name: "Word document", extensions: ["docx"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportDocx(documentId, dest);
+      if (summary.paragraphs === 0 && summary.images === 0) {
+        reportError(
+          "Nothing to export",
+          new Error(
+            "This document has no text or images — if it is a scan, use Read text… first to recognise it.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export to Word", err);
+    }
+  }, [documentId, path]);
+
+  // SPEC: P7-OCR-007 (P7.B4) — export as a web page. Read-only on the PDF; the
+  // images land in a folder beside the file, named after it.
+  const handleExportHtml = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.html`,
+        filters: [{ name: "Web page", extensions: ["html", "htm"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportHtml(documentId, dest);
+      if (summary.paragraphs === 0 && summary.images === 0) {
+        reportError(
+          "Nothing to export",
+          new Error(
+            "This document has no text or images — if it is a scan, use Read text… first to recognise it.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export to HTML", err);
+    }
+  }, [documentId, path]);
+
+  // SPEC: P7-OCR-008 (P7.B5) — export detected tables as a workbook. Read-only
+  // on the PDF. When nothing is detected the backend writes no file, so the
+  // message says that rather than pointing at a path with nothing at it.
+  const handleExportXlsx = useCallback(async () => {
+    try {
+      const base = basename(path).replace(/\.pdf$/i, "") || "document";
+      const dest = await saveDialog({
+        defaultPath: `${base}.xlsx`,
+        filters: [{ name: "Excel workbook", extensions: ["xlsx"] }],
+      });
+      if (typeof dest !== "string") return; // user cancelled the dialog
+      const summary = await exportXlsx(documentId, dest);
+      if (summary.tables === 0) {
+        reportError(
+          "No tables found",
+          new Error(
+            "Nothing was saved. Only tables with visible ruling lines can be detected — " +
+              "a table laid out with spacing alone is not one this can find.",
+          ),
+        );
+      }
+    } catch (err) {
+      reportError("Couldn't export to Excel", err);
+    }
+  }, [documentId, path]);
 
   // SPEC: P2-PAGE-007 — split: pick a mode, then a directory, then write N
   // numbered files. Read-only on the open document. The output stem is the
@@ -198,6 +315,19 @@ export function PdfViewer({ documentId, path }: Props) {
   const setHistory = useHistoryStore((s) => s.setHistory);
   const [insertFromOpen, setInsertFromOpen] = useState(false);
   const [watermarkOpen, setWatermarkOpen] = useState(false);
+  const [protectOpen, setProtectOpen] = useState(false);
+  const [cleanOpen, setCleanOpen] = useState(false);
+  const [ocrOpen, setOcrOpen] = useState(false);
+  const [exportImagesOpen, setExportImagesOpen] = useState(false);
+  const [compressOpen, setCompressOpen] = useState(false);
+  // SPEC: P7-OCR-010 — the file's size on disk, for the compress dialog's
+  // estimate. PDF.js already knows it (it loaded the bytes), so this asks it
+  // rather than adding a backend round-trip for a number we have.
+  const [documentBytes, setDocumentBytes] = useState(0);
+  const [licencesOpen, setLicencesOpen] = useState(false);
+  const [signOpen, setSignOpen] = useState(false);
+  const [findRedactOpen, setFindRedactOpen] = useState(false);
+  const [unlockOpen, setUnlockOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false);
   const [pageNumbersOpen, setPageNumbersOpen] = useState(false);
@@ -279,20 +409,28 @@ export function PdfViewer({ documentId, path }: Props) {
 
     (async () => {
       try {
-        // A pristine document loads from disk (cheap); an edited one — even
-        // a rotate, which doesn't bump the epoch — must load from the
-        // actor's live bytes, which carry the in-memory edits.
-        const bytes = isDocEdited(documentId)
-          ? await getPdfBytes(documentId)
-          : await readFile(path);
-        if (cancelled) return;
-        localDoc = await loadDocument(bytes);
+        // Disk for a pristine document, the actor for an edited or encrypted
+        // one — see `loadViewDocument`.
+        localDoc = await loadViewDocument(
+          { documentId, path, edited: isDocEdited(documentId) },
+          { readFile, getPdfBytes, loadDocument },
+        );
         if (cancelled) {
-          await localDoc.destroy();
+          await localDoc.loadingTask.destroy();
           return;
         }
         setDoc(localDoc);
         setError(null);
+        void localDoc
+          .getDownloadInfo()
+          .then(({ length }) => {
+            if (!cancelled) setDocumentBytes(length);
+          })
+          .catch(() => {
+            // A size we cannot read is not worth failing a document load over;
+            // the dialog simply omits its estimate.
+            if (!cancelled) setDocumentBytes(0);
+          });
         // This reload's bytes bake every edit up to `epoch`; once its pages
         // paint, drop the optimistic overlays that were bridging the gap. One
         // rAF lets PDF.js render the delta first, so there's never a blank frame
@@ -317,7 +455,8 @@ export function PdfViewer({ documentId, path }: Props) {
     return () => {
       cancelled = true;
       if (freezeTimer !== undefined) clearTimeout(freezeTimer);
-      void localDoc?.destroy();
+      // PDF.js 6 dropped `PDFDocumentProxy.destroy()`; v5's only forwarded here.
+      void localDoc?.loadingTask.destroy();
       setDoc(null);
     };
   }, [path, epoch, documentId, resetRotations]);
@@ -506,13 +645,31 @@ export function PdfViewer({ documentId, path }: Props) {
         onMerge={doc ? () => setMergeOpen(true) : undefined}
         onInsertFromPdf={doc ? () => setInsertFromOpen(true) : undefined}
         onWatermark={doc ? () => setWatermarkOpen(true) : undefined}
+        onProtect={doc ? () => setProtectOpen(true) : undefined}
+        onClean={doc ? () => setCleanOpen(true) : undefined}
+        onOcr={doc ? () => setOcrOpen(true) : undefined}
+        onExportText={doc ? () => void handleExportText() : undefined}
+        onExportImages={doc ? () => setExportImagesOpen(true) : undefined}
+        onExportDocx={doc ? () => void handleExportDocx() : undefined}
+        onExportHtml={doc ? () => void handleExportHtml() : undefined}
+        onExportXlsx={doc ? () => void handleExportXlsx() : undefined}
+        onCompress={doc ? () => setCompressOpen(true) : undefined}
+        onSign={doc ? () => setSignOpen(true) : undefined}
+        onFindRedact={doc ? () => setFindRedactOpen(true) : undefined}
+        onUnlock={doc ? () => setUnlockOpen(true) : undefined}
         onBackground={doc ? () => setBackgroundOpen(true) : undefined}
         onHeaderFooter={doc ? () => setHeaderFooterOpen(true) : undefined}
         onPageNumbers={doc ? () => setPageNumbersOpen(true) : undefined}
         onBates={doc ? () => setBatesOpen(true) : undefined}
+        onLicences={() => setLicencesOpen(true)}
       />
       {doc ? <MarkupToolbar documentId={documentId} /> : null}
       <SearchBar />
+      <SignatureBanner
+        reports={signatures.reports}
+        dismissed={signatures.dismissed}
+        onDismiss={signatures.dismiss}
+      />
       <FontFallbackBanner
         report={fontReport.report}
         dismissed={fontReport.dismissed}
@@ -542,6 +699,76 @@ export function PdfViewer({ documentId, path }: Props) {
         destPageCount={doc?.numPages ?? 0}
         onInsert={(args) => void handleInsertFromPdf(args)}
         onClose={() => setInsertFromOpen(false)}
+      />
+      <ProtectDialog
+        open={protectOpen}
+        documentId={documentId}
+        documentName={path}
+        onClose={() => setProtectOpen(false)}
+      />
+      <SignDialog
+        open={signOpen}
+        documentId={documentId}
+        documentName={path}
+        onClose={() => setSignOpen(false)}
+      />
+      <FindRedactDialog
+        open={findRedactOpen}
+        documentId={documentId}
+        onClose={() => setFindRedactOpen(false)}
+      />
+      <LicensesDialog open={licencesOpen} onClose={() => setLicencesOpen(false)} />
+      <CleanDialog
+        open={cleanOpen}
+        documentId={documentId}
+        onClose={() => setCleanOpen(false)}
+      />
+      {/* SPEC: P7-OCR-001 — the surface for Track A's engine. `currentPage` is
+          read when the dialog opens, the same imperative snap the form panel
+          uses (the virtualizer has no re-render signal for scroll). */}
+      <OcrDialog
+        open={ocrOpen}
+        documentId={documentId}
+        currentPage={Math.max((virtRef.current?.getCurrentPage() ?? 1) - 1, 0)}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setOcrOpen(false)}
+      />
+      {/* SPEC: P7-OCR-005 (P7.B2) — export pages as images. Read-only on the
+          PDF. The page size comes from the virtualizer so the dialog can state
+          the pixel size before the run; a rotated page reports as displayed.
+          The US-Letter fallback only applies before the document is measured,
+          which is before the toolbar button exists — it keeps the estimate a
+          number rather than a NaN, and the export itself never uses it. */}
+      <ExportImageDialog
+        open={exportImagesOpen}
+        documentId={documentId}
+        currentPage={Math.max((virtRef.current?.getCurrentPage() ?? 1) - 1, 0)}
+        pageCount={doc?.numPages ?? 0}
+        pageWidthPoints={
+          virtRef.current?.getPageSize(virtRef.current.getCurrentPage())?.width ?? 612
+        }
+        pageHeightPoints={
+          virtRef.current?.getPageSize(virtRef.current.getCurrentPage())?.height ?? 792
+        }
+        stem={basename(path).replace(/\.pdf$/i, "") || "page"}
+        onClose={() => setExportImagesOpen(false)}
+      />
+      {/* SPEC: P7-OCR-010 (P7.C2a) — compress. Read-only on the open document
+          by design: the recompression is lossy, so it writes a copy and leaves
+          the original alone. */}
+      <CompressDialog
+        open={compressOpen}
+        documentId={documentId}
+        suggestedName={`${basename(path).replace(/\.pdf$/i, "") || "document"}-compressed.pdf`}
+        currentBytes={documentBytes}
+        pageCount={doc?.numPages ?? 0}
+        onClose={() => setCompressOpen(false)}
+      />
+      <UnlockDialog
+        open={unlockOpen}
+        documentId={documentId}
+        documentName={path}
+        onClose={() => setUnlockOpen(false)}
       />
       <WatermarkDialog
         open={watermarkOpen}

@@ -1,7 +1,7 @@
 //! XFDF annotation interchange (P3.E1).
 //!
 //! SPEC: P3-ANN-010 — export every annotation to an XFDF (XML) sidecar and
-//! import one back, compatible with Adobe Acrobat.
+//! import one back, compatible with a mainstream PDF reader.
 //!
 //! Two halves:
 //!   * [`annotations_to_xfdf`] walks the raw lopdf annotation dicts and emits an
@@ -14,13 +14,14 @@
 //!     `/T`, and timestamps so identity and reply threads survive the round-trip.
 //!
 //! FDF is deferred (E1b). XML parsing is hand-rolled over the XFDF subset we and
-//! Acrobat emit rather than pulling in a parser dependency (see CLAUDE.md).
+//! a mainstream reader emit rather than pulling in a parser dependency (see CLAUDE.md).
 
 use std::collections::HashSet;
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
 use crate::error::CommandError;
+use crate::pdf::document::load_cos;
 use crate::pdf::cos::{
     add_free_text, add_ink, add_line, add_measure, add_polygon, add_reply, add_shape, add_stamp,
     add_text_markup, add_text_note,
@@ -45,7 +46,7 @@ fn cos_err(e: lopdf::Error) -> CommandError {
 /// subtypes (`/Link`, `/Widget`, `/Popup`, …) are skipped, mirroring
 /// [`crate::pdf::cos::read_annotations`].
 pub fn annotations_to_xfdf(bytes: &[u8]) -> Result<(String, usize), CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     let mut out = String::from(XFDF_HEADER);
     out.push_str("<annots>\n");
     let mut count = 0usize;
@@ -459,7 +460,7 @@ fn patch_identity(
     known: &HashSet<ObjectId>,
     el: &ParsedAnnot,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(&new_bytes).map_err(cos_err)?;
+    let mut doc = load_cos(&new_bytes, cos_err)?;
     let after = annotation_ids_doc(&doc);
     let Some(new_id) = after.difference(known).next().copied() else {
         // Nothing new (e.g. add was a silent no-op) — leave bytes as-is.
@@ -546,7 +547,7 @@ fn parse_default_appearance(da: Option<&str>, fallback: &str) -> (f32, String) {
 // --- annotation id / name bookkeeping over serialized bytes ---
 
 fn annotation_ids(bytes: &[u8]) -> Result<HashSet<ObjectId>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     Ok(annotation_ids_doc(&doc))
 }
 
@@ -570,7 +571,7 @@ fn annotation_ids_doc(doc: &Document) -> HashSet<ObjectId> {
 }
 
 fn name_set(bytes: &[u8]) -> Result<HashSet<String>, CommandError> {
-    let doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let doc = load_cos(bytes, cos_err)?;
     let mut names = HashSet::new();
     for id in annotation_ids_doc(&doc) {
         if let Some(nm) = doc.get_dictionary(id).ok().and_then(|d| read_text(d, b"NM")) {
@@ -673,7 +674,7 @@ fn line_has_arrow(head: Option<&str>, tail: Option<&str>) -> bool {
 
 /// Split a numeric attribute (`coords`, `vertices`, `start`, …) into floats,
 /// lenient about the separator (comma, semicolon, or whitespace) so both our
-/// output and Acrobat's are accepted.
+/// output and a mainstream reader's are accepted.
 fn parse_floats(s: &str) -> Vec<f32> {
     s.split([',', ';', ' ', '\t', '\n', '\r'])
         .filter(|t| !t.is_empty())

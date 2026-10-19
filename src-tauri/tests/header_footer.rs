@@ -254,7 +254,7 @@ fn header_footer_is_tagged() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn hf_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-header-footer.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-header-footer.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }
@@ -287,7 +287,7 @@ async fn hf_writes_verification_artifact() {
 async fn hf_embedded_unicode_verification_artifact() {
     // P4.HF5: a non-WinAnsi footer takes the PDFium font-embedding path. Cyrillic +
     // Greek are covered by the broad system face `covering_font_bytes` picks.
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-hf-unicode.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-hf-unicode.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

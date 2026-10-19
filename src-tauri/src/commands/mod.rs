@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod history;
+pub mod languages;
 pub mod pdf;
 pub mod recents;
 pub mod recovery;

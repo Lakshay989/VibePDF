@@ -1,5 +1,6 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
+import { CreatePdfDialog } from "@/app/CreatePdfDialog";
 import { PasswordPromptDialog } from "@/app/PasswordPromptDialog";
 import { RecoveryDialog } from "@/app/RecoveryDialog";
 import { Toasts } from "@/app/Toasts";
@@ -45,6 +46,9 @@ export function App() {
   // Cmd/Ctrl+O, recents hydration) and the session restore + persist
   // lifecycle live in dedicated hooks; App is composition + layout.
   const { openByPath, pickAndOpen, toast, passwordDialogProps } = useFileOpen();
+  // SPEC: P7-OCR-009 (P7.C1a) — create a PDF from images and text files. Lives
+  // in the header because it needs no open document; the result is opened.
+  const [createOpen, setCreateOpen] = useState(false);
   useSessionRestore(openByPath);
 
   // SPEC: P2.A2 — offer to recover unsaved changes from a previous run.
@@ -117,6 +121,13 @@ export function App() {
         >
           Open PDF (⌘O)
         </button>
+        <button
+          onClick={() => setCreateOpen(true)}
+          title="Make a new PDF from images and text files"
+          className="rounded border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          Create PDF…
+        </button>
         {current && formDetected && formDetected.fieldCount > 0 ? (
           <button
             onClick={() => (formMode ? exitFormMode() : enterFormMode())}
@@ -182,6 +193,11 @@ export function App() {
         </div>
       ) : null}
       <PasswordPromptDialog {...passwordDialogProps} />
+      <CreatePdfDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(path) => void openByPath(path)}
+      />
       <RecoveryDialog
         entries={recoveryEntries}
         onRecover={(e) => void recover(e)}

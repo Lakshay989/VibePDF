@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@/ipc/invoke";
+import type { HistoryState } from "@/ipc/history";
 
 export type DocumentId = string;
 
@@ -112,4 +113,340 @@ export async function pdfiumVersion(): Promise<string> {
 export async function getPdfBytes(id: DocumentId): Promise<Uint8Array> {
   const buf = await invoke<ArrayBuffer>("pdf_get_bytes", { id });
   return new Uint8Array(buf);
+}
+
+/**
+ * SPEC: P6-SEC-007 (P6.C1) — write a password-protected copy of `id` to `path`,
+ * with AES-256 encryption.
+ *
+ * **Protect-on-export.** The open document is untouched: this produces an
+ * encrypted copy and leaves the current file, its undo history and its password
+ * alone. Encrypting in place would silently change the password the open
+ * document needs, which is a good way to lock someone out of their own work.
+ *
+ * Both passwords are optional and mean different things — user gates *opening*,
+ * owner gates *permissions* — but at least one is required; the backend rejects
+ * a request with neither. The passwords go straight to the Rust side and are
+ * never stored, logged, or echoed back.
+ */
+/**
+ * SPEC: P6-SEC-009 (P6.C3) — what a reader may do with the protected copy.
+ *
+ * Every field means *allowed*, so `true` everywhere is an unrestricted
+ * document. Note that these are advisory: no PDF enforces them, readers may
+ * ignore them, and a document whose permissions password equals its open
+ * password can have them lifted by anyone who can open it.
+ */
+export interface DocumentPermissions {
+  print: boolean;
+  copy: boolean;
+  modify: boolean;
+  fillForms: boolean;
+  annotate: boolean;
+  extract: boolean;
+  assemble: boolean;
+}
+
+/** Everything allowed — the shape a caller that sets nothing should send. */
+export const ALL_PERMISSIONS: DocumentPermissions = {
+  print: true,
+  copy: true,
+  modify: true,
+  fillForms: true,
+  annotate: true,
+  extract: true,
+  assemble: true,
+};
+
+export async function protectPdf(
+  id: DocumentId,
+  path: string,
+  userPassword: string | null,
+  ownerPassword: string | null,
+  permissions: DocumentPermissions = ALL_PERMISSIONS,
+): Promise<void> {
+  return invoke<void>("pdf_protect", {
+    id,
+    path,
+    userPassword,
+    ownerPassword,
+    permissions,
+  });
+}
+
+/**
+ * SPEC: P6-SEC-008 (P6.C2) — write an unprotected copy of `id` to `path`.
+ *
+ * `password` is the document's **owner** password. For AES-256 that is what
+ * lopdf enforces; the user password is refused. See `security/decrypt.rs`.
+ *
+ * The open document is untouched — this is an export, mirroring `protectPdf`.
+ * The backend re-opens the output with no password before returning, so a file
+ * that is still encrypted never reaches the user.
+ */
+export async function removePdfProtection(
+  id: DocumentId,
+  path: string,
+  password: string,
+): Promise<void> {
+  return invoke<void>("pdf_remove_protection", { id, path, password });
+}
+
+/**
+ * SPEC: P6-SEC-012 (P6.D3) — what "Clean document" should remove.
+ *
+ * Every field is a *removal*, so all-false is the document untouched. That is
+ * the opposite sense to `DocumentPermissions`, where a field means "allowed" —
+ * worth keeping straight, because both are seven booleans on a dialog.
+ */
+export interface CleanOptions {
+  /** `/Info`, the XMP packet, and any page-level metadata. */
+  metadata: boolean;
+  /** Text drawn invisibly — including the OCR layer of a scanned page. */
+  hiddenText: boolean;
+  /** Markup annotations. Not links, form fields, or attachments. */
+  comments: boolean;
+  attachments: boolean;
+  bookmarks: boolean;
+  /** Field values; the empty form stays. */
+  formData: boolean;
+  embeddedFiles: boolean;
+}
+
+/** Nothing removed — the starting state of the dialog. */
+export const CLEAN_NOTHING: CleanOptions = {
+  metadata: false,
+  hiddenText: false,
+  comments: false,
+  attachments: false,
+  bookmarks: false,
+  formData: false,
+  embeddedFiles: false,
+};
+
+/**
+ * What a clean removed. The visible page is unchanged by design, so these
+ * counts are the only evidence the command did anything.
+ */
+export interface CleanReport {
+  infoKeys: number;
+  xmpPackets: number;
+  hiddenTextRuns: number;
+  comments: number;
+  attachments: number;
+  bookmarks: number;
+  formFields: number;
+  embeddedFiles: number;
+  history: HistoryState;
+}
+
+/**
+ * SPEC: P6-SEC-012 (P6.D3) — clean the open document in place. Undoable
+ * in-session; permanent once the file is saved and reopened.
+ *
+ * In place rather than on export, unlike protect/unlock: you want to watch the
+ * comments go, and you want Undo if you cleaned more than you meant to.
+ */
+export async function cleanDocument(
+  id: DocumentId,
+  options: CleanOptions,
+): Promise<CleanReport> {
+  return invoke<CleanReport>("pdf_clean_document", { id, options });
+}
+
+/**
+ * SPEC: P6-SEC-005 (P6.B1b) — how much a reader may change a *certified*
+ * document without invalidating the signature (PDF 32000-1 §12.8.2.2, DocMDP).
+ *
+ * Advisory, like the encryption permissions in P6.C3: nothing enforces it. What
+ * it buys is detection, not prevention — a conforming reader that makes a
+ * disallowed change afterwards reports the signature as invalid, so the change
+ * shows. "Lock" sounds like prevention and is not.
+ */
+export type DocMdpLevel = "noChanges" | "formFilling" | "formFillingAndAnnotations";
+
+/** What goes in the signature dictionary alongside the signature itself. */
+export interface SignatureDetails {
+  /** PDF date string — use `pdfDate(new Date())`. */
+  signedAt: string;
+  reason: string | null;
+  location: string | null;
+  /** Display name. Not a security claim; the certificate is. */
+  name: string | null;
+  /**
+   * Non-null makes this a **certification** signature — a claim about the whole
+   * document, and only the first signature on one may make it. `null` is an
+   * ordinary approval signature, which is the common case.
+   */
+  certify: DocMdpLevel | null;
+  /**
+   * SPEC: P6-SEC-004 (P6.A5b) — which field to sign.
+   *
+   * A document routed for sign-off usually arrives with an empty field in it.
+   * Adding an invisible one beside it would satisfy "the document is signed"
+   * while leaving the box the recipient is looking at empty.
+   */
+  target: { kind: "newField" } | { kind: "existingField"; name: string };
+}
+
+/**
+ * SPEC: P6-SEC-004 — the empty signature fields this document offers, sorted.
+ *
+ * Empty because a signed one cannot be signed again: overwriting would destroy
+ * the existing signature, whose byte range would no longer exist.
+ */
+export async function unsignedSignatureFields(id: DocumentId): Promise<string[]> {
+  return invoke<string[]>("pdf_unsigned_signature_fields", { id });
+}
+
+/**
+ * SPEC: P6-SEC-005 (P6.B1a) — write a certificate-signed copy of `id` to `path`.
+ *
+ * **Sign-on-export, and necessarily so.** Saving a document re-serialises it,
+ * which rewrites every byte offset — and a signature covers exact bytes. Signing
+ * in place would give you a file that the next Save silently un-signs, still
+ * looking signed until someone checked. So the signed copy is written to disk
+ * and the open document is left alone.
+ *
+ * `certificatePath` is a path, not bytes: the private key has no reason to cross
+ * the IPC boundary. Neither it nor `password` is logged anywhere.
+ */
+export async function signPdf(
+  id: DocumentId,
+  path: string,
+  certificatePath: string,
+  password: string,
+  details: SignatureDetails,
+): Promise<void> {
+  return invoke<void>("pdf_sign_document", {
+    id,
+    path,
+    certificate: certificatePath,
+    password,
+    details,
+  });
+}
+
+/**
+ * SPEC: P6-SEC-006 (P6.B2b) — what VibePDF can say about a certificate's issuer.
+ *
+ * There is deliberately no `trusted`. We have no trust anchors and none we can
+ * bundle, so the claim is not representable rather than merely undocumented.
+ * See `security/verify.rs`.
+ */
+export type ChainStatus = "selfSigned" | "issuerNotChecked" | "incomplete" | "broken";
+
+/** SPEC: P6-SEC-006 — the per-signature status. */
+export interface SignatureReport {
+  fieldName: string | null;
+  /** The signing certificate's subject. */
+  signer: string;
+  issuer: string;
+  /** `/M` — the *claimed* signing time. Nothing here proves it. */
+  signedAt: string | null;
+  reason: string | null;
+  /** The signature over the signed attributes checks out. */
+  signatureValid: boolean;
+  /** The document still hashes to what was signed. */
+  digestMatches: boolean;
+  /** Nothing was appended after this signature. */
+  coversWholeDocument: boolean;
+  certificateExpired: boolean;
+  chain: ChainStatus;
+  /** DocMDP `/P`, when this signature certifies the document. */
+  certificationLevel: number | null;
+  /** Anything that stopped a check from running. */
+  problems: string[];
+}
+
+/**
+ * SPEC: P6-SEC-006 — verify every signature on the open document.
+ *
+ * Reports on the file **as saved**: a signature covers exact byte offsets, and
+ * the in-memory document would have to be re-serialised to inspect, which moves
+ * every one of them. Unsaved edits are therefore not reflected — and saving
+ * would invalidate the signature anyway.
+ */
+export async function verifySignatures(id: DocumentId): Promise<SignatureReport[]> {
+  return invoke<SignatureReport[]>("pdf_verify_signatures", { id });
+}
+
+/** SPEC: P6-SEC-010 (P6.D1c) — what a redaction should take out. */
+export interface RedactOptions {
+  /** Also strip `/Info` and the XMP packet. Off by default. */
+  removeMetadata: boolean;
+}
+
+/**
+ * What a redaction removed.
+ *
+ * `removedWholeForSafety` is the number worth surfacing: runs only *partly*
+ * inside the region whose font could not be measured, so the whole run went.
+ * Over-removal is the deliberate price of never leaving half a secret behind.
+ */
+export interface RedactReport {
+  removed: number;
+  split: number;
+  removedWholeForSafety: number;
+  imagesRemoved: number;
+  history: HistoryState;
+}
+
+/**
+ * SPEC: P6-SEC-010 — remove the content inside `rect` on `page`.
+ *
+ * `rect` is `[x0, y0, x1, y1]` in PDF points. Undoable in-session and
+ * **permanent once the file is saved and reopened** — which is the point of
+ * redaction rather than a limitation of it.
+ */
+export async function redactRegion(
+  id: DocumentId,
+  page: number,
+  rect: [number, number, number, number],
+  options: RedactOptions = { removeMetadata: false },
+): Promise<RedactReport> {
+  return invoke<RedactReport>("pdf_redact_region", { id, page, rect, options });
+}
+
+/** SPEC: P6-SEC-011 (P6.D2) — the patterns the spec names, plus user regexes. */
+export type PatternKind = "ssn" | "creditCard" | "email" | "phone" | "custom";
+
+export interface PatternSet {
+  kinds: PatternKind[];
+  /** Extra regexes, in Rust `regex` syntax. */
+  custom: string[];
+}
+
+/** One thing found — or one page that could not be searched. */
+export interface MatchHit {
+  /** 0-based. */
+  page: number;
+  rect: [number, number, number, number];
+  kind: PatternKind;
+  /** The matched text, so the list can actually be reviewed. */
+  preview: string;
+  /**
+   * The font could not be measured, so confirming this removes the whole run
+   * rather than just the match.
+   */
+  coversWholeRun: boolean;
+  /**
+   * Not a match: a page that could not be searched at all. "We found nothing
+   * here" and "we could not look here" must stay distinguishable, or a clean
+   * result is indistinguishable from a failed one.
+   */
+  unreadable: boolean;
+}
+
+/**
+ * SPEC: P6-SEC-011 — find matches. **Changes nothing.**
+ *
+ * Finding and applying are separate on purpose: the spec requires the user to
+ * confirm first, so there is deliberately no call that does both.
+ */
+export async function findRedactionMatches(
+  id: DocumentId,
+  patterns: PatternSet,
+): Promise<MatchHit[]> {
+  return invoke<MatchHit[]>("pdf_find_redaction_matches", { id, patterns });
 }

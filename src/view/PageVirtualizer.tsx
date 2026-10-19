@@ -20,6 +20,7 @@ import { TextBoxLayer } from "@/view/text-box-layer";
 import { ImageAddLayer } from "@/view/image-add-layer";
 import { ImageEditLayer } from "@/view/image-edit-layer";
 import { LinkLayer } from "@/view/link-layer";
+import { RedactLayer } from "@/view/redact-layer";
 import { InkLayer } from "@/view/ink-layer";
 import { NoteLayer } from "@/view/note-layer";
 import { PolygonLayer } from "@/view/polygon-layer";
@@ -96,6 +97,10 @@ export interface PageVirtualizerHandle {
    *  or `null` if nothing is measured. Captured just before an edit reload so a
    *  freeze-frame can bridge the blank while PDF.js re-parses. */
   snapshotVisible: () => string | null;
+  /** SPEC: P7-OCR-005 — a 1-based page's size in points *as displayed*, so the
+   *  image-export dialog can say what a DPI will cost in pixels. `null` before
+   *  the document is measured. */
+  getPageSize: (page: number) => { width: number; height: number } | null;
 }
 
 function computeFitScale(
@@ -331,6 +336,12 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
         },
         getCurrentPage: () => currentPageRef.current,
         getScrollTop: () => scrollRef.current?.scrollTop ?? 0,
+        // `effectivePages`, not `pages`: a rotated page exports at the size it
+        // is displayed, because that is what the renderer produces.
+        getPageSize: (page: number) => {
+          const found = effectivePages?.find((p) => p.pageNumber === page);
+          return found ? { width: found.width, height: found.height } : null;
+        },
         snapshotVisible: () => {
           const scroller = scrollRef.current;
           if (!scroller) return null;
@@ -364,7 +375,7 @@ export const PageVirtualizer = forwardRef<PageVirtualizerHandle, Props>(
           return snap.toDataURL();
         },
       }),
-      [pages, darkMode],
+      [pages, effectivePages, darkMode],
     );
 
     const registerSlot = (page: number, el: HTMLDivElement | null) => {
@@ -651,6 +662,14 @@ function PageSlot({
         documentId={documentId}
         page={natural.pageNumber - 1}
         pageCount={doc.numPages}
+        displayedWidth={natural.width}
+        displayedHeight={natural.height}
+        scale={scale}
+        rotation={rotation}
+      />
+      <RedactLayer
+        documentId={documentId}
+        page={natural.pageNumber - 1}
         displayedWidth={natural.width}
         displayedHeight={natural.height}
         scale={scale}

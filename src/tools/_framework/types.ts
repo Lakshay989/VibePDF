@@ -37,13 +37,21 @@ export type ToolId =
   | "polygon"
   | "ink"
   | "stamp"
+  // SPEC: P6-SEC-004 (P6.A5a) — placing a signature reuses the stamp *layer*
+  // but is its own mode. Sharing `"stamp"` put the user in the rubber-stamp
+  // tool, palette and all, which is not what they asked for.
+  | "signature"
   | "measure"
   | "edit-text"
   | "add-text"
   | "add-image"
   | "edit-image"
   | "add-link"
-  | "create-text-field";
+  | "create-text-field"
+  // SPEC: P6-SEC-010 (P6.D1c) — drag a region and delete what is under it. Its
+  // own tool rather than a mode of anything else: every other tool here adds
+  // something, and this one is the only one that takes away irreversibly.
+  | "redact";
 
 /** A base-14 font family the free-text tool can request. */
 export type FontFamily = "Helvetica" | "Times" | "Courier";

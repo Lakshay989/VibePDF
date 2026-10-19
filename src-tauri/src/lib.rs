@@ -8,7 +8,9 @@
 
 pub mod commands;
 pub mod error;
+pub mod ocr;
 pub mod pdf;
+pub mod security;
 pub mod settings;
 
 use std::collections::HashMap;
@@ -89,6 +91,11 @@ pub fn run() {
                     *guard = cli_paths;
                 }
             }
+            // SPEC: P7-OCR-002 — language packs the user added live beside
+            // the bundled ones as far as the engine is concerned.
+            if let Ok(dir) = app.path().app_data_dir() {
+                pdf::ocr_user_tessdata(dir.join("tessdata"));
+            }
             app.manage(state);
             // SPEC: P2.A2 — start the 30s autosave tick. Pokes each open
             // actor to write a recovery copy if dirty. Dedicated std
@@ -134,6 +141,12 @@ pub fn run() {
             commands::pdf::pdf_export_form_data,
             commands::pdf::pdf_import_form_data,
             commands::pdf::pdf_flatten_form,
+            commands::pdf::pdf_clean_document,
+            commands::pdf::pdf_sign_document,
+            commands::pdf::pdf_verify_signatures,
+            commands::pdf::pdf_unsigned_signature_fields,
+            commands::pdf::pdf_redact_region,
+            commands::pdf::pdf_find_redaction_matches,
             commands::signatures::signatures_list,
             commands::signatures::signatures_add,
             commands::signatures::signatures_remove,
@@ -148,6 +161,19 @@ pub fn run() {
             commands::pdf::pdf_add_image_background,
             commands::pdf::pdf_add_pdf_background,
             commands::pdf::pdf_add_header_footer,
+            commands::pdf::pdf_ocr_run,
+            commands::pdf::pdf_export_text,
+            commands::pdf::pdf_export_images,
+            commands::pdf::pdf_compress_document,
+            commands::pdf::pdf_export_docx,
+            commands::pdf::pdf_export_html,
+            commands::pdf::pdf_export_xlsx,
+            commands::languages::ocr_list_languages,
+            commands::languages::ocr_install_language_file,
+            commands::languages::ocr_download_language,
+            commands::languages::ocr_remove_language,
+            commands::languages::ocr_downloads_allowed,
+            commands::languages::ocr_set_downloads_allowed,
             commands::pdf::pdf_add_page_numbers,
             commands::pdf::pdf_add_bates,
             commands::pdf::pdf_extract_images,
@@ -162,6 +188,9 @@ pub fn run() {
             commands::pdf::pdf_add_ink,
             commands::pdf::pdf_add_stamp,
             commands::pdf::pdf_add_image_stamp,
+            commands::pdf::pdf_place_signature,
+            commands::pdf::pdf_protect,
+            commands::pdf::pdf_remove_protection,
             commands::pdf::pdf_add_measure,
             commands::pdf::pdf_read_measure_calibration,
             commands::pdf::pdf_extract_text_runs,
@@ -175,6 +204,7 @@ pub fn run() {
             commands::pdf::pdf_extract_pages,
             commands::pdf::pdf_split_document,
             commands::pdf::pdf_merge_documents,
+            commands::pdf::pdf_create_from_files,
             commands::pdf::pdf_insert_from_pdf,
             commands::pdf::pdf_reorder_pages,
             commands::pdf::pdf_peek_page_count,

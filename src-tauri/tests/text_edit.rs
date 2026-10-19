@@ -36,13 +36,13 @@ async fn replace_changes_text_and_records_undo() {
     assert!(page0_text(&handle).await.contains("VibePDF"), "fixture sanity");
 
     let state = handle
-        .replace_text_run(0, 0, "Hello, Acrobat.".to_owned())
+        .replace_text_run(0, 0, "Hello, a mainstream reader.".to_owned())
         .await
         .expect("replace");
     assert!(state.can_undo, "an edit must be undoable");
 
     let after = page0_text(&handle).await;
-    assert!(after.contains("Hello, Acrobat."), "new text present: {after:?}");
+    assert!(after.contains("Hello, a mainstream reader."), "new text present: {after:?}");
     assert!(!after.contains("VibePDF"), "old text gone: {after:?}");
     drop(handle);
 }

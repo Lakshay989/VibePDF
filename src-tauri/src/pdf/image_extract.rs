@@ -10,7 +10,7 @@
 use pdfium_render::prelude::*;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{load_edited_bytes, pdfium_lock};
 
 /// One image on a page, as the frontend's click-to-select hit-test consumes it.
 /// `index` is the image ordinal (the Nth image object, counting in page-object
@@ -66,9 +66,7 @@ pub fn extract_images(doc: &PdfDocument, page: usize) -> Result<Vec<ImageInfo>, 
 pub fn extract_images_from_bytes(bytes: &[u8], page: usize) -> Result<Vec<ImageInfo>, CommandError> {
     let doc = {
         let _guard = pdfium_lock()?;
-        pdfium()?
-            .load_pdf_from_byte_vec(bytes.to_vec(), None)
-            .map_err(CommandError::from)?
+        load_edited_bytes(bytes.to_vec())?
     };
     let images = extract_images(&doc, page)?;
     {

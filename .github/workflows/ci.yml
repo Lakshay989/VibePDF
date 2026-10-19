@@ -1,6 +1,6 @@
 name: CI
 
-# Runs the project's gates on every push to main and every PR:
+# Runs the project's gates on every push to main (bar docs-only ones) and every PR:
 #   npm run check   — tsc + eslint + cargo clippy (pedantic, -D warnings)
 #   npm run test    — vitest (frontend)
 #   npm run test:rust — cargo test (Rust + PDF, via the PDFium wrapper)
@@ -19,65 +19,69 @@ name: CI
 # If Linux CI is wanted later, regenerate the golden on Linux
 # (`npm run test:pdf -- --ignored bless_goldens`) or exclude
 # render_compare there.
+#
+# Third-party actions are pinned by commit SHA, not by tag. A tag is a mutable
+# pointer: `@v4` re-authorises whatever that repository's owner (or anyone who
+# compromises it) has since moved the tag to, on every single run. The trailing
+# `# v4.4.0` comment keeps it readable, and Dependabot bumps the SHA and the
+# comment together — see .github/dependabot.yml.
+#
+# `dtolnay/rust-toolchain@stable` is worse than a tag: `stable` is a *branch*,
+# so it tracked head continuously. It is pinned to the head at the time of
+# pinning; bumping it is a deliberate act.
+#
+# Trigger is `pull_request`, deliberately never `pull_request_target`. A fork's
+# PR runs its own code here, so the job must never hold anything worth stealing:
+# no secrets are referenced, and the workflow token is read-only.
 
+# Every push to main and every PR runs everything. Until 2026-10-18 a `gate`
+# job ran the heavy jobs on only every third push to main, to save macOS
+# minutes; a run whose jobs were all skipped still reported success, which is
+# how CI failed every real run from 2026-08-13 to 2026-10-16 unseen. The repo is
+# public, and GitHub's standard runners are free for public repositories, so
+# the gate was saving nothing.
 on:
   push:
     branches: [main]
+    # Pure documentation can't change a build or a test result.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
+  # Re-run `main` on demand: `gh workflow run ci.yml --ref main`.
+  workflow_dispatch:
 
-# Cancel an in-progress run when a newer commit is pushed to the same ref.
+# A newer commit cancels the run it supersedes. The event is part of the
+# group, so a manual run and a push run of the same commit no longer cancel
+# each other (that left "cancelled" checks on commits that had passed).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
-  # Cost throttle: the heavy job runs on macOS, billed at 10x the Linux rate.
-  # Since every gate is also run locally before each push, we don't pay 10x on
-  # *every* direct push to main — only every 3rd commit. PRs always run. This
-  # gate job is Linux (1x) and finishes in seconds, so the two skipped pushes in
-  # each cycle of three cost ~nothing (a skipped `if` job allocates no runner).
-  # To go back to every-push, delete this job + the `needs`/`if` below. To change
-  # the cadence, edit the `% 3` divisor.
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # need full history to count commits
-      - id: decide
-        run: |
-          if [ "${{ github.event_name }}" != "push" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT" # always run on PRs
-            exit 0
-          fi
-          n=$(git rev-list --count HEAD)
-          if [ $((n % 3)) -eq 0 ]; then run=true; else run=false; fi
-          echo "commit #$n on main -> run=$run (heavy CI every 3rd push)"
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-
   check-and-test:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
         with:
+          # Pinned to match `rust-toolchain.toml`. Left at the default, this
+          # installs whatever `stable` is that day — 1.99 by 2026-10-16, whose
+          # new clippy lints failed CI on code that passed locally on 1.95.
+          toolchain: 1.95.0
           components: clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
@@ -87,14 +91,34 @@ jobs:
       - name: Fetch PDFium
         run: npm run fetch-pdfium
 
+      # The OCR suites need the twelve bundled language packs (~25 MB, each
+      # SHA-256-pinned in the script). Like PDFium they are git-ignored, and
+      # this job never fetched them, so every OCR test that reads one failed —
+      # unseen until 2026-10-17, because earlier failures always stopped the
+      # run first.
+      - name: Fetch OCR language data
+        run: npm run fetch-tessdata
+
       - name: Check (tsc + eslint + clippy)
         run: npm run check
 
       - name: Frontend tests (vitest)
         run: npm run test
 
+      # The P6 redaction fixture is git-ignored and generated on demand. Its
+      # generator is stdlib-only and byte-deterministic, so building it here
+      # keeps all 17 region- and find-redaction tests running in CI instead of
+      # skipping them — redaction is the feature least safe to leave untested.
+      # The encrypted fixture is not generated here: its generator needs pypdf,
+      # so `decrypt.rs` and `encrypted_open.rs` skip that one with a message.
+      - name: Generate acceptance fixtures (stdlib-only)
+        run: python3 tests/fixtures/acceptance/generate-p6-document.py
+
+      # --no-fail-fast: cargo otherwise stops at the first failing test binary,
+      # and every binary after it goes unreported. That is how several
+      # independent failures stacked up here, each hidden behind the last.
       - name: Rust tests (cargo)
-        run: npm run test:rust
+        run: npm run test:rust -- --no-fail-fast
 
   # Windows is a shipped target (docs/01_VISION) but was never built or tested
   # — FABLE_REVIEW §3.9. This leg compiles ALL Rust on Windows via
@@ -107,28 +131,30 @@ jobs:
   # `check` + the frontend tests need no PDFium binary (pdfium-render binds at
   # runtime, not link time), so no fetch step here. Wiring the Windows Rust PDF
   # suite (fetch-pdfium Windows branch + a per-platform golden skip) is a
-  # separate follow-up. Gated by the same throttle as the macOS job.
+  # separate follow-up.
   check-windows:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-08
         with:
+          # Pinned to match `rust-toolchain.toml`. Left at the default, this
+          # installs whatever `stable` is that day — 1.99 by 2026-10-16, whose
+          # new clippy lints failed CI on code that passed locally on 1.95.
+          toolchain: 1.95.0
           components: clippy
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 

@@ -101,7 +101,7 @@ async fn ink_rejects_a_tap() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn ink_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-ink.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-ink.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

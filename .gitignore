@@ -15,6 +15,18 @@ src-tauri/gen/
 # PDFium prebuilt binary (fetched by scripts/fetch-pdfium.sh)
 src-tauri/resources/pdfium/*
 !src-tauri/resources/pdfium/.gitkeep
+# `tauri.conf.json` bundles `resources/pdfium/licenses/*`, and tauri-build
+# refuses a glob that matches nothing. Windows CI never fetches PDFium, so the
+# directory has to exist in the checkout. Git cannot re-include a file inside
+# an excluded directory, so the directory is re-included first and its
+# contents excluded again — the real licence files stay ignored.
+!src-tauri/resources/pdfium/licenses/
+src-tauri/resources/pdfium/licenses/*
+!src-tauri/resources/pdfium/licenses/.gitkeep
+
+# Tesseract language data (fetched by scripts/fetch-tessdata.sh)
+src-tauri/resources/tessdata/*
+!src-tauri/resources/tessdata/.gitkeep
 
 # Editor / OS
 .DS_Store
@@ -32,6 +44,39 @@ coverage/
 docs/PORTFOLIO_*.md
 docs/story/
 
+# Prompt-engineering and process notes. These describe how the project was
+# *built* rather than what it is, and on a public repository they are noise to
+# a reader and a distraction to a contributor. Untracked in the same commit
+# that added these lines — note that ignoring a file does nothing until it is
+# also `git rm --cached`ed, and that its history stays in the repository either
+# way, so this is tidiness rather than removal.
+#
+INITIAL_PROMPT.md
+PROMPTING_PLAYBOOK.md
+
+# The working logs and the internal design review. Written every step, kept
+# local. Learning.md and commandLog.md are the running teaching / command
+# journals; FABLE_REVIEW.md is an internal review whose section numbers are
+# cited from ~31 files, so those citations resolve only for someone holding the
+# document — CONTRIBUTING.md says so rather than leaving a contributor guessing.
+#
+# Same caveat as above: their history stays in the repository. This stops them
+# being published from here on; it does not remove what was already pushed.
+FABLE_REVIEW.md
+Learning.md
+commandLog.md
+
+# Scratch working files. None of these exist yet; they are here so the first
+# one never has to be noticed in a `git status` and cleaned up by hand.
+scratch/
+*.local.md
+*.orig
+*.rej
+*.bak
+.env
+.env.*
+!.env.example
+
 # Scratch / exploratory / verification PDFs. Its own README always claimed this
 # folder was ignored; it wasn't — only untracked, so one `git add -A` would have
 # committed tens of MB of scratch. See `Sample PDFs/README.md` for the layout.
@@ -46,6 +91,12 @@ Sample PDFs/
 
 # Generated Phase 1 acceptance fixtures (rebuild via the script)
 tests/fixtures/acceptance/*.pdf
+
+# P7.C2a: the noisy scan that compression is measured on. A fixture that can
+# actually be compressed is megabytes by nature — the whole point is that Flate
+# cannot squeeze scanner noise. Rebuild with:
+#   python3 tests/fixtures/basic/generate-noisy-scan.py
+tests/fixtures/basic/noisy-scan.pdf
 
 # Python virtualenv for the fixture generator (PEP 668 forces a venv
 # on system Python installs; the venv itself is a per-machine artifact).

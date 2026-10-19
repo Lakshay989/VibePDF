@@ -1,0 +1,397 @@
+# P6 verification sweep
+
+Everything shipped in Phase 6 that a human still has to check, in the order
+worth doing it. Nothing here is `[x]` — the automated suites are green for all
+of it, and that is exactly why these items exist.
+
+Two kinds of item, kept apart on purpose:
+
+- **Review** — reading a diff against what could fail silently. Required for
+  anything under `src-tauri/src/security/`, tests passing or not. Since
+  2026-09-13 Claude may perform and record it; a human pass is optional.
+- **Cross-reader** — opening a file somewhere that is not PDFium. A passing test
+  proves our reader agrees with us; it says nothing about a mainstream reader. Phase 6 has
+  already produced two files that PDFium accepted and something else did not, or
+  vice versa.
+
+**No mainstream commercial reader is available on the verification machine
+(2026-09-15).** Cross-reader items are checked in Preview (PDFKit) and Firefox
+(PDF.js). Signature items — which neither of those validates — are checked with
+**pyHanko 0.37.0**, an independent open-source PAdES validator that also analyses
+every incremental update made after signing. It runs offline, with revocation
+checks off and the committed test certificate as its only trust root:
+
+```bash
+"Sample PDFs/tools/check-signature.sh" "Sample PDFs/<file>.pdf"
+```
+
+The script and its virtualenv live in git-ignored `Sample PDFs/tools/`; the
+wrapper's header says how to recreate them. It reports two verdicts separately:
+whether the signed bytes are intact, and what was appended after signing.
+
+---
+
+## 1. `security/` review — C1 and C2 (blocking)
+
+Two diffs: `8e8394b`, `f7384e3`, `536510b`.
+
+- [ ] ~~`security/encrypt.rs::permissions_entry` — the workaround for lopdf 0.36
+      writing `/Perms` in plaintext. Check it encrypts a **named** binding and
+      returns that; the upstream bug is encrypting a temporary copy.~~
+      **Obsolete (2026-10-18):** removed. lopdf 0.37 fixed the bug upstream and
+      0.42 writes `/Perms` itself; `tests/encrypt.rs::the_perms_entry_is_encrypted`
+      checks it against `/P` and through PDFium.
+- [ ] `security/encrypt.rs::file_encryption_key` — OS CSPRNG, nothing derived
+      from the passwords or the clock.
+- [ ] `commands/pdf.rs::pdf_protect` / `pdf_remove_protection` — no password
+      enters a log line, a `CommandError` message, or the actor (which logs its
+      path on every message).
+- [ ] `security/decrypt.rs` — the two named failures are honest about what went
+      wrong rather than blaming the password.
+- [ ] ~~`security/encrypt.rs::fix_permissions_entry` (C3) — `/Perms` is built from
+      the `/P` read back out of the document, not from a second copy of the
+      permission set. Two values that must agree are one value here; check it
+      stayed that way.~~ **Obsolete (2026-10-18):** removed with
+      `permissions_entry`. lopdf writes `/P` and `/Perms` from the one
+      `Permissions` value `encrypt_document` hands it.
+- [ ] `DocumentPermissions::default()` — hand-written, granting everything. The
+      derived `Default` would clear every bit and silently produce the most
+      restricted document possible.
+- [ ] `security/encrypt.rs::state_crypt_filter_key_length` (sweep fix,
+      2026-09-12) — writes `/Length 32` into `/CF/StdCF` and **only** there.
+      Check the top-level `/Encrypt` still carries no `/Length` (lopdf's decrypt
+      rejects it), and that the value is bytes, not bits.
+- [ ] `pdf/document.rs::remove_security_for_view` + `RAW_BINDINGS` (sweep fix,
+      2026-09-13, P1-VIEW-003) — **the codebase's first `unsafe`**, outside
+      `security/` but producing decrypted document bytes. Check:
+      the write callback cannot read past `size` and tolerates `size == 0`;
+      the raw document is closed exactly once on every path past the null
+      check; the spare PDFium binding can never be dropped (its `Drop` calls
+      `FPDF_DestroyLibrary`); and `GetViewBytes` is the **only** caller — the
+      decrypted bytes must never reach `save_document` or any command.
+      `encrypted_view_bytes.rs::a_protected_document_stays_protected_everywhere_but_the_screen`
+      is the guard; it was mutation-checked by leaking the view path into
+      `GetBytes`.
+
+## 2. Cross-reader: encryption (blocking)
+
+Files: `Sample PDFs/vibepdf-verify-encrypted-user.pdf`, `…-both.pdf`.
+Password to open: `open-me`. Permissions password on the second: `owner-only`.
+
+- [ ] **a mainstream reader** prompts, opens with `open-me`, refuses a wrong password
+- [ ] **A third reader** (Chrome, other independent viewers) — same
+- [ ] Preview — same. **Re-check; the 2026-08-12 pass did not hold.** On
+      2026-09-11 every page of these files rendered *blank* in PDFKit after the
+      correct password (`unsupported crypt filter key length`), while PDFium,
+      PDF.js and Ghostscript were fine. Fixed 2026-09-12 by stating the crypt
+      filter's key length; the files were regenerated and PDFKit now extracts
+      and renders the text. Confirm in the Preview app itself.
+- [ ] **Open one in VibePDF** with `open-me`: the page **renders**. Before
+      2026-09-13 every encrypted PDF opened to "This file does not appear to be
+      a valid PDF" (P1-VIEW-003) — the backend opened it, the view could not.
+      Also make an edit (rotate) and confirm the view updates.
+- [ ] With the encrypted file open, try to **add a sticky note**: refused, with
+      a message saying to Unlock…, edit, then Protect… again. **Rotate** still
+      works, and saving afterwards keeps the file protected.
+- [ ] **Unlock** one in-app, then open the result in all three: opens with **no**
+      password anywhere
+
+## 2b. Cross-reader: permissions (C3, blocking)
+
+File: `Sample PDFs/vibepdf-verify-no-print.pdf` — printing and copying withheld.
+Opens with `open-me`; permissions password `owner-only`.
+
+This is the roadmap's own acceptance demo, and **the only way to check C3 at
+all**: the tests assert what the document *says*, and nothing in a PDF makes a
+reader obey it. A green suite here means the bits are right, not that the
+feature works.
+
+- [ ] **a mainstream reader**, opened with `open-me`: **printing is blocked** (greyed out or
+      refused), and copying text is blocked
+- [ ] **a mainstream reader**, opened with `owner-only`: printing works
+- [ ] A **third reader**: note what it does. Ignoring `/P` entirely is a legitimate
+      reader choice, not a defect in our file — record which readers honour it so
+      the dialog's wording can stay honest.
+- [ ] The other two encrypted files still print and copy freely (that the
+      restriction is *ours* and not an accident of encrypting at all)
+
+> The one that would matter most: a file some readers open and others reject is
+> the exact failure the `/Perms` bug produced, and it looked fine locally.
+
+## 3. Cross-reader + undo: signature placement (A5a)
+
+File: `Sample PDFs/vibepdf-verify-signature.pdf` — two placements, full and 50%
+opacity.
+
+- [ ] **a mainstream reader** and a **third reader**: both render, transparent background,
+      no white box, correct proportions, the half-opacity one visibly lighter
+- [ ] **Undo** after placing a signature in-app → the page returns to exactly as
+      it was *(never checked; the only A5a item with no coverage at all)*
+- [ ] Zoom a **thresholded** import to 400% — a judgement call, not pass/fail.
+      P6.A4 decoding showed 0% partial alpha on those, so the edges are hard.
+      Placement is the first time it is visible at size.
+
+## 4. In-app, worth one pass each
+
+- [ ] **Protect…** with only a permissions password → refused, and the message
+      explains that the protection could not be removed afterwards
+- [ ] **Unlock…** with the password that *opens* an AES-256 file → refused; with
+      the permissions password → works. Surprising, and deliberate: see
+      `steps/P6.md`.
+- [ ] Signature placement: first Place after any tool change works — the
+      "select twice" bug (`1d20da3`) was invisible to every test until it was
+      reported
+
+## 5. Cross-reader: clean document (D3)
+
+Files: `Sample PDFs/vibepdf-verify-dirty.pdf` and `…-cleaned.pdf` — the same
+document before and after every toggle.
+
+The automated tests prove the strings are gone from the bytes, which is the part
+that matters most. What they cannot show is whether a *reader* agrees the file
+is still well-formed after seven kinds of surgery.
+
+- [ ] Open **both** in a mainstream reader: Document Properties on the dirty one shows
+      `SECRETAUTHOR`; on the cleaned one shows nothing. Same in Preview's
+      Inspector, which reads XMP rather than `/Info` — the one that catches a
+      half-done metadata clean.
+- [ ] The cleaned file still renders `VisibleBodyText`, still has one page, and
+      the bookmarks/comments panels are empty
+- [ ] Search the cleaned file for `SECRETHIDDEN` in a reader: no hit
+- [ ] The cleaned form field is **still fillable** — the value is gone, the field
+      is not
+- [ ] In-app: clean, then **Undo** → everything comes back. Then save, reopen,
+      and confirm undo no longer offers it (documented behaviour, not a bug)
+
+## 6a. Signed document (B1a) — the roadmap's acceptance demo
+
+File: `Sample PDFs/vibepdf-verify-signed.pdf` — `hello.pdf` signed with the test
+certificate in `tests/fixtures/certs/`.
+
+`openssl cms -verify` already accepts this signature and rejects a tampered
+copy, so the cryptography is checked. What is not checked is what **a mainstream reader**
+makes of the container around it, which is the thing the roadmap asks for.
+
+- [ ] **a mainstream reader**: the signature panel shows a signature, and it is
+      **cryptographically valid**. It will say the identity is *unknown* — the
+      certificate is self-signed, which is correct and expected, not a failure
+- [ ] The **certificate chain** is shown, with `CN=VibePDF Test Signer`
+- [ ] a mainstream reader reports **no changes since signing**
+- [ ] Change one byte of the file in a hex editor and reopen: a mainstream reader now says
+      the document has been modified. (If it does not, the `/ByteRange` is
+      covering less than it should.)
+- [ ] Preview and a third reader open it without complaint
+- [ ] `vibepdf-verify-signed-then-edited.pdf` — signed, then a note added and
+      saved by VibePDF. A mainstream reader calls the signature **valid** for
+      the revision it signed, says the document was **modified after
+      signing**, and shows the note. OpenSSL already validates the signed
+      revision, and `/ByteRange` stops before the appended edit.
+
+pyHanko, 2026-09-15 (a person still reads the output and ticks the boxes):
+
+| File | Signature | After signing |
+|---|---|---|
+| `vibepdf-verify-signed.pdf` | VALID, signer `CN=VibePDF Test Signer, O=VibePDF, C=GB`, ordinary (not certified) | Nothing — covers the whole file |
+| `vibepdf-verify-signed-TAMPERED.pdf` | INVALID — cryptographically unsound | — |
+| `vibepdf-verify-signed-then-edited.pdf` | VALID | One revision: the page (`/Annots` gains one entry) and the note. pyHanko's default policy rejects it — see *Known and accepted* |
+
+A copy of `vibepdf-verify-signed.pdf` re-saved in-app during pass two (note →
+save → undo → save) kept a VALID signature, began with the exact signed bytes,
+and carried two appended revisions; the second rewrote only the page, back to
+its signed state.
+
+## 6c. Signing in-app (B1a)
+
+Certificate: `tests/fixtures/certs/signer.pfx`, password `test123`.
+
+- [ ] **Sign…** → choose the certificate, type the password, save a copy. The
+      copy opens in a mainstream reader with a valid signature
+- [ ] The **open document is unchanged** — no dirty marker, no signature in it.
+      Save it and confirm the saved file has no signature either
+- [ ] A **wrong certificate password** is refused with a message about the
+      password, and no file is written
+- [ ] The **legacy** certificate (`signer-legacy.pfx`) signs too
+- [ ] Cancel the dialog, reopen it: the password field is empty and no
+      certificate is remembered
+
+## 6e. Signature status in-app (B2b)
+
+- [ ] Open `Sample PDFs/vibepdf-verify-signed.pdf` → a green **Signed** banner
+      naming the test signer, with a note that the certificate vouches for
+      itself
+- [ ] **Details** lists the signature, its claimed signing time and its reason
+- [ ] Open `vibepdf-verify-certified.pdf` → the same, plus the certification level
+- [ ] Edit a byte of a signed file in a hex editor, open it → a red
+      **Signature problem** banner saying the *document changed*, not that the
+      signature is invalid
+- [ ] Open any unsigned document → **no banner at all**
+- [ ] Open a signed file, edit it in-app without saving: the banner still
+      reports on the file as saved. (Known and intended — it says so in
+      `steps/P6.md`. Worth confirming it does not report nonsense.)
+- [ ] On a Finder copy of a signed file: add a note, **save**, undo, **save**
+      again. The banner stays **Signed by VibePDF Test Signer**, with a note
+      that the file changed after signing. Pass one got "The signature covers
+      bytes outside the file" — every save rewrote the whole file. Fixed
+      2026-09-13 (P6-SEC-006): saves of a signed document are appended.
+
+## 6f. Signing into an existing field (A5b)
+
+File: `Sample PDFs/signatures/sigfield-form.pdf`, or the committed
+`tests/fixtures/basic/sigfield.pdf`. Certificate `signer.pfx` / `test123`.
+
+- [ ] **Sign…** on a document with a signature field → the dialog shows a
+      **Signature field** picker, defaulting to the first empty one
+- [ ] Sign it → in a mainstream reader the signature appears **in that field's box**, not as
+      an invisible extra
+- [ ] Sign the same field again → refused, saying the field is already signed
+- [ ] Choose "Add a new invisible signature" instead → behaves as before
+- [ ] A document with no fields shows **no picker at all**
+
+## 6d. Certification (B1b)
+
+File: `Sample PDFs/vibepdf-verify-certified.pdf` — certified at "no changes".
+
+- [ ] **a mainstream reader** says the document is **certified**, not merely signed, and
+      names the level
+- [ ] Add a comment in a mainstream reader and save: the signature is now reported as
+      invalid, or the change is refused. Either is a pass — what matters is that
+      it is not silently accepted
+- [ ] `vibepdf-verify-signed.pdf` (uncertified) shows as an ordinary signature
+      with no certification claim
+- [ ] In-app: the "After signing" default is **Sign only**, and a plain signature
+      produces a file with no certification
+
+Without a mainstream reader, the comment check becomes: add a note to a Finder
+copy **in VibePDF**, save, and run the checker on the copy. Expected:
+`Signature: VALID` and `Certification: BROKEN`. pyHanko, 2026-09-15: the
+certified file reports `certified — no changes allowed`, VALID; a control with a
+comment appended by pyHanko's own writer reports BROKEN.
+
+## 6b. Signature container (B1a, part one)
+
+File: `Sample PDFs/vibepdf-verify-sig-placeholder.pdf` — a signature field with
+the gap reserved and nothing in it.
+
+Not a signed document, and not meant to look like one. What is worth confirming
+is that the *container* is well-formed before any crypto goes near it.
+
+**The expected result here was wrong, and is corrected (2026-09-13).** It said a
+reader should show an *unsigned* field. It cannot: the field's `/V` points at a
+real signature dictionary — `/Filter`, `/SubFilter`, `/ByteRange`, `/M`,
+`/Reason` all present — whose `/Contents` is 16 KB of zeros. To a reader that
+is a signature that fails to parse, and reporting it as broken is the *correct*
+behaviour. VibePDF's own verifier says `The signature has no readable content.`,
+so opening this file in-app shows a red problem banner, as it should.
+
+Checked without a human (2026-09-11): the file differs from
+`vibepdf-verify-signed.pdf` only inside the `/Contents` gap; `/ByteRange` starts
+at 0 and ends at EOF; the gap is exactly the hex string; revision 1 opens on
+its own in PDFKit, PDF.js and pypdf; PDFKit, PDF.js and Ghostscript render the
+page. pyHanko (2026-09-15) reports the signature UNREADABLE — its CMS parser
+finds no container in the zeros — rather than valid.
+
+- [ ] **a mainstream reader** opens it **without an error dialog** and lists a
+      signature in the panel. Record what it says about it — "invalid",
+      "corrupted" or "unable to verify" are all correct for zeroed
+      `/Contents`. An *unsigned field* would mean the reader ignored `/V`, and
+      is worth noting, not failing.
+- [ ] Preview renders the page normally *(PDFKit already does; confirm in the app)*
+
+## 7. Artifact inventory
+
+Everything Phase 6 has produced for a human to open, in one place, so a sweep
+does not have to reconstruct it. All in `Sample PDFs/` (git-ignored).
+
+| File | Step | What it is | Password |
+|---|---|---|---|
+| `vibepdf-verify-encrypted-user.pdf` | C1 | AES-256, open password only | `open-me` |
+| `vibepdf-verify-encrypted-both.pdf` | C1 | …plus a distinct permissions password | `open-me` / `owner-only` |
+| `vibepdf-verify-no-print.pdf` | C3 | Printing and copying withheld | `open-me` / `owner-only` |
+| `vibepdf-verify-dirty.pdf` | D3 | Carries all seven cleanable categories | — |
+| `vibepdf-verify-cleaned.pdf` | D3 | The same document, everything removed | — |
+| `vibepdf-verify-signature.pdf` | A5a | Two placed signature *pictures* | — |
+| `vibepdf-verify-sig-placeholder.pdf` | B1a | Signature field, gap reserved, empty | — |
+| `vibepdf-verify-signed.pdf` | B1a | Certificate-signed | — |
+| `vibepdf-verify-certified.pdf` | B1b | Certified, no changes allowed | — |
+| `vibepdf-verify-signed-then-edited.pdf` | P6-SEC-006 | Signed, then a note saved as an incremental update | — |
+| `vibepdf-verify-redacted.pdf` | D1a | SSN removed, `SSN:` label kept | — |
+
+Regenerate any of them with the `--ignored` test in the matching suite:
+
+```bash
+cd src-tauri && cargo test --test encrypt --test clean --test sign_container \
+  --test sign_pades --test signature_place --test signed_save -- --ignored
+```
+
+**The two that catch the most:** Preview's Inspector on the cleaned file (it
+reads XMP, so it catches a half-done metadata clean that every `/Info`-reading
+tool would call clean), and the byte-flip on the signed file (§6a), which is the
+only check that `/ByteRange` covers what it claims.
+
+## 8. Redaction (D1a–c)
+
+File: `Sample PDFs/vibepdf-verify-redacted.pdf`.
+
+The tests already prove the string is gone from the bytes and from PDFium's
+extractor. What a human adds is a different reader's opinion and a look at the
+result.
+
+- [ ] **a mainstream reader**: select the redacted area and copy — nothing comes out. Search
+      for `123-45-6789` — no hit
+- [ ] The black box sits where the number was, and `SSN:` is still readable
+      beside it
+- [ ] A third reader (Preview, Firefox) — same. Not Chrome: it renders with
+      PDFium, so agreeing with VibePDF proves nothing
+- [ ] Optional, if `brew install poppler` is wanted: `pdftotext` on the file,
+      as the roadmap literally specifies, and confirm the SSN is absent
+
+In-app (D1c), against `tests/fixtures/acceptance/p6-document.pdf`:
+
+- [ ] **Redact** on the markup bar → drag over the SSN digits → the confirmation
+      appears and says the content is deleted rather than covered
+- [ ] Confirm → the number is gone, `SSN:` remains, a black box sits over it
+- [ ] **Undo** brings it back; save, reopen, and confirm undo no longer offers it
+- [ ] Drag on **page 2** (text inside a form) → refused, with a message naming
+      the form and suggesting Flatten
+- [ ] Drag on **page 4** (the image) → the image goes
+- [ ] Tick "Also remove document metadata" and confirm it still works
+
+## 9. Pattern redaction (D2)
+
+Against `tests/fixtures/acceptance/p6-document.pdf`.
+
+- [ ] **Find & Redact…** → tick SSNs → Find → one match listed, showing
+      `123-45-6789`, page 1, **nothing pre-ticked**
+- [ ] The panel also says **page 2 could not be searched** — that page's SSN is
+      real and deliberately not found
+- [ ] Tick the match → Redact → it goes; `SSN:` stays
+- [ ] A custom pattern (`555-0100`) finds the page-3 account number and warns
+      that the whole line will go
+- [ ] Card numbers: a real test number (`4242 4242 4242 4242`) matches, an
+      invoice-shaped 16-digit number does not
+
+---
+
+## Known and accepted, not defects
+
+Listed so a sweep does not re-report them.
+
+| | |
+|---|---|
+| A placed signature lists as **Stamp** in the annotation panel | It is a `/Stamp`. Revisit at B2. |
+| **Owner-only protection is refused** | C2 cannot undo it. Revisit when lopdf's R6 user auth is fixed. |
+| AES-256 files carrying `/Length` cannot be unlocked | Other tools' files, including pypdf's. Named in the error. |
+| Flattened form text is top-anchored; `/Q` not honoured | Carried from P5. |
+| Cleaning **hidden text** makes a scanned page unsearchable | That layer *is* the searchability. Off by default; the dialog says so. |
+| Clean does not remove hidden **layers** (OCGs) | P6-SEC-012 does not name them. Revisit if a real file needs it. |
+| Signing a document that is **already signed** is refused | B1a-container. Needs a second incremental update; would otherwise corrupt the first signature. |
+| Saving a document that is **both signed and password protected** is refused | Appending needs each object encrypted with the document key, which nothing does yet; rewriting would break the signature. The edit stays in the open document. |
+| pyHanko calls a signed file with a **comment added afterwards** "not allowed" | Its default difference policy accepts form filling and signature updates but rejects every other annotation change, by design. The signature itself stays VALID; with difference analysis off the verdict is VALID. Not a VibePDF defect. |
+| **Autosave recovery** of a signed document is a whole-file rewrite | A *recovered* copy's signature won't verify. Files you save yourself are appended and unaffected. |
+| On a **password-protected** document, edits that go through lopdf — annotations, forms, text editing, watermarks, headers, Clean, redaction — are **refused**; PDFium-native page edits (rotate, crop, delete, insert blank) still work | lopdf cannot encrypt the objects it adds. Before 2026-09-13 these edits failed obscurely, saved garbage, or — on RC4 permissions-only files — silently saved the file *without its protection*. Unlock…, edit, then Protect… again. |
+
+## Upstream
+
+- [ ] File the lopdf report (the R6 user-authentication finding). Draft
+      prepared 2026-08-12; not yet filed. Its `/Perms`-in-plaintext half is moot:
+      lopdf 0.37 fixed that upstream ("consistently iterating over blocks").

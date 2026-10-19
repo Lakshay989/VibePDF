@@ -178,7 +178,7 @@ async fn import_is_one_undoable_edit() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn xfdf_writes_verification_artifact() {
-    let dir = PathBuf::from("../Sample PDFs");
+    let dir = PathBuf::from("../Sample PDFs/out/p3-annotations");
     std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
     let handle = spawn();
     build_standard_set(&handle).await;

@@ -28,7 +28,7 @@ IF the file is not a valid PDF, THEN THE system SHALL display the message "This 
 WHEN the user opens a password-protected PDF, THE system SHALL prompt for the password, retry up to 3 times, and SHALL never store the password to disk.
 
 ### P1-VIEW-004 — Render fidelity
-THE system SHALL render every page at the same pixel-fidelity as Adobe Acrobat Reader for the W3C PDF conformance test suite. Failures must be documented in `tests/render-failures.md`.
+THE system SHALL render every page at the same pixel-fidelity as a mainstream PDF reader for the W3C PDF conformance test suite. Failures must be documented in `tests/render-failures.md`.
 
 ### P1-VIEW-005 — Navigation
 WHEN the user scrolls, presses Page Up/Down, presses arrow keys, or clicks a thumbnail, THE system SHALL navigate to the corresponding page within 100ms for files up to 500 pages.
@@ -93,7 +93,7 @@ WHEN the user resizes a page to a standard size (Letter, A4, Legal, A3, etc.) or
 ## P3 — Annotations
 
 ### P3-ANN-001 — Highlight, underline, strikethrough
-WHEN the user selects text and applies highlight/underline/strikethrough, THE system SHALL store the annotation as a standard PDF text-markup annotation that is visible in Adobe Acrobat and other major PDF readers.
+WHEN the user selects text and applies highlight/underline/strikethrough, THE system SHALL store the annotation as a standard PDF text-markup annotation that is visible in a mainstream PDF reader and other major PDF readers.
 
 ### P3-ANN-002 — Sticky notes
 WHEN the user places a sticky note, THE system SHALL store it as a PDF Text annotation with author, timestamp, and free-text body. Notes SHALL be re-openable, editable, and deletable.
@@ -120,7 +120,7 @@ THE system SHALL display all annotations in a sidebar list, grouped by page, wit
 WHEN the user replies to an annotation, THE system SHALL store the reply as a linked annotation with `IRT` (in reply to) reference, per the PDF specification.
 
 ### P3-ANN-010 — Import/export
-THE system SHALL support importing and exporting annotations as XFDF and FDF files, compatible with Adobe Acrobat.
+THE system SHALL support importing and exporting annotations as XFDF and FDF files, compatible with a mainstream PDF reader.
 
 ### P3-ANN-011 — Flatten
 WHEN the user chooses "flatten annotations," THE system SHALL render all annotations into the page content streams permanently. The result SHALL not be undoable from a saved file (only from session history).

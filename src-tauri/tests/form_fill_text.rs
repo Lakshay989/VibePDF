@@ -127,7 +127,7 @@ async fn fill_via_actor_then_undo() {
     drop(handle);
 }
 
-/// Produce a filled form for a manual cross-reader check (Acrobat/Preview should
+/// Produce a filled form for a manual cross-reader check (a mainstream reader/Preview should
 /// show the values and keep the form interactive). Run on demand.
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]

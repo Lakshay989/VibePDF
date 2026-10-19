@@ -178,7 +178,7 @@ fn non_winansi_stamp_now_embeds() {
 #[test]
 #[ignore = "produces a verification artifact; run on demand"]
 fn winansi_writes_verification_artifact() {
-    let out = std::path::PathBuf::from("../Sample PDFs/vibepdf-verify-winansi.pdf");
+    let out = std::path::PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-winansi.pdf");
     if let Some(par) = out.parent() {
         std::fs::create_dir_all(par).ok();
     }

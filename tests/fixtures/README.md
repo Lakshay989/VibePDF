@@ -2,7 +2,8 @@
 
 Small, hand-generated, **committed** PDFs the automated suites depend on. Every
 one is deterministic: a `generate-*.py` beside it rebuilds it byte-for-byte with
-zero external dependencies. Provenance for anything not generated here is in
+zero external dependencies — except `jpx.pdf` (needs OpenJPEG's `opj_compress`)
+and `scan.pdf` (needs `ghostscript` to rasterise text). Provenance for anything not generated here is in
 [`PROVENANCE.md`](PROVENANCE.md).
 
 ⚠️ **Never open these in the app for manual testing.** VibePDF saves in place, so
@@ -28,6 +29,14 @@ findability fix instead.
 | `rotated.pdf` | 4 | `/Rotate` 0 / 90 / 180 / 270, one per page. | P4.HF hardening — decorations must respect rotation |
 | `cropped.pdf` | 1 | `/CropBox` strictly inside `/MediaBox` (print bleed). Viewers show only the CropBox. | P4.HF hardening — decorations must respect crop |
 | `sample.jpg` | — | Not a PDF. The image-embed source. | image add / replace |
+| `ccitt.pdf` | 1 | A 16×16 CCITT fax image (`/K 0`) with an asymmetric black pattern. Decodes only through PDF.js's `jbig2.wasm`, the module JBIG2 also uses. | P1-VIEW-004 image decoders |
+| `scan.pdf` | 1 | A page that is only a *picture* of text: four lines (24 pt heading, 9 pt body) rasterised at 150 DPI and embedded, so nothing in it is selectable. Body text is small on purpose — at 28 pt every preprocessing pipeline looks fine, including a harmful one. **Generator needs `ghostscript`.** | P7-OCR-001/003 OCR smoke |
+| `scan-rotated.pdf` | 1 | The same scan sideways on a landscape page with `/Rotate 270` turning it upright — a sheet fed in rotated. Displays identically to `scan.pdf`, so the OCR text layer must land in rotated page coordinates. | P7-OCR-001 placement |
+| `two-column.pdf` | 1 | Two columns whose lines are drawn *interleaved* in the content stream, so anything that concatenates in stream order returns "Alpha one Beta one". The reading-order fixture. | P7-OCR-006 |
+| `unicode-text.pdf` | 1 | Cyrillic, Greek and accented Latin as real selectable text in an embedded font. Built by a Rust fixture test — the base-14 fonts cannot encode these. ~330 KB, most of it the font subset. | P7-OCR-006 UTF-8 |
+| `scan-cyrillic.pdf` | 1 | A Russian page that is only a picture of text. Built by a Rust fixture test, not Python: Ghostscript's base fonts can't set Cyrillic, so it goes through VibePDF's own font embedding and PDFium. | P7-OCR-002 non-Latin text layer |
+| `scan-skewed.pdf` | 1 | The same scan drawn 3° off level before rasterising. Recognition straightens it, so the text layer has to be tilted back. | P7-OCR-001 placement |
+| `jpx.pdf` | 1 | A 16×16 lossless JPEG 2000 image, four coloured quadrants. Decodes only through `openjpeg.wasm`. **The one generator with an external tool:** `opj_compress` (OpenJPEG). | P1-VIEW-004 image decoders |
 
 ### Form fixtures (Phase 5)
 

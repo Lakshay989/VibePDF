@@ -265,7 +265,7 @@ fn watermark_is_tagged() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn watermark_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-watermark.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-watermark.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }
@@ -287,7 +287,7 @@ async fn watermark_writes_verification_artifact() {
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn watermark_embedded_unicode_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-watermark-unicode.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p4-content/vibepdf-verify-watermark-unicode.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

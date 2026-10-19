@@ -14,26 +14,39 @@ import {
   addSignature,
   listSignatures,
   removeSignature,
+  signatureBytes,
   type SignatureEntry,
   type SignatureKind,
 } from "@/ipc/signatures";
+import { bytesToDataUrl } from "@/view/file-data-url";
 
 interface SignatureState {
   /** Newest first, mirroring the backend's order. */
   entries: SignatureEntry[];
   /** True while the first load is in flight, so the UI can hold off on "empty". */
   loading: boolean;
+  /**
+   * P6.A5a — `data:` URLs by entry id, for the picker's thumbnails.
+   *
+   * A list of kinds and dates is not something anyone can choose a signature
+   * from; you have to see them. Cached because the bytes cross IPC as a JSON
+   * number array at roughly 4× their size, and the library holds up to 20.
+   */
+  thumbs: Record<string, string>;
   /** Re-read the library from disk. Safe to call repeatedly. */
   refresh: () => Promise<void>;
   /** Store a new signature and return it; the list is refreshed. */
   add: (kind: SignatureKind, png: Uint8Array) => Promise<SignatureEntry>;
   /** Delete one, then refresh. */
   remove: (id: string) => Promise<void>;
+  /** Fetch and cache one thumbnail. A second call for the same id is free. */
+  loadThumb: (id: string) => Promise<void>;
 }
 
-export const useSignatureStore = create<SignatureState>((set) => ({
+export const useSignatureStore = create<SignatureState>((set, get) => ({
   entries: [],
   loading: false,
+  thumbs: {},
 
   refresh: async () => {
     set({ loading: true });
@@ -54,6 +67,18 @@ export const useSignatureStore = create<SignatureState>((set) => ({
 
   remove: async (id) => {
     await removeSignature(id);
-    set({ entries: await listSignatures() });
+    // Drop the thumbnail too: ids are not reused, so keeping it would only be a
+    // leak that grows with every delete.
+    const thumbs = { ...get().thumbs };
+    delete thumbs[id];
+    set({ entries: await listSignatures(), thumbs });
+  },
+
+  loadThumb: async (id) => {
+    if (get().thumbs[id]) return;
+    const url = bytesToDataUrl(await signatureBytes(id));
+    // Re-read rather than closing over the old map — several thumbnails load
+    // concurrently, and a stale spread would drop all but the last.
+    set((s) => ({ thumbs: { ...s.thumbs, [id]: url } }));
   },
 }));

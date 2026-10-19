@@ -35,6 +35,28 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-009 — open the watermark dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onWatermark?: (() => void) | undefined;
+  /** SPEC: P6-SEC-007 (P6.C1) — open the password-protect dialog. */
+  onProtect?: (() => void) | undefined;
+  /** SPEC: P6-SEC-008 (P6.C2) — open the remove-protection dialog. */
+  onUnlock?: (() => void) | undefined;
+  /** SPEC: P6-SEC-012 (P6.D3) — open the clean-document dialog. */
+  onClean?: (() => void) | undefined;
+  onOcr?: (() => void) | undefined;
+  onExportText?: (() => void) | undefined;
+  /** SPEC: P7-OCR-005 (P7.B2) — open the export-as-images dialog. */
+  onExportImages?: (() => void) | undefined;
+  /** SPEC: P7-OCR-004 (P7.B1a) — export the document as Word. */
+  onExportDocx?: (() => void) | undefined;
+  /** SPEC: P7-OCR-007 (P7.B4) — export the document as HTML. */
+  onExportHtml?: (() => void) | undefined;
+  /** SPEC: P7-OCR-008 (P7.B5) — export detected tables as a workbook. */
+  onExportXlsx?: (() => void) | undefined;
+  /** SPEC: P7-OCR-010 (P7.C2a) — open the compress dialog. */
+  onCompress?: (() => void) | undefined;
+  /** SPEC: P6-SEC-005 (P6.B1a) — open the certificate-signing dialog. */
+  onSign?: (() => void) | undefined;
+  /** SPEC: P6-SEC-011 (P6.D2b) — open the find-and-redact dialog. */
+  onFindRedact?: (() => void) | undefined;
   /** SPEC: P4-EDIT-008 — open the background dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBackground?: (() => void) | undefined;
@@ -47,6 +69,10 @@ export interface ZoomToolbarProps {
   /** SPEC: P4-EDIT-012 — open the Bates-numbering dialog (when a doc is open).
    *  `undefined` (no document loaded) hides the button. */
   onBates?: (() => void) | undefined;
+  /** Open the third-party licence list. Unlike every other entry here this is
+   *  not gated on a document: the attribution a binary distribution owes is
+   *  owed whether or not a file happens to be open. */
+  onLicences?: (() => void) | undefined;
 }
 
 export function ZoomToolbar({
@@ -55,10 +81,23 @@ export function ZoomToolbar({
   onMerge,
   onInsertFromPdf,
   onWatermark,
+  onProtect,
+  onClean,
+  onOcr,
+  onExportText,
+  onExportImages,
+  onExportDocx,
+  onExportHtml,
+  onExportXlsx,
+  onCompress,
+  onSign,
+  onFindRedact,
+  onUnlock,
   onBackground,
   onHeaderFooter,
   onPageNumbers,
   onBates,
+  onLicences,
 }: ZoomToolbarProps = {}) {
   const zoom = useViewStore((s) => s.zoom);
   const fitMode = useViewStore((s) => s.fitMode);
@@ -228,6 +267,138 @@ export function ZoomToolbar({
         </button>
       ) : null}
 
+      {onProtect ? (
+        <button
+          type="button"
+          onClick={onProtect}
+          title="Write a password-protected copy (AES-256)"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Protect…
+        </button>
+      ) : null}
+
+      {onUnlock ? (
+        <button
+          type="button"
+          onClick={onUnlock}
+          title="Write a copy with the password protection removed"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Unlock…
+        </button>
+      ) : null}
+
+      {onSign ? (
+        <button
+          type="button"
+          onClick={onSign}
+          title="Write a copy signed with a certificate"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Sign…
+        </button>
+      ) : null}
+
+      {onFindRedact ? (
+        <button
+          type="button"
+          onClick={onFindRedact}
+          title="Search for sensitive patterns and choose what to redact"
+          className="rounded px-2 py-0.5 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+        >
+          Find &amp; Redact…
+        </button>
+      ) : null}
+
+      {onClean ? (
+        <button
+          type="button"
+          onClick={onClean}
+          title="Remove metadata, comments, attachments and other non-visible data"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Clean…
+        </button>
+      ) : null}
+
+      {onOcr ? (
+        <button
+          type="button"
+          onClick={onOcr}
+          title="Read the text in a scanned page so it can be searched and selected"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Read text…
+        </button>
+      ) : null}
+
+      {onExportText ? (
+        <button
+          type="button"
+          onClick={onExportText}
+          title="Save the document's text as a .txt file"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export text…
+        </button>
+      ) : null}
+
+      {onExportImages ? (
+        <button
+          type="button"
+          onClick={onExportImages}
+          title="Save each page as a PNG, JPG, TIFF or WebP image"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export images…
+        </button>
+      ) : null}
+
+      {onExportDocx ? (
+        <button
+          type="button"
+          onClick={onExportDocx}
+          title="Save this PDF as a Word document"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export to Word…
+        </button>
+      ) : null}
+
+      {onExportHtml ? (
+        <button
+          type="button"
+          onClick={onExportHtml}
+          title="Save this PDF as a web page, with its images in a folder beside it"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export to HTML…
+        </button>
+      ) : null}
+
+      {onExportXlsx ? (
+        <button
+          type="button"
+          onClick={onExportXlsx}
+          title="Save the tables in this PDF as an Excel workbook"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Export to Excel…
+        </button>
+      ) : null}
+
+      {onCompress ? (
+        <button
+          type="button"
+          onClick={onCompress}
+          title="Save a smaller copy of this PDF"
+          className="rounded px-2 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          Compress…
+        </button>
+      ) : null}
+
       {onBackground ? (
         <button
           type="button"
@@ -273,6 +444,16 @@ export function ZoomToolbar({
       ) : null}
 
       <span className="ml-auto text-neutral-300 dark:text-neutral-700">|</span>
+      {onLicences ? (
+        <button
+          type="button"
+          onClick={onLicences}
+          title="Open source licences for the components VibePDF is built on"
+          className="rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        >
+          Licences
+        </button>
+      ) : null}
       <label className="flex items-center gap-1" title="Theme">
         <span className="text-neutral-500 dark:text-neutral-400">Theme</span>
         <select

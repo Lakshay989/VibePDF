@@ -272,15 +272,15 @@ back by opening it, however the flatten goes.
 
 ## Cross-reader check
 
-The one thing only you can do. Open in **Acrobat**, **macOS Preview**, and a
-third reader (Okular / Sumatra / Firefox):
+The one thing only you can do. Open in **a mainstream reader**, **a platform viewer**, and a
+third reader (an independent reader / an independent reader / Firefox):
 
 - [ ] `Sample PDFs/sweep/p5-sweep-form.pdf` after filling + saving — values show, still interactive
 - [ ] `Sample PDFs/verify/p5-forms/vibepdf-verify-form-import.pdf` — filled, interactive
 - [ ] `Sample PDFs/verify/p5-forms/vibepdf-verify-form-flatten.pdf` — values baked, nothing clickable
 
 Known cosmetic limit on the flattened file: synthesized text is **top-anchored**
-in its box, not vertically centred the way Acrobat draws a live field, and `/Q`
+in its box, not vertically centred the way a mainstream reader draws a live field, and `/Q`
 alignment isn't honoured yet. Legible and inside the box. Flag it if it looks
 worse than that.
 

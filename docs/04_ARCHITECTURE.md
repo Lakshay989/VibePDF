@@ -27,13 +27,31 @@ vibepdf/
 │   │   ├── pdf/                  # Core PDF engine (PDFium wrapper)
 │   │   │   ├── document.rs       # Open, save, metadata
 │   │   │   ├── cos.rs            # lopdf object-model layer (structural edits) + annotation add_* incl. add_link (P4.C3)
+│   │   │   ├── create.rs         # New PDF from images, text, Word and HTML files: lopdf builder, image embedding (P7-OCR-009)
+│   │   │   ├── css.rs            # CSS for the HTML reader: rules, declarations, specificity, values (P7.C1c)
+│   │   │   ├── docx_read.rs      # Word (.docx) → flow model: styles, numbering, images, tracked changes (P7.C1b1); tables (C1b2)
+│   │   │   ├── flow.rs           # Flowed text → pages: line breaking, alignment, lists, embedded faces (P7.C1b1); tables (C1b2); auto tables, rules (C1c)
+│   │   │   ├── html_read.rs      # HTML → flow model: html5ever via dom_query, cascade, lists, images, tables; offline (P7.C1c)
+│   │   │   ├── font_index.rs     # System fonts by family + style, from their name tables (P7.C1b1)
+│   │   │   ├── xml_tree.rs       # Namespace-aware XML tree over quick-xml, for OOXML (P7.C1b1)
 │   │   │   ├── page.rs           # Page operations
 │   │   │   ├── text.rs           # Text editing
 │   │   │   ├── annotation.rs     # Annotations
 │   │   │   ├── xfdf.rs           # XFDF annotation import/export (P3.E1)
 │   │   │   ├── flatten.rs        # Flatten annotations into page content (P3.E2)
+│   │   │   ├── clean.rs         # Strip metadata/hidden text/comments/attachments/bookmarks/form data/embedded files (P6.D3)
 │   │   │   ├── image_xobject.rs  # PNG → Image XObject + /SMask (P3.C3b)
 │   │   │   ├── text_extract.rs   # Text-run extraction + doc font scan (live PDFium read, P4.A1/A2)
+│   │   │   ├── ocr_text_layer.rs # Invisible text over a scan: render → OCR → place (P7-OCR-001)
+│   │   │   ├── export_text.rs    # Document → plain text in reading order (P7-OCR-006)
+│   │   │   ├── export_image.rs   # Pages → PNG/JPG/TIFF/WebP at 72–600 DPI (P7-OCR-005)
+│   │   │   ├── compress.rs      # Smaller file: image recompression + stream deflation (P7-OCR-010)
+│   │   │   ├── export_docx.rs    # Document → blocks (shared) → Word: paragraphs, headings, tables, images (P7-OCR-004)
+│   │   │   ├── export_html.rs    # Same blocks → semantic HTML, images to <name>_files/ (P7-OCR-007)
+│   │   │   ├── ooxml.rs         # The ZIP container a .docx is, hand-written (P7-OCR-004)
+│   │   │   ├── table_detect.rs   # Ruled grids → tables, pure geometry (P7-OCR-004)
+│   │   │   ├── page_content.rs   # One page → runs, images, rules (shared by both exporters)
+│   │   │   ├── export_xlsx.rs    # Detected tables → Excel sheets (P7-OCR-008)
 │   │   │   ├── font_resolver.rs  # Font fallback: base-14/system check + substitute (pure, P4.A2)
 │   │   │   ├── reflow.rs         # Text-run edit (PDFium set_text, P4.A3/B1) + delete (lopdf splice, P4.B3)
 │   │   │   ├── image_extract.rs  # Locate page images (live PDFium read, P4.C2)
@@ -47,7 +65,11 @@ vibepdf/
 │   │   │   ├── form_flatten.rs   # Synthesize field appearances, bake, drop AcroForm (P5.C2)
 │   │   │   ├── render.rs         # Rasterization (for thumbnails, export)
 │   │   │   └── actor.rs          # Single-threaded document actor
-│   │   ├── ocr/                  # Tesseract pipeline
+│   │   ├── ocr/                  # Tesseract pipeline (P7)
+│   │   │   ├── engine.rs         # the only code that talks to Tesseract
+│   │   │   ├── preprocess.rs     # deskew / despeckle / upscale (P7-OCR-003)
+│   │   │   ├── languages.rs      # bundled + added language packs; the opt-in download (P7-OCR-002)
+│   │   │   └── tessdata.rs       # where the bundled language data lives
 │   │   ├── security/             # Crypto, signatures, redaction
 │   │   │   ├── encrypt.rs
 │   │   │   ├── sign.rs
@@ -132,6 +154,21 @@ indirect references — needed by reorder (P2-PAGE-002), delete ref-cleanup
 bookmarks/form-fields (P2-PAGE-008). These go through `pdf::cos` (the `lopdf`
 object model), **not** PDFium. See `docs/03` "Structural edits — `lopdf`" for
 the why.
+
+**One way in: `pdf::document::load_cos` (since 2026-10-17).** lopdf does not fail
+on a PDF it cannot decrypt — 0.36 returned the objects still encrypted, 0.42
+returns only the encryption dictionary — and callers carried on with ciphertext
+or with nothing. `load_cos(bytes, map_err)` refuses such a document with
+`NEEDS_PASSWORD` and keeps each caller's own error for real parse failures;
+`load_cos_with_password` is the same for a read that has the open password (the
+signature check, via the document's actor). `tests/lopdf_load_policy.rs` fails
+on any other loader call in production code; `security/decrypt.rs` is the one
+allowed exception, because Unlock needs the undecrypted encryption dictionary.
+Three helpers keep protected documents honest around the round trip:
+`bytes_for_cos_edit` refuses a protected document *before* an edit starts (Insert
+used to copy pages in first and refuse after), `bytes_for_cos_read` gives the
+actor's parse cache the decrypted in-memory copy the view already uses, and
+`refuse_locked_source` names a merge or background source that needs a password.
 
 **Page resize (P2-PAGE-010) also lives here, for a different reason.** Scaling a
 page's content is something PDFium *can* nominally do (`FPDFPage_TransFormWithClip`),
@@ -258,7 +295,7 @@ shared click/multi-click lifecycle is well overdue (BACKLOG).
 
 **C4b** completes the interop half: `add_measure` also attaches a rectilinear
 **`/Measure`** dict (§12.9 — `/X`/`/D`/`/A` `NumberFormat`s; `/X /C` *is* the
-calibration, units per point), so Acrobat & co. re-measure *live* against the raw
+calibration, units per point), so a mainstream reader & co. re-measure *live* against the raw
 geometry rather than trusting our baked `/Contents` label. The `/Measure` dict is
 also how the calibration **persists**: `read_measure_calibration` reads it back,
 and `use-calibration-sync` re-seeds `measure-store` on reopen (guarded so it never
@@ -298,7 +335,7 @@ flat (orphan- and cycle-safe); the sidebar renders the root row + nested replies
 an inline composer, and filters operate on roots only.
 
 **XFDF interchange (P3.E1, P3-ANN-010)** lives in **`pdf/xfdf.rs`** — the one place
-that maps between annotation dicts and the XFDF (XML) sidecar Acrobat uses to ship
+that maps between annotation dicts and the XFDF (XML) sidecar a mainstream reader uses to ship
 markup separately from the PDF. **Export** (`annotations_to_xfdf`, a read-only
 `ExportAnnotations` actor query that writes the file like `extract_pages` writes
 `dest`) walks the raw dicts and emits one element per `/Subtype` with full geometry
@@ -317,6 +354,28 @@ on output, clean failure on malformed input. Commands: `pdf_export_annotations` 
 `pdf_import_annotations`; the frontend `src/ipc/interchange.ts` wrappers drive the
 `AnnotationPanel` header's ⬆/⬇ actions through the native save/open dialogs. **FDF
 (the spec's other half) is deferred to E1b.**
+
+**Cleaning (P6.D3, P6-SEC-012)** lives in **`pdf/clean.rs`** — another COS
+transform, on bytes, with a `CleanOptions` of seven independent toggles and a
+`CleanReport` of what each removed. Two decisions are worth knowing before
+touching it:
+
+- **Every removal deletes the object, not just the reference.** `dict.remove(key)`
+  leaves an orphan in the saved file holding the same data, which is a clean that
+  reports success and ships the author's name. `clean.rs` pairs every detach with
+  a `doc.objects.remove(&id)`, and `tests/clean.rs` asserts on marker strings
+  being absent from the saved bytes — walking objects and decompressing streams,
+  because lopdf compresses content on save and a raw byte search alone would
+  report a false pass.
+- **Metadata lives in two places.** `/Info` and the catalog's XMP `/Metadata`
+  stream (plus, rarely, page-level `/Metadata`). They disagree in the wild and
+  readers differ on which they trust, so all of them go together.
+
+Unlike protect/unlock (P6.C1/C2, which export a copy), cleaning is an **in-place
+edit** through the actor: `clean_into` mirrors `form_import::import_into`,
+returning a `RestoreDocEdit` byte-snapshot inverse alongside the report, because
+`Edit::apply` can return only the inverse and the counts are the sole visible
+result of the operation.
 
 **Flattening (P3.E2, P3-ANN-011)** lives in **`pdf/flatten.rs`** — a COS transform
 (not PDFium's native `FPDFPage_Flatten`, which would need a shared live handle +
@@ -519,7 +578,7 @@ reference **to an array** is now dereferenced and flattened by the content appen
 (`existing_contents`), and `save_document` threads the document's open password into the round-trip
 verification — before this, **encrypted documents could not be saved at all** (PDFium preserves
 encryption on save; the verify re-opened the temp file with no password and failed). Save now
-succeeds and the copy stays encrypted, pinned by `tests/hardening.rs`.
+succeeds and the copy stays encrypted, pinned by `tests/hardening.rs`. **Signed documents are the one exception to the whole-file rewrite (P6-SEC-006).** When PDFium reports signatures at open, the actor keeps the bytes it opened, and `save_document_onto` appends only the objects that differ from them as an incremental update (`pdf/incremental_save.rs`) — every signed byte stays where it was, so the signature keeps verifying for the revision it signed and readers report the later change. PDFium still makes every edit; the module diffs PDFium's rewrite against the signed file object by object, which works because PDFium keeps object numbers across a rewrite (streams compare by decoded content, since a rewrite re-encodes them). A signed *and* password-protected document refuses to save rather than break its signature.
 
 **Decoration identity (P4.HF2).** Every Track-D fragment is wrapped in a marked-content block —
 `/VibePDF << /Kind (watermark|background|header-footer) /Id (uuid) >> BDC … EMC`
@@ -709,7 +768,10 @@ Most commands take a `DocumentId` and route to that document's actor (the
 actor owns the bytes and serializes mutations). A few operations don't fit
 that shape: they read **one or more files from disk that need not be open**
 and produce a **new** file, mutating nothing. **Merge** (`pdf_merge_documents`,
-P2-PAGE-008) is the first.
+P2-PAGE-008) is the first; **Create PDF** (`pdf_create_from_files`,
+P7-OCR-009) builds a document from images and text with lopdf, then hands the
+bytes to the same verified save path. Create's entry point is the app header,
+not the viewer toolbar, because it needs no open document.
 
 These run as **standalone commands** that take file paths instead of a
 `DocumentId`. They still obey the two invariants that matter:
@@ -782,7 +844,7 @@ cache *derived views* or *previews*.
 
 ## WebView quirks
 
-The frontend runs in the OS-native webview (Tauri 2), **not** Chromium — so it
+The frontend runs in the OS-native webview (Tauri 2), **not** a major browser — so it
 is not a Chrome-equivalent. Behaviour differs per platform, and on macOS the
 webview is **WKWebView**.
 
@@ -824,12 +886,18 @@ IPC access, so it runs under a strict CSP set in `src-tauri/tauri.conf.json`
 `default-src 'self'` with the minimum relaxations the frontend actually needs,
 each earned by a specific resource:
 
-- `script-src 'self' 'wasm-unsafe-eval'` — our bundle, plus PDF.js v5's WASM
-  decoders (OpenJPEG/JBIG2 images, QuickJS PDF-function eval). `'wasm-unsafe-eval'`
-  is strictly narrower than `'unsafe-eval'` (WASM compile only, no JS `eval`).
+- `script-src 'self' 'wasm-unsafe-eval'` — our bundle, plus PDF.js's WASM
+  image decoders served from `/pdfjs/wasm/`: `jbig2.wasm` (JBIG2 and CCITT
+  fax), `openjpeg.wasm` (JPEG 2000) and `qcms_bg.wasm` (ICC colour), with their
+  JS fallbacks. `'wasm-unsafe-eval'` is strictly narrower than `'unsafe-eval'`
+  (WASM compile only, no JS `eval`). The same package's `quickjs-eval.*` is
+  PDF.js's *document-scripting* sandbox, loaded only by `pdf.sandbox.mjs`; it is
+  deliberately not served (`scripts/copy-pdfjs-worker.mjs`). PostScript
+  functions don't need it — the worker parses them itself.
 - `worker-src 'self'` — the PDF.js worker is a same-origin static asset
   (`/pdfjs/pdf.worker.min.mjs`), not a blob worker.
-- `connect-src 'self' ipc: http://ipc.localhost` — same-origin cmap/font fetches
+- `connect-src 'self' ipc: http://ipc.localhost` — same-origin cmap, font,
+  decoder and ICC-profile fetches (`pdfjsAssetUrls` in `src/view/render-page.ts`)
   plus Tauri IPC.
 - `img-src 'self' blob: data:` — thumbnail `<img>`s use `blob:` object URLs.
 - `style-src 'self' 'unsafe-inline'` — Tailwind + React inline `style={}` attrs.
@@ -862,7 +930,7 @@ PDF.js handles rendering in the WebView for the interactive canvas. PDFium handl
 
 **Important:** PDF.js never writes. It is purely the view layer. This is non-negotiable; sharing write capability between two PDF engines causes drift.
 
-**Edit-preview pipeline.** Edits mutate the actor's in-memory PDFium document, but PDF.js renders from a separate copy — so an edit wouldn't show until reload. The bridge is a per-document **edit epoch** (`state/edit-epoch-store.ts`): every successful edit / undo / redo bumps it. The main view (`PdfViewer`) and the thumbnails subscribe; on a bump the view reloads PDF.js from the actor's *live* bytes via `pdf_get_bytes` (a read-only `save_to_bytes`), and the thumbnails invalidate + re-render. The reload swaps the new document in before destroying the old (no blank) and restores the current page. This is a full re-parse per edit for now — correct and uniform across all edit types; an incremental/single-page fast path is deferred (BACKLOG). It keeps the "PDF.js never writes" rule intact: the actor still owns every byte; the frontend only *reads* the current state.
+**Edit-preview pipeline.** Edits mutate the actor's in-memory PDFium document, but PDF.js renders from a separate copy — so an edit wouldn't show until reload. The bridge is a per-document **edit epoch** (`state/edit-epoch-store.ts`): every successful edit / undo / redo bumps it. The main view (`PdfViewer`) and the thumbnails subscribe; on a bump the view reloads PDF.js from the actor's *live* bytes via `pdf_get_bytes` (a read-only `save_to_bytes`), and the thumbnails invalidate + re-render. **Encrypted documents (P1-VIEW-003):** PDF.js has no password and must not be given one — the open password lives only in the prompt — so for a document opened with a password `pdf_get_bytes` serves the same bytes with the encryption removed (`GetViewBytes` → `remove_security_for_view`, a raw `FPDF_SaveAsCopy(FPDF_REMOVE_SECURITY)`), in memory only. A pristine encrypted document falls back from disk to `pdf_get_bytes` when PDF.js raises `PasswordException` (`view/load-view-document.ts`). Everything else keeps the protection: `save_document` writes it, and `GetBytes` — used by Protect, Unlock, Sign and Find — returns the protected document. The reload swaps the new document in before destroying the old (no blank) and restores the current page. This is a full re-parse per edit for now — correct and uniform across all edit types; an incremental/single-page fast path is deferred (BACKLOG). It keeps the "PDF.js never writes" rule intact: the actor still owns every byte; the frontend only *reads* the current state.
 
 ---
 

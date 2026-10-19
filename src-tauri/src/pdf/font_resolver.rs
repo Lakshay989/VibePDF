@@ -246,7 +246,7 @@ pub fn covering_font_bytes(text: &str) -> Option<Vec<u8>> {
 }
 
 /// Ordered candidate paths for a broad-Unicode system face, most-covering first.
-fn broad_coverage_font_paths() -> Vec<std::path::PathBuf> {
+pub(crate) fn broad_coverage_font_paths() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
     let mut paths = Vec::new();
     #[cfg(target_os = "macos")]

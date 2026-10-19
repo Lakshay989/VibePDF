@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::error::CommandError;
 use crate::pdf::actor::DocumentActorHandle;
+use crate::pdf::clean::{CleanOptions, CleanOutcome};
 use crate::pdf::cos::{AnnotationInfo, FreeTextData, MeasureCalibration, NoteData, TextBoxInfo};
 use crate::pdf::font_resolver::FontReport;
 use crate::pdf::form::{
@@ -13,6 +14,14 @@ use crate::pdf::form::{
 use crate::pdf::form_data::ExportFormat;
 use crate::pdf::form_import::ImportOutcome;
 use crate::pdf::image_extract::ImageInfo;
+use crate::ocr::preprocess::PreprocessOptions;
+use crate::pdf::compress::{CompressLevel, CompressReport};
+use crate::pdf::export_docx::DocxExportSummary;
+use crate::pdf::export_html::HtmlExportSummary;
+use crate::pdf::export_xlsx::XlsxExportSummary;
+use crate::pdf::export_image::{ImageExportFormat, ImageExportOptions, ImageExportSummary};
+use crate::pdf::export_text::TextExportSummary;
+use crate::pdf::ocr_text_layer::{OcrOptions, OcrSummary};
 use crate::pdf::text_extract::TextRun;
 use crate::pdf::document::{open_document_metadata, SaveOutcome};
 use crate::pdf::merge::merge_documents;
@@ -21,6 +30,9 @@ use crate::pdf::split::{SplitMode, SplitOutcome};
 use crate::pdf::background::BackgroundKind;
 use crate::pdf::undo::HistoryState;
 use crate::pdf::watermark::WatermarkKind;
+use crate::security::encrypt::DocumentPermissions;
+use crate::security::redact::{RedactOptions, RedactOutcome};
+use crate::security::verify::SignatureReport;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -1213,6 +1225,39 @@ pub async fn pdf_flatten_form(
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
 }
 
+/// SPEC: P6-SEC-012 (P6.D3) — remove everything `opts` names from the open
+/// document: metadata, hidden text, comments, attachments, bookmarks, form
+/// data, embedded files.
+///
+/// **In place, not on export**, unlike P6.C1/C2. Cleaning is an edit to the
+/// document you are looking at — you want to see the comments disappear, and
+/// you want Undo if you cleaned more than you meant to. The inverse is a
+/// pre-clean byte snapshot, so undo works until the file is saved and reopened.
+///
+/// Returns the per-category counts: the page is unchanged by design, so without
+/// them a clean is indistinguishable from having done nothing.
+#[tauri::command]
+pub async fn pdf_clean_document(
+    state: State<'_, AppState>,
+    id: String,
+    options: CleanOptions,
+) -> Result<CleanOutcome, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.clean_document_request(options)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
 /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `box_id` on `page`
 /// (0-based). Undoable; runs on the actor.
 #[tauri::command]
@@ -1444,6 +1489,7 @@ pub async fn pdf_add_pdf_background(
 ) -> Result<HistoryState, CommandError> {
     let source = std::fs::read(&source_path)
         .map_err(|e| CommandError::InvalidInput(format!("cannot read {source_path}: {e}")))?;
+    crate::pdf::document::refuse_locked_source(Path::new(&source_path), &source)?;
     let page = usize::try_from(source_page)
         .map_err(|_| CommandError::InvalidInput(format!("negative source page: {source_page}")))?;
     run_background(&state, &id, pages, BackgroundKind::PdfPage { source, page }, opacity).await
@@ -1484,6 +1530,241 @@ pub async fn pdf_add_header_footer(
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-006 (P7.B3) — write the document's text to `path` as UTF-8, in
+/// reading order. `pages` empty means the whole document. The PDF is not
+/// modified.
+#[tauri::command]
+pub async fn pdf_export_text(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<TextExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_text_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-004 (P7.B1a) — write the document to `path` as a Word `.docx`,
+/// preserving reading order, bold/italic, headings and images. `pages` empty
+/// means the whole document. The PDF is not modified.
+#[tauri::command]
+pub async fn pdf_export_docx(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<DocxExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_docx_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-007 (P7.B4) — write the document to `path` as semantic HTML,
+/// its images to `<name>_files/` beside it. `pages` empty means the whole
+/// document. The PDF is not modified.
+#[tauri::command]
+pub async fn pdf_export_html(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<HtmlExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_html_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-010 (P7.C2a) — write a smaller copy of the document to `path`
+/// at `level` (`low`, `medium` or `high`), and report the before/after sizes.
+///
+/// The open document is **not** modified: image recompression is lossy, so the
+/// result is a new file rather than an undoable edit.
+#[tauri::command]
+pub async fn pdf_compress_document(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    level: String,
+) -> Result<CompressReport, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let level = CompressLevel::parse(&level)?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.compress_request(level, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-008 (P7.B5) — write the document's detected tables to `path` as
+/// an Excel `.xlsx`, one sheet a table. `pages` empty means the whole document.
+///
+/// When no tables are found the reply's `tables` is zero and **no file is
+/// written** — the caller warns. The PDF is not modified.
+#[tauri::command]
+pub async fn pdf_export_xlsx(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    pages: Vec<i32>,
+) -> Result<XlsxExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_xlsx_request(pages, PathBuf::from(path))?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-005 (P7.B2) — render pages into `dest_dir` as image files
+/// named `{stem}-{n:03}.{ext}`, where `n` is the page's own 1-based number.
+/// `pages` empty means the whole document. The PDF is not modified.
+///
+/// `format` is one of `png`, `jpeg`, `tiff`, `webp`; `dpi` must be within
+/// 72–600 (the spec's range) and `quality` applies to JPEG only.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_export_images(
+    state: State<'_, AppState>,
+    id: String,
+    dest_dir: String,
+    stem: String,
+    pages: Vec<i32>,
+    format: String,
+    dpi: f32,
+    quality: u8,
+) -> Result<ImageExportSummary, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let options = ImageExportOptions {
+        format: ImageExportFormat::parse(&format)?,
+        dpi,
+        quality,
+    };
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.export_images_request(pages, PathBuf::from(dest_dir), stem, options)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-001 (P7.A2) — OCR the 0-based `pages` (all pages when empty)
+/// and write what Tesseract read as invisible text over the picture of it, so
+/// the page becomes searchable. One undoable edit; replies with what was found.
+///
+/// `dpi`, `min_confidence` and the three preprocessing switches are the
+/// spec's configurable pipeline (P7-OCR-003); omitting them uses the defaults.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_ocr_run(
+    state: State<'_, AppState>,
+    id: String,
+    pages: Vec<i32>,
+    language: Option<String>,
+    dpi: Option<f32>,
+    min_confidence: Option<f32>,
+    deskew: Option<bool>,
+    denoise: Option<bool>,
+    min_dpi: Option<u32>,
+) -> Result<OcrRunReply, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let defaults = OcrOptions::default();
+    let options = OcrOptions {
+        language: language.unwrap_or(defaults.language),
+        dpi: dpi.unwrap_or(defaults.dpi),
+        min_confidence: min_confidence.unwrap_or(defaults.min_confidence),
+        preprocess: PreprocessOptions {
+            deskew: deskew.unwrap_or(defaults.preprocess.deskew),
+            denoise: denoise.unwrap_or(defaults.preprocess.denoise),
+            min_dpi: min_dpi.unwrap_or(defaults.preprocess.min_dpi),
+        },
+    };
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        let pages = if pages.is_empty() {
+            (0..i32::try_from(handle.metadata().page_count).unwrap_or(i32::MAX)).collect()
+        } else {
+            pages
+        };
+        handle.run_ocr_request(pages, options)?
+    };
+    let (summary, history) = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+    Ok(OcrRunReply { summary, history })
+}
+
+/// Reply of [`pdf_ocr_run`]: what OCR found, plus the undo state the edit left.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrRunReply {
+    pub summary: OcrSummary,
+    pub history: HistoryState,
 }
 
 /// SPEC: P4-EDIT-011 (P4.D4) — stamp a page number in `format` (from `start`) in
@@ -1784,6 +2065,411 @@ pub async fn pdf_add_image_stamp(
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
         handle.add_image_stamp_request(page, x, y, height, image, text, opacity)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P6-SEC-007 (P6.C1) — write a password-protected copy of the open
+/// document to `path`, with AES-256 encryption.
+///
+/// **Protect-on-export, not protect-in-place.** The open document is untouched:
+/// this writes an encrypted copy and leaves the actor's state, undo history and
+/// current password exactly as they were. Encrypting in place would mean the
+/// actor holding a document whose open-password had silently changed, every
+/// later render needing it, and undo having to restore the old one — three ways
+/// to lock someone out of their own file, for no gain the spec line asks for.
+///
+/// The output is re-opened with the password before this returns, so a file
+/// that cannot be opened is reported here rather than discovered later.
+#[tauri::command]
+pub async fn pdf_protect(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    user_password: Option<String>,
+    owner_password: Option<String>,
+    permissions: Option<DocumentPermissions>,
+) -> Result<(), CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    // Passwords stay in this frame. They are never logged, never put into a
+    // `CommandError` message, and never reach the actor — which logs its path
+    // on every message.
+    let opts = crate::security::encrypt::EncryptOptions {
+        user_password,
+        owner_password,
+        // SPEC: P6-SEC-009 — an omitted set restricts nothing, which is what a
+        // caller that predates C3 means and what `Default` gives.
+        permissions: permissions.unwrap_or_default(),
+    };
+    let encrypted = crate::security::encrypt::encrypt_document(&bytes, &opts)?;
+
+    let out = PathBuf::from(&path);
+    std::fs::write(&out, &encrypted)
+        .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
+
+    // The round-trip rule, with the password the file now needs. An owner-only
+    // document opens with none, so try that first and fall back.
+    let open_with = opts_open_password(&opts);
+    if let Err(e) = crate::pdf::document::open_pdf(&out, open_with) {
+        let _ = std::fs::remove_file(&out);
+        return Err(CommandError::PdfError(format!(
+            "the protected file could not be re-opened, so it was not kept: {e}"
+        )));
+    }
+    Ok(())
+}
+
+/// SPEC: P6-SEC-011 (P6.D2) — find pattern matches. **Changes nothing.**
+///
+/// The spec requires the user to confirm before anything is applied, so finding
+/// and applying are two commands. One call that redacted what it found would
+/// remove exactly the review step the requirement exists for, and there would
+/// be no way for a caller to get it back.
+///
+/// Entries with `unreadable` set are not matches — they mark pages that could
+/// not be searched, so "we found nothing here" and "we could not look here"
+/// stay distinguishable.
+#[tauri::command]
+pub async fn pdf_find_redaction_matches(
+    state: State<'_, AppState>,
+    id: String,
+    patterns: crate::security::patterns::PatternSet,
+) -> Result<Vec<crate::security::redact::MatchHit>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    // Searching ciphertext finds nothing, and "Nothing matched" on a protected
+    // document would read as "this document holds no SSNs".
+    crate::pdf::document::refuse_if_protected(&bytes)?;
+    crate::security::redact::find_matches(&bytes, &patterns)
+}
+
+/// SPEC: P6-SEC-010 (P6.D1c) — remove the content inside `rect` on `page`.
+///
+/// `rect` is `[x0, y0, x1, y1]` in PDF points. Undoable in-session, and
+/// **permanent once the file is saved and reopened** — which is the point of
+/// redaction, not a shortcoming. The UI says so before applying.
+#[tauri::command]
+pub async fn pdf_redact_region(
+    state: State<'_, AppState>,
+    id: String,
+    page: usize,
+    rect: [f32; 4],
+    options: RedactOptions,
+) -> Result<RedactOutcome, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.redact_region_request(page, rect, options)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P6-SEC-004 (P6.A5b) — the empty signature fields this document offers.
+///
+/// Read-only. Reads the file from disk for the same reason verification does:
+/// the names have to describe the document a signature will be written into,
+/// and the actor's bytes are a re-serialisation of it.
+#[tauri::command]
+pub async fn pdf_unsigned_signature_fields(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<String>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+    let path = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?
+            .path()
+            .clone()
+    };
+    let bytes = std::fs::read(&path).map_err(|e| {
+        CommandError::Internal(format!("could not read {}: {e}", path.display()))
+    })?;
+    crate::security::sign::unsigned_signature_fields(&bytes)
+}
+
+/// SPEC: P6-SEC-006 (P6.B2b) — verify every signature on the open document.
+///
+/// **Reads the file from disk, not the actor's bytes.** The actor produces
+/// bytes by asking `PDFium` to re-serialise, which rewrites every offset — and
+/// a signature covers exact offsets. Verifying that would report every
+/// signature as broken, which is the same trap that made signing an export in
+/// P6.B1a, arriving from the other direction.
+///
+/// So this reports on the document **as saved**. Unsaved edits are not
+/// reflected, and that is the truthful thing to report: the signature covers
+/// what is on disk. (Saving would break it regardless — see `pdf_sign_document`.)
+///
+/// Read-only, and never fails the open: a document whose signatures cannot be
+/// read is still a document.
+#[tauri::command]
+pub async fn pdf_verify_signatures(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<SignatureReport>, CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let path = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?
+            .path()
+            .clone()
+    };
+
+    let bytes = std::fs::read(&path).map_err(|e| {
+        CommandError::Internal(format!("could not read {}: {e}", path.display()))
+    })?;
+
+    // Only a protected file needs the password its document was opened with,
+    // and only the actor holds that. Everything else is checked here, as it
+    // always was: on the actor, a large file's parse would queue ahead of the
+    // renders the view is waiting for.
+    let now = std::time::SystemTime::now();
+    if !crate::pdf::document::declares_encryption(&bytes) {
+        return crate::security::verify::verify_signatures(&bytes, now);
+    }
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?
+            .verify_signatures_request(bytes, now)?
+    };
+    rx.await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P6-SEC-005 (P6.B1a) — write a certificate-signed copy of the open
+/// document to `path`.
+///
+/// **Sign-on-export, and it has to be.** The actor hands out bytes by asking
+/// `PDFium` to re-serialise the document, which rewrites every object and every
+/// offset. A signature covers exact bytes, so signing in place would produce a
+/// document that the very next Save silently un-signs — the worst possible
+/// failure for this feature, because the file would still *look* signed until
+/// somebody checked. The signed copy therefore leaves this command as a file
+/// and never goes back into the actor.
+///
+/// `certificate` is a path rather than bytes: private key material has no
+/// reason to cross the IPC boundary, and the backend can read the file itself.
+/// Neither the key nor `password` is logged or put into a `CommandError`.
+#[tauri::command]
+pub async fn pdf_sign_document(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    certificate: String,
+    password: String,
+    details: crate::security::sign::SignatureDetails,
+) -> Result<(), CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    // Read the certificate here rather than in the frontend. The error names the
+    // file, never its contents.
+    let pfx = std::fs::read(&certificate).map_err(|e| {
+        CommandError::InvalidInput(format!("could not read the certificate file: {e}"))
+    })?;
+
+    let spec = details.into_spec("Signature1");
+    // lopdf would append the signature to a protected file in plaintext, and
+    // the round-trip below would then refuse it with a message about reopening.
+    crate::pdf::document::refuse_if_protected(&bytes)?;
+    let signed = crate::security::sign::sign_document(&bytes, &spec, &pfx, &password)?;
+
+    let out = PathBuf::from(&path);
+    std::fs::write(&out, &signed)
+        .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
+
+    // The round-trip rule. A signature is worth nothing if the file it is in
+    // will not open, and finding that out here is better than shipping it.
+    if let Err(e) = crate::pdf::document::open_pdf(&out, None) {
+        let _ = std::fs::remove_file(&out);
+        return Err(CommandError::PdfError(format!(
+            "the signed file could not be re-opened, so it was not kept: {e}"
+        )));
+    }
+    Ok(())
+}
+
+/// SPEC: P6-SEC-008 (P6.C2) — write an unprotected copy of the open document.
+///
+/// The mirror of `pdf_protect`, and an export for the same reasons. `password`
+/// is the document's owner password; see `security::decrypt` for why that is
+/// what `lopdf` enforces for AES-256.
+///
+/// The output is re-opened **with no password** before this returns. That is
+/// the whole assertion: a file that is still encrypted and a file that is not
+/// look identical from here, and only a reader can tell them apart.
+#[tauri::command]
+pub async fn pdf_remove_protection(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    password: String,
+) -> Result<(), CommandError> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.get_bytes_request()?
+    };
+    let bytes = rx
+        .await
+        .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))??;
+
+    let unlocked = crate::security::decrypt::remove_protection(&bytes, &password)?;
+
+    let out = PathBuf::from(&path);
+    std::fs::write(&out, &unlocked)
+        .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
+
+    if let Err(e) = crate::pdf::document::open_pdf(&out, None) {
+        let _ = std::fs::remove_file(&out);
+        return Err(CommandError::PdfError(format!(
+            "the unlocked file still needs a password, so it was not kept: {e}"
+        )));
+    }
+    Ok(())
+}
+
+/// Which password re-opens the file we just wrote: the user password when there
+/// is one, otherwise none (an owner-only document opens freely).
+fn opts_open_password(opts: &crate::security::encrypt::EncryptOptions) -> Option<&str> {
+    opts.user_password.as_deref().filter(|p| !p.is_empty())
+}
+
+/// SPEC: P6-SEC-004 (P6.A5a) — place a stored signature on the page as a
+/// `/Stamp`, aspect-correct around `(x, y)` at `height` points tall.
+///
+/// Takes a library **id**, not a path. Only the command layer knows where the
+/// library lives (P6.A1), and shipping ~30 KB of PNG out to the frontend purely
+/// to hand it straight back would cost 4× that as JSON for no benefit.
+///
+/// Reuses `ImageStampEdit` wholesale: the PNG's alpha becomes an `/SMask`, so a
+/// transparent signature composites rather than arriving in a white box. It
+/// reads back as kind `"stamp"` and inherits list/delete/undo.
+///
+/// The library lock is taken and dropped before the actor map is touched, so the
+/// two locks are never held at the same time.
+///
+/// This is the stamp half of P6-SEC-004. The other half — writing into an
+/// existing `/Sig` field as a PKCS#7 signature — needs certificate signing
+/// (P6.B1) and is not implemented; the frontend declines that case rather than
+/// stamping a picture over a signature field, which would look signed without
+/// being signed.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn pdf_place_signature(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    page: i32,
+    x: f32,
+    y: f32,
+    height: f32,
+    signature_id: String,
+    opacity: f32,
+) -> Result<HistoryState, CommandError> {
+    if page < 0 {
+        return Err(CommandError::InvalidInput(format!("negative page index: {page}")));
+    }
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|_| CommandError::InvalidInput(format!("not a UUID: {id}")))?;
+
+    let png = {
+        let dir = crate::commands::signatures::library_dir(&app)?;
+        let _guard = state
+            .signatures_lock
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("signatures lock poisoned: {e}")))?;
+        crate::settings::signatures::bytes(&dir, &signature_id)?
+    };
+
+    let rx = {
+        let guard = state
+            .actors
+            .lock()
+            .map_err(|e| CommandError::Internal(format!("actor map poisoned: {e}")))?;
+        let handle = guard
+            .get(&uuid)
+            .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
+        handle.add_image_stamp_request(page, x, y, height, png, None, opacity)?
     };
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
@@ -2237,6 +2923,11 @@ pub async fn pdf_extract_pages(
 /// every edit — slow enough on large files that the reload never landed and
 /// edits silently failed to appear (P4.HF28). Raw bytes are ~1× overhead.
 /// Read-only — no mutation, no dirty change.
+///
+/// SPEC: P1-VIEW-003 — these are the bytes PDF.js renders, so a document opened
+/// with a password is served with its encryption removed: the view layer has no
+/// password. Commands that operate on the document itself use
+/// `get_bytes_request`, which keeps the protection.
 #[tauri::command]
 pub async fn pdf_get_bytes(
     state: State<'_, AppState>,
@@ -2253,7 +2944,7 @@ pub async fn pdf_get_bytes(
         let handle = guard
             .get(&uuid)
             .ok_or_else(|| CommandError::NotFound(format!("document {id}")))?;
-        handle.get_bytes_request()?
+        handle.get_view_bytes_request()?
     };
 
     let bytes = rx
@@ -2296,6 +2987,26 @@ pub async fn pdf_split_document(
 
     rx.await
         .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+}
+
+/// SPEC: P7-OCR-009 (P7.C1a) — create a new PDF at `dest` from image and
+/// plain-text files, in the order given. Standalone, like merge: it reads files
+/// from disk and needs no open document. `page_size` is `a4`, `letter` or
+/// `image`. Runs on a `spawn_blocking` thread.
+#[tauri::command]
+pub async fn pdf_create_from_files(
+    sources: Vec<String>,
+    dest: String,
+    page_size: crate::pdf::create::PageSize,
+) -> Result<crate::pdf::create::CreateSummary, CommandError> {
+    if dest.trim().is_empty() {
+        return Err(CommandError::InvalidInput("no output file".into()));
+    }
+    let sources: Vec<PathBuf> = sources.into_iter().map(PathBuf::from).collect();
+    let dest = PathBuf::from(dest);
+    tokio::task::spawn_blocking(move || crate::pdf::create::create_pdf_from_files(&sources, &dest, page_size))
+        .await
+        .map_err(|e| CommandError::Internal(format!("create task panicked: {e}")))?
 }
 
 /// SPEC: P2-PAGE-008 (partial) — merge `paths` (≥ 2, in order) into a new PDF

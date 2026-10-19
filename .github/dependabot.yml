@@ -1,0 +1,70 @@
+# Dependabot version updates.
+#
+# Security *alerts* and automatic security fixes are a repository setting, not
+# this file — this configures the routine "a newer version exists" PRs.
+#
+# Everything is grouped and weekly on purpose. Three ecosystems updating
+# individually would open a dozen PRs a week on a repository whose CI runs on
+# macOS, and the failure mode of dependency automation is that it becomes noise
+# people close without reading. One PR per ecosystem per week stays readable.
+version: 2
+
+updates:
+  # The actions themselves are pinned by commit SHA in the workflows (a tag is
+  # mutable, so `@v4` is a trust decision renewed on every run). Dependabot
+  # understands SHA pins and will bump the SHA and the trailing version comment
+  # together — which is the only sustainable way to keep pins current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps land together; a major gets its own PR, because
+      # that is the one where the changelog actually has to be read.
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Pinned deliberately: the render golden in tests/fixtures/golden/ was
+      # produced against this PDF.js line, and a version bump shifts
+      # anti-aliasing. Upgrade intentionally, then re-bless the golden.
+      - dependency-name: pdfjs-dist
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      # The RustCrypto crates move as a set and are version-coupled to each
+      # other; splitting them across PRs produces a tree that will not build.
+      rustcrypto:
+        patterns:
+          - cms
+          - x509-cert
+          - rsa
+          - sha1
+          - sha2
+          - der
+          - const-oid
+          - pkcs12
+          - pkcs5
+          - pkcs8
+          - cbc
+          - des
+          - aes
+          - hmac
+          - digest

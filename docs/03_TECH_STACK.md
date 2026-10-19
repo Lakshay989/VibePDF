@@ -51,7 +51,7 @@ Every choice here has a reason. If Claude wants to deviate, the reason needs to 
 
 ## PDF mutation — PDFium via `pdfium-render` (Rust)
 
-**Why:** Google PDFium is the engine inside Chromium. BSD-licensed. C++ at its core, with mature Rust bindings (`pdfium-render`). Supports the full surface area we need: text editing, annotation, forms, signatures, redaction.
+**Why:** Google PDFium is the engine inside a major browser. BSD-licensed. C++ at its core, with mature Rust bindings (`pdfium-render`). Supports the full surface area we need: text editing, annotation, forms, signatures, redaction.
 
 **Specifically why not the alternatives:**
 
@@ -98,21 +98,120 @@ Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic,
 - **`subsetter` (0.1, MIT/Apache, zero-dependency)** — the Typst team's PDF font subsetter. `Profile::pdf(&glyph_ids)` keeps only the used glyphs *and preserves original glyph-ids + the `cmap`*, so PDFium's Unicode→GID lookup still resolves on the subset (verified: the same footer is now **60 KB**, ~256× smaller).
 - **`ttf-parser` (0.25, MIT/Apache, zero-dependency)** — RazrFalcon's read-only parser, used only to map the runs' codepoints → glyph-ids for the subset set.
 
+- **`quick-xml` (0.39, MIT)** — added P7.C1b1 to read WordprocessingML for "create PDF from a Word document" (P7-OCR-009). Not new code to trust: Tauri already compiles this exact version into every build through `plist`, so naming it directly adds no crate. `roxmltree` (simpler, but genuinely new) and a hand-written XML parser (new risk) were passed over. `pdf::xml_tree` wraps it in a small namespace-aware tree. `ttf-parser` also gained a second job here: `pdf::font_index` reads each system font's `name` and `OS/2` tables to find faces by family and style.
+- **`dom_query` (=0.27.0, MIT) over `html5ever` (0.38, MIT/Apache)** — added P7.C1c to read HTML for "create PDF from files" (P7-OCR-009).
+  - **What they do.** html5ever is Servo's spec-conformant HTML parser, which mends broken markup exactly as browsers do. `dom_query` puts a DOM over it, with CSS selector matching through Servo's `selectors`, which a page's `<style>` rules need.
+  - **Already in the lockfile.** Both were in `Cargo.lock` before this step, because Tauri uses them while building. Nothing new is downloaded, but they are new to the app binary.
+  - **Kept contained.** `dom_query` has one maintainer and is at 0.x, so it is pinned exactly, with default features off (no extra code or crates), and only `pdf::html_read` touches it.
+  - **What was passed over.**
+    - The system web view's print-to-PDF: three platform APIs, no font-embedding or PDF/A guarantee, network fetches, and running the page's JavaScript.
+    - `html5ever` alone with our own tree and selector matching: more code, fewer selectors supported.
+  - **What we wrote.** `pdf::css` is our own small CSS parser: rules, declarations, specificity and values.
+  - **One guard on the parser.** html5ever is quadratic in nesting depth, so `html_read` caps the depth at 512 before parsing, as Chrome's parser does.
+- **`base64` (0.22, MIT/Apache)** — P7.C1c, for `data:` image URIs. Already in the app through Tauri's `plist`; same argument as `quick-xml`.
+
 **Why this is consistent with the "no double engine / minimal deps" rules:** both crates are permissive, zero-transitive-dependency, and read/produce font *bytes* — they don't render or edit PDFs (no overlap with PDFium or lopdf). They're the smallest tools that do exactly one thing PDFium won't. `subset_font` degrades gracefully — an unparseable or un-subsettable face embeds whole (bloated but correct), never a hard failure. *(The heavier `subsetter` 0.2.x / `fontations` stack and `allsorts` were passed over for tree size.)*
 
 ---
 
-## OCR — Tesseract via `leptess` (Rust)
+## OCR — Tesseract via `tesseract-rs` (Rust)
 
-**Why Tesseract:** 100+ languages, mature, Apache 2.0. The gold standard for offline OCR.
+**Why Tesseract:** 100+ languages, mature, Apache 2.0. The gold standard for offline OCR, and what `P7-OCR-001` names.
 
-**Why `leptess` (Rust binding):** Stable Rust bindings, exposes the LSTM engine, supports getting word/line bounding boxes (needed for the invisible-text-layer alignment when producing searchable PDFs).
+**Why `tesseract-rs` and not `leptess` (decided 2026-09-21, P7.A1):** `leptess` was the original pick here and has had no release since **2023-02-21**; `steps/P7.md` carried a standing warning to re-evaluate before Track A started. Both bind the same C API, so the choice came down to how Tesseract reaches a user's machine:
 
-**Trained data:** We ship the English LSTM data (~15 MB) in the installer. Other languages are downloaded on demand from `tessdata_fast` (BSD license) and cached in the app data dir.
+| Option | Verdict |
+|---|---|
+| **`tesseract-rs` with `build-tesseract`** (chosen) | Compiles Tesseract 5.5.2 + Leptonica 1.87.0 from source and links them statically. Nothing to install, one story on all three platforms, MIT crate, actively released (0.4.0, 2026-07-31). |
+| `leptess` / `tesseract` against system libraries | Fast builds, but every contributor installs `libtesseract`/`libleptonica`, and a release would have to copy those dylibs into the bundle by hand per platform. |
+| Bundling the `tesseract` command-line program | Simplest linking and crash isolation, but we would have to produce and sign that binary for three platforms ourselves. Kept as the fallback if static linking ever becomes the tail that wags the dog. |
 
-**Pre-processing:** Before passing images to Tesseract we run a small Rust pipeline: deskew (via `imageproc`), denoise (median filter), and bicubic upscale if input is < 300 DPI. These preprocessing choices double OCR accuracy in our reference fixtures.
+**What the crate's build script does, and what we do about it:** it downloads both source archives over the network with no integrity check, and separately insists on two `*.traineddata` files, failing the build when the network is slow. `scripts/fetch-tesseract-src.sh` pre-places all four, verified against pinned SHA-256s, in the cache directory the build script reuses — so a build performs no download of its own. This is the same posture as `scripts/fetch-pdfium.sh`: the bytes a build compiles are pinned, and substitution is detectable.
 
-**Alternative considered:** Tesseract.js (WebAssembly). Rejected because native Tesseract via leptess is ~3-5× faster on multi-page docs and avoids holding the WebView main thread.
+**Trained data (P7.A3):** all twelve languages `P7-OCR-002` names — English, Spanish, French, German, Chinese (both scripts), Japanese, Korean, Arabic, Hindi, Portuguese, Russian — ship in the build (`tessdata_fast`, ~25 MB total, Apache-2.0), fetched by `scripts/fetch-tessdata.sh` with a pinned checksum each. `ocr::tessdata` resolves them at runtime and refuses to fall back to a system-wide Tesseract, so a developer machine cannot pass a test a user's machine would fail.
+
+A thirteenth language arrives either **from a file** the user has, or **by download** — the application's only network call, off until switched on, never in the background, and always for a language someone just asked for (`ocr::languages`). Both paths refuse anything Tesseract cannot load, because a language pack that fails later, inside a document, is worse than one that was never installed. Downloads use `ureq` (MIT/Apache-2.0, rustls with the platform trust store); its bundled CA list is CDLA-Permissive-2.0, reviewed and recorded in `scripts/generate-notices.mjs`.
+
+**Writing non-Latin text (P7.A3):** eight of the twelve languages are outside WinAnsi, so the invisible text layer embeds a covering system face through the same CID path the header/footer writer uses. Without it those languages recognise perfectly and write nothing — the failure mode a "supports twelve languages" claim hides.
+
+**Pre-processing — hand-written, not `imageproc`:** deskew, denoise and upscale are ~40 lines each over an 8-bit grayscale buffer (`ocr::preprocess`), so they carry no new dependency, in the same spirit as using `png` directly instead of `image`.
+
+Two findings worth keeping from building it:
+
+- **A plain 3×3 median filter is the wrong "denoise" for text.** Measured 2026-09-21 on 9 pt text rendered at 150 DPI: it cost 3 of 10 words (`brown` → `broval`), because a stroke is 2–3 pixels wide at that size and a median rounds it away. Replaced with a despeckle that only rewrites isolated outliers; it touches 11–18 pixels of a 2-megapixel page and the same page then reads perfectly.
+- **Fixtures must use body-text sizes.** At 28 pt every pipeline scored 10/10, including the harmful one. `tests/fixtures/basic/scan.pdf` now carries 9 pt lines for exactly this reason.
+
+**Alternative considered:** Tesseract.js (WebAssembly). Rejected because native Tesseract is ~3-5× faster on multi-page docs and avoids holding the WebView main thread.
+
+---
+
+## Image encoders — `png` direct, `image` for the rest (P7.B2)
+
+P7-OCR-005 names four output formats — PNG, JPG, TIFF, WebP — and until P7.B2 the tree had an encoder for exactly one of them (`png = "0.17"`, added in P1.B3 for the render IPC reply).
+
+**Why `image` 0.25:** it was **already in `Cargo.lock`** as a transitive dependency of `pdfium-render`, so taking a direct edge on it with `default-features = false, features = ["jpeg", "tiff", "webp"]` adds three codecs and no new top-level supply chain. Six crates came with them — `tiff`, `image-webp`, `fax`, `half`, `crunchy`, `quick-error` — all permissive, and the licence gate (`npm run licenses`) is the check. The alternative, hand-writing a TIFF and a WebP encoder, is strictly worse than using the image-rs maintainers' own.
+
+**PNG stays on the `png` crate.** It is the hot path — every page render on the view layer goes through `render.rs::encode_png` — and it is the thinner call. `export_image.rs` reuses that same function rather than routing PNG through `image`, so the two paths cannot drift.
+
+Two limits worth stating rather than discovering:
+
+- **WebP is lossless only.** `image` 0.25 ships the VP8L encoder; lossy WebP needs the C `libwebp`, which would cost us the "compiles anywhere with no system library" property that `tesseract-rs` already strains. A lossless WebP page is smaller than the PNG and larger than a lossy WebP would be.
+- **JPEG is three-channel, so the RGBA render is composited down.** Measured 2026-09-23: PDFium renders fully opaque (0 of 484,704 pixels of `hello.pdf` at 72 DPI had `a != 255`), so compositing over *white* rather than simply dropping the alpha channel is insurance, not a live fix — but it is the difference between a correct page and a black one if a future PDFium, or a caller that sets a clear colour, ever hands us real transparency.
+
+---
+
+## Compression — `lopdf` + the `image` encoders (P7.C2a)
+
+P7-OCR-010 names three targets. Two are implemented in `pdf/compress.rs`; the third, font subsetting, is deliberately deferred to its own step (decided 2026-09-23) — doing it properly means walking every content stream to learn which glyphs are used, and it saves nothing on the scanned documents the feature exists for.
+
+**Where the bytes actually are**, measured 2026-09-23 on a 20-page 300 DPI grayscale scan with sensor noise (81.6 MB, `tests/fixtures/basic/generate-noisy-scan.py`):
+
+| | 300 DPI | 200 DPI | 150 DPI |
+|---|---|---|---|
+| JPEG q85 | 20.4% | 9.1% | 5.2% |
+| JPEG q60 | 5.6% | 2.5% | 1.5% |
+
+Stream deflation is the opposite shape: nothing on a scan (every image stream is already Flate), and 92.8% on `unicode-text.pdf`, which stores its embedded font program uncompressed.
+
+**Why `lopdf` and not `PDFium` for the image pass.** `PdfPageImageObject::set_image` calls `FPDFImageObj_SetBitmap`, which stores a **raw BGRA bitmap** — it would inflate every image fourfold and turn a `DeviceGray` scan into four channels. PDFium's only compressing path, `FPDFImageObj_LoadJpegFileInline`, is reachable through `pdfium-render` solely when *creating* an object, not when replacing one.
+
+**Triangle, not Lanczos3, for the downsample.** Measured on a 2550×3300 scan page reduced to 200 DPI: Triangle took 3.3 s against Lanczos3's 6.7 s *and* produced a 21% smaller JPEG (241 KB against 305 KB). Lanczos3 rings, which preserves exactly the sensor noise the JPEG then has to spend bits on; a bilinear kernel low-passes it away. Faster and smaller on the same input is not a trade-off.
+
+**Two rules keep it safe to offer.** Nothing is replaced unless the replacement is smaller — per image *and* for the file as a whole — and nothing is touched whose colour cannot survive the trip. The colour space is read only to learn the channel count; the `/ColorSpace` entry itself is never rewritten, so ICC-managed and calibrated images keep their profile across the re-encode. `/Indexed`, `/Separation` and `/DeviceN` are refused outright, because a sample there is an index or an ink quantity rather than a colour.
+
+Compression writes a **new file** rather than becoming an undoable edit: the image pass is lossy, and an edit would let the next Ctrl-S overwrite the user's original with the degraded version.
+
+---
+
+## Word export — hand-written OOXML (P7.B1a)
+
+A `.docx` is a ZIP of five small XML parts. `pdf/ooxml.rs` writes that container directly: local file headers, a central directory, an end-of-central-directory record, and nothing else — no Zip64 (the parts are kilobytes), no encryption, no streaming.
+
+**Why not the `zip` crate.** It is in `Cargo.lock`, but only as a build dependency of the Tauri bundler; `cargo tree -e normal -i zip` finds nothing, so taking it would have pulled `zip`, `zopfli`, `typed-path` and friends into the shipped binary. `flate2` (via lopdf) and `crc32fast` (via flate2) were already reachable, and they are the whole of what a ZIP entry needs — so the two direct edges added here cost **zero new crates**, which the licence report confirms (410 before and after).
+
+The risk of a hand-written container is that a subtle error produces a file Word silently refuses, so it is checked three ways: our own reader for content, `unzip -t` in the test suite for the format, and Word itself in the acceptance pass. That layering earned its keep immediately — a deliberately corrupted central-directory offset was invisible to our reader (which walks local headers) and caught only by `unzip -t`.
+
+**Headings are relative, never absolute.** A PDF has no heading flag; it has type that is larger than its neighbours. The body size is whichever size the most *characters* are set in — counting runs would let a three-word title outvote a paragraph — and a line materially larger than that is a heading, ranked by size. A document set in one size gets no headings at all.
+
+Measured 2026-09-23: the first width rule (a heading must be under 60% of its column) rejected a plain 20 pt title that ran to 63%. The rule now applies only below 1.5× the body size, where length is genuinely the tie-breaker between a heading and a lead paragraph.
+
+**Tables are detected from ruling lines only** (P7.B1b). There are two ways to guess that some text is a table: ruling lines are *evidence* — the document drew a grid — while alignment is a *guess* that fires on two-column layouts, contents lists and forms. A wrong table is worse for a reader than no table, because it locks prose into cells they then have to unpick, so an unruled table comes out as paragraphs.
+
+Four guards stand between a page's rules and a table: at least two horizontal and two vertical grid lines, lines that actually bound a region, at least 2×2 cells, and text inside. A section rule under a masthead has no verticals; a box round a pull-quote has one cell; a bordered sidebar has one column. The fixture carries a decoy rule so that failure stays visible.
+
+One measured trap: **`PDFium` reports a path segment's point before the object matrix is applied, while its bounding box is after.** Measured 2026-09-23 — a line written `10 10 m 100 10 l` under `2 0 0 2 20 40 cm` reports points `(10,10)-(100,10)` and bounds `(38.5,58.5)-(221.5,61.5)`. A detector that trusts the raw points mislocates every rule in a transformed document, and most real documents are transformed, so one fixture page is drawn under a `cm` purely to keep that regression caught.
+
+---
+
+## Excel export — the same container, one decision about numbers (P7.B5)
+
+P7-OCR-008 cost almost no new machinery: `table_detect` finds the grids (P7.B1b), `ooxml` writes the ZIP (P7.B1a), and `page_content` — lifted out of `export_docx` in this step, when a second exporter needed the same page reading — supplies the runs and rules. What is new is the SpreadsheetML and one judgement call.
+
+**Numbers become numbers only when they are unambiguous.** `-12`, `3.5` and `0` are written as numeric cells, because a spreadsheet of text-formatted figures is a poor deliverable. `412,000` stays **text**: a comma is a thousands separator in one locale and a decimal point in another — `1,000` is one thousand in en-US and one in de-DE — and a PDF carries no locale to decide with. Quietly turning someone's `1,000` into `1000` corrupts a figure they will then do arithmetic on, which is worse than making them convert a column. Percent signs, currency symbols, exponents and spaces are text for the same reason. Parsing grouped numbers against a locale the user picks is a reasonable follow-up.
+
+**No tables means no file.** The spec says warn. A workbook of prose is useless and an empty one is worse, so nothing is written, the reply reports zero, and the UI says only ruled tables can be found.
+
+Text cells are written inline (`t="inlineStr"`), which removes the shared-strings part and the index that would have to agree with it. Sheet names are a small pure function with its own tests, because Excel caps them at 31 characters, forbids `[ ] : * ? / \`, and treats a duplicate — which truncation can create by accident — as a corrupt file.
 
 ---
 
@@ -123,7 +222,7 @@ Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic,
 - `rsa` — RSA operations (signing, encryption)
 - `x509-cert` — Certificate parsing and chain validation
 - `cms` — Cryptographic Message Syntax (the structure inside PKCS#7 signatures)
-- `aes` + `aes-gcm` — Document encryption (256-bit AES per PDF 2.0)
+- Document encryption (256-bit AES per PDF 2.0) is `lopdf`'s standard security handler, not ours. `aes` is a dev-dependency only, for `tests/encrypt.rs` to decrypt the `/Perms` block lopdf writes; `aes-gcm` was never needed.
 
 **PDF signature flow:**
 1. Compute a SHA-256 hash of the byte range being signed
@@ -213,9 +312,11 @@ tauri-build  = "2.11"
 
 # Rust PDF
 pdfium-render = "0.9"        # current stable as of May 2026
-lopdf        = "0.36"        # COS/object-model layer (structural edits PDFium
-                             # can't do); default-features off. 0.41 exists but
-                             # needs a newer Rust than our 1.80 floor.
+lopdf        = "0.42"        # COS/object-model layer (structural edits PDFium
+                             # can't do); default-features off. 0.42 is the
+                             # first release fixing GHSA-6fj4-rcr3-r7rr (unbounded
+                             # nesting -> stack-overflow abort) and raised our
+                             # Rust floor to 1.85. Parse only via load_cos.
 
 # OCR
 leptess = "0.14"             # WARNING: last release 2023-02-21. Re-evaluate before Phase 7;
@@ -225,8 +326,8 @@ leptess = "0.14"             # WARNING: last release 2023-02-21. Re-evaluate bef
 rsa       = "0.9"
 x509-cert = "0.2"
 cms       = "0.2"
-aes       = "0.8"
-aes-gcm   = "0.10"
+aes       = "0.8"             # dev-dependency only since 2026-10-18 (tests/encrypt.rs)
+aes-gcm   = "0.10"            # never added: lopdf owns document AES
 
 # AI
 ort     = "2.0.0-rc"          # only RC releases exist as of May 2026; stable 2.x not yet out

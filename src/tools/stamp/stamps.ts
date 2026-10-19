@@ -26,7 +26,22 @@ export interface ImageStampSpec {
   label?: string;
 }
 
-export type StampSpec = TextStampSpec | ImageStampSpec;
+/**
+ * SPEC: P6-SEC-004 (P6.A5a) — a signature from the library, armed for placing.
+ *
+ * Carries an **id**, not bytes and not a path: only the Rust command layer knows
+ * where the library lives (P6.A1), so the frontend arms a reference and the
+ * backend resolves it.
+ */
+export interface SignatureStampSpec {
+  kind: "signature";
+  /** Display id — the library entry's id, which is also its blob filename. */
+  name: string;
+  /** Library entry id, resolved to PNG bytes by `pdf_place_signature`. */
+  signatureId: string;
+}
+
+export type StampSpec = TextStampSpec | ImageStampSpec | SignatureStampSpec;
 
 /** Default placement height (PDF points) for an image stamp; width follows the
  *  image's aspect ratio, computed on the Rust side. */
@@ -63,6 +78,27 @@ export function customStamp(text: string, color: string = RED): TextStampSpec {
 export function imageStamp(path: string, label?: string): ImageStampSpec {
   const base = path.split(/[\\/]/).pop() ?? path;
   return { kind: "image", name: base, imagePath: path, ...(label ? { label } : {}) };
+}
+
+/** SPEC: P6-SEC-004 (P6.A5a) — arm a stored signature for placement. */
+export function signatureStamp(signatureId: string): SignatureStampSpec {
+  return { kind: "signature", name: signatureId, signatureId };
+}
+
+/**
+ * Whether `tool` places through the stamp layer — `"stamp"` for rubber stamps
+ * and images, `"signature"` for a saved signature (P6.A5a).
+ *
+ * This exists because the pairing was written out twice: once in the layer to
+ * decide whether a click counts, and once in the toolbar to disarm on leaving.
+ * Adding `"signature"` to the first and not the second meant the toolbar
+ * treated signature mode as "left the stamp tool" and cleared the armed
+ * signature the instant the dialog set it — so the first Place after any tool
+ * change did nothing, and only a second Place (with the tool already set, so
+ * the effect never re-ran) worked. One predicate, so they cannot drift again.
+ */
+export function usesStampLayer(tool: string | null): boolean {
+  return tool === "stamp" || tool === "signature";
 }
 
 /**

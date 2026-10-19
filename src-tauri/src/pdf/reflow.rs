@@ -29,11 +29,10 @@
 //! the whole-line layout model only the B1 editor has.
 
 use lopdf::content::Content;
-use lopdf::Document;
 use pdfium_render::prelude::*;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, load_edited_bytes, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::text_extract::extract_text_runs;
 use crate::pdf::undo::Edit;
@@ -62,9 +61,7 @@ pub fn replace_text_run(
         .map_err(|_| CommandError::InvalidInput(format!("bad page index: {page}")))?;
 
     let _guard = pdfium_lock()?;
-    let doc = pdfium()?
-        .load_pdf_from_byte_vec(bytes.to_vec(), None)
-        .map_err(CommandError::from)?;
+    let doc = load_edited_bytes(bytes.to_vec())?;
 
     // Single page borrow: locate + mutate + regenerate. Staging under **Manual**
     // regeneration and committing once is load-bearing — `set_text` mutates the
@@ -127,14 +124,12 @@ impl<'a> Edit<PdfDocument<'a>> for ReplaceTextRunEdit {
         // `cos_edit`, but the transform is a `PDFium` mutation rather than lopdf.
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = replace_text_run(&pre_bytes, self.page, self.run_index, &self.new_text)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }
@@ -192,9 +187,7 @@ pub fn delete_text_run(
 fn extract_runs(bytes: &[u8], page: usize) -> Result<Vec<crate::pdf::text_extract::TextRun>, CommandError> {
     let doc = {
         let _guard = pdfium_lock()?;
-        pdfium()?
-            .load_pdf_from_byte_vec(bytes.to_vec(), None)
-            .map_err(CommandError::from)?
+        load_edited_bytes(bytes.to_vec())?
     };
     let runs = extract_text_runs(&doc, page)?;
     {
@@ -211,7 +204,7 @@ fn splice_out_show_operator(
     page: usize,
     run_index: usize,
 ) -> Result<Vec<u8>, CommandError> {
-    let mut doc = Document::load_mem(bytes).map_err(lopdf_err)?;
+    let mut doc = load_cos(bytes, lopdf_err)?;
     let page_no = u32::try_from(page)
         .ok()
         .map(|n| n + 1)
@@ -274,14 +267,12 @@ impl<'a> Edit<PdfDocument<'a>> for DeleteTextRunEdit {
     ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
         let pre_bytes = {
             let _guard = pdfium_lock()?;
-            doc.save_to_bytes().map_err(CommandError::from)?
+            bytes_for_cos_edit(doc)?
         };
         let new_bytes = delete_text_run(&pre_bytes, self.page, self.run_index)?;
         {
             let _guard = pdfium_lock()?;
-            *doc = pdfium()?
-                .load_pdf_from_byte_vec(new_bytes, None)
-                .map_err(CommandError::from)?;
+            replace_with_edited_bytes(doc, new_bytes)?;
         }
         Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
     }

@@ -23,7 +23,7 @@ use crate::pdf::cos::{
     register_page_resource, remove_decorations_on_page, visual_cm_line, visual_transform,
     wrap_decoration,
 };
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::image_xobject::embed_image;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -54,7 +54,7 @@ pub fn add_background(
     }
     let opacity = opacity.clamp(0.0, 1.0);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
 
     let page_map = doc.get_pages();
     let mut targets: Vec<ObjectId> = Vec::with_capacity(pages.len());
@@ -167,7 +167,7 @@ fn import_page_as_form(
     source_bytes: &[u8],
     page: usize,
 ) -> Result<(ObjectId, [f32; 4]), CommandError> {
-    let mut src = Document::load_mem(source_bytes).map_err(cos_err)?;
+    let mut src = load_cos(source_bytes, cos_err)?;
     // Shift every source id above the dest's so a copy can't collide.
     src.renumber_objects_with(dest.max_id + 1);
 
@@ -339,14 +339,12 @@ fn background_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

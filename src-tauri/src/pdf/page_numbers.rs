@@ -22,7 +22,7 @@ use crate::pdf::cos::{
     page_rotation, parse_hex_color, register_page_resource, visual_cm_line, visual_transform,
     wrap_decoration,
 };
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::font_metrics::text_width;
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -151,7 +151,7 @@ pub fn add_page_numbers(
     let rgb = parse_hex_color(color)?;
     let sz = size.max(1.0);
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     // `get_pages()` is a BTreeMap keyed by 1-based page number, so iteration is in
     // document order; enumerate() gives the 0-based index the caller speaks in.
     let targets: Vec<(usize, ObjectId)> =
@@ -294,14 +294,12 @@ fn page_numbers_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

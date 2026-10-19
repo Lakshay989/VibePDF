@@ -10,7 +10,7 @@ generator.
 | File | What | Used by |
 |---|---|---|
 | `p1-spec.pdf` | 1000-page text-heavy PDF (Lorem ipsum), each page numbered. Exercises navigation, search across many pages, outline absence handling. | P1-VIEW-005 nav perf, P1-VIEW-007 search-of-5000-page-target |
-| `p1-encrypted.pdf` | `hello.pdf` re-encrypted with **user password `vibepdf`** and owner password `vibepdf-owner`. Both 256-bit AES per the PDF 2.0 spec via pypdf. | P1-VIEW-003 password prompt |
+| `p1-encrypted.pdf` | `hello.pdf` re-encrypted with **user password `vibepdf`** and owner password `vibepdf-owner`. **RC4 128-bit** (`/V 2 /R 3`), not AES — the `generate.py` call does not request an AES algorithm. Corrected 2026-08-12 while building P6.C1; the AES-256 writing counterpart is `security/encrypt.rs`. | P1-VIEW-003 password prompt |
 | `p1-large.pdf` | ≈500 MB filler PDF — repeated text-draw operators across enough pages that the on-disk size hits the NFR target. | NFR-PERF-003 (open without OOM, scroll ≥30 fps) |
 
 ## Generating

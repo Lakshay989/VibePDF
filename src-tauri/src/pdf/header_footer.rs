@@ -20,7 +20,7 @@ use crate::pdf::cos::{
     append_page_content, base_font, escape_pdf_string, page_effective_box, page_rotation,
     parse_hex_color, register_page_resource, visual_cm_line, visual_transform, wrap_decoration,
 };
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::font_embed_cid::{build_cid_font, place_cid_run, CidRun};
 use crate::pdf::restore::RestoreDocEdit;
 use crate::pdf::undo::Edit;
@@ -89,7 +89,7 @@ pub fn add_header_footer(
         );
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let total = doc.get_pages().len();
 
     // Resolve + range-check targets (keeping each page's 1-based number for `{n}`).
@@ -169,7 +169,7 @@ fn add_header_footer_embedded(
         shown: String,
     }
 
-    let mut doc = Document::load_mem(bytes).map_err(cos_err)?;
+    let mut doc = load_cos(bytes, cos_err)?;
     let total = doc.get_pages().len();
     let page_map = doc.get_pages();
 
@@ -380,14 +380,12 @@ fn header_footer_apply<'a>(
 ) -> Result<Box<dyn Edit<PdfDocument<'a>>>, CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let new_bytes = f(&pre_bytes)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?
-            .load_pdf_from_byte_vec(new_bytes, None)
-            .map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok(Box::new(RestoreDocEdit { bytes: pre_bytes }))
 }

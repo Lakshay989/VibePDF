@@ -4,7 +4,7 @@
 >
 > Phase-1 interpretation: each fixture's render must match its committed
 > golden, a regression baseline produced by our own PDFium pipeline —
-> **not** an Adobe Acrobat reference. The real Acrobat / W3C conformance
+> **not** an a mainstream PDF reader reference. The real a mainstream reader / W3C conformance
 > comparison is future work; this scaffold is the machinery it plugs into.
 >
 > Regenerate goldens after an intentional renderer change:

@@ -1,0 +1,27 @@
+# Copyright and licensing
+
+VibePDF is dual-licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE), or
+  <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT), or
+  <https://opensource.org/licenses/MIT>)
+
+at your option. This is the dual-licence convention the Rust ecosystem uses:
+Apache-2.0 carries an explicit patent grant, and MIT stays compatible with the
+handful of downstream projects that cannot take Apache-2.0.
+
+The SPDX expression for the project is `MIT OR Apache-2.0`, which is what
+`src-tauri/Cargo.toml` and `package.json` declare.
+
+## Contributions
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual-licensed as above, without any additional terms or conditions.
+
+## Third-party components
+
+This licence covers VibePDF's own source. Bundled and redistributed third-party
+components carry their own terms, and a binary distribution must reproduce them
+— see [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).

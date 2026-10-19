@@ -19,7 +19,7 @@
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{load_edited_bytes, pdfium, pdfium_lock};
 use crate::pdf::undo::Edit;
 
 /// Delete `pages` (0-based indices) from the document.
@@ -111,10 +111,7 @@ impl<'a> Edit<PdfDocument<'a>> for RestorePagesEdit {
         let RestorePagesEdit { bytes, indices } = *self;
         let _guard = pdfium_lock()?;
 
-        let pdfium = pdfium()?;
-        let holding = pdfium
-            .load_pdf_from_byte_vec(bytes, None)
-            .map_err(CommandError::from)?;
+        let holding = load_edited_bytes(bytes)?;
 
         // Re-insert each held page at its original index. `indices` is
         // ascending, so inserting in order is correct: each insert shifts

@@ -1,0 +1,460 @@
+//! True redaction (P6.D1a, SPEC P6-SEC-010).
+//!
+//! The acceptance from `docs/05_ROADMAP.md` is "redact an SSN, then extract the
+//! text and confirm the SSN is not there". These tests do that, and then keep
+//! going, because "the string is absent" is satisfied by a great many wrong
+//! implementations — including one that deletes the whole page.
+//!
+//! So each test names both halves: what must be **gone**, and what must have
+//! **survived**. A redaction that removes too much is a bug too; it is just a
+//! less dangerous one, and without the surviving half a test cannot tell the
+//! difference.
+
+use std::path::PathBuf;
+
+use vibepdf_lib::pdf::document::open_pdf;
+use vibepdf_lib::security::redact::redact_text_in_region;
+
+const SSN: &str = "123-45-6789";
+const SURVIVES: &str = "Employee record";
+const IN_A_FORM: &str = "987-65-4321";
+
+/// The region over the SSN digits on page 1. "SSN: " is 31.3pt wide at 12pt in
+/// Helvetica, so the number runs from x=103.3 to x=171.4 — see the fixture
+/// generator, which lays this out on purpose.
+const OVER_THE_NUMBER: [f32; 4] = [102.0, 695.0, 175.0, 713.0];
+
+/// The P6 acceptance document, or `None` with a printed reason.
+///
+/// The fixture is git-ignored and generated on demand, so a fresh clone does
+/// not have it. Asserting it existed — as this did until 2026-10-17 — panicked
+/// in CI, and because cargo stops at the first failing test binary, hid every
+/// later binary's result too. CI generates it before the Rust tests (its
+/// generator is stdlib-only), so these tests still run there; locally they
+/// skip with the command to run instead.
+fn fixture_or_skip() -> Option<Vec<u8>> {
+    let p = PathBuf::from("../tests/fixtures/acceptance/p6-document.pdf");
+    if p.is_file() {
+        return Some(std::fs::read(p).expect("read fixture"));
+    }
+    eprintln!(
+        "skipping: fixture missing at {}\n  regenerate with: \
+         python3 tests/fixtures/acceptance/generate-p6-document.py",
+        p.display()
+    );
+    None
+}
+
+struct TempPdf(PathBuf);
+
+impl TempPdf {
+    fn new(bytes: &[u8]) -> Self {
+        let p = std::env::temp_dir().join(format!("vibepdf-redact-{}.pdf", uuid::Uuid::new_v4()));
+        std::fs::write(&p, bytes).expect("write temp pdf");
+        Self(p)
+    }
+}
+
+impl Drop for TempPdf {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The text `PDFium` can see on `page` of `bytes` — the same extractor a reader
+/// would use, not our own parse. Checking our work with the code that did it
+/// proves nothing.
+fn extracted(bytes: &[u8], page: usize) -> String {
+    let file = TempPdf::new(bytes);
+    let (doc, _) = open_pdf(&file.0, None).expect("PDFium opens the redacted file");
+    let runs = vibepdf_lib::pdf::text_extract::extract_text_runs(&doc, page).expect("extract");
+    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    drop(doc);
+    text
+}
+
+/// Does `needle` survive anywhere in the raw bytes, including inside a
+/// compressed stream? Extraction alone would miss text a reader does not draw.
+fn leaks(bytes: &[u8], needle: &str) -> bool {
+    let n = needle.as_bytes();
+    if bytes.windows(n.len()).any(|w| w == n) {
+        return true;
+    }
+    let Ok(doc) = lopdf::Document::load_mem(bytes) else {
+        return false;
+    };
+    doc.objects.values().any(|o| {
+        o.as_stream()
+            .ok()
+            .and_then(|s| s.decompressed_content().ok())
+            .is_some_and(|c| c.windows(n.len()).any(|w| w == n))
+    })
+}
+
+// SPEC: P6-SEC-010 — the roadmap's acceptance, both ways round.
+#[test]
+fn the_ssn_is_gone_from_the_saved_file() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, report) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
+
+    assert!(!leaks(&out, SSN), "the SSN is still in the file's bytes");
+    let text = extracted(&out, 0);
+    assert!(!text.contains(SSN), "PDFium can still read the SSN: {text:?}");
+    assert!(
+        text.contains(SURVIVES),
+        "the rest of the page was destroyed: {text:?}"
+    );
+    assert_eq!(report.split, 1, "the run should have been cut, not dropped");
+}
+
+// The point of measuring rather than dropping: "SSN:" is not secret and should
+// still be on the page, so a reader can see *that* something was removed.
+#[test]
+fn a_partly_covered_run_keeps_its_visible_half() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
+    let text = extracted(&out, 0);
+
+    assert!(text.contains("SSN"), "the label went with the number: {text:?}");
+    assert!(!text.contains(SSN));
+}
+
+#[test]
+fn text_outside_the_region_survives() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
+    let text = extracted(&out, 0);
+
+    assert!(text.contains(SURVIVES));
+    assert!(
+        text.contains("Department"),
+        "a line well below the region was removed: {text:?}"
+    );
+}
+
+// The whole distinction the spec draws in clause (a). If the black box were
+// doing the work, removing it would bring the SSN back.
+#[test]
+fn the_black_box_is_not_the_mechanism() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
+
+    // Strip every fill-rectangle from the page content and look again.
+    let mut doc = lopdf::Document::load_mem(&out).expect("load");
+    let page_id = *doc.get_pages().values().next().expect("a page");
+    let content = doc.get_page_content(page_id).expect("content");
+    let mut parsed = lopdf::content::Content::decode(&content).expect("decode");
+    parsed
+        .operations
+        .retain(|op| !matches!(op.operator.as_str(), "re" | "f" | "rg"));
+    let stripped = parsed.encode().expect("encode");
+    doc.change_page_content(page_id, stripped).expect("replace");
+
+    let mut naked = Vec::new();
+    doc.save_to(&mut naked).expect("save");
+
+    assert!(
+        !leaks(&naked, SSN),
+        "the SSN came back once the box was removed — it was only ever covered"
+    );
+}
+
+// SPEC: P6-SEC-010 — text inside a Form XObject is invisible to a page-content
+// walk. Redacting the page and reporting success would leave it in the file and
+// tell the user otherwise, which is the worst thing this module could do.
+#[test]
+fn a_page_whose_text_hides_in_a_form_is_refused() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let err = redact_text_in_region(&acceptance_pdf, 1, [0.0, 0.0, 612.0, 792.0]).unwrap_err();
+    let msg = format!("{err:?}");
+
+    assert!(msg.contains("form"), "the refusal should say why: {msg}");
+    assert!(
+        msg.contains("Flatten"),
+        "the refusal should say what to do about it: {msg}"
+    );
+    // …and the text really is there, so the refusal is not hypothetical.
+    assert!(leaks(&acceptance_pdf, IN_A_FORM));
+}
+
+// A region that touches nothing should not rewrite the document. Re-encoding a
+// file and calling it a redaction is the kind of no-op that looks like work.
+#[test]
+fn a_region_over_empty_space_changes_nothing() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let source = acceptance_pdf.clone();
+    let (out, report) = redact_text_in_region(&source, 0, [400.0, 100.0, 500.0, 150.0])
+        .expect("redact");
+
+    assert!(report.is_empty(), "reported {report:?} for an empty region");
+    assert_eq!(out, source, "the document was rewritten for nothing");
+}
+
+// The whole line, not just the number.
+#[test]
+fn a_region_over_a_whole_run_removes_it() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let (out, report) = redact_text_in_region(&acceptance_pdf, 0, [60.0, 695.0, 400.0, 713.0])
+        .expect("redact");
+
+    let text = extracted(&out, 0);
+    assert!(!text.contains("SSN"), "the whole line should be gone: {text:?}");
+    assert!(text.contains(SURVIVES));
+    assert_eq!(report.removed, 1);
+    assert_eq!(report.split, 0);
+}
+
+// SPEC: P6-SEC-010(c) — the verification helper has to fail when it should, or
+// it is decoration. Both directions: a leak, and a check that passed only
+// because extraction returned nothing.
+#[test]
+fn the_verification_helper_catches_both_kinds_of_wrong() {
+    use vibepdf_lib::security::redact::confirm_removed;
+
+    assert!(confirm_removed("Employee record", &[SSN], &[SURVIVES]).is_ok());
+
+    let leaked = confirm_removed("Employee record 123-45-6789", &[SSN], &[SURVIVES]);
+    assert!(leaked.is_err(), "a leak was not caught");
+
+    // Extraction returned nothing: the SSN is "absent", and so is everything.
+    let vacuous = confirm_removed("", &[SSN], &[SURVIVES]);
+    assert!(
+        vacuous.is_err(),
+        "an empty extraction passed — the check proves nothing"
+    );
+}
+
+/// SPEC: P6-SEC-010 — a redacted file to inspect.
+#[test]
+#[ignore = "produces a verification artifact; run on demand"]
+fn writes_verification_artifact() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let dir = PathBuf::from("../Sample PDFs/out/p6-security");
+    std::fs::create_dir_all(&dir).expect("ensure Sample PDFs dir");
+    let (out, _) = redact_text_in_region(&acceptance_pdf, 0, OVER_THE_NUMBER).expect("redact");
+    let path = dir.join("vibepdf-verify-redacted.pdf");
+    std::fs::write(&path, &out).expect("write");
+    eprintln!("wrote {}", path.display());
+}
+
+// The module's governing principle, exercised rather than merely documented.
+//
+// Page 3's font has an unrecognised /BaseFont and no /Widths, so its advances
+// are unknowable. A region touching *part* of the run must therefore take the
+// whole run: guessing the cut point could leave half the account number, which
+// is the failure this whole design exists to avoid.
+#[test]
+fn an_unmeasurable_run_is_removed_whole_and_reported() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    let source = acceptance_pdf.clone();
+    // Covers the *tail* of "Account: 555-0100", from mid-run to past its end.
+    //
+    // The region matters. Over the run's start, an implementation that wrongly
+    // measured this font would also end up removing everything — the surviving
+    // tail is not a prefix, so it cannot be split either way, and the test
+    // would pass for the wrong reason. Over the tail, a measuring
+    // implementation *can* split (keeping "Account: "), so the two paths
+    // diverge and the assertions below can tell them apart.
+    let (out, report) = redact_text_in_region(&source, 2, [115.0, 695.0, 400.0, 713.0])
+        .expect("redact");
+
+    assert_eq!(
+        report.removed_whole_for_safety, 1,
+        "the safe default did not fire: {report:?}"
+    );
+    assert_eq!(report.split, 0, "an unmeasurable run must never be cut");
+    assert!(
+        !leaks(&out, "555-0100"),
+        "part of the account number survived the cut"
+    );
+    // Over-removal is the price, and it is bounded: the other line is untouched.
+    let text = extracted(&out, 2);
+    assert!(
+        text.contains("Elsewhere on the page"),
+        "over-removal spread beyond the run: {text:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P6.D1b — images and metadata
+// ---------------------------------------------------------------------------
+
+const IMAGE_MARKER: &str = "SECRETPIXELDATA";
+
+// SPEC: P6-SEC-010(a) — "the content (text, images) within the region".
+//
+// The trap is the same one P6.D3 met with `/Info`: dropping the `Do` undraws
+// the image but leaves its stream in the file, pixels intact, findable by
+// anything that reads the bytes. A test asserting "the image no longer renders"
+// would pass against that. This one reads the bytes.
+#[test]
+fn a_redacted_image_leaves_no_pixels_behind() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::redact::redact_region;
+
+    let source = acceptance_pdf.clone();
+    assert!(leaks(&source, IMAGE_MARKER), "the fixture lost its image");
+
+    // Page 4's image is placed at 100,600 and is 200pt square.
+    let (out, report) = redact_region(&source, 3, [150.0, 650.0, 250.0, 750.0], Default::default())
+        .expect("redact");
+
+    assert_eq!(report.images_removed, 1);
+    assert!(
+        !leaks(&out, IMAGE_MARKER),
+        "the image was undrawn but its pixels are still in the file"
+    );
+}
+
+#[test]
+fn an_image_outside_the_region_is_untouched() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::redact::redact_region;
+
+    let (out, report) = redact_region(&acceptance_pdf, 3, [10.0, 10.0, 60.0, 60.0], Default::default())
+        .expect("redact");
+
+    assert_eq!(report.images_removed, 0);
+    assert!(leaks(&out, IMAGE_MARKER), "an image well clear of the region went");
+}
+
+// SPEC: P6-SEC-010(b) — optional, and off unless asked for. A redaction is
+// often one of several passes; stripping metadata every time would surprise.
+#[test]
+fn metadata_goes_only_when_asked() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::redact::{redact_region, RedactOptions};
+
+    let with = RedactOptions { remove_metadata: true };
+    let (kept, _) = redact_region(&acceptance_pdf, 0, OVER_THE_NUMBER, Default::default())
+        .expect("redact");
+    let (stripped, _) = redact_region(&acceptance_pdf, 0, OVER_THE_NUMBER, with).expect("redact");
+
+    // The fixture has no /Info of its own, so the observable difference is that
+    // the option runs the cleaner at all — assert the redaction still holds and
+    // the document still opens either way.
+    for out in [&kept, &stripped] {
+        assert!(!leaks(out, SSN));
+        assert!(extracted(out, 0).contains(SURVIVES));
+    }
+    assert!(
+        !leaks(&stripped, "/Info"),
+        "the metadata option left an /Info entry behind"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P6.D2a — pattern matching (SPEC P6-SEC-011)
+// ---------------------------------------------------------------------------
+
+/// The real matches, dropping the entries that mark pages we could not search.
+/// Those are gaps in the search, not findings, and every count below is about
+/// findings.
+fn matches_only(
+    hits: Vec<vibepdf_lib::security::redact::MatchHit>,
+) -> Vec<vibepdf_lib::security::redact::MatchHit> {
+    hits.into_iter().filter(|h| !h.unreadable).collect()
+}
+
+// SPEC: P6-SEC-011 — "finds matches and asks the user to confirm before
+// applying". Finding must therefore change nothing at all: a scan that quietly
+// redacted would remove the confirm step the spec is built around.
+#[test]
+fn finding_matches_changes_nothing() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let source = acceptance_pdf.clone();
+    let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
+    let hits = matches_only(find_matches(&source, &set).expect("find"));
+
+    assert_eq!(hits.len(), 1, "expected one SSN: {hits:?}");
+    assert_eq!(hits[0].preview, SSN);
+    assert_eq!(hits[0].page, 0);
+    assert!(leaks(&source, SSN), "finding must not remove anything");
+}
+
+// The rectangle a match reports has to be the one that actually removes it —
+// the whole point of computing geometry in the same basis the redactor uses.
+// A plausible-looking rect from a different coordinate source would confirm
+// fine and redact the wrong place.
+#[test]
+fn a_matchs_rect_redacts_that_match() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let source = acceptance_pdf.clone();
+    let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
+    let hits = matches_only(find_matches(&source, &set).expect("find"));
+
+    let (out, report) =
+        redact_text_in_region(&source, hits[0].page, hits[0].rect).expect("redact");
+
+    assert!(!leaks(&out, SSN), "the reported rect did not remove the match");
+    assert!(!report.is_empty());
+    // …and it was a cut, not the whole line — the label is not part of the match.
+    let text = extracted(&out, 0);
+    assert!(text.contains("SSN"), "the rect was wider than the match: {text:?}");
+}
+
+// An unmeasurable font cannot give a sub-rectangle, so the match covers its
+// whole run. That is the safe answer, and the list has to say so — a user
+// confirming it is agreeing to lose more than the highlighted text.
+#[test]
+fn an_unmeasurable_match_says_it_covers_the_whole_run() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::patterns::PatternSet;
+    use vibepdf_lib::security::redact::find_matches;
+
+    // A custom pattern, not a built-in: this test is about geometry, and using
+    // the phone pattern would tie it to whether "555-0100" looks like a phone
+    // number (it does not — seven digits).
+    let set = PatternSet {
+        kinds: Vec::new(),
+        custom: vec![r"555-0100".into()],
+    };
+    let hits = matches_only(find_matches(&acceptance_pdf, &set).expect("find"));
+
+    assert_eq!(hits.len(), 1, "expected the account number: {hits:?}");
+    assert!(
+        hits[0].covers_whole_run,
+        "an unmeasurable run claimed a precise rectangle"
+    );
+}
+
+#[test]
+fn a_document_with_no_matches_reports_none() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let set = PatternSet { kinds: vec![PatternKind::Email], custom: Vec::new() };
+    assert!(matches_only(find_matches(&acceptance_pdf, &set).expect("find")).is_empty());
+}
+
+// A page whose text lives in a form cannot be searched. Reporting it as clean
+// would tell a user asking "find every SSN" that there is one when there are
+// two — the false negative that looks exactly like success. The redactor
+// refuses these pages; the finder has to say the same thing.
+#[test]
+fn a_page_that_cannot_be_searched_is_listed_rather_than_skipped() {
+    let Some(acceptance_pdf) = fixture_or_skip() else { return };
+    use vibepdf_lib::security::patterns::{PatternKind, PatternSet};
+    use vibepdf_lib::security::redact::find_matches;
+
+    let set = PatternSet { kinds: vec![PatternKind::Ssn], custom: Vec::new() };
+    let hits = find_matches(&acceptance_pdf, &set).expect("find");
+
+    // Page 1's SSN, found. Page 2's, not found — but reported as unsearchable.
+    let found: Vec<_> = hits.iter().filter(|h| !h.unreadable).collect();
+    let gaps: Vec<_> = hits.iter().filter(|h| h.unreadable).collect();
+
+    assert_eq!(found.len(), 1, "expected page 1's SSN: {found:?}");
+    assert_eq!(found[0].preview, SSN);
+    assert_eq!(gaps.len(), 1, "page 2 was silently treated as clean");
+    assert_eq!(gaps[0].page, 1);
+    // …and the SSN it could not see really is in there.
+    assert!(leaks(&acceptance_pdf, IN_A_FORM));
+}

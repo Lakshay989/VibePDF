@@ -29,7 +29,7 @@ use lopdf::{Document, Object};
 use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
-use crate::pdf::document::{pdfium, pdfium_lock};
+use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::form::{
     decode_pdf_text_string, field_kind, field_widget_ids, qualified_name, set_button_field_doc,
     set_choice_field_doc, set_text_field_value_doc, terminal_field_ids, widget_on_state,
@@ -86,7 +86,7 @@ pub fn import_form_data(
     format: ExportFormat,
 ) -> Result<(Vec<u8>, ImportReport), CommandError> {
     let incoming = parse(data, format)?;
-    let mut doc = Document::load_mem(bytes).map_err(lop)?;
+    let mut doc = load_cos(bytes, lop)?;
     let report = apply_data(&mut doc, &incoming)?;
 
     let mut out = Vec::new();
@@ -107,12 +107,12 @@ pub fn import_into<'a>(
 ) -> Result<(Box<dyn Edit<PdfDocument<'a>>>, ImportReport), CommandError> {
     let pre_bytes = {
         let _guard = pdfium_lock()?;
-        doc.save_to_bytes().map_err(CommandError::from)?
+        bytes_for_cos_edit(doc)?
     };
     let (new_bytes, report) = import_form_data(&pre_bytes, data, format)?;
     {
         let _guard = pdfium_lock()?;
-        *doc = pdfium()?.load_pdf_from_byte_vec(new_bytes, None).map_err(CommandError::from)?;
+        replace_with_edited_bytes(doc, new_bytes)?;
     }
     Ok((Box::new(RestoreDocEdit { bytes: pre_bytes }), report))
 }
@@ -243,8 +243,7 @@ fn from_fdf(data: &[u8]) -> Result<Vec<FormDatum>, CommandError> {
         return Err(CommandError::InvalidInput("not an FDF file (no %FDF- header)".into()));
     };
 
-    let doc = Document::load_mem(pdf_bytes)
-        .map_err(|e| CommandError::InvalidInput(format!("unreadable FDF: {e}")))?;
+    let doc = load_cos(pdf_bytes, |e| CommandError::InvalidInput(format!("unreadable FDF: {e}")))?;
     let root = doc.trailer.get(b"Root").and_then(Object::as_reference).map_err(lop)?;
     let fdf = doc
         .get_dictionary(root)

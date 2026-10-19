@@ -190,12 +190,12 @@ async fn read_notes_tracks_undo_and_redo() {
 }
 
 /// Writes a note-bearing PDF to the git-ignored `Sample PDFs/` for the manual
-/// cross-reader ritual (Acrobat / Preview / Okular). Ignored; run on demand:
+/// cross-reader ritual (several independent readers). Ignored; run on demand:
 ///   cargo test --test text_note note_writes_verification_artifact -- --ignored
 #[tokio::test]
 #[ignore = "produces a verification artifact; run on demand"]
 async fn note_writes_verification_artifact() {
-    let out = PathBuf::from("../Sample PDFs/vibepdf-verify-note.pdf");
+    let out = PathBuf::from("../Sample PDFs/out/p3-annotations/vibepdf-verify-note.pdf");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("ensure Sample PDFs dir");
     }

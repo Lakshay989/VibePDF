@@ -21,6 +21,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::SystemTime;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -35,7 +36,8 @@ use crate::pdf::extract::extract_pages;
 use crate::pdf::insert_blank::InsertBlankEdit;
 use crate::pdf::insert_from::InsertFromEdit;
 use crate::pdf::document::{
-    collect_metadata, open_pdf, pdfium_lock, save_document, DocumentMetadata, SaveOutcome,
+    bytes_for_cos_read, collect_metadata, is_protected, open_pdf, pdfium_lock, remove_security_for_view,
+    save_document_onto, DocumentMetadata, SaveOutcome, PROTECTED_EDIT_REFUSAL,
 };
 use crate::pdf::render::{self, ImageFormat, RenderedPage};
 use crate::pdf::annotation::{
@@ -47,6 +49,15 @@ use crate::pdf::annotation::{
 use crate::pdf::background::{BackgroundEdit, BackgroundKind};
 use crate::pdf::bates::BatesEdit;
 use crate::pdf::header_footer::HeaderFooterEdit;
+use crate::pdf::compress::{compress_document, CompressLevel, CompressReport};
+use crate::pdf::export_docx::{export_docx, DocxExportSummary};
+use crate::pdf::export_html::{export_html, HtmlExportSummary};
+use crate::pdf::export_xlsx::{export_xlsx, XlsxExportSummary};
+use crate::pdf::export_image::{export_pages, ImageExportOptions, ImageExportSummary};
+use crate::pdf::export_text::{document_text, TextExportSummary};
+use crate::pdf::ocr_text_layer::{
+    prepare_words, recognise_pages, OcrOptions, OcrSummary, OcrTextLayerEdit,
+};
 use crate::pdf::page_numbers::PageNumbersEdit;
 use crate::pdf::watermark::{RemoveWatermarksEdit, WatermarkEdit, WatermarkKind};
 use crate::pdf::cos::{
@@ -62,6 +73,9 @@ use crate::pdf::form::{
     SetButtonFieldEdit, SetChoiceFieldEdit, SetTabOrderEdit, StripXfaEdit, UpdateFieldPropertiesEdit,
 };
 use crate::pdf::form_flatten::FlattenFormEdit;
+use crate::pdf::clean::{clean_into, CleanOptions, CleanOutcome};
+use crate::security::redact::{redact_into, RedactOptions, RedactOutcome};
+use crate::security::verify::{verify_signatures_opened_with, SignatureReport};
 use crate::pdf::form_import::{import_into, ImportOutcome};
 use crate::pdf::font_resolver::{build_font_report, FontReport};
 use crate::pdf::image_edit::{DeleteImageEdit, ReplaceImageEdit, TransformImageEdit};
@@ -87,6 +101,9 @@ pub enum DocumentChange {
     Opened { id: String, page_count: u32 },
     Closed { id: String },
 }
+
+/// What an OCR run replies with: what it found, and the undo state afterwards.
+pub type OcrReply = Result<(OcrSummary, HistoryState), CommandError>;
 
 /// Messages the worker thread accepts. Each variant carries its own
 /// reply channel so the worker can answer one message at a time
@@ -187,11 +204,27 @@ pub enum Message {
     GetHistoryState {
         reply: oneshot::Sender<HistoryState>,
     },
-    /// Serialize the live document to bytes — the edit-preview pipeline
-    /// reloads PDF.js from these so the view reflects in-memory edits
-    /// without a save/reopen.
+    /// Serialize the live document to bytes, **protection intact** — what
+    /// Protect, Unlock, Sign and Find operate on. The view layer uses
+    /// `GetViewBytes`.
     GetBytes {
         reply: oneshot::Sender<Result<Vec<u8>, CommandError>>,
+    },
+    /// SPEC: P1-VIEW-003 — the bytes PDF.js renders, so the view reflects
+    /// in-memory edits without a save/reopen. Identical to `GetBytes` for an
+    /// unprotected document; for one opened with a password, the same document
+    /// with its encryption removed — in memory, because the view layer has no
+    /// password and must not be given one. Never written to disk.
+    GetViewBytes {
+        reply: oneshot::Sender<Result<Vec<u8>, CommandError>>,
+    },
+    /// SPEC: P6-SEC-006 — verify the signatures in `file`, the document's bytes
+    /// as saved on disk, with the password this document was opened with.
+    /// The check runs here so the password never leaves this thread.
+    VerifySignatures {
+        file: Vec<u8>,
+        now: SystemTime,
+        reply: oneshot::Sender<Result<Vec<SignatureReport>, CommandError>>,
     },
     /// SPEC: P2-PAGE-001 — rotate `pages` by `quarter_turns` × 90°.
     /// Applies the edit, records its inverse on the undo stack, and marks
@@ -491,6 +524,21 @@ pub enum Message {
     FlattenForm {
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
     },
+    /// SPEC: P6-SEC-012 — strip metadata, hidden text, comments, attachments,
+    /// bookmarks, form data and embedded files, per `opts`. Undoable in-session
+    /// only (byte-snapshot inverse).
+    CleanDocument {
+        opts: CleanOptions,
+        reply: oneshot::Sender<Result<CleanOutcome, CommandError>>,
+    },
+    /// SPEC: P6-SEC-010 — remove the content inside `rect` on `page`. Undoable
+    /// in-session only (byte-snapshot inverse); permanent once saved.
+    RedactRegion {
+        page: usize,
+        rect: [f32; 4],
+        opts: RedactOptions,
+        reply: oneshot::Sender<Result<RedactOutcome, CommandError>>,
+    },
     /// SPEC: P4-EDIT-003b / P4-EDIT-004 — delete the Add-Text box `id` on `page`.
     /// Undoable; marks dirty.
     RemoveTextBox {
@@ -556,6 +604,53 @@ pub enum Message {
         margin: f32,
         date: String,
         reply: oneshot::Sender<Result<HistoryState, CommandError>>,
+    },
+    /// SPEC: P7-OCR-006 — write the document's text, in reading order, to
+    /// `dest` as UTF-8. Read-only on the document.
+    ExportText {
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+        reply: oneshot::Sender<Result<TextExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-004 — write the 0-based `pages` to `dest` as a Word
+    /// document. Read-only on the source.
+    ExportDocx {
+        pages: Vec<i32>,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<DocxExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-007 — write the 0-based `pages` to `dest` as HTML, images
+    /// to a sibling folder. Read-only on the source.
+    ExportHtml {
+        pages: Vec<i32>,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<HtmlExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-008 — write the tables in the 0-based `pages` to `dest` as
+    /// an Excel workbook. Read-only on the source; nothing is written when no
+    /// tables are found.
+    ExportXlsx {
+        pages: Vec<i32>,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<XlsxExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-005 — render the 0-based `pages` into `dest_dir` as
+    /// `{stem}-{n:03}.{ext}`, one image file per page. Read-only on the
+    /// document.
+    ExportImages {
+        pages: Vec<i32>,
+        dest_dir: std::path::PathBuf,
+        stem: String,
+        options: ImageExportOptions,
+        reply: oneshot::Sender<Result<ImageExportSummary, CommandError>>,
+    },
+    /// SPEC: P7-OCR-001 — OCR the 0-based `pages` and add an invisible text
+    /// layer over the picture of the text, so the page becomes searchable.
+    /// One undoable edit for the whole run; replies with what was recognised.
+    RunOcr {
+        pages: Vec<i32>,
+        options: OcrOptions,
+        reply: oneshot::Sender<OcrReply>,
     },
     /// SPEC: P4-EDIT-011 — stamp a page number (in `format`, from `start`) in the
     /// `position`/`align` margin of every page except the 0-based `exclude`d ones.
@@ -699,6 +794,14 @@ pub enum Message {
         dest_dir: PathBuf,
         stem: String,
         reply: oneshot::Sender<Result<SplitOutcome, CommandError>>,
+    },
+    /// SPEC: P7-OCR-010 — write a compressed copy to `dest` at `level`.
+    /// Read-only on the source: compression is lossy, so it produces a new
+    /// file rather than an undoable edit. No undo, no dirty.
+    CompressDocument {
+        level: CompressLevel,
+        dest: PathBuf,
+        reply: oneshot::Sender<Result<CompressReport, CommandError>>,
     },
     /// SPEC: P2.A2 — fire-and-forget poke from the autosave tick. Writes a
     /// recovery copy iff the document is dirty; no reply (best-effort).
@@ -933,7 +1036,7 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
-    /// Serialize the live document to bytes (edit-preview pipeline).
+    /// Serialize the live document to bytes, protection intact.
     /// Await-holding convenience for tests; IPC uses `get_bytes_request`.
     pub async fn get_bytes(&self) -> Result<Vec<u8>, CommandError> {
         let rx = self.get_bytes_request()?;
@@ -947,6 +1050,48 @@ impl DocumentActorHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(Message::GetBytes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P1-VIEW-003 — the bytes the view renders; see `Message::GetViewBytes`.
+    /// Await-holding convenience for tests; IPC uses `get_view_bytes_request`.
+    pub async fn get_view_bytes(&self) -> Result<Vec<u8>, CommandError> {
+        let rx = self.get_view_bytes_request()?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn get_view_bytes_request(
+        &self,
+    ) -> Result<oneshot::Receiver<Result<Vec<u8>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::GetViewBytes { reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P6-SEC-006 — verify the signatures in `file` (the document as
+    /// saved), using the password the document was opened with.
+    pub async fn verify_signatures(
+        &self,
+        file: Vec<u8>,
+        now: SystemTime,
+    ) -> Result<Vec<SignatureReport>, CommandError> {
+        let rx = self.verify_signatures_request(file, now)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn verify_signatures_request(
+        &self,
+        file: Vec<u8>,
+        now: SystemTime,
+    ) -> Result<oneshot::Receiver<Result<Vec<SignatureReport>, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::VerifySignatures { file, now, reply })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
         Ok(rx)
     }
@@ -1871,6 +2016,49 @@ impl DocumentActorHandle {
         Ok(rx)
     }
 
+    /// SPEC: P6-SEC-010 — redact a region. Await-holding for tests.
+    pub async fn redact_region(
+        &self,
+        page: usize,
+        rect: [f32; 4],
+        opts: RedactOptions,
+    ) -> Result<RedactOutcome, CommandError> {
+        let rx = self.redact_region_request(page, rect, opts)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn redact_region_request(
+        &self,
+        page: usize,
+        rect: [f32; 4],
+        opts: RedactOptions,
+    ) -> Result<oneshot::Receiver<Result<RedactOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RedactRegion { page, rect, opts, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P6-SEC-012 — clean the document. Await-holding for tests.
+    pub async fn clean_document(&self, opts: CleanOptions) -> Result<CleanOutcome, CommandError> {
+        let rx = self.clean_document_request(opts)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    pub fn clean_document_request(
+        &self,
+        opts: CleanOptions,
+    ) -> Result<oneshot::Receiver<Result<CleanOutcome, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::CleanDocument { opts, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
     /// SPEC: P4-EDIT-003b — delete an Add-Text box by its `/Id`. Await-holding for tests.
     pub async fn delete_text_box(&self, page: i32, id: String) -> Result<HistoryState, CommandError> {
         let rx = self.delete_text_box_request(page, id)?;
@@ -2066,6 +2254,18 @@ impl DocumentActorHandle {
             .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
     }
 
+    /// SPEC: P7-OCR-001 (P7.A2) — OCR pages into a searchable layer.
+    /// Await-holding for tests.
+    pub async fn run_ocr(
+        &self,
+        pages: Vec<i32>,
+        options: OcrOptions,
+    ) -> Result<(OcrSummary, HistoryState), CommandError> {
+        let rx = self.run_ocr_request(pages, options)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
     /// SPEC: P4-EDIT-011 (P4.D4) — stamp page numbers. Await-holding for tests.
     #[allow(clippy::too_many_arguments)]
     pub async fn add_page_numbers(
@@ -2170,6 +2370,185 @@ impl DocumentActorHandle {
                 color,
                 margin,
                 date,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-006 — export text to `dest`. Non-blocking; the command awaits.
+    pub fn export_text_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<TextExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportText { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-006 — export text. Await-holding for tests.
+    pub async fn export_text(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<TextExportSummary, CommandError> {
+        let rx = self.export_text_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-005 — export pages as images. Non-blocking; the command
+    /// awaits. A page at 600 DPI takes a moment and the actor handles one
+    /// message at a time, so a long run holds the mailbox — the same trade the
+    /// OCR path makes.
+    pub fn export_images_request(
+        &self,
+        pages: Vec<i32>,
+        dest_dir: std::path::PathBuf,
+        stem: String,
+        options: ImageExportOptions,
+    ) -> Result<oneshot::Receiver<Result<ImageExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportImages {
+                pages,
+                dest_dir,
+                stem,
+                options,
+                reply,
+            })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-004 — export as Word. Non-blocking; the command awaits.
+    pub fn export_docx_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<DocxExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportDocx { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-007 — export as HTML. Non-blocking; the command awaits.
+    pub fn export_html_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<HtmlExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportHtml { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-007 — export as HTML. Await-holding for tests.
+    pub async fn export_html(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<HtmlExportSummary, CommandError> {
+        let rx = self.export_html_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-004 — export as Word. Await-holding for tests.
+    pub async fn export_docx(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<DocxExportSummary, CommandError> {
+        let rx = self.export_docx_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-008 — export tables as a workbook. Non-blocking.
+    pub fn export_xlsx_request(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<XlsxExportSummary, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::ExportXlsx { pages, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-008 — export tables as a workbook. Await-holding for tests.
+    pub async fn export_xlsx(
+        &self,
+        pages: Vec<i32>,
+        dest: std::path::PathBuf,
+    ) -> Result<XlsxExportSummary, CommandError> {
+        let rx = self.export_xlsx_request(pages, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-010 — write a compressed copy. Non-blocking; the command
+    /// awaits. Recompressing a page costs on the order of a second, and the
+    /// actor handles one message at a time, so a long document holds the
+    /// mailbox — the same trade OCR and image export make.
+    pub fn compress_request(
+        &self,
+        level: CompressLevel,
+        dest: std::path::PathBuf,
+    ) -> Result<oneshot::Receiver<Result<CompressReport, CommandError>>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::CompressDocument { level, dest, reply })
+            .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
+        Ok(rx)
+    }
+
+    /// SPEC: P7-OCR-010 — compress to `dest`. Await-holding for tests.
+    pub async fn compress(
+        &self,
+        level: CompressLevel,
+        dest: std::path::PathBuf,
+    ) -> Result<CompressReport, CommandError> {
+        let rx = self.compress_request(level, dest)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-005 — export images. Await-holding for tests.
+    pub async fn export_images(
+        &self,
+        pages: Vec<i32>,
+        dest_dir: std::path::PathBuf,
+        stem: String,
+        options: ImageExportOptions,
+    ) -> Result<ImageExportSummary, CommandError> {
+        let rx = self.export_images_request(pages, dest_dir, stem, options)?;
+        rx.await
+            .map_err(|_| CommandError::Internal("doc-actor dropped reply".into()))?
+    }
+
+    /// SPEC: P7-OCR-001 — OCR pages into a searchable layer. Non-blocking; the
+    /// command awaits. A page takes on the order of a second, and the actor
+    /// handles one message at a time, so a long document holds the mailbox.
+    pub fn run_ocr_request(
+        &self,
+        pages: Vec<i32>,
+        options: OcrOptions,
+    ) -> Result<oneshot::Receiver<OcrReply>, CommandError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(Message::RunOcr {
+                pages,
+                options,
                 reply,
             })
             .map_err(|_| CommandError::Internal("doc-actor mailbox closed".into()))?;
@@ -2927,6 +3306,11 @@ fn run_worker(
         }
     };
 
+    // SPEC: P6-SEC-006 — a signed document is saved by appending to the bytes it
+    // was opened from, so its signatures keep verifying. `None` for every
+    // unsigned document, which keeps saving exactly as it was.
+    let mut signed_base = crate::pdf::incremental_save::signed_base_for(&doc, &path);
+
     tracing::info!(page_count = metadata.page_count, "doc-actor started");
     if ready.send(Ok(metadata.clone())).is_err() {
         // Caller went away before we could report success; nothing to
@@ -3125,7 +3509,13 @@ fn run_worker(
                     // make_backup only when overwriting the original; a
                     // same-path save that reaches here is, by the branch
                     // above, necessarily dirty.
-                    let outcome = save_document(&doc, &dest, same_path, password.as_deref());
+                    let outcome = save_document_onto(
+                        &doc,
+                        &dest,
+                        same_path,
+                        password.as_deref(),
+                        signed_base.as_deref(),
+                    );
                     if outcome.is_ok() {
                         // Any successful save — same-path *or* save-as — makes
                         // the in-memory document clean: record the state we
@@ -3135,6 +3525,16 @@ fn run_worker(
                         // "unsaved changes" claim. SPEC: P2-SAVE-001 / P2.A2;
                         // FABLE_REVIEW §3.11 (P4.HF12).
                         saved_state_id = history.current_state_id();
+                        // The file on disk is now what the next save appends to.
+                        // Only for a same-path save: a save-as leaves the original
+                        // file, and so the base, untouched. If it can't be read
+                        // back, the old base still yields a valid file — the next
+                        // save simply replaces this revision instead of stacking.
+                        if same_path && signed_base.is_some() {
+                            if let Ok(bytes) = std::fs::read(&dest) {
+                                signed_base = Some(bytes);
+                            }
+                        }
                         if let Some(dir) = autosave_dir.as_deref() {
                             let _ = autosave::discard_autosave(dir, &id_str);
                         }
@@ -3163,6 +3563,24 @@ fn run_worker(
                 // state); same path the explicit save uses.
                 let result = pdfium_lock().and_then(|_guard| {
                     doc.save_to_bytes().map_err(CommandError::from)
+                });
+                let _ = reply.send(result);
+            }
+            Message::VerifySignatures { file, now, reply } => {
+                // Pure lopdf over the file's own bytes: no PDFium, no lock.
+                let _ = reply.send(verify_signatures_opened_with(&file, password.as_deref(), now));
+            }
+            Message::GetViewBytes { reply } => {
+                // Same lock, same serialisation — then, only for a document
+                // that needed a password, drop the encryption for PDF.js. The
+                // password is the one this actor was opened with; it never
+                // leaves this thread.
+                let result = pdfium_lock().and_then(|_guard| {
+                    let bytes = doc.save_to_bytes().map_err(CommandError::from)?;
+                    match password.as_deref() {
+                        Some(pw) => remove_security_for_view(&bytes, pw),
+                        None => Ok(bytes),
+                    }
                 });
                 let _ = reply.send(result);
             }
@@ -3348,7 +3766,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_text_notes_doc);
                 let _ = reply.send(result);
@@ -3358,7 +3776,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_annotations_doc);
                 let _ = reply.send(result);
@@ -3405,7 +3823,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_free_text_doc(d, &nm));
                 let _ = reply.send(result);
@@ -3546,7 +3964,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_text_boxes_doc(d, page));
                 let _ = reply.send(result);
@@ -3558,7 +3976,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_form_summary_doc);
                 let _ = reply.send(result);
@@ -3568,7 +3986,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_text_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -3591,7 +4009,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_button_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -3613,7 +4031,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_choice_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -3679,7 +4097,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(|d| read_page_fields_doc(d, page));
                 let _ = reply.send(result);
@@ -3712,7 +4130,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(collect_form_data)
                     .and_then(|data| {
@@ -3734,6 +4152,37 @@ fn run_worker(
                         history.record(inverse);
                         ImportOutcome { report, history: history.state() }
                     });
+                let _ = reply.send(result);
+            }
+            Message::RedactRegion { page, rect, opts, reply } => {
+                // SPEC: P6-SEC-010 — the counts are the only visible result;
+                // the page afterwards looks the same whether it worked or not.
+                // A protected document is refused before `security::redact`
+                // runs: its reload carries no password, and a redaction that
+                // fails obscurely is worse than one that says why.
+                let protected = pdfium_lock().map(|_guard| is_protected(&doc));
+                let result = protected
+                    .and_then(|protected| {
+                        if protected {
+                            Err(CommandError::InvalidInput(PROTECTED_EDIT_REFUSAL.into()))
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .and_then(|()| redact_into(&mut doc, page, rect, opts))
+                    .map(|(inverse, report)| {
+                        history.record(inverse);
+                        RedactOutcome { report, history: history.state() }
+                    });
+                let _ = reply.send(result);
+            }
+            Message::CleanDocument { opts, reply } => {
+                // SPEC: P6-SEC-012 — the report is the only visible result, so
+                // it travels back with the history state.
+                let result = clean_into(&mut doc, &opts).map(|(inverse, report)| {
+                    history.record(inverse);
+                    CleanOutcome { report, history: history.state() }
+                });
                 let _ = reply.send(result);
             }
             Message::FlattenForm { reply } => {
@@ -3895,6 +4344,83 @@ fn run_worker(
                     }
                     Err(e) => Err(e),
                 };
+                let _ = reply.send(result);
+            }
+            Message::ExportText { pages, dest, reply } => {
+                // SPEC: P7-OCR-006 (P7.B3) — a read of the document and a write
+                // of a *text* file; the PDF is untouched, so there is no edit
+                // and nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| document_text(&doc, &pages))
+                    .and_then(|(text, summary)| {
+                        std::fs::write(&dest, text.as_bytes())?;
+                        Ok(summary)
+                    });
+                let _ = reply.send(result);
+            }
+            Message::ExportImages {
+                pages,
+                dest_dir,
+                stem,
+                options,
+                reply,
+            } => {
+                // SPEC: P7-OCR-005 (P7.B2) — renders of the document and writes
+                // of image files; the PDF is untouched, so there is no edit and
+                // nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_pages(&doc, &pages, &dest_dir, &stem, options));
+                let _ = reply.send(result);
+            }
+            Message::RunOcr {
+                pages,
+                options,
+                reply,
+            } => {
+                // SPEC: P7-OCR-001 (P7.A2) — recognise first so the reply can
+                // report what was found even when nothing is confident enough
+                // to write, then apply the write as one undoable edit.
+                let started = std::time::Instant::now();
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| {
+                        let mut found = recognise_pages(&doc, &pages, &options)?;
+                        let (words, skipped) =
+                            prepare_words(&mut found, options.min_confidence);
+                        let page_count = found.len();
+                        if words > 0 {
+                            let inverse = Box::new(OcrTextLayerEdit { found }).apply(&mut doc)?;
+                            history.record(inverse);
+                        }
+                        let summary = OcrSummary {
+                            pages: u32::try_from(page_count).unwrap_or(u32::MAX),
+                            words,
+                            skipped,
+                            milliseconds: u64::try_from(started.elapsed().as_millis())
+                                .unwrap_or(u64::MAX),
+                        };
+                        Ok((summary, history.state()))
+                    });
                 let _ = reply.send(result);
             }
             Message::AddPageNumbers {
@@ -4080,7 +4606,7 @@ fn run_worker(
                 let result = doc_cache
                     .get(|| {
                         let _guard = pdfium_lock()?;
-                        doc.save_to_bytes().map_err(CommandError::from)
+                        bytes_for_cos_read(&doc, password.as_deref())
                     })
                     .and_then(read_measure_calibration_doc);
                 let _ = reply.send(result);
@@ -4108,6 +4634,54 @@ fn run_worker(
                 // SPEC: P2-PAGE-007 — read-only: emit N files from the source.
                 // No undo, no dirty (the open doc is unchanged).
                 let _ = reply.send(split_document(&doc, &mode, &dest_dir, &stem));
+            }
+            Message::ExportDocx { pages, dest, reply } => {
+                // SPEC: P7-OCR-004 (P7.B1a) — a read of the document and a
+                // write of a .docx; the PDF is untouched, nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_docx(&doc, &pages, &dest));
+                let _ = reply.send(result);
+            }
+            Message::ExportHtml { pages, dest, reply } => {
+                // SPEC: P7-OCR-007 (P7.B4) — a read of the document and a write
+                // of an .html plus its images; the PDF is untouched.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_html(&doc, &pages, &dest));
+                let _ = reply.send(result);
+            }
+            Message::ExportXlsx { pages, dest, reply } => {
+                // SPEC: P7-OCR-008 (P7.B5) — a read of the document and a write
+                // of a .xlsx; the PDF is untouched, nothing to undo.
+                let result = pages
+                    .iter()
+                    .map(|&p| {
+                        usize::try_from(p).map_err(|_| {
+                            CommandError::InvalidInput(format!("negative page index: {p}"))
+                        })
+                    })
+                    .collect::<Result<Vec<usize>, CommandError>>()
+                    .and_then(|pages| export_xlsx(&doc, &pages, &dest));
+                let _ = reply.send(result);
+            }
+            Message::CompressDocument { level, dest, reply } => {
+                // SPEC: P7-OCR-010 — read-only: write a smaller copy. No undo,
+                // no dirty (the open doc is unchanged, and deliberately so —
+                // the recompression is lossy).
+                let _ = reply.send(compress_document(&doc, level, &dest));
             }
             Message::Autosave => {
                 // SPEC: P2.A2 — write a recovery copy only when dirty, i.e.
