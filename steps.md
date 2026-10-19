@@ -5,14 +5,14 @@ shippable steps. The per-phase plans live under `steps/`.
 
 | Phase | File | Steps | Status |
 |---|---|---|---|
-| Phase 1 — Open & view | [steps/P1.md](steps/P1.md) | 18 (A1..E5) | bootstrap shipped (`c7a54f5`); rest open |
-| Phase 2 — Page operations | [steps/P2.md](steps/P2.md) | 13 (A1..D1) | not started |
-| Phase 3 — Annotations | [steps/P3.md](steps/P3.md) | 13 (A1..E2) | not started |
-| Phase 4 — Content editing | [steps/P4.md](steps/P4.md) | 14 (A1..D5) | not started |
-| Phase 5 — Forms | [steps/P5.md](steps/P5.md) | 10 (A1..C2) | not started |
+| Phase 1 — Open & view | [steps/P1.md](steps/P1.md) | 18 (A1..E5) | 16/18 `[x]`; E3 (cold-start benchmark) open, E5 (E2E harness) `[~]` |
+| Phase 2 — Page operations | [steps/P2.md](steps/P2.md) | 13 (A1..D1) | 11/13 `[x]`; A2 (crash-recovery ritual, deferred) + C3 at `[~]` |
+| Phase 3 — Annotations | [steps/P3.md](steps/P3.md) | 13 (A1..E2) | shipped and closed, bar B3c (rich text `/RC`), deferred from B3b |
+| Phase 4 — Content editing | [steps/P4.md](steps/P4.md) | 14 (A1..D5) | all 14 shipped, all still `[~]` — no sweep has been run |
+| Phase 5 — Forms | [steps/P5.md](steps/P5.md) | 10 (A1..C2) | all 10 shipped and swept — closed |
 | Phase 6 — Signing & security | [steps/P6.md](steps/P6.md) | 13 (A1..D3) | all 13 shipped (`[~]`); sweep open — 8 rows unrecorded, 2 marked Issue |
-| Phase 7 — OCR & conversion | [steps/P7.md](steps/P7.md) | 10 (A1..C2) | not started |
-| Phase 8 — AI & batch | [steps/P8.md](steps/P8.md) | 10 (A1..C2) | not started |
+| Phase 7 — OCR & conversion | [steps/P7.md](steps/P7.md) | 10 (A1..C2) | A1..A4, B1a/B1b, B2..B5, C1c, C2a shipped but still marked `[ ]`; C1a/C1b/C1d + C2b/C2c open |
+| Phase 8 — AI & batch | [steps/P8.md](steps/P8.md) | 10 (A1..C2) | not started (no `P8.*` commits) |
 
 **Total:** 101 steps. Every `P<n>-...` spec line in
 `docs/02_PRODUCT_SPEC.md` is referenced in exactly one step; the
