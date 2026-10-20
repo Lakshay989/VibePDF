@@ -2,6 +2,7 @@ name: CI
 
 # Runs the project's gates on every push to main (bar docs-only ones) and every PR:
 #   npm run check   — tsc + eslint + cargo clippy (pedantic, -D warnings)
+#   npm run licenses -- --check — the licence inventory matches the dependencies
 #   npm run test    — vitest (frontend)
 #   npm run test:rust — cargo test (Rust + PDF, via the PDFium wrapper)
 #
@@ -101,6 +102,15 @@ jobs:
 
       - name: Check (tsc + eslint + clippy)
         run: npm run check
+
+      # THIRD-PARTY-LICENSES.md and the in-app Licences list are generated from
+      # the dependency trees. With nothing checking them they drifted for weeks:
+      # the lopdf 0.42 upgrade and P7.C1c's crates went unlisted until P7.C1d
+      # regenerated them. --check fails when a dependency change wasn't followed
+      # by `npm run licenses`, and when any licence is outside the reviewed-
+      # permissive set (docs/01_VISION.md's "no copyleft in the shipped binary").
+      - name: Licence inventory up to date
+        run: npm run licenses -- --check
 
       - name: Frontend tests (vitest)
         run: npm run test

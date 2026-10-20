@@ -122,9 +122,11 @@ function rustDependencies() {
       { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
     );
     for (const line of raw.split("\n")) {
-      // "name v1.2.3 (path)? (*)?|<licence>|<repository>"; "(*)" marks a
-      // subtree cargo already printed.
-      const [pkg = "", license = "", repository = ""] = line.split("|");
+      // "name v1.2.3 (path)?|<licence>|<repository>", and " (*)" at the very
+      // end when cargo already printed that subtree. The marker trails the
+      // whole formatted line, so it lands in the repository field: strip it
+      // before splitting, or it becomes part of the link.
+      const [pkg = "", license = "", repository = ""] = line.replace(/\s*\(\*\)\s*$/, "").split("|");
       const match = /^(\S+) v(\S+)/.exec(pkg.trim());
       if (!match) continue;
       const [, name, version] = match;
