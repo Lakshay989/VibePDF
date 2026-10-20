@@ -114,10 +114,23 @@ jobs:
       - name: Generate acceptance fixtures (stdlib-only)
         run: python3 tests/fixtures/acceptance/generate-p6-document.py
 
+      # P7.C1d: veraPDF, the PDF Association's reference validator, judges the
+      # PDF/A output in tests/create_pdfa.rs. A test tool only (GPL-3.0+ OR
+      # MPL-2.0), never shipped. Locally those checks skip without it;
+      # VIBEPDF_REQUIRE_VERAPDF below makes a missing validator fail here
+      # instead of passing quietly.
+      - name: Install veraPDF
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install verapdf && verapdf --version
+
       # --no-fail-fast: cargo otherwise stops at the first failing test binary,
       # and every binary after it goes unreported. That is how several
       # independent failures stacked up here, each hidden behind the last.
       - name: Rust tests (cargo)
+        env:
+          VIBEPDF_REQUIRE_VERAPDF: "1"
         run: npm run test:rust -- --no-fail-fast
 
   # Windows is a shipped target (docs/01_VISION) but was never built or tested

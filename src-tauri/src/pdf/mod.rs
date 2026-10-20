@@ -42,6 +42,7 @@ pub mod ocr_text_layer;
 pub mod ooxml;
 pub mod page_content;
 pub mod page_numbers;
+pub mod pdfa;
 pub mod reflow;
 pub mod render;
 pub mod reorder;

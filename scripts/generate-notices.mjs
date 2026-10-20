@@ -47,6 +47,13 @@ const PERMISSIVE = new Set([
   "CDLA-Permissive-2.0",
   "CC0-1.0",
   "ISC",
+  // The International Color Consortium's terms for its own profiles. Reviewed
+  // 2026-10-20 for sRGB2014.icc (P7.C1d, PDF/A): a profile "may be copied,
+  // distributed, embedded, made, used, and sold without restriction"; the one
+  // condition is that an *altered* copy drops the ICC's identification and
+  // isn't passed off as the original. We ship it unaltered. No SPDX identifier
+  // exists, hence the LicenseRef.
+  "LicenseRef-ICC-Profile",
   "MIT",
   "MIT-0",
   "MPL-2.0", // file-level copyleft: no obligation unless we modify those files
@@ -225,6 +232,13 @@ const BUNDLED = [
     license: "Apache-2.0",
     repository: "https://github.com/tesseract-ocr/tessdata_fast",
     note: "The eng.traineddata model, fetched by scripts/fetch-tessdata.sh and bundled as a Tauri resource. Its LICENSE ships beside it in resources/tessdata/.",
+  },
+  {
+    name: "sRGB2014 ICC profile",
+    version: "2.0 (2015)",
+    license: "LicenseRef-ICC-Profile",
+    repository: "https://registry.color.org/rgb-registry/srgbprofiles",
+    note: "Copyright International Color Consortium, 2015. Compiled into the binary (src-tauri/resources/icc/sRGB2014.icc) as the output intent of PDF/A files (P7.C1d). The ICC's terms: it may be copied, distributed, embedded, made, used and sold without restriction; an altered copy must drop the original identification. Shipped unaltered; its copyright is in the profile's own cprt tag.",
   },
   {
     name: "CGATS001Compat-v2-micro ICC profile (PDF.js iccs)",

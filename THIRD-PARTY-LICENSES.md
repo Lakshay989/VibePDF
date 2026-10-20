@@ -18,9 +18,9 @@ Obligations that a *release* must satisfy, as opposed to this inventory, are in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Attribution text for the
 Apache-2.0 components is in [`NOTICE`](NOTICE).
 
-- **410** Rust crates
+- **409** Rust crates
 - **62** npm packages
-- **9** bundled components
+- **10** bundled components
 - **0** with a licence outside the reviewed-permissive set
 
 ## Bundled components
@@ -73,6 +73,12 @@ Apache-2.0 — <https://github.com/tesseract-ocr/tessdata_fast>
 
 The eng.traineddata model, fetched by scripts/fetch-tessdata.sh and bundled as a Tauri resource. Its LICENSE ships beside it in resources/tessdata/.
 
+### sRGB2014 ICC profile 2.0 (2015)
+
+LicenseRef-ICC-Profile — <https://registry.color.org/rgb-registry/srgbprofiles>
+
+Copyright International Color Consortium, 2015. Compiled into the binary (src-tauri/resources/icc/sRGB2014.icc) as the output intent of PDF/A files (P7.C1d). The ICC's terms: it may be copied, distributed, embedded, made, used and sold without restriction; an altered copy must drop the original identification. Shipped unaltered; its copyright is in the profile's own cprt tag.
+
 ### CGATS001Compat-v2-micro ICC profile (PDF.js iccs) 6.3.289
 
 CC0-1.0 — <https://github.com/saucecontrol/Compact-ICC-Profiles>
@@ -104,7 +110,6 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [block2](https://github.com/madsmtm/objc2 (*)) | 0.6.2 | MIT |
 | [brotli](https://github.com/dropbox/rust-brotli) | 8.0.2 | BSD-3-Clause AND MIT |
 | [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) | 5.0.0 | BSD-3-Clause/MIT |
-| [bytecount](https://github.com/llogiq/bytecount) | 0.6.9 | Apache-2.0/MIT |
 | [bytemuck](https://github.com/Lokathor/bytemuck) | 1.25.0 | Zlib OR Apache-2.0 OR MIT |
 | [byteorder](https://github.com/BurntSushi/byteorder) | 1.5.0 | Unlicense OR MIT |
 | [byteorder-lite](https://github.com/image-rs/byteorder-lite) | 0.1.0 | Unlicense OR MIT |
@@ -117,6 +122,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [cbc](https://github.com/RustCrypto/block-modes (*)) | 0.1.2 | MIT OR Apache-2.0 |
 | [cfb](https://github.com/mdsteele/rust-cfb) | 0.7.3 | MIT |
 | [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.4 | MIT OR Apache-2.0 |
+| [chacha20](https://github.com/RustCrypto/stream-ciphers) | 0.10.2 | MIT OR Apache-2.0 |
 | [chrono](https://github.com/chronotope/chrono) | 0.4.44 | MIT OR Apache-2.0 |
 | [cipher](https://github.com/RustCrypto/traits (*)) | 0.4.4 | MIT OR Apache-2.0 |
 | [cms](https://github.com/RustCrypto/formats/tree/master/cms (*)) | 0.2.3 | Apache-2.0 OR MIT |
@@ -127,12 +133,13 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [core-graphics](https://github.com/servo/core-foundation-rs) | 0.25.0 | MIT OR Apache-2.0 |
 | [core-graphics-types](https://github.com/servo/core-foundation-rs) | 0.2.0 | MIT OR Apache-2.0 |
 | [cpufeatures](https://github.com/RustCrypto/utils) | 0.2.17 | MIT OR Apache-2.0 |
+| [cpufeatures](https://github.com/RustCrypto/utils) | 0.3.1 | MIT OR Apache-2.0 |
 | [crc32fast](https://github.com/srijs/rust-crc32fast (*)) | 1.5.0 | MIT OR Apache-2.0 |
 | [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam (*)) | 0.5.15 | MIT OR Apache-2.0 |
 | [crossbeam-utils](https://github.com/crossbeam-rs/crossbeam) | 0.8.21 | MIT OR Apache-2.0 |
 | [crypto-common](https://github.com/RustCrypto/traits) | 0.1.7 | MIT OR Apache-2.0 |
 | [cssparser](https://github.com/servo/rust-cssparser (*)) | 0.36.0 | MPL-2.0 |
-| [cssparser-macros](https://github.com/servo/rust-cssparser) | 0.6.1 | MPL-2.0 |
+| [cssparser-macros](https://github.com/servo/rust-cssparser (*)) | 0.6.1 | MPL-2.0 |
 | [ctor](https://github.com/mmastrac/rust-ctor) | 0.8.0 | Apache-2.0 OR MIT |
 | [ctor-proc-macro](https://github.com/mmastrac/rust-ctor) | 0.0.7 | Apache-2.0 OR MIT |
 | [darling](https://github.com/TedDriggs/darling) | 0.23.0 | MIT |
@@ -143,7 +150,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [der_derive](https://github.com/RustCrypto/formats/tree/master/der/derive) | 0.7.3 | Apache-2.0 OR MIT |
 | [deranged](https://github.com/jhpratt/deranged) | 0.5.8 | MIT OR Apache-2.0 |
 | [derive_more](https://github.com/JelteF/derive_more) | 2.1.1 | MIT |
-| [derive_more-impl](https://github.com/JelteF/derive_more) | 2.1.1 | MIT |
+| [derive_more-impl](https://github.com/JelteF/derive_more (*)) | 2.1.1 | MIT |
 | [des](https://github.com/RustCrypto/block-ciphers) | 0.8.1 | MIT OR Apache-2.0 |
 | [digest](https://github.com/RustCrypto/traits) | 0.10.7 | MIT OR Apache-2.0 |
 | [dirs](https://github.com/soc/dirs-rs) | 6.0.0 | MIT OR Apache-2.0 |
@@ -193,7 +200,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [generic-array](https://github.com/fizyk20/generic-array.git (*)) | 0.14.7 | MIT |
 | [getrandom](https://github.com/rust-random/getrandom (*)) | 0.2.17 | MIT OR Apache-2.0 |
 | [getrandom](https://github.com/rust-random/getrandom (*)) | 0.3.4 | MIT OR Apache-2.0 |
-| [getrandom](https://github.com/rust-random/getrandom) | 0.4.2 | MIT OR Apache-2.0 |
+| [getrandom](https://github.com/rust-random/getrandom (*)) | 0.4.2 | MIT OR Apache-2.0 |
 | [gio](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.4 | MIT |
 | [gio-sys](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.1 | MIT |
 | [glib](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.5 | MIT |
@@ -247,7 +254,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [litemap](https://github.com/unicode-org/icu4x) | 0.8.2 | Unicode-3.0 |
 | [lock_api](https://github.com/Amanieu/parking_lot) | 0.4.14 | MIT OR Apache-2.0 |
 | [log](https://github.com/rust-lang/log) | 0.4.30 | MIT OR Apache-2.0 |
-| [lopdf](https://github.com/J-F-Liu/lopdf.git) | 0.36.0 | MIT |
+| [lopdf](https://github.com/J-F-Liu/lopdf.git) | 0.42.0 | MIT |
 | [markup5ever](https://github.com/servo/html5ever) | 0.38.0 | MIT OR Apache-2.0 |
 | [matchers](https://github.com/hawkw/matchers) | 0.2.0 | MIT |
 | [maybe-owned](https://github.com/rustonaut/maybe-owned) | 0.3.4 | MIT OR Apache-2.0 |
@@ -259,8 +266,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [moxcms](https://github.com/awxkee/moxcms.git) | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
 | [muda](https://github.com/tauri-apps/muda) | 0.19.2 | Apache-2.0 OR MIT |
 | [new_debug_unreachable](https://github.com/mbrubeck/rust-debug-unreachable) | 1.0.6 | MIT |
-| [nom](https://github.com/rust-bakery/nom (*)) | 8.0.0 | MIT |
-| [nom_locate](https://github.com/fflorent/nom_locate) | 5.0.0 | MIT |
+| [nom](https://github.com/rust-bakery/nom) | 8.0.0 | MIT |
 | [nu-ansi-term](https://github.com/nushell/nu-ansi-term) | 0.50.3 | MIT |
 | [num-bigint-dig](https://github.com/dignifiedquire/num-bigint) | 0.8.6 | MIT/Apache-2.0 |
 | [num-conv](https://github.com/jhpratt/num-conv) | 0.2.2 | MIT OR Apache-2.0 |
@@ -279,16 +285,16 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [option-ext](https://github.com/soc/option-ext.git) | 0.2.0 | MPL-2.0 |
 | [pango](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.3 | MIT |
 | [pango-sys](https://github.com/gtk-rs/gtk-rs-core (*)) | 0.18.0 | MIT |
-| [parking_lot](https://github.com/Amanieu/parking_lot) | 0.12.5 | MIT OR Apache-2.0 |
+| [parking_lot](https://github.com/Amanieu/parking_lot (*)) | 0.12.5 | MIT OR Apache-2.0 |
 | [parking_lot_core](https://github.com/Amanieu/parking_lot) | 0.9.12 | MIT OR Apache-2.0 |
 | [pbkdf2](https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2 (*)) | 0.12.2 | MIT OR Apache-2.0 |
 | [pdfium-render](https://github.com/ajrcarey/pdfium-render) | 0.9.1 | MIT OR Apache-2.0 |
 | [pem-rfc7468](https://github.com/RustCrypto/formats/tree/master/pem-rfc7468) | 0.7.0 | Apache-2.0 OR MIT |
 | [percent-encoding](https://github.com/servo/rust-url/) | 2.3.2 | MIT OR Apache-2.0 |
-| [phf](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT |
+| [phf](https://github.com/rust-phf/rust-phf (*)) | 0.13.1 | MIT |
 | [phf_generator](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT |
 | [phf_macros](https://github.com/rust-phf/rust-phf (*)) | 0.13.1 | MIT |
-| [phf_shared](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT |
+| [phf_shared](https://github.com/rust-phf/rust-phf (*)) | 0.13.1 | MIT |
 | [pin-project-lite](https://github.com/taiki-e/pin-project-lite) | 0.2.17 | Apache-2.0 OR MIT |
 | [piston-float](https://github.com/pistondevelopers/float.git) | 1.0.1 | MIT |
 | [pkcs1](https://github.com/RustCrypto/formats/tree/master/pkcs1) | 0.7.5 | Apache-2.0 OR MIT |
@@ -300,7 +306,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [png](https://github.com/image-rs/image-png) | 0.18.1 | MIT OR Apache-2.0 |
 | [potential_utf](https://github.com/unicode-org/icu4x) | 0.1.5 | Unicode-3.0 |
 | [powerfmt](https://github.com/jhpratt/powerfmt) | 0.2.0 | MIT OR Apache-2.0 |
-| [ppv-lite86](https://github.com/cryptocorrosion/cryptocorrosion (*)) | 0.2.21 | MIT OR Apache-2.0 |
+| [ppv-lite86](https://github.com/cryptocorrosion/cryptocorrosion) | 0.2.21 | MIT OR Apache-2.0 |
 | [precomputed-hash](https://github.com/emilio/precomputed-hash) | 0.1.1 | MIT |
 | [proc-macro-crate](https://github.com/bkchr/proc-macro-crate) | 1.3.1 | MIT OR Apache-2.0 |
 | [proc-macro-crate](https://github.com/bkchr/proc-macro-crate) | 2.0.2 | MIT OR Apache-2.0 |
@@ -309,14 +315,13 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [proc-macro2](https://github.com/dtolnay/proc-macro2 (*)) | 1.0.106 | MIT OR Apache-2.0 |
 | [pxfm](https://github.com/awxkee/pxfm) | 0.1.29 | BSD-3-Clause OR Apache-2.0 |
 | [quick-error](http://github.com/tailhook/quick-error) | 2.0.1 | MIT/Apache-2.0 |
-| [quick-xml](https://github.com/tafia/quick-xml) | 0.39.4 | MIT |
+| [quick-xml](https://github.com/tafia/quick-xml (*)) | 0.39.4 | MIT |
 | [quote](https://github.com/dtolnay/quote (*)) | 1.0.45 | MIT OR Apache-2.0 |
+| [rand](https://github.com/rust-random/rand) | 0.10.3 | MIT OR Apache-2.0 |
 | [rand](https://github.com/rust-random/rand) | 0.8.7 | MIT OR Apache-2.0 |
-| [rand](https://github.com/rust-random/rand) | 0.9.4 | MIT OR Apache-2.0 |
 | [rand_chacha](https://github.com/rust-random/rand) | 0.3.1 | MIT OR Apache-2.0 |
-| [rand_chacha](https://github.com/rust-random/rand) | 0.9.0 | MIT OR Apache-2.0 |
+| [rand_core](https://github.com/rust-random/rand_core) | 0.10.1 | MIT OR Apache-2.0 |
 | [rand_core](https://github.com/rust-random/rand (*)) | 0.6.4 | MIT OR Apache-2.0 |
-| [rand_core](https://github.com/rust-random/rand (*)) | 0.9.5 | MIT OR Apache-2.0 |
 | [rangemap](https://github.com/jeffparsons/rangemap) | 1.7.1 | MIT/Apache-2.0 |
 | [raw-window-handle](https://github.com/rust-windowing/raw-window-handle) | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | [regex](https://github.com/rust-lang/regex (*)) | 1.12.3 | MIT OR Apache-2.0 |
@@ -565,8 +570,8 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 
 | Licence | Count |
 |---|---|
-| MIT OR Apache-2.0 | 192 |
-| MIT | 152 |
+| MIT OR Apache-2.0 | 193 |
+| MIT | 151 |
 | Apache-2.0 OR MIT | 40 |
 | Unicode-3.0 | 18 |
 | MIT/Apache-2.0 | 17 |
@@ -576,9 +581,9 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | MPL-2.0 | 5 |
 | Unlicense OR MIT | 5 |
 | MIT OR Apache-2.0 OR Zlib | 4 |
-| Apache-2.0/MIT | 3 |
 | ISC | 3 |
 | Apache-2.0 OR ISC OR MIT | 2 |
+| Apache-2.0/MIT | 2 |
 | BSD-2-Clause | 2 |
 | BSD-2-Clause OR Apache-2.0 OR MIT | 2 |
 | BSD-3-Clause OR Apache-2.0 | 2 |
@@ -596,6 +601,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | CC0-1.0 | 1 |
 | CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
 | CDLA-Permissive-2.0 | 1 |
+| LicenseRef-ICC-Profile | 1 |
 | MIT OR Zlib OR Apache-2.0 | 1 |
 
 ### On the MPL-2.0 entries

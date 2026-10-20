@@ -32,6 +32,7 @@ vibepdf/
 │   │   │   ├── docx_read.rs      # Word (.docx) → flow model: styles, numbering, images, tracked changes (P7.C1b1); tables (C1b2)
 │   │   │   ├── flow.rs           # Flowed text → pages: line breaking, alignment, lists, embedded faces (P7.C1b1); tables (C1b2); auto tables, rules (C1c)
 │   │   │   ├── html_read.rs      # HTML → flow model: html5ever via dom_query, cascade, lists, images, tables; offline (P7.C1c)
+│   │   │   ├── pdfa.rs           # PDF/A-2u for created PDFs: sRGB output intent (resources/icc/), XMP, matching Info, file ID (P7.C1d)
 │   │   │   ├── font_index.rs     # System fonts by family + style, from their name tables (P7.C1b1)
 │   │   │   ├── xml_tree.rs       # Namespace-aware XML tree over quick-xml, for OOXML (P7.C1b1)
 │   │   │   ├── page.rs           # Page operations

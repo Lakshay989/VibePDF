@@ -18,7 +18,7 @@ it** — a failure with symptoms is worth more than a red X.
 Regenerate every output file, so what you check matches what the code does now:
 
 ```bash
-cd src-tauri && cargo test --test export_image --test export_docx --test export_xlsx --test compress --test ocr_to_searchable --test ocr_languages --test create_docx --test create_html -- --ignored --nocapture
+cd src-tauri && cargo test --test export_image --test export_docx --test export_xlsx --test compress --test ocr_to_searchable --test ocr_languages --test create_docx --test create_html --test create_pdfa -- --ignored --nocapture
 ```
 
 Then start the app and leave it running:
@@ -160,6 +160,22 @@ own HTML export. None of them is a real website.
     beside it.
   - Nothing cut off at the right margin.
 
+### 1.10 Create PDF… as PDF/A (added with P7.C1d)
+
+veraPDF already checks the files the tests make; this checks the checkbox
+and the result.
+
+- [ ] **Create PDF…** → add a photo, a Word file and a web page → tick
+      **PDF/A, for archiving** → **Create**.
+- [ ] Run veraPDF on what you saved:
+
+      verapdf --flavour 2u "path/to/what-you-saved.pdf" | grep -o 'isCompliant="[a-z]*"'
+
+      **Expect `isCompliant="true"`.**
+- [ ] Open it in **Preview**: it should look the same as a file made without
+      the checkbox. Look at **Tools → Show Inspector**: the title is the file's
+      name.
+
 ---
 
 ## Part 2 — PDFs in Preview
@@ -247,6 +263,9 @@ open -a Preview "Sample PDFs/out/p7-create/from-html-features.pdf" "Sample PDFs/
   - "Drive shaft" on yellow.
   - "Fasteners, assorted" spanning two columns.
   - No cell text wrapped.
+- [ ] **`pdfa-every-source.pdf`** and **`pdfa-html-features.pdf`** (PDF/A) —
+      the same content as the files above, unchanged in look; the CMYK test
+      image is still red.
 - [ ] **`from-html-textutil-memo.pdf`** — the memo's heading, body, list
       lines, centred line, red and underlined words, and the Cyrillic line.
 

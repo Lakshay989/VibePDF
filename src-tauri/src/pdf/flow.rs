@@ -28,7 +28,7 @@ use std::fmt::Write as _;
 use lopdf::{Dictionary, Object, ObjectId};
 
 use crate::error::CommandError;
-use crate::pdf::create::{embed_image, num, placement, Builder};
+use crate::pdf::create::{converted_note, embed_image, num, placement, Builder};
 use crate::pdf::font_embed_cid::{build_cid_font_from, CidFont};
 use crate::pdf::font_index::{class_of, fallback_families, FontIndex};
 use crate::pdf::font_resolver::broad_coverage_font_paths;
@@ -327,11 +327,14 @@ struct Faces<'i> {
     fallback: Option<usize>,
     fallback_tried: bool,
     reported: BTreeSet<String>,
+    /// PDF/A: a character no face has is refused rather than drawn as `.notdef`.
+    archival: bool,
 }
 
 impl<'i> Faces<'i> {
-    fn new(index: &'i FontIndex) -> Self {
+    fn new(index: &'i FontIndex, archival: bool) -> Self {
         Self {
+            archival,
             index,
             loaded: Vec::new(),
             by_style: HashMap::new(),
@@ -456,6 +459,12 @@ fn pieces(runs: &[Run], faces: &mut Faces, warnings: &mut Vec<String>) -> Result
             let face = if kind == Kind::Word && !faces.loaded[primary].covers(c) {
                 if let Some(f) = faces.fallback_for(&run.style, c) {
                     f
+                } else if faces.archival {
+                    // PDF/A forbids drawing `.notdef`, the box a missing character becomes.
+                    return Err(CommandError::InvalidInput(format!(
+                        "{c} (U+{:04X}) has no font on this computer, and a PDF/A file can't show it as a box.",
+                        u32::from(c)
+                    )));
                 } else {
                     let note = format!("{c} (U+{:04X}) has no font on this computer and is shown as a box.", u32::from(c));
                     if !warnings.contains(&note) {
@@ -817,8 +826,11 @@ fn lay_out_paragraph(paragraph: &Paragraph, left: f32, right: f32, faces: &mut F
 }
 
 /// An image as one line, scaled down to fit `left..right` and `max_height`.
-fn lay_out_image(image: &FlowImage, left: f32, right: f32, max_height: f32, builder: &mut Builder) -> Result<Item, CommandError> {
-    let embedded = embed_image(&mut builder.doc, &image.name, &image.bytes)?;
+fn lay_out_image(image: &FlowImage, left: f32, right: f32, max_height: f32, builder: &mut Builder, warnings: &mut Vec<String>) -> Result<Item, CommandError> {
+    let embedded = embed_image(&mut builder.doc, &image.name, &image.bytes, builder.archival)?;
+    if embedded.converted {
+        warnings.push(converted_note(&image.name));
+    }
     let room = right - left;
     let scale = (room / image.width).min(max_height / image.height).min(1.0);
     let (w, h) = (image.width * scale, image.height * scale);
@@ -993,7 +1005,7 @@ fn lay_out_blocks(
     for block in blocks {
         match block {
             FlowBlock::Paragraph(p) => items.extend(lay_out_paragraph(p, left, right, faces, warnings)?),
-            FlowBlock::Image(image) => items.push(lay_out_image(image, left, right, max_height, builder)?),
+            FlowBlock::Image(image) => items.push(lay_out_image(image, left, right, max_height, builder, warnings)?),
             FlowBlock::Table(table) => {
                 let rows = lay_out_rows(table, (left, right), max_height, faces, builder, warnings)?;
                 for index in 0..rows.len() {
@@ -1354,7 +1366,7 @@ fn split_row(row: &mut RowBox, pages: &mut Pages, heads: &[Header], warnings: &m
 /// # Errors
 /// When no font can be found at all, or an image can't be read.
 pub(crate) fn render_flow(builder: &mut Builder, document: &FlowDocument, index: &FontIndex, warnings: &mut Vec<String>) -> Result<usize, CommandError> {
-    let mut faces = Faces::new(index);
+    let mut faces = Faces::new(index, builder.archival);
     let mut pages = Pages::new(document.page);
     let (left, right) = (document.page.left, document.page.width - document.page.right);
     for block in &document.blocks {
@@ -1364,7 +1376,7 @@ pub(crate) fn render_flow(builder: &mut Builder, document: &FlowDocument, index:
                 pages.place(items);
             }
             FlowBlock::Image(image) => {
-                let item = lay_out_image(image, left, right, pages.body(), builder)?;
+                let item = lay_out_image(image, left, right, pages.body(), builder, warnings)?;
                 pages.place(vec![item]);
             }
             FlowBlock::Table(table) => place_table(table, &mut pages, &mut faces, builder, warnings)?,

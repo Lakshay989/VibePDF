@@ -74,7 +74,7 @@ describe("CreatePdfDialog", () => {
     fireEvent.change(screen.getByLabelText("Page size"), { target: { value: "letter" } });
     fireEvent.click(screen.getByRole("button", { name: "Create…" }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("/out/holiday.pdf"));
-    expect(mockCreate).toHaveBeenCalledWith(["/in/holiday.jpg"], "/out/holiday.pdf", "letter");
+    expect(mockCreate).toHaveBeenCalledWith(["/in/holiday.jpg"], "/out/holiday.pdf", "letter", false);
     expect(mockSave.mock.calls[0]?.[0]).toMatchObject({ defaultPath: "holiday.pdf" });
   });
 
@@ -115,6 +115,21 @@ describe("suggestedName", () => {
     const filters = mockOpen.mock.calls[0]?.[0]?.filters ?? [];
     const offered = filters.flatMap((f) => f.extensions);
     for (const extension of ["docx", "html", "htm", "png", "jpg", "txt"]) expect(offered).toContain(extension);
+  });
+
+  it("sends PDF/A only when it is ticked", async () => {
+    show();
+    await addFiles(["/in/a.png"]);
+    fireEvent.click(screen.getByRole("button", { name: "Create…" }));
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    expect(mockCreate.mock.calls[0]?.[3]).toBe(false);
+    cleanup();
+    show();
+    await addFiles(["/in/a.png"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "PDF/A, for archiving" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create…" }));
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(2));
+    expect(mockCreate.mock.calls[1]?.[3]).toBe(true);
   });
 
   it("names the PDF after the first file", () => {

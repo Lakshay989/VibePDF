@@ -63,6 +63,24 @@ they are in every build.
 - **Not shipped:** `wasm/quickjs-eval.*`, PDF.js's sandbox for a document's own
   JavaScript. The copy script excludes it, and a test fails if it is served.
 
+### sRGB2014 ICC profile (P7.C1d)
+
+- **Upstream:** the International Color Consortium's sRGB profile, from
+  <https://registry.color.org/rgb-registry/srgbprofiles> (ICC v2, 3,024 bytes,
+  SHA-256 `384b832d…5c6e0a`).
+- **Obtained as:** downloaded once and committed as
+  `src-tauri/resources/icc/sRGB2014.icc`. It is compiled into the binary with
+  `include_bytes!`, not bundled as a file, and becomes the output intent of
+  every PDF/A file VibePDF writes.
+- **Licence:** the ICC's terms for its profiles. It "may be copied, distributed,
+  embedded, made, used, and sold without restriction". The one condition: an
+  *altered* copy must have the original identification and copyright removed
+  and must not be passed off as the original.
+- **Obligation:** none, while it is unaltered. **Met:** it ships byte for byte
+  as downloaded, a unit test pins its size and header, and its copyright stays
+  in its own `cprt` tag. Listed in the generated inventory as
+  `LicenseRef-ICC-Profile`.
+
 ### Tesseract OCR (P7)
 
 The OCR engine and the image library under it are compiled from source into the
@@ -121,6 +139,14 @@ it is written down in the generated file too so the decision stays visible.
 - Used only to exercise the font-embedding path in tests. Not bundled with the
   application, so no redistribution obligation is triggered today. If a font is
   ever shipped, the OFL notice ships with it.
+
+### veraPDF (P7.C1d)
+
+- The PDF Association's PDF/A validator, run by `src-tauri/tests/create_pdfa.rs`
+  to judge VibePDF's PDF/A output. Installed apart from the project
+  (`brew install verapdf` locally and in CI), never vendored or bundled.
+- Licence: GPL-3.0-or-later or MPL-2.0. Running a tool imposes nothing on the
+  program it checks, so no obligation reaches VibePDF.
 
 ## Release obligations
 

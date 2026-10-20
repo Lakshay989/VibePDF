@@ -19,7 +19,8 @@ export interface CreateSummary {
  * SPEC: P7-OCR-009 (P7.C1a–c) — create a new PDF at `dest` from Word
  * documents, HTML pages, images (JPEG, PNG, TIFF, WebP) and plain-text files,
  * in the order given. Standalone, like merge: it reads files from disk and needs no open
- * document. Fonts are embedded; JPEGs go in unchanged. What a conversion
+ * document. Fonts are embedded; JPEGs go in unchanged. With `pdfA`, the file
+ * is PDF/A-2u, for archiving (P7.C1d). What a conversion
  * simplified (a missing font, a text box, tracked changes) comes back as
  * `warnings`.
  */
@@ -27,6 +28,7 @@ export async function createPdfFromFiles(
   sources: string[],
   dest: string,
   pageSize: CreatePageSize,
+  pdfA = false,
 ): Promise<CreateSummary> {
-  return invoke<CreateSummary>("pdf_create_from_files", { sources, dest, pageSize });
+  return invoke<CreateSummary>("pdf_create_from_files", { sources, dest, pageSize, pdfA });
 }

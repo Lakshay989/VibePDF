@@ -58,6 +58,7 @@ export function suggestedName(paths: string[]): string {
 export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogProps) {
   const [paths, setPaths] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState<CreatePageSize>("a4");
+  const [pdfA, setPdfA] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -85,7 +86,7 @@ export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogPro
     if (typeof dest !== "string") return; // cancelled
     setBusy(true);
     try {
-      const summary = await createPdfFromFiles(paths, dest, pageSize);
+      const summary = await createPdfFromFiles(paths, dest, pageSize, pdfA);
       for (const warning of summary.warnings) useToastStore.getState().push("info", warning);
       onClose();
       onCreated(dest);
@@ -186,6 +187,10 @@ export function CreatePdfDialog({ open, onClose, onCreated }: CreatePdfDialogPro
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={pdfA} onChange={(e) => setPdfA(e.target.checked)} />
+                PDF/A, for archiving
               </label>
             </div>
 

@@ -67,6 +67,13 @@ export const BUNDLED_COMPONENTS: readonly ThirdPartyLicence[] = [
     "note": "The eng.traineddata model, fetched by scripts/fetch-tessdata.sh and bundled as a Tauri resource. Its LICENSE ships beside it in resources/tessdata/."
   },
   {
+    "name": "sRGB2014 ICC profile",
+    "version": "2.0 (2015)",
+    "license": "LicenseRef-ICC-Profile",
+    "repository": "https://registry.color.org/rgb-registry/srgbprofiles",
+    "note": "Copyright International Color Consortium, 2015. Compiled into the binary (src-tauri/resources/icc/sRGB2014.icc) as the output intent of PDF/A files (P7.C1d). The ICC's terms: it may be copied, distributed, embedded, made, used and sold without restriction; an altered copy must drop the original identification. Shipped unaltered; its copyright is in the profile's own cprt tag."
+  },
+  {
     "name": "CGATS001Compat-v2-micro ICC profile (PDF.js iccs)",
     "version": "6.3.289",
     "license": "CC0-1.0",
@@ -203,12 +210,6 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/dropbox/rust-brotli-decompressor"
   },
   {
-    "name": "bytecount",
-    "version": "0.6.9",
-    "license": "Apache-2.0/MIT",
-    "repository": "https://github.com/llogiq/bytecount"
-  },
-  {
     "name": "bytemuck",
     "version": "1.25.0",
     "license": "Zlib OR Apache-2.0 OR MIT",
@@ -281,6 +282,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/rust-lang/cfg-if"
   },
   {
+    "name": "chacha20",
+    "version": "0.10.2",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/RustCrypto/stream-ciphers"
+  },
+  {
     "name": "chrono",
     "version": "0.4.44",
     "license": "MIT OR Apache-2.0",
@@ -341,6 +348,12 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/RustCrypto/utils"
   },
   {
+    "name": "cpufeatures",
+    "version": "0.3.1",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/RustCrypto/utils"
+  },
+  {
     "name": "crc32fast",
     "version": "1.5.0",
     "license": "MIT OR Apache-2.0",
@@ -374,7 +387,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "cssparser-macros",
     "version": "0.6.1",
     "license": "MPL-2.0",
-    "repository": "https://github.com/servo/rust-cssparser"
+    "repository": "https://github.com/servo/rust-cssparser (*)"
   },
   {
     "name": "ctor",
@@ -440,7 +453,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "derive_more-impl",
     "version": "2.1.1",
     "license": "MIT",
-    "repository": "https://github.com/JelteF/derive_more"
+    "repository": "https://github.com/JelteF/derive_more (*)"
   },
   {
     "name": "des",
@@ -740,7 +753,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "getrandom",
     "version": "0.4.2",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/getrandom"
+    "repository": "https://github.com/rust-random/getrandom (*)"
   },
   {
     "name": "gio",
@@ -1062,7 +1075,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   },
   {
     "name": "lopdf",
-    "version": "0.36.0",
+    "version": "0.42.0",
     "license": "MIT",
     "repository": "https://github.com/J-F-Liu/lopdf.git"
   },
@@ -1136,13 +1149,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "nom",
     "version": "8.0.0",
     "license": "MIT",
-    "repository": "https://github.com/rust-bakery/nom (*)"
-  },
-  {
-    "name": "nom_locate",
-    "version": "5.0.0",
-    "license": "MIT",
-    "repository": "https://github.com/fflorent/nom_locate"
+    "repository": "https://github.com/rust-bakery/nom"
   },
   {
     "name": "nu-ansi-term",
@@ -1256,7 +1263,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "parking_lot",
     "version": "0.12.5",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/Amanieu/parking_lot"
+    "repository": "https://github.com/Amanieu/parking_lot (*)"
   },
   {
     "name": "parking_lot_core",
@@ -1292,7 +1299,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "phf",
     "version": "0.13.1",
     "license": "MIT",
-    "repository": "https://github.com/rust-phf/rust-phf"
+    "repository": "https://github.com/rust-phf/rust-phf (*)"
   },
   {
     "name": "phf_generator",
@@ -1310,7 +1317,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "phf_shared",
     "version": "0.13.1",
     "license": "MIT",
-    "repository": "https://github.com/rust-phf/rust-phf"
+    "repository": "https://github.com/rust-phf/rust-phf (*)"
   },
   {
     "name": "pin-project-lite",
@@ -1382,7 +1389,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "ppv-lite86",
     "version": "0.2.21",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/cryptocorrosion/cryptocorrosion (*)"
+    "repository": "https://github.com/cryptocorrosion/cryptocorrosion"
   },
   {
     "name": "precomputed-hash",
@@ -1436,7 +1443,7 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "name": "quick-xml",
     "version": "0.39.4",
     "license": "MIT",
-    "repository": "https://github.com/tafia/quick-xml"
+    "repository": "https://github.com/tafia/quick-xml (*)"
   },
   {
     "name": "quote",
@@ -1446,13 +1453,13 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
   },
   {
     "name": "rand",
-    "version": "0.8.7",
+    "version": "0.10.3",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/rust-random/rand"
   },
   {
     "name": "rand",
-    "version": "0.9.4",
+    "version": "0.8.7",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/rust-random/rand"
   },
@@ -1463,20 +1470,14 @@ export const RUST_DEPENDENCIES: readonly ThirdPartyLicence[] = [
     "repository": "https://github.com/rust-random/rand"
   },
   {
-    "name": "rand_chacha",
-    "version": "0.9.0",
+    "name": "rand_core",
+    "version": "0.10.1",
     "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/rand"
+    "repository": "https://github.com/rust-random/rand_core"
   },
   {
     "name": "rand_core",
     "version": "0.6.4",
-    "license": "MIT OR Apache-2.0",
-    "repository": "https://github.com/rust-random/rand (*)"
-  },
-  {
-    "name": "rand_core",
-    "version": "0.9.5",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/rust-random/rand (*)"
   },

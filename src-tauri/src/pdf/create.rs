@@ -33,6 +33,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
@@ -47,6 +48,7 @@ use crate::pdf::font_embed_cid::{build_cid_font, CidFont};
 use crate::pdf::font_index::FontIndex;
 use crate::pdf::font_resolver::broad_coverage_font_paths;
 use crate::pdf::html_read::read_html;
+use crate::pdf::pdfa::mark_archival;
 
 /// The page every image or text page is placed on.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -102,13 +104,16 @@ pub(crate) struct Builder {
     pub(crate) doc: Document,
     pages_id: ObjectId,
     kids: Vec<ObjectId>,
+    /// PDF/A-2u (P7.C1d): no `DeviceCMYK`, no `.notdef`, and the archival
+    /// metadata added by [`Builder::finish`].
+    pub(crate) archival: bool,
 }
 
 impl Builder {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(archival: bool) -> Self {
         let mut doc = Document::with_version("1.7");
         let pages_id = doc.new_object_id();
-        Self { doc, pages_id, kids: Vec::new() }
+        Self { doc, pages_id, kids: Vec::new(), archival }
     }
 
     pub(crate) fn add_page(&mut self, (width, height): (f32, f32), content: &str, resources: Dictionary) {
@@ -126,7 +131,8 @@ impl Builder {
         self.kids.push(self.doc.add_object(page));
     }
 
-    pub(crate) fn finish(mut self) -> Result<Vec<u8>, CommandError> {
+    /// The document's bytes. `title` names it in a PDF/A file's metadata.
+    pub(crate) fn finish(mut self, title: &str) -> Result<Vec<u8>, CommandError> {
         let count = i64::try_from(self.kids.len()).unwrap_or(i64::MAX);
         let kids: Vec<Object> = self.kids.iter().map(|id| Object::Reference(*id)).collect();
         self.doc.objects.insert(
@@ -137,6 +143,9 @@ impl Builder {
         self.doc.trailer.set("Root", catalog);
         let info = self.doc.add_object(dictionary! { "Producer" => Object::string_literal("VibePDF") });
         self.doc.trailer.set("Info", info);
+        if self.archival {
+            mark_archival(&mut self.doc, catalog, info, title, SystemTime::now())?;
+        }
         let mut out = Vec::new();
         self.doc
             .save_to(&mut out)
@@ -351,6 +360,8 @@ pub(crate) struct PageImage {
     pub orientation: Orientation,
     /// Width and height as shown, in pixels.
     pub shown: (f32, f32),
+    /// A CMYK JPEG decoded to RGB for PDF/A rather than copied in.
+    pub converted: bool,
 }
 
 /// SPEC: P7-OCR-009 — add the image in `bytes` to `doc` as an image `XObject`.
@@ -360,7 +371,9 @@ pub(crate) struct PageImage {
 /// # Errors
 /// When `bytes` isn't a JPEG, PNG, TIFF or WebP that can be read, or it is
 /// over the size limit.
-pub(crate) fn embed_image(doc: &mut Document, name: &str, bytes: &[u8]) -> Result<PageImage, CommandError> {
+/// With `archival` (PDF/A), a CMYK JPEG is decoded to RGB rather than copied
+/// in: the sRGB output intent gives `DeviceCMYK` no meaning.
+pub(crate) fn embed_image(doc: &mut Document, name: &str, bytes: &[u8], archival: bool) -> Result<PageImage, CommandError> {
     let unreadable = |e: &dyn std::fmt::Display| CommandError::InvalidInput(format!("{name} could not be read as an image: {e}"));
     let Ok(format @ (ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Tiff | ImageFormat::WebP)) = image::guess_format(bytes) else {
         return Err(unreadable(&"it isn't a JPEG, PNG, TIFF or WebP image"));
@@ -368,7 +381,9 @@ pub(crate) fn embed_image(doc: &mut Document, name: &str, bytes: &[u8]) -> Resul
 
     // JPEG: copied in unchanged; its orientation goes into the matrix.
     if format == ImageFormat::Jpeg {
-        if let Some(info) = jpeg_info(bytes).filter(passes_through) {
+        let info = jpeg_info(bytes);
+        let converted = archival && info.as_ref().is_some_and(|i| i.components == 4);
+        if let Some(info) = info.filter(|i| passes_through(i) && !converted) {
             let orientation = image::codecs::jpeg::JpegDecoder::new(Cursor::new(bytes))
                 .and_then(|mut d| d.orientation())
                 .unwrap_or(Orientation::NoTransforms);
@@ -392,7 +407,7 @@ pub(crate) fn embed_image(doc: &mut Document, name: &str, bytes: &[u8]) -> Resul
                 dict.set("Decode", (0..4).flat_map(|_| [Object::Integer(1), Object::Integer(0)]).collect::<Vec<_>>());
             }
             let xobject = doc.add_object(Stream::new(dict, bytes.to_vec()));
-            return Ok(PageImage { xobject, orientation, shown });
+            return Ok(PageImage { xobject, orientation, shown, converted: false });
         }
     }
 
@@ -414,12 +429,21 @@ pub(crate) fn embed_image(doc: &mut Document, name: &str, bytes: &[u8]) -> Resul
         Decoded { width: image.width(), height: image.height(), colour, gray, alpha }
     };
     let xobject = decoded_xobject(doc, width, height, &colour, gray, alpha.as_deref());
-    Ok(PageImage { xobject, orientation: Orientation::NoTransforms, shown: (width as f32, height as f32) })
+    let converted = archival && format == ImageFormat::Jpeg && jpeg_info(bytes).is_some_and(|i| i.components == 4);
+    Ok(PageImage { xobject, orientation: Orientation::NoTransforms, shown: (width as f32, height as f32), converted })
+}
+
+/// The note for a CMYK JPEG that PDF/A made [`embed_image`] convert.
+pub(crate) fn converted_note(name: &str) -> String {
+    format!("{name} is a CMYK JPEG. A PDF/A file here is in sRGB, so it was converted to RGB rather than copied in unchanged.")
 }
 
 /// Add one image as one page.
-fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], size: PageSize) -> Result<(), CommandError> {
-    let image = embed_image(&mut builder.doc, name, bytes)?;
+fn add_image(builder: &mut Builder, name: &str, bytes: &[u8], size: PageSize, warnings: &mut Vec<String>) -> Result<(), CommandError> {
+    let image = embed_image(&mut builder.doc, name, bytes, builder.archival)?;
+    if image.converted {
+        warnings.push(converted_note(name));
+    }
     let (page, [x, y, w, h]) = image_page(size, image.shown);
     draw_image(builder, page, image.xobject, placement(image.orientation, x, y, w, h));
     Ok(())
@@ -695,10 +719,27 @@ fn classify(path: &Path, bytes: &[u8]) -> Result<Source, CommandError> {
 /// When a file can't be read or isn't a supported kind, a text character has
 /// no font, or nothing at all would be on the pages.
 pub fn build_pdf(sources: &[PathBuf], size: PageSize) -> Result<(Vec<u8>, CreateSummary), CommandError> {
+    build_pdf_with(sources, CreateOptions { size, pdf_a: false }, "")
+}
+
+/// How to create: the page size, and whether to write PDF/A-2u.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CreateOptions {
+    pub size: PageSize,
+    pub pdf_a: bool,
+}
+
+/// [`build_pdf`] with every option; `title` names a PDF/A file.
+///
+/// # Errors
+/// As [`build_pdf`]; with `pdf_a`, also when a character has no font, since
+/// PDF/A can't show one as a box.
+pub fn build_pdf_with(sources: &[PathBuf], options: CreateOptions, title: &str) -> Result<(Vec<u8>, CreateSummary), CommandError> {
+    let size = options.size;
     if sources.is_empty() {
         return Err(CommandError::InvalidInput("Choose at least one file.".into()));
     }
-    let mut builder = Builder::new();
+    let mut builder = Builder::new(options.pdf_a);
     let mut summary = CreateSummary::default();
     for path in sources {
         let name = file_label(path);
@@ -706,7 +747,7 @@ pub fn build_pdf(sources: &[PathBuf], size: PageSize) -> Result<(Vec<u8>, Create
             .map_err(|e| CommandError::InvalidInput(format!("{name} could not be read: {e}")))?;
         match classify(path, &bytes)? {
             Source::Image => {
-                add_image(&mut builder, &name, &bytes, size)?;
+                add_image(&mut builder, &name, &bytes, size, &mut summary.warnings)?;
                 summary.images += 1;
             }
             Source::Word => {
@@ -742,7 +783,7 @@ pub fn build_pdf(sources: &[PathBuf], size: PageSize) -> Result<(Vec<u8>, Create
         return Err(CommandError::InvalidInput("Those files have nothing to put on a page.".into()));
     }
     summary.pages = u32::try_from(builder.kids.len()).unwrap_or(u32::MAX);
-    Ok((builder.finish()?, summary))
+    Ok((builder.finish(title)?, summary))
 }
 
 /// SPEC: P7-OCR-009 — create the PDF at `dest` from `sources`, through the
@@ -751,7 +792,17 @@ pub fn build_pdf(sources: &[PathBuf], size: PageSize) -> Result<(Vec<u8>, Create
 /// # Errors
 /// As [`build_pdf`], or when the result does not load or save cleanly.
 pub fn create_pdf_from_files(sources: &[PathBuf], dest: &Path, size: PageSize) -> Result<CreateSummary, CommandError> {
-    let (bytes, mut summary) = build_pdf(sources, size)?;
+    create_pdf(sources, dest, CreateOptions { size, pdf_a: false })
+}
+
+/// SPEC: P7-OCR-009 — [`create_pdf_from_files`] with every option. A PDF/A
+/// file is titled after `dest`.
+///
+/// # Errors
+/// As [`build_pdf_with`], or when the result does not load or save cleanly.
+pub fn create_pdf(sources: &[PathBuf], dest: &Path, options: CreateOptions) -> Result<CreateSummary, CommandError> {
+    let title = dest.file_stem().map_or_else(|| "Untitled".to_owned(), |s| s.to_string_lossy().into_owned());
+    let (bytes, mut summary) = build_pdf_with(sources, options, &title)?;
     let doc = {
         let _guard = pdfium_lock()?;
         load_edited_bytes(bytes)?

@@ -109,6 +109,14 @@ Rendering text outside the built-in base-14 fonts' WinAnsi range (CJK, Cyrillic,
   - **What we wrote.** `pdf::css` is our own small CSS parser: rules, declarations, specificity and values.
   - **One guard on the parser.** html5ever is quadratic in nesting depth, so `html_read` caps the depth at 512 before parsing, as Chrome's parser does.
 - **`base64` (0.22, MIT/Apache)** — P7.C1c, for `data:` image URIs. Already in the app through Tauri's `plist`; same argument as `quick-xml`.
+- **The ICC's `sRGB2014.icc` (v2, 3 KB)** — P7.C1d, the output intent of PDF/A files. A data file, not a crate, compiled in with `include_bytes!`.
+  - **Why this one:** it comes from the standards body itself, it's a version 2 profile (which every PDF/A part accepts), and its terms are "copied, distributed, embedded, made, used, and sold without restriction".
+  - **Passed over:** a public-domain hand-packed minimal profile, less proven against validators.
+  - See `THIRD-PARTY-NOTICES.md`.
+- **veraPDF (test-only, GPL-3.0+ OR MPL-2.0)** — P7.C1d. The PDF Association's reference PDF/A validator.
+  - **How it's used:** `tests/create_pdfa.rs` runs it on the final files. It's installed apart from the project (`brew install verapdf`, locally and in CI) and never shipped.
+  - **In CI:** `VIBEPDF_REQUIRE_VERAPDF` makes its absence a failure rather than a skip.
+  - **No alternative:** no other open validator does this job.
 
 **Why this is consistent with the "no double engine / minimal deps" rules:** both crates are permissive, zero-transitive-dependency, and read/produce font *bytes* — they don't render or edit PDFs (no overlap with PDFium or lopdf). They're the smallest tools that do exactly one thing PDFium won't. `subset_font` degrades gracefully — an unparseable or un-subsettable face embeds whole (bloated but correct), never a hard failure. *(The heavier `subsetter` 0.2.x / `fontations` stack and `allsorts` were passed over for tree size.)*
 
