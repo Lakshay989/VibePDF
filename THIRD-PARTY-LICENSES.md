@@ -354,8 +354,8 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [serde_repr](https://github.com/dtolnay/serde-repr) | 0.1.20 | MIT OR Apache-2.0 |
 | [serde_spanned](https://github.com/toml-rs/toml) | 0.6.9 | MIT OR Apache-2.0 |
 | [serde_spanned](https://github.com/toml-rs/toml) | 1.1.1 | MIT OR Apache-2.0 |
-| [serde_with](https://github.com/jonasbb/serde_with/) | 3.20.0 | MIT OR Apache-2.0 |
-| [serde_with_macros](https://github.com/jonasbb/serde_with/) | 3.20.0 | MIT OR Apache-2.0 |
+| [serde_with](https://github.com/jonasbb/serde_with/) | 3.21.0 | MIT OR Apache-2.0 |
+| [serde_with_macros](https://github.com/jonasbb/serde_with/) | 3.21.0 | MIT OR Apache-2.0 |
 | [serde-untagged](https://github.com/dtolnay/serde-untagged) | 0.1.9 | MIT OR Apache-2.0 |
 | [serialize-to-javascript](https://github.com/chippers/serialize-to-javascript) | 0.1.2 | MIT OR Apache-2.0 |
 | [serialize-to-javascript-impl](https://github.com/chippers/serialize-to-javascript) | 0.1.2 | MIT OR Apache-2.0 |
