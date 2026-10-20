@@ -156,7 +156,7 @@ subsetter = "0.1"           # Typst; Profile::pdf keeps used glyphs + cmap
 # so this names a dependency the app already carries rather than adding one.
 # Chosen over roxmltree, which would be new code, and over a hand-written XML
 # parser, which would be new risk.
-quick-xml = "0.39"
+quick-xml = "0.42"
 # P7.C1c (SPEC P7-OCR-009): reading HTML. dom_query is html5ever (Servo's
 # spec-conformant HTML parser) with a DOM and CSS selector matching (Servo's
 # `selectors`), which a page's <style> rules need. Neither is a new crate:
