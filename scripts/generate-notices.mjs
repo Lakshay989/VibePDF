@@ -115,7 +115,9 @@ function rustDependencies() {
     const raw = execFileSync(
       "cargo",
       [
-        "tree", "-e", "normal", "--target", target, "--prefix", "none",
+        // --color never: CI sets CARGO_TERM_COLOR=always, which wraps the
+        // "(*)" marker in ANSI codes that no pattern below would match.
+        "tree", "-e", "normal", "--target", target, "--prefix", "none", "--color", "never",
         "--format", "{p}|{l}|{r}",
         "--manifest-path", path.join(ROOT, "src-tauri", "Cargo.toml"),
       ],
@@ -126,7 +128,8 @@ function rustDependencies() {
       // end when cargo already printed that subtree. The marker trails the
       // whole formatted line, so it lands in the repository field: strip it
       // before splitting, or it becomes part of the link.
-      const [pkg = "", license = "", repository = ""] = line.replace(/\s*\(\*\)\s*$/, "").split("|");
+      const plain = line.replace(/\x1b\[[0-9;]*m/g, ""); // any colour codes, all the same
+      const [pkg = "", license = "", repository = ""] = plain.replace(/\s*\(\*\)\s*$/, "").split("|");
       const match = /^(\S+) v(\S+)/.exec(pkg.trim());
       if (!match) continue;
       const [, name, version] = match;
