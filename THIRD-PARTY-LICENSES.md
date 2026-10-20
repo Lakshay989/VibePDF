@@ -18,7 +18,7 @@ Obligations that a *release* must satisfy, as opposed to this inventory, are in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Attribution text for the
 Apache-2.0 components is in [`NOTICE`](NOTICE).
 
-- **409** Rust crates
+- **404** Rust crates
 - **62** npm packages
 - **10** bundled components
 - **0** with a licence outside the reviewed-permissive set
@@ -37,19 +37,19 @@ MIT — <https://github.com/bblanchon/pdfium-binaries>
 
 Copyright Benoit Blanchon. The build scripts that produce the binary above; its MIT licence is the LICENSE file at the archive root.
 
-### PDFium JBIG2 and CCITT fax decoder (PDF.js jbig2.wasm) 6.3.289
+### PDFium JBIG2 and CCITT fax decoder (PDF.js jbig2.wasm) 6.4.299
 
 BSD-3-Clause — <https://pdfium.googlesource.com/pdfium/>
 
 Copyright The PDFium Authors. Compiled to WebAssembly by Mozilla, whose build glue is Apache-2.0. Licences: wasm/LICENSE_JBIG2 and wasm/LICENSE_PDFJS_JBIG2.
 
-### OpenJPEG JPEG 2000 decoder (PDF.js openjpeg.wasm) 6.3.289
+### OpenJPEG JPEG 2000 decoder (PDF.js openjpeg.wasm) 6.4.299
 
 BSD-2-Clause — <https://github.com/uclouvain/openjpeg>
 
 Copyright the OpenJPEG contributors. Compiled to WebAssembly by Mozilla (glue also BSD-2-Clause). Licences: wasm/LICENSE_OPENJPEG and wasm/LICENSE_PDFJS_OPENJPEG.
 
-### qcms colour management (PDF.js qcms_bg.wasm) 6.3.289
+### qcms colour management (PDF.js qcms_bg.wasm) 6.4.299
 
 MIT — <https://github.com/FirefoxGraphics/qcms>
 
@@ -79,7 +79,7 @@ LicenseRef-ICC-Profile — <https://registry.color.org/rgb-registry/srgbprofiles
 
 Copyright International Color Consortium, 2015. Compiled into the binary (src-tauri/resources/icc/sRGB2014.icc) as the output intent of PDF/A files (P7.C1d). The ICC's terms: it may be copied, distributed, embedded, made, used and sold without restriction; an altered copy must drop the original identification. Shipped unaltered; its copyright is in the profile's own cprt tag.
 
-### CGATS001Compat-v2-micro ICC profile (PDF.js iccs) 6.3.289
+### CGATS001Compat-v2-micro ICC profile (PDF.js iccs) 6.4.299
 
 CC0-1.0 — <https://github.com/saucecontrol/Compact-ICC-Profiles>
 
@@ -92,9 +92,9 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [adler2](https://github.com/oyvindln/adler2) | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
 | [aes](https://github.com/RustCrypto/block-ciphers) | 0.8.4 | MIT OR Apache-2.0 |
 | [aho-corasick](https://github.com/BurntSushi/aho-corasick) | 1.1.4 | Unlicense OR MIT |
-| [alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 2.0.4 | BSD-3-Clause |
-| [alloc-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 0.2.2 | BSD-3-Clause |
-| [anyhow](https://github.com/dtolnay/anyhow) | 1.0.102 | MIT OR Apache-2.0 |
+| [alloc-no-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 3.0.0 | BSD-3-Clause |
+| [alloc-stdlib](https://github.com/dropbox/rust-alloc-no-stdlib) | 0.3.0 | BSD-3-Clause |
+| [anyhow](https://github.com/dtolnay/anyhow) | 1.0.104 | MIT OR Apache-2.0 |
 | [atk](https://github.com/gtk-rs/gtk3-rs) | 0.18.2 | MIT |
 | [atk-sys](https://github.com/gtk-rs/gtk3-rs) | 0.18.2 | MIT |
 | [base64](https://github.com/marshallpierce/rust-base64) | 0.21.7 | MIT OR Apache-2.0 |
@@ -108,8 +108,8 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [block-buffer](https://github.com/RustCrypto/utils) | 0.10.4 | MIT OR Apache-2.0 |
 | [block-padding](https://github.com/RustCrypto/utils) | 0.3.3 | MIT OR Apache-2.0 |
 | [block2](https://github.com/madsmtm/objc2) | 0.6.2 | MIT |
-| [brotli](https://github.com/dropbox/rust-brotli) | 8.0.2 | BSD-3-Clause AND MIT |
-| [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) | 5.0.0 | BSD-3-Clause/MIT |
+| [brotli](https://github.com/dropbox/rust-brotli) | 9.0.0 | BSD-3-Clause AND MIT |
+| [brotli-decompressor](https://github.com/dropbox/rust-brotli-decompressor) | 6.0.1 | BSD-3-Clause/MIT |
 | [bytemuck](https://github.com/Lokathor/bytemuck) | 1.25.0 | Zlib OR Apache-2.0 OR MIT |
 | [byteorder](https://github.com/BurntSushi/byteorder) | 1.5.0 | Unlicense OR MIT |
 | [byteorder-lite](https://github.com/image-rs/byteorder-lite) | 0.1.0 | Unlicense OR MIT |
@@ -120,7 +120,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [cargo_metadata](https://github.com/oli-obk/cargo_metadata) | 0.19.2 | MIT |
 | [cargo-platform](https://github.com/rust-lang/cargo) | 0.1.9 | MIT OR Apache-2.0 |
 | [cbc](https://github.com/RustCrypto/block-modes) | 0.1.2 | MIT OR Apache-2.0 |
-| [cfb](https://github.com/mdsteele/rust-cfb) | 0.7.3 | MIT |
+| [cfb](https://github.com/mdsteele/rust-cfb) | 0.14.0 | MIT |
 | [cfg-if](https://github.com/rust-lang/cfg-if) | 1.0.4 | MIT OR Apache-2.0 |
 | [chacha20](https://github.com/RustCrypto/stream-ciphers) | 0.10.2 | MIT OR Apache-2.0 |
 | [chrono](https://github.com/chronotope/chrono) | 0.4.44 | MIT OR Apache-2.0 |
@@ -134,14 +134,13 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [core-graphics-types](https://github.com/servo/core-foundation-rs) | 0.2.0 | MIT OR Apache-2.0 |
 | [cpufeatures](https://github.com/RustCrypto/utils) | 0.2.17 | MIT OR Apache-2.0 |
 | [cpufeatures](https://github.com/RustCrypto/utils) | 0.3.1 | MIT OR Apache-2.0 |
-| [crc32fast](https://github.com/srijs/rust-crc32fast) | 1.5.0 | MIT OR Apache-2.0 |
+| [crc32fast](https://github.com/srijs/rust-crc32fast) | 1.5.2 | MIT OR Apache-2.0 |
 | [crossbeam-channel](https://github.com/crossbeam-rs/crossbeam) | 0.5.15 | MIT OR Apache-2.0 |
 | [crossbeam-utils](https://github.com/crossbeam-rs/crossbeam) | 0.8.21 | MIT OR Apache-2.0 |
 | [crypto-common](https://github.com/RustCrypto/traits) | 0.1.7 | MIT OR Apache-2.0 |
-| [cssparser](https://github.com/servo/rust-cssparser) | 0.36.0 | MPL-2.0 |
-| [cssparser-macros](https://github.com/servo/rust-cssparser) | 0.6.1 | MPL-2.0 |
-| [ctor](https://github.com/mmastrac/rust-ctor) | 0.8.0 | Apache-2.0 OR MIT |
-| [ctor-proc-macro](https://github.com/mmastrac/rust-ctor) | 0.0.7 | Apache-2.0 OR MIT |
+| [cssparser](https://github.com/servo/rust-cssparser) | 0.37.0 | MPL-2.0 |
+| [cssparser-macros](https://github.com/servo/rust-cssparser) | 0.7.1 | MPL-2.0 |
+| [ctor](https://github.com/mmastrac/linktime) | 1.0.13 | Apache-2.0 OR MIT |
 | [darling](https://github.com/TedDriggs/darling) | 0.23.0 | MIT |
 | [darling_core](https://github.com/TedDriggs/darling) | 0.23.0 | MIT |
 | [darling_macro](https://github.com/TedDriggs/darling) | 0.23.0 | MIT |
@@ -153,13 +152,13 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [derive_more-impl](https://github.com/JelteF/derive_more) | 2.1.1 | MIT |
 | [des](https://github.com/RustCrypto/block-ciphers) | 0.8.1 | MIT OR Apache-2.0 |
 | [digest](https://github.com/RustCrypto/traits) | 0.10.7 | MIT OR Apache-2.0 |
-| [dirs](https://github.com/soc/dirs-rs) | 6.0.0 | MIT OR Apache-2.0 |
+| [dirs](https://codeberg.org/dirs/dirs-rs) | 7.0.0 | MIT OR Apache-2.0 |
 | [dirs-sys](https://github.com/dirs-dev/dirs-sys-rs) | 0.5.0 | MIT OR Apache-2.0 |
 | [dispatch2](https://github.com/madsmtm/objc2) | 0.3.1 | Zlib OR Apache-2.0 OR MIT |
 | [displaydoc](https://github.com/yaahc/displaydoc) | 0.2.5 | MIT OR Apache-2.0 |
 | [dlopen2](https://github.com/OpenByteDev/dlopen2) | 0.8.2 | MIT |
 | [dlopen2_derive](https://github.com/OpenByteDev/dlopen2) | 0.4.3 | MIT |
-| [dom_query](https://github.com/niklak/dom_query) | 0.27.0 | MIT |
+| [dom_query](https://github.com/niklak/dom_query) | 0.28.0 | MIT |
 | [dpi](https://github.com/rust-windowing/winit) | 0.1.2 | Apache-2.0 AND MIT |
 | [dtoa](https://github.com/dtolnay/dtoa) | 1.0.11 | MIT OR Apache-2.0 |
 | [dtoa-short](https://github.com/upsuper/dtoa-short) | 0.3.5 | MPL-2.0 |
@@ -176,7 +175,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [fdeflate](https://github.com/image-rs/fdeflate) | 0.3.7 | MIT OR Apache-2.0 |
 | [field-offset](https://github.com/Diggsey/rust-field-offset) | 0.3.6 | MIT OR Apache-2.0 |
 | [flagset](https://github.com/enarx/flagset) | 0.4.7 | Apache-2.0 |
-| [flate2](https://github.com/rust-lang/flate2-rs) | 1.1.9 | MIT OR Apache-2.0 |
+| [flate2](https://github.com/rust-lang/flate2-rs) | 1.1.10 | MIT OR Apache-2.0 |
 | [fnv](https://github.com/servo/rust-fnv) | 1.0.7 | Apache-2.0 / MIT |
 | [foldhash](https://github.com/orlp/foldhash) | 0.2.0 | Zlib |
 | [foreign-types](https://github.com/sfackler/foreign-types) | 0.5.0 | MIT/Apache-2.0 |
@@ -217,7 +216,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [heck](https://github.com/withoutboats/heck) | 0.4.1 | MIT OR Apache-2.0 |
 | [heck](https://github.com/withoutboats/heck) | 0.5.0 | MIT OR Apache-2.0 |
 | [hmac](https://github.com/RustCrypto/MACs) | 0.12.1 | MIT OR Apache-2.0 |
-| [html5ever](https://github.com/servo/html5ever) | 0.38.0 | MIT OR Apache-2.0 |
+| [html5ever](https://github.com/servo/html5ever) | 0.39.0 | MIT OR Apache-2.0 |
 | [http](https://github.com/hyperium/http) | 1.4.1 | MIT OR Apache-2.0 |
 | [httparse](https://github.com/seanmonstar/httparse) | 1.10.1 | MIT OR Apache-2.0 |
 | [iana-time-zone](https://github.com/strawlab/iana-time-zone) | 0.1.65 | MIT OR Apache-2.0 |
@@ -236,26 +235,26 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [image-webp](https://github.com/image-rs/image-webp) | 0.2.4 | MIT OR Apache-2.0 |
 | [indexmap](https://github.com/bluss/indexmap) | 1.9.3 | Apache-2.0 OR MIT |
 | [indexmap](https://github.com/indexmap-rs/indexmap) | 2.14.0 | Apache-2.0 OR MIT |
-| [infer](https://github.com/bojand/infer) | 0.19.0 | MIT |
+| [infer](https://github.com/bojand/infer) | 0.22.0 | MIT |
 | [inout](https://github.com/RustCrypto/utils) | 0.1.4 | MIT OR Apache-2.0 |
 | [itertools](https://github.com/rust-itertools/itertools) | 0.14.0 | MIT OR Apache-2.0 |
 | [itoa](https://github.com/dtolnay/itoa) | 1.0.18 | MIT OR Apache-2.0 |
 | [javascriptcore-rs](https://github.com/tauri-apps/javascriptcore-rs) | 1.1.2 | MIT |
 | [javascriptcore-rs-sys](https://github.com/tauri-apps/javascriptcore-rs) | 1.1.1 | MIT |
-| [json-patch](https://github.com/idubrov/json-patch) | 3.0.1 | MIT/Apache-2.0 |
-| [jsonptr](https://github.com/chanced/jsonptr) | 0.6.3 | MIT OR Apache-2.0 |
+| [json-patch](https://github.com/idubrov/json-patch) | 4.2.0 | MIT/Apache-2.0 |
+| [jsonptr](https://github.com/chanced/jsonptr) | 0.7.1 | MIT OR Apache-2.0 |
 | [keccak](https://github.com/RustCrypto/sponges/tree/master/keccak) | 0.1.6 | Apache-2.0 OR MIT |
-| [keyboard-types](https://github.com/pyfisch/keyboard-types) | 0.7.0 | MIT OR Apache-2.0 |
+| [keyboard-types](https://github.com/rust-windowing/keyboard-types) | 0.8.3 | MIT OR Apache-2.0 |
 | [lazy_static](https://github.com/rust-lang-nursery/lazy-static.rs) | 1.5.0 | MIT OR Apache-2.0 |
 | [libc](https://github.com/rust-lang/libc) | 0.2.186 | MIT OR Apache-2.0 |
 | [libdbus-sys](https://github.com/diwic/dbus-rs) | 0.2.7 | Apache-2.0/MIT |
-| [libloading](https://github.com/nagisa/rust_libloading/) | 0.9.0 | ISC |
+| [libloading](https://github.com/nagisa/rust_libloading/) | 0.7.4 | ISC |
 | [libm](https://github.com/rust-lang/compiler-builtins) | 0.2.16 | MIT |
 | [litemap](https://github.com/unicode-org/icu4x) | 0.8.2 | Unicode-3.0 |
 | [lock_api](https://github.com/Amanieu/parking_lot) | 0.4.14 | MIT OR Apache-2.0 |
 | [log](https://github.com/rust-lang/log) | 0.4.30 | MIT OR Apache-2.0 |
 | [lopdf](https://github.com/J-F-Liu/lopdf.git) | 0.42.0 | MIT |
-| [markup5ever](https://github.com/servo/html5ever) | 0.38.0 | MIT OR Apache-2.0 |
+| [markup5ever](https://github.com/servo/html5ever) | 0.39.0 | MIT OR Apache-2.0 |
 | [matchers](https://github.com/hawkw/matchers) | 0.2.0 | MIT |
 | [maybe-owned](https://github.com/rustonaut/maybe-owned) | 0.3.4 | MIT OR Apache-2.0 |
 | [md-5](https://github.com/RustCrypto/hashes) | 0.10.6 | MIT OR Apache-2.0 |
@@ -263,8 +262,9 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [memoffset](https://github.com/Gilnaa/memoffset) | 0.9.1 | MIT |
 | [mime](https://github.com/hyperium/mime) | 0.3.17 | MIT OR Apache-2.0 |
 | [miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
+| [miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | [moxcms](https://github.com/awxkee/moxcms.git) | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
-| [muda](https://github.com/tauri-apps/muda) | 0.19.2 | Apache-2.0 OR MIT |
+| [muda](https://github.com/tauri-apps/muda) | 0.20.0 | Apache-2.0 OR MIT |
 | [new_debug_unreachable](https://github.com/mbrubeck/rust-debug-unreachable) | 1.0.6 | MIT |
 | [nom](https://github.com/rust-bakery/nom) | 8.0.0 | MIT |
 | [nu-ansi-term](https://github.com/nushell/nu-ansi-term) | 0.50.3 | MIT |
@@ -279,6 +279,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [objc2-encode](https://github.com/madsmtm/objc2) | 4.1.0 | MIT |
 | [objc2-exception-helper](https://github.com/madsmtm/objc2) | 0.1.1 | Zlib OR Apache-2.0 OR MIT |
 | [objc2-foundation](https://github.com/madsmtm/objc2) | 0.3.2 | MIT |
+| [objc2-quartz-core](https://github.com/madsmtm/objc2) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | [objc2-web-kit](https://github.com/madsmtm/objc2) | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | [once_cell](https://github.com/matklad/once_cell) | 1.21.4 | MIT OR Apache-2.0 |
 | [openssl-probe](https://github.com/rustls/openssl-probe) | 0.2.1 | MIT OR Apache-2.0 |
@@ -288,7 +289,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [parking_lot](https://github.com/Amanieu/parking_lot) | 0.12.5 | MIT OR Apache-2.0 |
 | [parking_lot_core](https://github.com/Amanieu/parking_lot) | 0.9.12 | MIT OR Apache-2.0 |
 | [pbkdf2](https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2) | 0.12.2 | MIT OR Apache-2.0 |
-| [pdfium-render](https://github.com/ajrcarey/pdfium-render) | 0.9.1 | MIT OR Apache-2.0 |
+| [pdfium-render](https://github.com/ajrcarey/pdfium-render) | 0.9.4 | MIT OR Apache-2.0 |
 | [pem-rfc7468](https://github.com/RustCrypto/formats/tree/master/pem-rfc7468) | 0.7.0 | Apache-2.0 OR MIT |
 | [percent-encoding](https://github.com/servo/rust-url/) | 2.3.2 | MIT OR Apache-2.0 |
 | [phf](https://github.com/rust-phf/rust-phf) | 0.13.1 | MIT |
@@ -324,9 +325,9 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [rand_core](https://github.com/rust-random/rand) | 0.6.4 | MIT OR Apache-2.0 |
 | [rangemap](https://github.com/jeffparsons/rangemap) | 1.7.1 | MIT/Apache-2.0 |
 | [raw-window-handle](https://github.com/rust-windowing/raw-window-handle) | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
-| [regex](https://github.com/rust-lang/regex) | 1.12.3 | MIT OR Apache-2.0 |
-| [regex-automata](https://github.com/rust-lang/regex) | 0.4.14 | MIT OR Apache-2.0 |
-| [regex-syntax](https://github.com/rust-lang/regex) | 0.8.10 | MIT OR Apache-2.0 |
+| [regex](https://github.com/rust-lang/regex) | 1.13.1 | MIT OR Apache-2.0 |
+| [regex-automata](https://github.com/rust-lang/regex) | 0.4.18 | MIT OR Apache-2.0 |
+| [regex-syntax](https://github.com/rust-lang/regex) | 0.8.11 | MIT OR Apache-2.0 |
 | [rfd](https://github.com/PolyMeilex/rfd) | 0.16.0 | MIT |
 | [ring](https://github.com/briansmith/ring) | 0.17.14 | Apache-2.0 AND ISC |
 | [rsa](https://github.com/RustCrypto/RSA) | 0.9.10 | MIT OR Apache-2.0 |
@@ -344,13 +345,13 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [scrypt](https://github.com/RustCrypto/password-hashes/tree/master/scrypt) | 0.11.0 | MIT OR Apache-2.0 |
 | [security-framework](https://github.com/kornelski/rust-security-framework) | 3.7.0 | MIT OR Apache-2.0 |
 | [security-framework-sys](https://github.com/kornelski/rust-security-framework) | 2.17.0 | MIT OR Apache-2.0 |
-| [selectors](https://github.com/servo/stylo) | 0.36.1 | MPL-2.0 |
+| [selectors](https://github.com/servo/stylo) | 0.38.0 | MPL-2.0 |
 | [semver](https://github.com/dtolnay/semver) | 1.0.28 | MIT OR Apache-2.0 |
-| [serde](https://github.com/serde-rs/serde) | 1.0.228 | MIT OR Apache-2.0 |
-| [serde_core](https://github.com/serde-rs/serde) | 1.0.228 | MIT OR Apache-2.0 |
-| [serde_derive](https://github.com/serde-rs/serde) | 1.0.228 | MIT OR Apache-2.0 |
+| [serde](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 |
+| [serde_core](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 |
+| [serde_derive](https://github.com/serde-rs/serde) | 1.0.229 | MIT OR Apache-2.0 |
 | [serde_derive_internals](https://github.com/serde-rs/serde) | 0.29.1 | MIT OR Apache-2.0 |
-| [serde_json](https://github.com/serde-rs/json) | 1.0.150 | MIT OR Apache-2.0 |
+| [serde_json](https://github.com/serde-rs/json) | 1.0.154 | MIT OR Apache-2.0 |
 | [serde_repr](https://github.com/dtolnay/serde-repr) | 0.1.20 | MIT OR Apache-2.0 |
 | [serde_spanned](https://github.com/toml-rs/toml) | 0.6.9 | MIT OR Apache-2.0 |
 | [serde_spanned](https://github.com/toml-rs/toml) | 1.1.1 | MIT OR Apache-2.0 |
@@ -380,25 +381,26 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [strsim](https://github.com/rapidfuzz/strsim-rs) | 0.11.1 | MIT |
 | [subsetter](https://github.com/typst/subsetter) | 0.1.1 | MIT OR Apache-2.0 |
 | [subtle](https://github.com/dalek-cryptography/subtle) | 2.6.1 | BSD-3-Clause |
-| [swift-rs](https://github.com/Brendonovich/swift-rs) | 1.0.7 | MIT OR Apache-2.0 |
+| [swift-rs](https://github.com/Brendonovich/swift-rs) | 1.0.9 | MIT OR Apache-2.0 |
 | [syn](https://github.com/dtolnay/syn) | 1.0.109 | MIT OR Apache-2.0 |
 | [syn](https://github.com/dtolnay/syn) | 2.0.117 | MIT OR Apache-2.0 |
+| [syn](https://github.com/dtolnay/syn) | 3.0.9 | MIT OR Apache-2.0 |
 | [synstructure](https://github.com/mystor/synstructure) | 0.13.2 | MIT |
-| [tao](https://github.com/tauri-apps/tao) | 0.35.3 | Apache-2.0 |
-| [tauri](https://github.com/tauri-apps/tauri) | 2.11.2 | Apache-2.0 OR MIT |
-| [tauri-codegen](https://github.com/tauri-apps/tauri) | 2.6.2 | Apache-2.0 OR MIT |
-| [tauri-macros](https://github.com/tauri-apps/tauri) | 2.6.2 | Apache-2.0 OR MIT |
-| [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | 2.7.1 | Apache-2.0 OR MIT |
-| [tauri-plugin-fs](https://github.com/tauri-apps/plugins-workspace) | 2.5.1 | Apache-2.0 OR MIT |
-| [tauri-runtime](https://github.com/tauri-apps/tauri) | 2.11.2 | Apache-2.0 OR MIT |
-| [tauri-runtime-wry](https://github.com/tauri-apps/tauri) | 2.11.2 | Apache-2.0 OR MIT |
-| [tauri-utils](https://github.com/tauri-apps/tauri) | 2.9.2 | Apache-2.0 OR MIT |
+| [tao](https://github.com/tauri-apps/tao) | 0.37.1 | Apache-2.0 |
+| [tauri](https://github.com/tauri-apps/tauri) | 2.12.4 | Apache-2.0 OR MIT |
+| [tauri-codegen](https://github.com/tauri-apps/tauri) | 2.7.3 | Apache-2.0 OR MIT |
+| [tauri-macros](https://github.com/tauri-apps/tauri) | 2.7.3 | Apache-2.0 OR MIT |
+| [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | 2.8.3 | Apache-2.0 OR MIT |
+| [tauri-plugin-fs](https://github.com/tauri-apps/plugins-workspace) | 2.7.1 | Apache-2.0 OR MIT |
+| [tauri-runtime](https://github.com/tauri-apps/tauri) | 2.12.2 | Apache-2.0 OR MIT |
+| [tauri-runtime-wry](https://github.com/tauri-apps/tauri) | 2.12.2 | Apache-2.0 OR MIT |
+| [tauri-utils](https://github.com/tauri-apps/tauri) | 2.10.2 | Apache-2.0 OR MIT |
 | [tendril](https://github.com/servo/html5ever) | 0.5.0 | MIT OR Apache-2.0 |
 | [tesseract-rs](https://github.com/cafercangundogdu/tesseract-rs) | 0.4.0 | MIT |
 | [thiserror](https://github.com/dtolnay/thiserror) | 1.0.69 | MIT OR Apache-2.0 |
-| [thiserror](https://github.com/dtolnay/thiserror) | 2.0.18 | MIT OR Apache-2.0 |
+| [thiserror](https://github.com/dtolnay/thiserror) | 2.0.21 | MIT OR Apache-2.0 |
 | [thiserror-impl](https://github.com/dtolnay/thiserror) | 1.0.69 | MIT OR Apache-2.0 |
-| [thiserror-impl](https://github.com/dtolnay/thiserror) | 2.0.18 | MIT OR Apache-2.0 |
+| [thiserror-impl](https://github.com/dtolnay/thiserror) | 2.0.21 | MIT OR Apache-2.0 |
 | [thread_local](https://github.com/Amanieu/thread_local-rs) | 1.1.9 | MIT OR Apache-2.0 |
 | [tiff](https://github.com/image-rs/image-tiff) | 0.11.3 | MIT |
 | [time](https://github.com/time-rs/time) | 0.3.47 | MIT OR Apache-2.0 |
@@ -407,7 +409,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [tinystr](https://github.com/unicode-org/icu4x) | 0.8.3 | Unicode-3.0 |
 | [tinyvec](https://github.com/Lokathor/tinyvec) | 1.11.0 | Zlib OR Apache-2.0 OR MIT |
 | [tinyvec_macros](https://github.com/Soveu/tinyvec_macros) | 0.1.1 | MIT OR Apache-2.0 OR Zlib |
-| [tokio](https://github.com/tokio-rs/tokio) | 1.52.3 | MIT |
+| [tokio](https://github.com/tokio-rs/tokio) | 1.53.3 | MIT |
 | [tokio-macros](https://github.com/tokio-rs/tokio) | 2.7.0 | MIT |
 | [toml](https://github.com/toml-rs/toml) | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 |
 | [toml_datetime](https://github.com/toml-rs/toml) | 0.6.3 | MIT OR Apache-2.0 |
@@ -425,11 +427,6 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [ttf-parser](https://github.com/harfbuzz/ttf-parser) | 0.25.1 | MIT OR Apache-2.0 |
 | [typeid](https://github.com/dtolnay/typeid) | 1.0.3 | MIT OR Apache-2.0 |
 | [typenum](https://github.com/paholg/typenum) | 1.20.0 | MIT OR Apache-2.0 |
-| [unic-char-property](https://github.com/open-i18n/rust-unic/) | 0.9.0 | MIT/Apache-2.0 |
-| [unic-char-range](https://github.com/open-i18n/rust-unic/) | 0.9.0 | MIT/Apache-2.0 |
-| [unic-common](https://github.com/open-i18n/rust-unic/) | 0.9.0 | MIT/Apache-2.0 |
-| [unic-ucd-ident](https://github.com/open-i18n/rust-unic/) | 0.9.0 | MIT/Apache-2.0 |
-| [unic-ucd-version](https://github.com/open-i18n/rust-unic/) | 0.9.0 | MIT/Apache-2.0 |
 | [unicode-bidi](https://github.com/servo/unicode-bidi) | 0.3.18 | MIT OR Apache-2.0 |
 | [unicode-ident](https://github.com/dtolnay/unicode-ident) | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | [unicode-normalization](https://github.com/unicode-rs/unicode-normalization) | 0.1.25 | MIT OR Apache-2.0 |
@@ -439,48 +436,46 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | [ureq](https://github.com/algesten/ureq) | 3.4.2 | MIT OR Apache-2.0 |
 | [ureq-proto](https://github.com/algesten/ureq-proto) | 0.6.4 | MIT OR Apache-2.0 |
 | [url](https://github.com/servo/rust-url) | 2.5.8 | MIT OR Apache-2.0 |
-| [urlpattern](https://github.com/denoland/rust-urlpattern) | 0.3.0 | MIT |
+| [urlpattern](https://github.com/denoland/rust-urlpattern) | 0.6.0 | MIT |
 | [utf-8](https://github.com/SimonSapin/rust-utf8) | 0.7.6 | MIT OR Apache-2.0 |
 | [utf16string](https://github.com/getsentry/utf16string) | 0.2.0 | MIT OR Apache-2.0 |
 | [utf8_iter](https://github.com/hsivonen/utf8_iter) | 1.0.4 | Apache-2.0 OR MIT |
 | [utf8-zero](https://github.com/algesten/utf8-zero) | 0.8.1 | MIT OR Apache-2.0 |
-| [uuid](https://github.com/uuid-rs/uuid) | 1.23.1 | Apache-2.0 OR MIT |
+| [uuid](https://github.com/uuid-rs/uuid) | 1.28.0 | Apache-2.0 OR MIT |
 | [vecmath](https://github.com/pistondevelopers/vecmath.git) | 1.0.0 | MIT |
 | [walkdir](https://github.com/BurntSushi/walkdir) | 2.5.0 | Unlicense/MIT |
 | [web_atoms](https://github.com/servo/html5ever) | 0.2.4 | MIT OR Apache-2.0 |
+| [web-time](https://github.com/daxpedda/web-time) | 1.1.0 | MIT OR Apache-2.0 |
 | [webkit2gtk](https://github.com/tauri-apps/webkit2gtk-rs) | 2.0.2 | MIT |
 | [webkit2gtk-sys](https://github.com/tauri-apps/webkit2gtk-rs) | 2.0.2 | MIT |
 | [webpki-roots](https://github.com/rustls/webpki-roots) | 1.0.9 | CDLA-Permissive-2.0 |
-| [webview2-com](https://github.com/wravery/webview2-rs) | 0.38.2 | MIT |
+| [webview2-com](https://github.com/wravery/webview2-rs) | 0.39.1 | MIT |
 | [webview2-com-macros](https://github.com/wravery/webview2-rs) | 0.8.1 | MIT |
-| [webview2-com-sys](https://github.com/wravery/webview2-rs) | 0.38.2 | MIT |
+| [webview2-com-sys](https://github.com/wravery/webview2-rs) | 0.39.1 | MIT |
 | [weezl](https://github.com/image-rs/weezl) | 0.1.12 | MIT OR Apache-2.0 |
+| [winapi](https://github.com/retep998/winapi-rs) | 0.3.9 | MIT/Apache-2.0 |
 | [winapi-util](https://github.com/BurntSushi/winapi-util) | 0.1.11 | Unlicense OR MIT |
-| [window-vibrancy](https://github.com/tauri-apps/tauri-plugin-vibrancy) | 0.6.0 | Apache-2.0 OR MIT |
-| [windows](https://github.com/microsoft/windows-rs) | 0.61.3 | MIT OR Apache-2.0 |
-| [windows_x86_64_msvc](https://github.com/microsoft/windows-rs) | 0.52.6 | MIT OR Apache-2.0 |
+| [window-vibrancy](https://github.com/tauri-apps/tauri-plugin-vibrancy) | 0.8.1 | Apache-2.0 OR MIT |
+| [windows](https://github.com/microsoft/windows-rs) | 0.62.2 | MIT OR Apache-2.0 |
 | [windows_x86_64_msvc](https://github.com/microsoft/windows-rs) | 0.53.1 | MIT OR Apache-2.0 |
-| [windows-collections](https://github.com/microsoft/windows-rs) | 0.2.0 | MIT OR Apache-2.0 |
-| [windows-core](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 |
-| [windows-future](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 |
+| [windows-collections](https://github.com/microsoft/windows-rs) | 0.3.2 | MIT OR Apache-2.0 |
+| [windows-core](https://github.com/microsoft/windows-rs) | 0.62.2 | MIT OR Apache-2.0 |
+| [windows-future](https://github.com/microsoft/windows-rs) | 0.3.2 | MIT OR Apache-2.0 |
 | [windows-implement](https://github.com/microsoft/windows-rs) | 0.60.2 | MIT OR Apache-2.0 |
 | [windows-interface](https://github.com/microsoft/windows-rs) | 0.59.3 | MIT OR Apache-2.0 |
-| [windows-link](https://github.com/microsoft/windows-rs) | 0.1.3 | MIT OR Apache-2.0 |
 | [windows-link](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 |
-| [windows-numerics](https://github.com/microsoft/windows-rs) | 0.2.0 | MIT OR Apache-2.0 |
-| [windows-result](https://github.com/microsoft/windows-rs) | 0.3.4 | MIT OR Apache-2.0 |
-| [windows-strings](https://github.com/microsoft/windows-rs) | 0.4.2 | MIT OR Apache-2.0 |
-| [windows-sys](https://github.com/microsoft/windows-rs) | 0.59.0 | MIT OR Apache-2.0 |
+| [windows-numerics](https://github.com/microsoft/windows-rs) | 0.3.1 | MIT OR Apache-2.0 |
+| [windows-result](https://github.com/microsoft/windows-rs) | 0.4.1 | MIT OR Apache-2.0 |
+| [windows-strings](https://github.com/microsoft/windows-rs) | 0.5.1 | MIT OR Apache-2.0 |
 | [windows-sys](https://github.com/microsoft/windows-rs) | 0.60.2 | MIT OR Apache-2.0 |
 | [windows-sys](https://github.com/microsoft/windows-rs) | 0.61.2 | MIT OR Apache-2.0 |
-| [windows-targets](https://github.com/microsoft/windows-rs) | 0.52.6 | MIT OR Apache-2.0 |
 | [windows-targets](https://github.com/microsoft/windows-rs) | 0.53.5 | MIT OR Apache-2.0 |
-| [windows-threading](https://github.com/microsoft/windows-rs) | 0.1.0 | MIT OR Apache-2.0 |
+| [windows-threading](https://github.com/microsoft/windows-rs) | 0.2.1 | MIT OR Apache-2.0 |
 | [windows-version](https://github.com/microsoft/windows-rs) | 0.1.7 | MIT OR Apache-2.0 |
 | [winnow](https://github.com/winnow-rs/winnow) | 0.5.40 | MIT |
 | [winnow](https://github.com/winnow-rs/winnow) | 1.0.3 | MIT |
 | [writeable](https://github.com/unicode-org/icu4x) | 0.6.3 | Unicode-3.0 |
-| [wry](https://github.com/tauri-apps/wry) | 0.55.1 | Apache-2.0 OR MIT |
+| [wry](https://github.com/tauri-apps/wry) | 0.57.0 | Apache-2.0 OR MIT |
 | [x11](https://github.com/AltF02/x11-rs.git) | 2.21.0 | MIT |
 | [x11-dl](https://github.com/AltF02/x11-rs.git) | 2.21.0 | MIT |
 | [x509-cert](https://github.com/RustCrypto/formats/tree/master/x509-cert) | 0.2.5 | Apache-2.0 OR MIT |
@@ -503,79 +498,79 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 
 | Package | Version | Licence |
 |---|---|---|
-| @floating-ui/core | 1.7.5 | MIT |
-| @floating-ui/dom | 1.7.6 | MIT |
-| @floating-ui/react-dom | 2.1.8 | MIT |
-| @floating-ui/utils | 0.2.11 | MIT |
-| @napi-rs/canvas | 1.0.9 | MIT |
-| @napi-rs/canvas-android-arm64 | 1.0.9 | MIT |
-| @napi-rs/canvas-darwin-arm64 | 1.0.9 | MIT |
-| @napi-rs/canvas-darwin-x64 | 1.0.9 | MIT |
-| @napi-rs/canvas-linux-arm-gnueabihf | 1.0.9 | MIT |
-| @napi-rs/canvas-linux-arm64-gnu | 1.0.9 | MIT |
-| @napi-rs/canvas-linux-arm64-musl | 1.0.9 | MIT |
-| @napi-rs/canvas-linux-riscv64-gnu | 1.0.9 | MIT |
-| @napi-rs/canvas-linux-x64-gnu | 1.0.9 | MIT |
-| @napi-rs/canvas-linux-x64-musl | 1.0.9 | MIT |
-| @napi-rs/canvas-win32-arm64-msvc | 1.0.9 | MIT |
-| @napi-rs/canvas-win32-x64-msvc | 1.0.9 | MIT |
-| @radix-ui/primitive | 1.1.3 | MIT |
-| @radix-ui/react-arrow | 1.1.7 | MIT |
-| @radix-ui/react-collection | 1.1.7 | MIT |
-| @radix-ui/react-compose-refs | 1.1.2 | MIT |
-| @radix-ui/react-context | 1.1.2 | MIT |
-| @radix-ui/react-dialog | 1.1.15 | MIT |
-| @radix-ui/react-direction | 1.1.1 | MIT |
-| @radix-ui/react-dismissable-layer | 1.1.11 | MIT |
-| @radix-ui/react-dropdown-menu | 2.1.16 | MIT |
-| @radix-ui/react-focus-guards | 1.1.3 | MIT |
-| @radix-ui/react-focus-scope | 1.1.7 | MIT |
-| @radix-ui/react-id | 1.1.1 | MIT |
-| @radix-ui/react-menu | 2.1.16 | MIT |
-| @radix-ui/react-popper | 1.2.8 | MIT |
-| @radix-ui/react-portal | 1.1.9 | MIT |
-| @radix-ui/react-presence | 1.1.5 | MIT |
-| @radix-ui/react-primitive | 2.1.3 | MIT |
-| @radix-ui/react-roving-focus | 1.1.11 | MIT |
-| @radix-ui/react-slot | 1.2.3 | MIT |
-| @radix-ui/react-tooltip | 1.2.8 | MIT |
-| @radix-ui/react-use-callback-ref | 1.1.1 | MIT |
-| @radix-ui/react-use-controllable-state | 1.2.2 | MIT |
-| @radix-ui/react-use-effect-event | 0.0.2 | MIT |
-| @radix-ui/react-use-escape-keydown | 1.1.1 | MIT |
-| @radix-ui/react-use-layout-effect | 1.1.1 | MIT |
-| @radix-ui/react-use-rect | 1.1.1 | MIT |
-| @radix-ui/react-use-size | 1.1.1 | MIT |
-| @radix-ui/react-visually-hidden | 1.2.3 | MIT |
-| @radix-ui/rect | 1.1.1 | MIT |
-| @tauri-apps/api | 2.11.0 | Apache-2.0 OR MIT |
-| @tauri-apps/plugin-dialog | 2.7.1 | MIT OR Apache-2.0 |
-| @tauri-apps/plugin-fs | 2.5.1 | MIT OR Apache-2.0 |
+| @floating-ui/core | 1.8.0 | MIT |
+| @floating-ui/dom | 1.8.0 | MIT |
+| @floating-ui/react-dom | 2.1.9 | MIT |
+| @floating-ui/utils | 0.2.12 | MIT |
+| @napi-rs/canvas | 1.0.12 | MIT |
+| @napi-rs/canvas-android-arm64 | 1.0.12 | MIT |
+| @napi-rs/canvas-darwin-arm64 | 1.0.12 | MIT |
+| @napi-rs/canvas-darwin-x64 | 1.0.12 | MIT |
+| @napi-rs/canvas-linux-arm-gnueabihf | 1.0.12 | MIT |
+| @napi-rs/canvas-linux-arm64-gnu | 1.0.12 | MIT |
+| @napi-rs/canvas-linux-arm64-musl | 1.0.12 | MIT |
+| @napi-rs/canvas-linux-riscv64-gnu | 1.0.12 | MIT |
+| @napi-rs/canvas-linux-x64-gnu | 1.0.12 | MIT |
+| @napi-rs/canvas-linux-x64-musl | 1.0.12 | MIT |
+| @napi-rs/canvas-win32-arm64-msvc | 1.0.12 | MIT |
+| @napi-rs/canvas-win32-x64-msvc | 1.0.12 | MIT |
+| @radix-ui/primitive | 1.2.0 | MIT |
+| @radix-ui/react-arrow | 1.1.17 | MIT |
+| @radix-ui/react-collection | 1.2.0 | MIT |
+| @radix-ui/react-compose-refs | 1.1.5 | MIT |
+| @radix-ui/react-context | 1.3.0 | MIT |
+| @radix-ui/react-dialog | 1.3.1 | MIT |
+| @radix-ui/react-direction | 1.2.0 | MIT |
+| @radix-ui/react-dismissable-layer | 1.2.1 | MIT |
+| @radix-ui/react-dropdown-menu | 2.2.1 | MIT |
+| @radix-ui/react-focus-guards | 1.2.0 | MIT |
+| @radix-ui/react-focus-scope | 1.3.1 | MIT |
+| @radix-ui/react-id | 1.1.4 | MIT |
+| @radix-ui/react-menu | 2.2.1 | MIT |
+| @radix-ui/react-popper | 1.4.0 | MIT |
+| @radix-ui/react-portal | 1.2.0 | MIT |
+| @radix-ui/react-presence | 1.1.11 | MIT |
+| @radix-ui/react-primitive | 2.2.0 | MIT |
+| @radix-ui/react-roving-focus | 1.2.1 | MIT |
+| @radix-ui/react-slot | 1.5.0 | MIT |
+| @radix-ui/react-tooltip | 1.4.1 | MIT |
+| @radix-ui/react-use-callback-ref | 1.1.5 | MIT |
+| @radix-ui/react-use-controllable-state | 1.3.0 | MIT |
+| @radix-ui/react-use-effect-event | 0.0.5 | MIT |
+| @radix-ui/react-use-is-hydrated | 0.1.3 | MIT |
+| @radix-ui/react-use-layout-effect | 1.1.4 | MIT |
+| @radix-ui/react-use-rect | 1.1.4 | MIT |
+| @radix-ui/react-use-size | 1.1.5 | MIT |
+| @radix-ui/react-visually-hidden | 1.2.13 | MIT |
+| @radix-ui/rect | 1.1.3 | MIT |
+| @tauri-apps/api | 2.12.4 | Apache-2.0 OR MIT |
+| @tauri-apps/plugin-dialog | 2.8.3 | MIT OR Apache-2.0 |
+| @tauri-apps/plugin-fs | 2.7.1 | MIT OR Apache-2.0 |
 | aria-hidden | 1.2.6 | MIT |
 | detect-node-es | 1.1.0 | MIT |
 | get-nonce | 1.0.1 | MIT |
-| pdfjs-dist | 6.3.289 | Apache-2.0 |
-| react | 19.2.6 | MIT |
-| react-dom | 19.2.6 | MIT |
+| pdfjs-dist | 6.4.299 | Apache-2.0 |
+| react | 19.3.1 | MIT |
+| react-dom | 19.3.1 | MIT |
 | react-remove-scroll | 2.7.2 | MIT |
 | react-remove-scroll-bar | 2.3.8 | MIT |
 | react-style-singleton | 2.2.3 | MIT |
-| scheduler | 0.27.0 | MIT |
+| scheduler | 0.28.0 | MIT |
 | tslib | 2.8.1 | 0BSD |
 | use-callback-ref | 1.3.3 | MIT |
 | use-sidecar | 1.1.3 | MIT |
-| zustand | 5.0.13 | MIT |
+| zustand | 5.0.15 | MIT |
 
 ## Licence totals
 
 | Licence | Count |
 |---|---|
-| MIT OR Apache-2.0 | 193 |
+| MIT OR Apache-2.0 | 191 |
 | MIT | 151 |
-| Apache-2.0 OR MIT | 40 |
+| Apache-2.0 OR MIT | 39 |
 | Unicode-3.0 | 18 |
-| MIT/Apache-2.0 | 17 |
-| Zlib OR Apache-2.0 OR MIT | 7 |
+| MIT/Apache-2.0 | 13 |
+| Zlib OR Apache-2.0 OR MIT | 8 |
 | Apache-2.0 | 5 |
 | BSD-3-Clause | 5 |
 | MPL-2.0 | 5 |
@@ -587,6 +582,7 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | BSD-2-Clause | 2 |
 | BSD-2-Clause OR Apache-2.0 OR MIT | 2 |
 | BSD-3-Clause OR Apache-2.0 | 2 |
+| MIT OR Zlib OR Apache-2.0 | 2 |
 | Unlicense/MIT | 2 |
 | Zlib | 2 |
 | (Apache-2.0 OR MIT) AND BSD-3-Clause | 1 |
@@ -602,7 +598,6 @@ The CMYK profile PDF.js uses for DeviceCMYK colour. Public-domain dedication: ic
 | CC0-1.0 OR MIT-0 OR Apache-2.0 | 1 |
 | CDLA-Permissive-2.0 | 1 |
 | LicenseRef-ICC-Profile | 1 |
-| MIT OR Zlib OR Apache-2.0 | 1 |
 
 ### On the MPL-2.0 entries
 

@@ -58,6 +58,10 @@ pub fn transform_image(
         object
             .reset_matrix(PdfMatrix::new(a, b, c, d, e, f))
             .map_err(CommandError::from)?;
+        // Released before regenerating: since pdfium-render 0.9.4 a page's
+        // objects borrow the page. Dropping one attached to a page frees nothing
+        // (only an unattached object is destroyed), so the edit stays.
+        drop(object);
 
         pdf_page.regenerate_content().map_err(CommandError::from)?;
     }

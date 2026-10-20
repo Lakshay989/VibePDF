@@ -26,7 +26,13 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
-pdfium-render = "0.9"
+# The PDFium API level is named, not "latest": it must match the binary
+# scripts/fetch-pdfium.sh pins (chromium/7857), and "pdfium_latest" follows
+# whatever pdfium-render's newest release supports. 0.9.4 moved it to 7881,
+# whose bindings need symbols 7857 lacks (FPDFTextObj_SetFontSize), so PDFium
+# failed to load. 7763 is the newest level at or below 7857. Raise this with
+# PINNED_RELEASE. The other defaults (image_latest, thread_safe) are kept.
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_7763", "image_latest", "thread_safe"] }
 # Encoder-only PNG library; written by the image-rs maintainers.
 # Justification: PDFium emits raw RGBA; we need PNG bytes for the
 # RenderPage IPC reply (B3). The PNG path still goes through this crate
@@ -157,16 +163,19 @@ quick-xml = "0.39"
 # both are already in Cargo.lock because Tauri uses them while building, so
 # nothing new is downloaded; they are new to the app binary. Pinned exactly,
 # since dom_query is 0.x with one maintainer, and only pdf/html_read.rs uses it.
+# Move the pin with Tauri's: a different version means a second parser copy.
 # Chosen over the system web view's print-to-PDF, which would mean three
 # platform APIs, no font or PDF/A guarantees, network fetches and running the
 # page's JavaScript. Default features off: no extra code, no extra crates.
-dom_query = { version = "=0.27.0", default-features = false }
+dom_query = { version = "=0.28.0", default-features = false }
 # P7.C1c: `data:` image URIs. Already in the app through Tauri's `plist`.
 base64 = "0.22"
 ureq = { version = "3.2.1", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]
-pdfium-render = "0.9"
+# Same API level as above: cargo unifies features across both, so defaults
+# here would switch "pdfium_latest" back on for every test build.
+pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_7763", "image_latest", "thread_safe"] }
 # tests/encrypt.rs decrypts the /Perms block lopdf writes (ISO 32000-2
 # Algorithm 10) to check it against /P. Test-only since lopdf 0.37 fixed
 # writing that block in plaintext; before, it was a runtime dependency used
