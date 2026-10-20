@@ -380,6 +380,15 @@ for (const [file, content] of targets) {
   stale = true;
   if (CHECK_ONLY) {
     console.error(`generate-notices: ${path.relative(ROOT, file)} is out of date.`);
+    // Say what differs: a check that fails in one environment and passes in
+    // another is only fixable if it shows the lines.
+    const have = new Set((current ?? "").split("\n"));
+    const want = new Set(content.split("\n"));
+    const missing = [...want].filter((line) => !have.has(line));
+    const extra = [...have].filter((line) => !want.has(line));
+    for (const line of missing.slice(0, 15)) console.error(`  + ${line}`);
+    for (const line of extra.slice(0, 15)) console.error(`  - ${line}`);
+    if (missing.length + extra.length === 0) console.error("  (same lines, in a different order)");
   } else {
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, content);
