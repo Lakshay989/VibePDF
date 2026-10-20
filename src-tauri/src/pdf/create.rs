@@ -96,7 +96,7 @@ const LEADING: f32 = 12.0;
 const TAB_STOP: usize = 8;
 /// Decoding a 100-megapixel image takes 300–400 MB. Anything larger is
 /// refused rather than allowed to exhaust memory.
-const MAX_PIXELS: u64 = 100_000_000;
+const MAX_PIXELS: u64 = crate::pdf::image_xobject::MAX_IMAGE_PIXELS;
 const TEXT_EXTENSIONS: [&str; 5] = ["txt", "text", "log", "md", "csv"];
 
 /// A PDF being assembled: the objects, and the pages in order.

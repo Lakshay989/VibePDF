@@ -405,6 +405,65 @@ fn images_and_text_combine_in_order() {
     assert!(extract_text_runs(&doc, 1).expect("extract").is_empty(), "the image page has text");
 }
 
+// --- large images --------------------------------------------------------------
+
+/// A PNG whose header claims `width`×`height` RGBA, with an empty image
+/// stream: enough to be judged by its size without decoding megabytes.
+fn png_header_claiming(width: u32, height: u32) -> Vec<u8> {
+    let chunk = |kind: &[u8], data: &[u8]| {
+        let mut out = u32::try_from(data.len()).expect("len").to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let mut crc = crc32fast::Hasher::new();
+        crc.update(kind);
+        crc.update(data);
+        out.extend_from_slice(&crc.finalize().to_be_bytes());
+        out
+    };
+    let mut ihdr = width.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    out.extend(chunk(b"IHDR", &ihdr));
+    out.extend(chunk(b"IDAT", &[0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]));
+    out.extend(chunk(b"IEND", &[]));
+    out
+}
+
+#[test]
+fn a_twenty_megapixel_png_with_transparency_is_accepted() {
+    // 5,000 x 4,000 RGBA is 80 MB decoded: over the png crate's default
+    // 64 MiB decoding limit, well under the documented 100-megapixel cap.
+    // A screenshot from a 5K display is this size.
+    let scratch = Scratch::new("big-png");
+    let (w, h) = (5_000u32, 4_000u32);
+    let pixels: Vec<u8> = (0..w * h).flat_map(|i| if i % 2 == 0 { [40, 120, 200, 255] } else { [40, 120, 200, 128] }).collect();
+    let input = scratch.write("screenshot.png", &png(w, h, png::ColorType::Rgba, &pixels));
+    drop(pixels);
+    let dest = scratch.path("out.pdf");
+    let summary = create(&[input], &dest, PageSize::Image);
+    assert_eq!((summary.pages, summary.images), (1, 1));
+    let doc = Document::load_mem(&std::fs::read(&dest).expect("read")).expect("parse");
+    let image = doc
+        .objects
+        .values()
+        .filter_map(|o| o.as_stream().ok())
+        .find(|s| s.dict.get(b"Subtype").and_then(Object::as_name).is_ok_and(|n| n == b"Image") && s.dict.has(b"SMask"))
+        .expect("the image, with its soft mask");
+    assert_eq!(image.dict.get(b"Width").and_then(Object::as_i64).expect("width"), 5_000);
+}
+
+#[test]
+fn a_png_over_the_limit_is_refused_with_its_size() {
+    let scratch = Scratch::new("huge-png");
+    // 12,000 x 9,000 is 108 megapixels.
+    let input = scratch.write("poster.png", &png_header_claiming(12_000, 9_000));
+    let dest = scratch.path("out.pdf");
+    let message = refusal(create_pdf_from_files(&[input], &dest, PageSize::A4));
+    assert!(message.contains("12000 × 9000") && message.contains("100-megapixel limit"), "{message}");
+    assert!(!dest.exists());
+}
+
 // --- refusals -----------------------------------------------------------------
 
 fn refusal(result: Result<CreateSummary, CommandError>) -> String {

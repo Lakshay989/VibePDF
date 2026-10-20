@@ -38,6 +38,11 @@ pub struct EmbeddedImage {
 /// SPEC: P3-ANN-006 — decode `bytes` (`PNG`) and add an Image `XObject` (plus an
 /// `/SMask` for any alpha) to `doc`, returning its id + dimensions. Errors
 /// (non-`PNG`, unsupported depth) are typed, never a panic.
+/// The largest image decoded into a page, in pixels: Create PDF's documented
+/// cap, and the one image add, replace and stamps share. 100 megapixels of
+/// RGBA is 400 MB decoded.
+pub(crate) const MAX_IMAGE_PIXELS: u64 = 100_000_000;
+
 pub fn embed_png(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, CommandError> {
     if !is_png(bytes) {
         return Err(CommandError::InvalidInput("stamp image is not a PNG".into()));
@@ -46,6 +51,11 @@ pub fn embed_png(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, Comm
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(png_err)?;
+    // Refused from the header, before the whole image is allocated.
+    let (width, height) = (reader.info().width, reader.info().height);
+    if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
+        return Err(CommandError::InvalidInput(format!("the PNG is {width} × {height} pixels, over the 100-megapixel limit for an image")));
+    }
     // `None` (png 0.18) when the decoded size wouldn't fit in memory at all.
     let size = reader.output_buffer_size().ok_or_else(|| CommandError::InvalidInput("the PNG is too large to decode".into()))?;
     let mut buf = vec![0u8; size];
@@ -302,17 +312,30 @@ mod tests {
     #[test]
     fn a_png_claiming_a_huge_size_is_refused_before_anything_is_allocated() {
         // A header claiming 2^31 - 1 pixels square. The png crate's default
-        // decoding limit (64 MiB of output) refuses it while reading the
-        // header; `output_buffer_size()` returning `None` (png 0.18) is the
-        // second guard, for a size that overflows memory outright. Either way
-        // it's a typed error, never an allocation or a panic.
+        // limit (64 MiB per internal buffer, such as one row) refuses it while
+        // reading the header, because a single row is 8 GiB. It's a typed
+        // error, never an allocation or a panic.
         let mut doc = Document::with_version("1.7");
         match embed_png(&mut doc, &png_claiming(0x7FFF_FFFF, 0x7FFF_FFFF)) {
             Err(crate::error::CommandError::InvalidInput(m)) => assert!(m.contains("limits are exceeded"), "{m}"),
             other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
         }
-        // Just over the limit is refused the same way: 4,097 x 4,096 RGBA.
-        assert!(embed_png(&mut doc, &png_claiming(4097, 4096)).is_err());
+    }
+
+    #[test]
+    fn a_png_over_the_pixel_cap_is_refused_by_its_size() {
+        // 12,000 x 9,000 is 108 megapixels. Its rows are small, so the png
+        // crate would decode it (432 MB). Our cap refuses it from the header.
+        let mut doc = Document::with_version("1.7");
+        match embed_png(&mut doc, &png_claiming(12_000, 9_000)) {
+            Err(crate::error::CommandError::InvalidInput(m)) => assert!(m.contains("12000 × 9000") && m.contains("100-megapixel"), "{m}"),
+            other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+        }
+        // At the cap exactly, the header passes and only the (empty) data fails.
+        match embed_png(&mut doc, &png_claiming(10_000, 10_000)) {
+            Err(crate::error::CommandError::InvalidInput(m)) => assert!(!m.contains("100-megapixel"), "{m}"),
+            other => panic!("expected a data error, got {:?}", other.map(|_| ())),
+        }
     }
 
     /// Encode a tiny `width`×`height` image with the given `png` colour type.
