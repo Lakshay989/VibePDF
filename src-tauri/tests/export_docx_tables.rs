@@ -78,6 +78,26 @@ async fn a_ruled_grid_becomes_a_real_table() {
 }
 
 #[tokio::test]
+async fn a_tables_grid_is_in_twips_and_spans_the_text_width() {
+    // w:gridCol is a width in twips (ECMA-376 §17.4.16, ST_TwipsMeasure), and
+    // readers that trust the grid lay columns out from it. With no page size
+    // of our own, Word's default page (Letter, 1 in margins) leaves 6.5 in of
+    // text: 9,360 twips, shared evenly by the columns.
+    let (xml, _, dest) = export("table.pdf").await;
+    let first = table_n(&xml, 0);
+    let widths: Vec<i64> = first
+        .split("<w:gridCol w:w=\"")
+        .skip(1)
+        .filter_map(|piece| piece.split('"').next()?.parse().ok())
+        .collect();
+    assert_eq!(widths.len(), 4);
+    assert!(widths.iter().all(|w| *w == widths[0]), "an even grid: {widths:?}");
+    let total: i64 = widths.iter().sum();
+    assert!((9_356..=9_360).contains(&total), "the grid spans {total} twips, not the 9,360 of the text width");
+    cleanup(&dest);
+}
+
+#[tokio::test]
 async fn a_single_path_grid_is_found_too() {
     // Page 2 draws the whole grid as one path object, so its bounding box is
     // the size of the table and the rules can only be found by walking its

@@ -280,17 +280,20 @@ fn table_xml(table: &FilledTable) -> String {
     // but Word lays a table out from its grid and the text almost never fits
     // the original measure; an even grid that Word then autofits reads better
     // than a faithful one that clips.
-    let width = if table.columns == 0 {
-        0
-    } else {
-        // Fiftieths of a percent, which is what `pct` means here: 100% = 5000.
-        5000 / i32::try_from(table.columns).unwrap_or(1)
-    };
+    let columns = i32::try_from(table.columns).unwrap_or(1).max(1);
+    // Each cell's share of the table, in fiftieths of a percent (`pct`): 100% = 5000.
+    let width = if table.columns == 0 { 0 } else { 5000 / columns };
+    // The grid is in twips (ST_TwipsMeasure), not a share. We write no page
+    // size, so Word's default page (Letter, 1 in margins) sets the text
+    // width: 6.5 in, 9,360 twips. `tblW` stays at 100%, so a reader that
+    // scales the table to its margins still does; one that trusts the grid,
+    // as LibreOffice can, now gets a full-width table rather than 3.5 in.
+    let grid_col = if table.columns == 0 { 0 } else { 9360 / columns };
     let mut out = String::from(
         r#"<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="auto"/><w:left w:val="single" w:sz="4" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:color="auto"/><w:right w:val="single" w:sz="4" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:color="auto"/></w:tblBorders></w:tblPr><w:tblGrid>"#,
     );
     for _ in 0..table.columns {
-        let _ = write!(out, r#"<w:gridCol w:w="{width}"/>"#);
+        let _ = write!(out, r#"<w:gridCol w:w="{grid_col}"/>"#);
     }
     out.push_str("</w:tblGrid>");
 
