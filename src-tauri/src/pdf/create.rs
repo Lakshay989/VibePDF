@@ -323,7 +323,9 @@ fn decode_png(name: &str, bytes: &[u8]) -> Result<Decoded, CommandError> {
     let mut reader = decoder.read_info().map_err(|e| unreadable(&e))?;
     let (width, height) = (reader.info().width, reader.info().height);
     refuse_if_too_large(name, width, height)?;
-    let mut buffer = vec![0; reader.output_buffer_size()];
+    // `None` (png 0.18) when the decoded size wouldn't fit in memory at all.
+    let size = reader.output_buffer_size().ok_or_else(|| unreadable(&"its decoded size is too large"))?;
+    let mut buffer = vec![0; size];
     let frame = reader.next_frame(&mut buffer).map_err(|e| unreadable(&e))?;
     let pixels = &buffer[..frame.buffer_size()];
     let (colour, gray, alpha) = match frame.color_type {

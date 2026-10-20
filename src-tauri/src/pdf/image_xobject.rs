@@ -46,7 +46,9 @@ pub fn embed_png(doc: &mut Document, bytes: &[u8]) -> Result<EmbeddedImage, Comm
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(png_err)?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    // `None` (png 0.18) when the decoded size wouldn't fit in memory at all.
+    let size = reader.output_buffer_size().ok_or_else(|| CommandError::InvalidInput("the PNG is too large to decode".into()))?;
+    let mut buf = vec![0u8; size];
     let info = reader.next_frame(&mut buf).map_err(png_err)?;
     buf.truncate(info.buffer_size());
 
@@ -273,6 +275,45 @@ fn png_err(e: png::DecodingError) -> CommandError {
 mod tests {
     use super::{deinterleave, embed_png, is_png};
     use lopdf::{Document, Object};
+
+    /// A PNG whose header claims `width`×`height` RGBA but whose data is one
+    /// empty zlib stream: what a hostile file looks like before decoding.
+    fn png_claiming(width: u32, height: u32) -> Vec<u8> {
+        let chunk = |kind: &[u8], data: &[u8]| {
+            let mut out = u32::try_from(data.len()).unwrap().to_be_bytes().to_vec();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(data);
+            let mut crc = crc32fast::Hasher::new();
+            crc.update(kind);
+            crc.update(data);
+            out.extend_from_slice(&crc.finalize().to_be_bytes());
+            out
+        };
+        let mut ihdr = width.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit RGBA, no interlace
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &ihdr));
+        png.extend(chunk(b"IDAT", &[0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]));
+        png.extend(chunk(b"IEND", &[]));
+        png
+    }
+
+    #[test]
+    fn a_png_claiming_a_huge_size_is_refused_before_anything_is_allocated() {
+        // A header claiming 2^31 - 1 pixels square. The png crate's default
+        // decoding limit (64 MiB of output) refuses it while reading the
+        // header; `output_buffer_size()` returning `None` (png 0.18) is the
+        // second guard, for a size that overflows memory outright. Either way
+        // it's a typed error, never an allocation or a panic.
+        let mut doc = Document::with_version("1.7");
+        match embed_png(&mut doc, &png_claiming(0x7FFF_FFFF, 0x7FFF_FFFF)) {
+            Err(crate::error::CommandError::InvalidInput(m)) => assert!(m.contains("limits are exceeded"), "{m}"),
+            other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+        }
+        // Just over the limit is refused the same way: 4,097 x 4,096 RGBA.
+        assert!(embed_png(&mut doc, &png_claiming(4097, 4096)).is_err());
+    }
 
     /// Encode a tiny `width`×`height` image with the given `png` colour type.
     fn make_png(width: u32, height: u32, color: png::ColorType) -> Vec<u8> {

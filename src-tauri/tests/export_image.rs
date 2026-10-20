@@ -55,16 +55,16 @@ async fn export(
 /// PNG is decoded with the `png` crate rather than `image` — we build `image`
 /// without its png feature, because render.rs already encodes PNG directly.
 fn png_size(path: &Path) -> (u32, u32) {
-    let decoder = png::Decoder::new(std::fs::File::open(path).expect("open png"));
+    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).expect("open png")));
     let reader = decoder.read_info().expect("png header");
     let info = reader.info();
     (info.width, info.height)
 }
 
 fn png_pixels(path: &Path) -> (Vec<u8>, usize) {
-    let decoder = png::Decoder::new(std::fs::File::open(path).expect("open png"));
+    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).expect("open png")));
     let mut reader = decoder.read_info().expect("png header");
-    let mut buf = vec![0; reader.output_buffer_size()];
+    let mut buf = vec![0; reader.output_buffer_size().expect("decoded size fits in memory")];
     let info = reader.next_frame(&mut buf).expect("png data");
     let channels = info.color_type.samples();
     buf.truncate(info.buffer_size());
