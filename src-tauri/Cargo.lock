@@ -5021,7 +5021,7 @@ version = "0.0.1"
 dependencies = [
  "aes",
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "cbc",
  "cms",
  "const-oid",
