@@ -48,6 +48,24 @@ the current roadmap phase. When one is picked up, move it into the relevant
   flipping it is a one-line change to the `<img>` style in
   `src/panels/ThumbnailPanel.tsx`.
 
+- **✅ DECIDED (2026-10-22) — Linearize (P7-OCR-011, P7.C2b) deferred out of
+  Phase 7.** Neither PDFium nor lopdf can write a linearized file, and Fast
+  Web View helps only PDFs served by byte range to a browser. The two ways to
+  build it, if it comes back:
+  - **Write it ourselves**, `pdf/linearize.rs` on lopdf's objects: ~1,000
+    lines (Annex F layout, page-offset and shared-object hint tables, a
+    two-pass offset fix-up because the linearization dictionary's own length
+    moves the offsets it records). No runtime dependency; validate with
+    `qpdf --check-linearization` in dev and CI (`brew`/`apt`), like veraPDF.
+    Preferred of the two.
+  - **Bind qpdf**: the `qpdf` crate (0.3.7, `QPdfWriter::linearize(bool)`)
+    with its vendored C++ build. ~100 lines and qpdf is the reference
+    linearizer, but it is a second PDF engine (`docs/03` change, needs a human
+    call) and a C++ toolchain on macOS, Linux and Windows MSVC.
+  **Reopen if** users ask for it, or a library already in the tree gains a
+  linearizing writer. Not to be "solved" by renaming compression as
+  "optimize for web".
+
 - **Add an EARS spec line for Save (`P2-SAVE-001`)?**
   P2.A1 (Save) shipped as infrastructure with no `P2-PAGE-*` id; it's
   governed by `NFR-PERF-004` + `docs/04` §"Saving and auto-save". A

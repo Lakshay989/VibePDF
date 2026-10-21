@@ -183,7 +183,7 @@ The user can open `tests/fixtures/acceptance/p1-spec.pdf` (the actual PDF specif
 - Convert PDF → DOCX, XLSX, PPTX, image, text, HTML
 - Create PDF from DOCX, images, text, HTML
 - Compress (low/medium/high)
-- Linearize (web-optimized)
+- ~~Linearize (web-optimized)~~ — deferred out of Phase 7 by decision on 2026-10-22: neither PDF library can write a linearized file, and it only helps PDFs served by byte range to a browser. See `BACKLOG.md` ("Decisions to make") and `steps/P7.md` P7.C2b.
 
 **Acceptance demo:**
 - Open `tests/fixtures/acceptance/p7-scanned.pdf` (a 30-page scanned manual). Run OCR. The result is searchable; visual layout is unchanged.

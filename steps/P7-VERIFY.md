@@ -176,6 +176,23 @@ and the result.
       the checkbox. Look at **Tools → Show Inspector**: the title is the file's
       name.
 
+### 1.11 Compress… trims fonts (added with P7.C2c)
+
+`whole-font.pdf` embeds a whole font twice, the way some report generators
+do, so it is the file with something to trim. Use the copy in
+`Sample PDFs/scratch/`: the app saves in place, and the committed fixture
+must not change.
+
+- [ ] Open `Sample PDFs/scratch/whole-font.pdf` (copy it from
+      `tests/fixtures/basic/` if it isn't there) → **Compress…** → **Much
+      smaller** → save.
+- [ ] **Expect** the result line to say **"2 fonts reduced to the characters
+      used"**, and the copy to be about a fifth of the original's size.
+- [ ] Open the copy in **Preview**: all three pages look exactly like the
+      original, and the Coptic text still selects and copies as Coptic.
+- [ ] Compress the same file at **Smaller**: no fonts are reduced (low keeps
+      every font whole).
+
 ---
 
 ## Part 2 — PDFs in Preview
