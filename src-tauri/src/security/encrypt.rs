@@ -10,8 +10,7 @@
 //! What *is* decided here, and is worth reviewing carefully:
 //!
 //! - the key comes from the OS CSPRNG (`getrandom`) and nowhere else;
-//! - a user password is **required**, because P6.C2 cannot unlock a document
-//!   that has only an owner password — see the note on `EncryptOptions`;
+//! - a user password is **required** — see the note on `EncryptOptions`;
 //! - an omitted owner password falls back to the user password, so the
 //!   document always has a credential that can change its permissions.
 
@@ -62,14 +61,13 @@ const CRYPT_FILTER_KEY_LENGTH: i64 = KEY_BYTES as i64;
 ///
 /// **A user password is currently required.** The spec permits owner-only
 /// protection — a document that opens for anyone but is restricted — and this
-/// deliberately does not, because P6.C2 cannot remove protection from such a
-/// file: `lopdf` tries the empty user password while parsing and its R6 user
-/// authentication does not work, so the document cannot even be loaded.
-///
-/// Writing files we cannot subsequently unlock is a worse failure than a
-/// missing option, and it is one the user would only discover later, on a
-/// document they can no longer change. Recorded in `steps/P6.md`; revisit when
-/// the upstream R6 user-authentication path is fixed.
+/// does not write it yet. It was refused because P6.C2 could not remove such
+/// protection: writing files we cannot subsequently unlock is a worse failure
+/// than a missing option. Since 2026-10-21 P6.C2 can (`security::decrypt`
+/// checks the owner password against a rebuilt dictionary), so the reason is
+/// gone. Lifting the refusal, and the refusal's message, which still gives
+/// that reason, is a separate step with its own reader checks
+/// (`steps/P6.md`).
 #[derive(Debug, Clone, Default)]
 pub struct EncryptOptions {
     pub user_password: Option<String>,

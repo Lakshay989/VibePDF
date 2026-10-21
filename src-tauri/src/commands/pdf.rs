@@ -2366,9 +2366,11 @@ pub async fn pdf_sign_document(
 /// is the document's owner password; see `security::decrypt` for why that is
 /// what `lopdf` enforces for AES-256.
 ///
-/// The output is re-opened **with no password** before this returns. That is
-/// the whole assertion: a file that is still encrypted and a file that is not
-/// look identical from here, and only a reader can tell them apart.
+/// The output is re-opened **with no password** before this returns: a file
+/// that still needs a password and a file that doesn't look identical from
+/// here, and only a reader can tell them apart. That proves nothing for a
+/// permissions-only file, which opens with no password while still protected,
+/// so `remove_protection` also refuses a copy that still declares encryption.
 #[tauri::command]
 pub async fn pdf_remove_protection(
     state: State<'_, AppState>,

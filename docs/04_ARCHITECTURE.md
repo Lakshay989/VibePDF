@@ -165,6 +165,10 @@ or with nothing. `load_cos(bytes, map_err)` refuses such a document with
 signature check, via the document's actor). `tests/lopdf_load_policy.rs` fails
 on any other loader call in production code; `security/decrypt.rs` is the one
 allowed exception, because Unlock needs the undecrypted encryption dictionary.
+A permissions-only file (no open password) has none by then: lopdf decrypts it
+on load with the empty password and drops the dictionary, so Unlock rebuilds it
+from lopdf's decryption state (`EncryptionState::encode`) and checks the owner
+password against that (2026-10-21).
 Three helpers keep protected documents honest around the round trip:
 `bytes_for_cos_edit` refuses a protected document *before* an edit starts (Insert
 used to copy pages in first and refuse after), `bytes_for_cos_read` gives the
