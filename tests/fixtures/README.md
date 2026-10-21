@@ -37,6 +37,9 @@ findability fix instead.
 | `scan-cyrillic.pdf` | 1 | A Russian page that is only a picture of text. Built by a Rust fixture test, not Python: Ghostscript's base fonts can't set Cyrillic, so it goes through VibePDF's own font embedding and PDFium. | P7-OCR-002 non-Latin text layer |
 | `scan-skewed.pdf` | 1 | The same scan drawn 3° off level before rasterising. Recognition straightens it, so the text layer has to be tilted back. | P7-OCR-001 placement |
 | `jpx.pdf` | 1 | A 16×16 lossless JPEG 2000 image, four coloured quadrants. Decodes only through `openjpeg.wasm`. **The one generator with an external tool:** `opj_compress` (OpenJPEG). | P1-VIEW-004 image decoders |
+| `whole-font.pdf` | 2 | Coptic text in a composite font (`Identity-H`) that embeds the **whole** Noto Sans Coptic, as some report generators embed whole fonts; each page draws four different letters. Built by a Rust fixture test. | P7-OCR-010 font subsetting |
+| `permissions-only-*.pdf` | 1 | `hello.pdf` with an owner password (`owner-pw`) and **no** open password, one file per handler: RC4-40, RC4-128, AES-128, AES-256, and AES-256 with `/Length 256`. Built by pyHanko. | P6-SEC-008 Unlock |
+| `signed-unicode-reason.pdf` | 1 | `hello.pdf` signed by pyHanko with the reason "Freigabe für Druck ✓", written as UTF-16BE. | P6-SEC-006 reason decoding |
 
 ### Form fixtures (Phase 5)
 

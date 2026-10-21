@@ -298,7 +298,7 @@ pub(crate) fn place_cid_run(
 
 /// A 6-uppercase-letter subset tag (PDF convention: `ABCDEF+FontName`), unique
 /// per call so two embedded subsets in one document never collide under a name.
-fn subset_tag() -> String {
+pub(crate) fn subset_tag() -> String {
     uuid::Uuid::new_v4()
         .as_bytes()
         .iter()

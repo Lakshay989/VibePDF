@@ -32,6 +32,8 @@ const report = (over: Partial<CompressReport> = {}): CompressReport => ({
   imagesRecompressed: 6,
   imagesUntouched: 0,
   streamsDeflated: 0,
+  fontsSubset: 0,
+  fontsKept: 0,
   ...over,
 });
 
@@ -105,6 +107,15 @@ describe("CompressDialog", () => {
     await waitFor(() => expect(screen.getByText(/26\.7 MB/)).toBeTruthy());
     expect(screen.getByText(/1\.7 MB/)).toBeTruthy();
     expect(screen.getByText(/6 images recompressed/)).toBeTruthy();
+  });
+
+  it("says how many fonts it reduced, and how many it kept whole", async () => {
+    mockCompress.mockResolvedValue(report({ imagesRecompressed: 0, fontsSubset: 3, fontsKept: 1 }));
+    show();
+    submit();
+    await waitFor(() =>
+      expect(screen.getByText(/3 fonts reduced to the characters used, 1 kept whole\./)).toBeTruthy(),
+    );
   });
 
   it("says plainly when there was nothing to save", async () => {

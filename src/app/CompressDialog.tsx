@@ -51,19 +51,21 @@ const LEVELS: ReadonlyArray<{
   {
     key: "low",
     label: "Smaller",
-    detail: "Keeps every pixel. Nothing changes that you could see at any zoom.",
+    detail: "Keeps every pixel and every font. Nothing changes that you could see at any zoom.",
     share: 0.23,
   },
   {
     key: "medium",
     label: "Much smaller",
-    detail: "Reduces scans to 200 DPI. Nothing visible at normal reading size.",
+    detail:
+      "Reduces scans to 200 DPI and fonts to the characters used. Nothing visible at normal reading size.",
     share: 0.065,
   },
   {
     key: "high",
     label: "Smallest",
-    detail: "Reduces scans to 150 DPI. Text stays sharp; photographs soften.",
+    detail:
+      "Reduces scans to 150 DPI and fonts to the characters used. Text stays sharp; photographs soften.",
     share: 0.007,
   },
 ];
@@ -158,6 +160,9 @@ export function CompressDialog({
                 {formatBytes(done.beforeBytes - done.afterBytes)} saved).{" "}
                 {done.imagesRecompressed > 0
                   ? `${done.imagesRecompressed} ${done.imagesRecompressed === 1 ? "image" : "images"} recompressed. `
+                  : ""}
+                {done.fontsSubset > 0
+                  ? `${done.fontsSubset} ${done.fontsSubset === 1 ? "font" : "fonts"} reduced to the characters used${done.fontsKept > 0 ? `, ${done.fontsKept} kept whole` : ""}. `
                   : ""}
                 {done.streamsDeflated > 0 ? `${done.streamsDeflated} streams deflated.` : ""}
               </>

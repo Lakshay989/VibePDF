@@ -23,6 +23,7 @@ pub mod flatten;
 pub mod flow;
 pub mod font_embed_cid;
 pub mod font_index;
+pub mod font_subset;
 pub mod font_metrics;
 pub mod font_resolver;
 pub mod form;

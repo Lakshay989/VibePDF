@@ -11,6 +11,10 @@ export interface CompressReport {
   imagesRecompressed: number;
   imagesUntouched: number;
   streamsDeflated: number;
+  /** Embedded fonts cut down to the characters the document draws. */
+  fontsSubset: number;
+  /** Embedded fonts left whole. */
+  fontsKept: number;
 }
 
 /**

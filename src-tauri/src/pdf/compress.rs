@@ -1,10 +1,12 @@
 //! SPEC: P7-OCR-010 — make a PDF smaller, at one of three levels.
 //!
-//! Two of the spec's three targets are implemented here: **stream deflation**
-//! and **image recompression**. Font subsetting is deliberately not (decided
-//! 2026-09-23) — doing it properly means walking every content stream to learn
-//! which glyphs are actually used, and it saves nothing at all on the scanned
-//! documents this feature exists for. It is its own step.
+//! All three of the spec's targets: **image recompression** and **stream
+//! deflation** here, and **font subsetting** in `pdf::font_subset` (P7.C2c,
+//! 2026-10-21), at medium and high only. Subsetting walks every content stream
+//! to learn which glyphs are used, so it was deferred on 2026-09-23 as its own
+//! step: it saves nothing on the scanned documents this feature began with.
+//! The subset copy is kept only if every page renders exactly as it did
+//! without it.
 //!
 //! **Where the bytes are.** Measured 2026-09-23 on a 20-page 300 DPI grayscale
 //! scan with sensor noise (81.6 MB, built by `generate-noisy-scan.py`):
@@ -41,6 +43,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::CommandError;
 use crate::pdf::cos::effective_media_box;
 use crate::pdf::document::load_cos;
+use crate::pdf::font_subset;
 
 #[allow(clippy::needless_pass_by_value)]
 fn cos_err(e: lopdf::Error) -> CommandError {
@@ -76,6 +79,14 @@ impl CompressLevel {
             Self::Medium => Some(200.0),
             Self::High => Some(150.0),
         }
+    }
+
+    /// Whether this level subsets fonts. Low promises nothing lost, and a
+    /// subset font can't draw a character it no longer holds, so a later edit
+    /// to the text could fall back to another font.
+    #[must_use]
+    pub fn subsets_fonts(self) -> bool {
+        !matches!(self, Self::Low)
     }
 
     /// JPEG quality, 1-100.
@@ -116,6 +127,11 @@ pub struct CompressReport {
     pub images_untouched: u32,
     /// Streams that gained a `/FlateDecode` filter.
     pub streams_deflated: u32,
+    /// Embedded font files cut down to the glyphs the document draws.
+    pub fonts_subset: u32,
+    /// Embedded font files left whole: the level doesn't subset, their uses
+    /// can't all be proved, they aren't TrueType, or no subset was smaller.
+    pub fonts_kept: u32,
 }
 
 impl CompressReport {
@@ -373,15 +389,26 @@ fn downsampled_width(pixels: u32, page_width_points: f32, target_dpi: f32) -> Op
 /// SPEC: P7-OCR-010 — compress `bytes` at `level`, returning the new file and
 /// what was done to it.
 ///
-/// Images first, then stream deflation: re-encoding sets `/Filter /DCTDecode`,
-/// and the deflation pass skips anything that already has a filter, so the
-/// order stops it trying to zip a JPEG.
+/// Images first, then fonts, then stream deflation: re-encoding sets `/Filter
+/// /DCTDecode`, and the deflation pass skips anything that already has a filter,
+/// so the order stops it trying to zip a JPEG; a subset font goes in
+/// uncompressed, for deflation to compress.
 ///
 /// # Errors
 /// When the input cannot be parsed or the result cannot be serialized.
 pub fn compress_bytes(
     bytes: &[u8],
     level: CompressLevel,
+) -> Result<(Vec<u8>, CompressReport), CommandError> {
+    compress_with(bytes, level, font_subset::plan)
+}
+
+/// [`compress_bytes`], with the font planner passed in, so a test can hand the
+/// guard a subsetting that breaks a page.
+fn compress_with(
+    bytes: &[u8],
+    level: CompressLevel,
+    plan_fonts: fn(&Document) -> font_subset::Plans,
 ) -> Result<(Vec<u8>, CompressReport), CommandError> {
     let mut doc = load_cos(bytes, cos_err)?;
     let widths = page_widths(&doc);
@@ -469,26 +496,7 @@ pub fn compress_bytes(
         report.images_recompressed += 1;
     }
 
-    // Stream deflation. `Stream::compress` already refuses a stream that has a
-    // filter, and refuses a result that is not at least 19 bytes smaller (the
-    // width of the `/Filter /FlateDecode` it would have to add). Measured
-    // 2026-09-23, that guard is what keeps `many-pages.pdf` — 50 tiny content
-    // streams — from growing by 2.2%: it deflates none of them, and deflates
-    // all six of `unicode-text.pdf`'s for a 92.8% saving.
-    for object in doc.objects.values_mut() {
-        if let Object::Stream(stream) = object {
-            if stream.allows_compression && stream.dict.get(b"Filter").is_err() {
-                let before = stream.content.len();
-                if stream.compress().is_ok() && stream.content.len() < before {
-                    report.streams_deflated += 1;
-                }
-            }
-        }
-    }
-
-    let mut out = Vec::new();
-    doc.save_to(&mut out)
-        .map_err(|e| CommandError::PdfError(format!("compress: save: {e}")))?;
+    let out = fonts_then_deflate(doc, level, plan_fonts, &mut report)?;
     report.after_bytes = out.len() as u64;
 
     // The same rule once more, for the file as a whole. A document that cannot
@@ -501,11 +509,76 @@ pub fn compress_bytes(
                 images_recompressed: 0,
                 images_untouched: report.images_recompressed + report.images_untouched,
                 streams_deflated: 0,
+                fonts_subset: 0,
+                fonts_kept: report.fonts_subset + report.fonts_kept,
                 ..report
             },
         ));
     }
     Ok((out, report))
+}
+
+/// Fonts, then deflation. The fonts go on a copy: the guard compares the copy
+/// with and without them, so both are kept until it has. Fills in the report's
+/// stream and font counts.
+fn fonts_then_deflate(
+    doc: Document,
+    level: CompressLevel,
+    plan_fonts: fn(&Document) -> font_subset::Plans,
+    report: &mut CompressReport,
+) -> Result<Vec<u8>, CommandError> {
+    let fonts_total = u32::try_from(font_subset::font_files(&doc).len()).unwrap_or(u32::MAX);
+    let plans = if level.subsets_fonts() { plan_fonts(&doc) } else { font_subset::Plans::default() };
+    let subset = (!plans.subset.is_empty()).then(|| {
+        let mut copy = doc.clone();
+        font_subset::apply(&mut copy, &plans.subset);
+        copy
+    });
+
+    let (plain, plain_deflated) = deflate_and_save(doc)?;
+    let (out, deflated, fonts_subset) = match subset {
+        Some(copy) => {
+            let (with_fonts, deflated) = deflate_and_save(copy)?;
+            if font_subset::renders_identically(&plain, &with_fonts)? {
+                (with_fonts, deflated, u32::try_from(plans.subset.len()).unwrap_or(u32::MAX))
+            } else {
+                tracing::warn!("font subsetting changed how a page renders; fonts kept whole");
+                (plain, plain_deflated, 0)
+            }
+        }
+        None => (plain, plain_deflated, 0),
+    };
+    report.streams_deflated = deflated;
+    report.fonts_subset = fonts_subset;
+    report.fonts_kept = fonts_total.saturating_sub(fonts_subset);
+    Ok(out)
+}
+
+/// Stream deflation, then serialization. Returns the file and how many
+/// streams gained a filter.
+///
+/// `Stream::compress` already refuses a stream that has a filter, and refuses
+/// a result that is not at least 19 bytes smaller (the width of the `/Filter
+/// /FlateDecode` it would have to add). Measured 2026-09-23, that guard is what
+/// keeps `many-pages.pdf` — 50 tiny content streams — from growing by 2.2%: it
+/// deflates none of them, and deflates all six of `unicode-text.pdf`'s for a
+/// 92.8% saving.
+fn deflate_and_save(mut doc: Document) -> Result<(Vec<u8>, u32), CommandError> {
+    let mut deflated = 0;
+    for object in doc.objects.values_mut() {
+        if let Object::Stream(stream) = object {
+            if stream.allows_compression && stream.dict.get(b"Filter").is_err() {
+                let before = stream.content.len();
+                if stream.compress().is_ok() && stream.content.len() < before {
+                    deflated += 1;
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    doc.save_to(&mut out)
+        .map_err(|e| CommandError::PdfError(format!("compress: save: {e}")))?;
+    Ok((out, deflated))
 }
 
 /// SPEC: P7-OCR-010 — compress the open document at `level` and write the
@@ -529,6 +602,15 @@ pub fn compress_document(
         doc.save_to_bytes().map_err(CommandError::from)?
     };
     let (out, report) = compress_bytes(&bytes, level)?;
+    // The round-trip rule: the copy has to open before it is kept.
+    {
+        let _guard = crate::pdf::document::pdfium_lock()?;
+        if let Err(e) = crate::pdf::document::pdfium()?.load_pdf_from_byte_slice(&out, None) {
+            return Err(CommandError::PdfError(format!(
+                "the compressed copy did not open, so it was not written: {e}"
+            )));
+        }
+    }
     std::fs::write(dest, &out)?;
     Ok(report)
 }
@@ -685,6 +767,32 @@ mod tests {
         let letter = 612.0;
         assert_eq!(downsampled_width(2000, letter, 200.0), Some(1700));
         assert_eq!(downsampled_width(2000, letter, 300.0), None);
+    }
+
+    // The guard, wired in: a planner whose subset drops every glyph a page draws
+    // must leave the font whole, and say so in the report.
+    #[test]
+    fn a_subset_that_changes_a_page_is_thrown_away() {
+        fn breaks_the_page(doc: &Document) -> font_subset::Plans {
+            let mut plans = font_subset::plan(doc);
+            for plan in &mut plans.subset {
+                let stream = doc.get_object(plan.file).and_then(Object::as_stream).unwrap();
+                let program = stream.decompressed_content().unwrap();
+                plan.bytes = subsetter::subset(&program, 0, subsetter::Profile::pdf(&[0])).unwrap();
+            }
+            plans
+        }
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/basic/whole-font.pdf")).unwrap();
+        assert_eq!(font_subset::plan(&load_cos(&bytes, cos_err).unwrap()).subset.len(), 1, "the fixture has a font to subset");
+
+        let (_, report) = compress_with(&bytes, CompressLevel::Medium, breaks_the_page).unwrap();
+        assert_eq!((report.fonts_subset, report.fonts_kept), (0, 1), "{report:?}");
+    }
+
+    #[test]
+    fn only_low_keeps_fonts_whole() {
+        assert!(!CompressLevel::Low.subsets_fonts());
+        assert!(CompressLevel::Medium.subsets_fonts() && CompressLevel::High.subsets_fonts());
     }
 
     #[test]
