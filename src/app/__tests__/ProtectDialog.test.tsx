@@ -94,16 +94,48 @@ describe("ProtectDialog", () => {
     );
   });
 
-  it("refuses an owner password on its own", () => {
-    // A deliberate narrowing of P6-SEC-007: P6.C2 cannot unlock a document that
-    // has only a permissions password, so we do not write one. Producing files
-    // we cannot undo is worse than a missing option, and the user would meet it
-    // later, on a document they can no longer change.
+  it("sends a permissions password on its own", async () => {
+    // Owner-only protection (P6-SEC-007), written since Unlock can remove it
+    // (2026-10-21). The open password goes out as null, not as the permissions
+    // password: swapped, the copy would need the permissions password to open.
+    render(dialog());
+    type("Password to change permissions", "let-me-in");
+    fireEvent.click(screen.getByLabelText("Printing"));
+    fireEvent.click(screen.getByText("Protect…"));
+
+    await waitFor(() => expect(mockProtect).toHaveBeenCalled());
+    expect(mockProtect).toHaveBeenCalledWith(
+      "doc-1",
+      "/tmp/report-protected.pdf",
+      null,
+      "let-me-in",
+      { ...ALL_PERMISSIONS, print: false },
+    );
+  });
+
+  it("explains that a permissions-only copy opens for anyone", () => {
+    render(dialog());
+    expect(screen.queryByText(/Anyone can open this copy/i)).toBeNull();
+
+    type("Password to change permissions", "let-me-in");
+    expect(screen.getByText(/Anyone can open this copy/i)).toBeTruthy();
+
+    type("Password to open", "open-me");
+    expect(screen.queryByText(/Anyone can open this copy/i)).toBeNull();
+  });
+
+  it("will not write a permissions-only copy that restricts nothing", () => {
+    // It would open for anyone and limit nothing, while readers treat it as
+    // protected. The backend refuses it too.
     render(dialog());
     type("Password to change permissions", "let-me-in");
 
     expect(screen.getByText("Protect…").hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText(/could not be removed afterwards/i)).toBeTruthy();
+    expect(screen.getByText(/Untick at least one permission/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("Printing"));
+    expect(screen.getByText("Protect…").hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByText(/Untick at least one permission/i)).toBeNull();
   });
 
   it("sends both passwords when both are given", async () => {

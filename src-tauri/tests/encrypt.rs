@@ -10,7 +10,8 @@
 //!
 //!   - is the `/Encrypt` dictionary actually V5/R6/256, or a weaker handler;
 //!   - does the user password genuinely gate opening, per PDFium;
-//!   - does an owner-only document open freely, as the spec intends;
+//!   - does an owner-only document open freely, as the spec intends, and still
+//!     come out encrypted;
 //!   - is the key random, or the same on every run.
 //!
 //! The last is the one worth writing carefully. A fixed key produces a document
@@ -23,7 +24,8 @@ use aes::cipher::{BlockDecrypt, KeyInit};
 use aes::Aes256;
 use lopdf::{Document, EncryptionState, Object};
 use vibepdf_lib::error::CommandError;
-use vibepdf_lib::pdf::document::open_pdf;
+use vibepdf_lib::pdf::document::{declares_encryption, open_pdf};
+use vibepdf_lib::security::decrypt::remove_protection;
 use vibepdf_lib::security::encrypt::{encrypt_document, DocumentPermissions, EncryptOptions};
 
 fn fixture_bytes(name: &str) -> Vec<u8> {
@@ -196,23 +198,94 @@ fn the_user_password_is_required_to_open() {
     drop(doc);
 }
 
-// A deliberate narrowing of P6-SEC-007, not an oversight. The spec allows a
-// document with only an owner password — opens for anyone, restricted — and we
-// refuse to write one, because P6.C2 cannot unlock it: lopdf tries the empty
-// user password while parsing and its R6 user authentication does not work, so
-// the file cannot even be loaded.
-//
-// Producing files we cannot undo is a worse failure than a missing option, and
-// the user would meet it later, on a document they can no longer change.
+/// `hello.pdf` protected with only a permissions password, printing and
+/// copying restricted.
+fn permissions_only(owner: &str) -> Vec<u8> {
+    let mut o = opts(None, Some(owner));
+    o.permissions = DocumentPermissions {
+        print: false,
+        copy: false,
+        ..DocumentPermissions::default()
+    };
+    encrypt_document(&fixture_bytes("hello.pdf"), &o).expect("encrypt")
+}
+
+// SPEC: P6-SEC-007 — "both user password (open) and owner password
+// (permissions)". With only the owner password, the copy opens for anyone and
+// carries the restrictions. Opening with no password proves nothing about
+// whether it is protected, so the dictionary is checked as well.
+// (Refused until 2026-10-21, because Unlock could not undo it.)
 #[test]
-fn refuses_owner_only_protection_because_it_could_not_be_undone() {
-    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(None, Some("let-me-change-it")))
-        .unwrap_err();
-    let CommandError::InvalidInput(msg) = &err else { panic!("got {err:?}") };
+fn protects_with_only_a_permissions_password() {
+    let out = permissions_only("let-me-change-it");
+    assert!(declares_encryption(&out), "the copy is not encrypted");
+    // lopdf opens a file with no open password using the empty one and drops
+    // its dictionary on the way, so the values are read from the state it
+    // decoded them into.
+    let doc = Document::load_mem(&out).expect("load");
+    let state = doc.encryption_state.as_ref().expect("lopdf decrypted it with the empty password");
+    assert_eq!((state.version(), state.revision()), (5, 6), "not the AES-256 handler");
+    // SPEC: P6-SEC-009 — print clears bits 3 and 12, copy clears bit 5.
+    #[allow(clippy::cast_possible_wrap)] // /P is a signed 32-bit word, kept in a u64
+    let p = state.permissions().bits() as i64;
+    assert_eq!(p, spec_p(&[3, 5, 12]));
+
+    let file = TempPdf::new(&out);
+    let (doc, _) = open_pdf(&file.0, None).expect("opens with no password");
+    let runs = vibepdf_lib::pdf::text_extract::extract_text_runs(&doc, 0).expect("extract");
+    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    assert!(text.contains("Hello"), "the page text should survive, got {text:?}");
+    drop(doc);
+}
+
+// SPEC: P6-SEC-008 — what Protect writes, Unlock must be able to undo, with the
+// owner password and nothing else. Its absence is why this was refused.
+#[test]
+fn a_permissions_only_copy_unlocks_with_its_owner_password() {
+    let out = permissions_only("let-me-change-it");
+    for wrong in ["", "wrong", "let-me-change-i"] {
+        match remove_protection(&out, wrong) {
+            Err(CommandError::InvalidInput(message)) => {
+                assert_eq!(message, "That password did not unlock the document.", "{wrong:?}");
+            }
+            other => panic!("{wrong:?} should be refused, got {other:?}"),
+        }
+    }
+    let unlocked = remove_protection(&out, "let-me-change-it").expect("the owner password unlocks it");
+    assert!(!declares_encryption(&unlocked), "the unlocked copy is still encrypted");
+}
+
+// An empty owner password is no owner password: it falls back to the open
+// password, as an omitted one does. Taken literally, anyone could remove the
+// protection with the empty password, and a reader that tries the empty
+// password as the owner's would open a file that is meant to need one.
+#[test]
+fn an_empty_owner_password_falls_back_to_the_open_password() {
+    let out = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some("open-me"), Some("")))
+        .expect("encrypt");
+
+    // lopdf tries the empty password on every load, as owner or user, so had
+    // it worked this would come back decrypted, and the owner check below
+    // would fail only because there was nothing left to check.
+    let locked = Document::load_mem(&out).expect("load");
+    assert!(locked.is_encrypted(), "the empty password opened it");
     assert!(
-        msg.contains("remove that protection"),
-        "the message must say why, not just refuse: {msg}"
+        locked.authenticate_owner_password("").is_err(),
+        "the empty password is the owner password"
     );
+    assert!(remove_protection(&out, "").is_err(), "the empty password removed the protection");
+    let file = TempPdf::new(&out);
+    assert!(open_pdf(&file.0, None).is_err(), "opens with no password");
+    remove_protection(&out, "open-me").expect("the open password is the owner password too");
+}
+
+// A copy with only a permissions password and nothing restricted opens for
+// anyone and limits nothing, while readers and editors treat it as protected.
+#[test]
+fn refuses_permissions_only_protection_that_restricts_nothing() {
+    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(None, Some("owner"))).unwrap_err();
+    let CommandError::InvalidInput(msg) = &err else { panic!("got {err:?}") };
+    assert!(msg.contains("restrict at least one permission"), "{msg}");
 }
 
 // Both passwords still work together, and the owner one is a real credential.
@@ -270,7 +343,7 @@ fn refuses_when_no_password_was_given() {
     let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(None, None)).unwrap_err();
     assert!(matches!(err, CommandError::InvalidInput(_)), "got {err:?}");
     // Empty strings are the same thing arriving from a form.
-    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some(""), Some("owner"))).unwrap_err();
+    let err = encrypt_document(&fixture_bytes("hello.pdf"), &opts(Some(""), Some(""))).unwrap_err();
     assert!(matches!(err, CommandError::InvalidInput(_)), "got {err:?}");
 }
 
@@ -313,6 +386,17 @@ fn writes_verification_artifacts() {
     for (name, o) in [
         ("vibepdf-verify-encrypted-user.pdf", opts(Some("open-me"), None)),
         ("vibepdf-verify-encrypted-both.pdf", opts(Some("open-me"), Some("owner-only"))),
+        // Opens with no password; printing and copying restricted, and only
+        // `owner-only` lifts them.
+        ("vibepdf-verify-permissions-only.pdf", {
+            let mut o = opts(None, Some("owner-only"));
+            o.permissions = DocumentPermissions {
+                print: false,
+                copy: false,
+                ..DocumentPermissions::default()
+            };
+            o
+        }),
         // SPEC: P6-SEC-009 — the acceptance demo from the roadmap: "open with
         // the user password: print is blocked". Printing and copying are the two
         // restrictions a reader is most likely to actually enforce, so they are

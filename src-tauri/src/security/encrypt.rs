@@ -10,9 +10,13 @@
 //! What *is* decided here, and is worth reviewing carefully:
 //!
 //! - the key comes from the OS CSPRNG (`getrandom`) and nowhere else;
-//! - a user password is **required** — see the note on `EncryptOptions`;
-//! - an omitted owner password falls back to the user password, so the
-//!   document always has a credential that can change its permissions.
+//! - at least one password is required, and an empty one counts as none —
+//!   see the note on `EncryptOptions`;
+//! - an omitted or empty owner password falls back to the user password, so
+//!   the document always has a real credential that can change its
+//!   permissions;
+//! - the copy must come out encrypted, and is checked, because re-opening it
+//!   with its password can't tell.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,7 +25,7 @@ use lopdf::encryption::crypt_filters::{Aes256CryptFilter, CryptFilter};
 use lopdf::{Document, EncryptionState, EncryptionVersion, Object, Permissions, StringFormat};
 
 use crate::error::CommandError;
-use crate::pdf::document::load_cos;
+use crate::pdf::document::{declares_encryption, load_cos};
 
 /// AES-256 file encryption key length, in bytes. Fixed by the V5 handler.
 const KEY_BYTES: usize = 32;
@@ -59,15 +63,14 @@ const CRYPT_FILTER_KEY_LENGTH: i64 = KEY_BYTES as i64;
 /// - **owner password** — required to change permissions; the document still
 ///   opens without it.
 ///
-/// **A user password is currently required.** The spec permits owner-only
-/// protection — a document that opens for anyone but is restricted — and this
-/// does not write it yet. It was refused because P6.C2 could not remove such
-/// protection: writing files we cannot subsequently unlock is a worse failure
-/// than a missing option. Since 2026-10-21 P6.C2 can (`security::decrypt`
-/// checks the owner password against a rebuilt dictionary), so the reason is
-/// gone. Lifting the refusal, and the refusal's message, which still gives
-/// that reason, is a separate step with its own reader checks
-/// (`steps/P6.md`).
+/// Either alone is enough. **Owner-only** protection — a document that opens
+/// for anyone but is restricted — is what the spec's "owner password
+/// (permissions)" allows, and it must restrict at least one permission: with
+/// nothing restricted it would limit nothing while every reader and editor
+/// treats it as protected. Until 2026-10-21 it was refused outright, because
+/// P6.C2 could not remove it; `security::decrypt` now checks the owner password
+/// of such a file against a rebuilt dictionary, and `tests/encrypt.rs` unlocks
+/// what this writes.
 #[derive(Debug, Clone, Default)]
 pub struct EncryptOptions {
     pub user_password: Option<String>,
@@ -227,16 +230,29 @@ fn state_crypt_filter_key_length(doc: &mut Document) -> Result<(), CommandError>
 /// SPEC: P6-SEC-009 — `opts.permissions` decides what the document allows.
 pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, CommandError> {
     let user = opts.user_password.as_deref().unwrap_or("");
-    // An omitted owner password becomes the user password, so the document
-    // always has a credential with full rights. This is what a mainstream reader does when
-    // only an open password is set.
-    let owner = opts.owner_password.as_deref().unwrap_or(user);
+    // An omitted or empty owner password becomes the user password, so the
+    // document always has a credential with full rights. This is what a
+    // mainstream reader does when only an open password is set. An empty one
+    // taken literally would be that credential, for anyone: the empty password
+    // would remove the protection, and readers that try it as the owner's would
+    // open a file meant to need a password.
+    let owner = opts
+        .owner_password
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .unwrap_or(user);
 
-    if user.is_empty() {
+    if user.is_empty() && owner.is_empty() {
         return Err(CommandError::InvalidInput(
-            "Set a password to open the document. Protecting a file with only a \
-             permissions password isn't supported yet — VibePDF would not be able to \
-             remove that protection afterwards."
+            "Set a password to open the document, a password to change its permissions, \
+             or both."
+                .into(),
+        ));
+    }
+    if user.is_empty() && opts.permissions == DocumentPermissions::default() {
+        return Err(CommandError::InvalidInput(
+            "With no password to open, the copy must restrict at least one permission. \
+             Untick one, or set a password to open."
                 .into(),
         ));
     }
@@ -296,7 +312,22 @@ pub fn encrypt_document(bytes: &[u8], opts: &EncryptOptions) -> Result<Vec<u8>, 
     let mut out = Vec::new();
     doc.save_to(&mut out)
         .map_err(|e| CommandError::PdfError(format!("could not write the encrypted PDF: {e}")))?;
+    refuse_unencrypted(&out)?;
     Ok(out)
+}
+
+/// Refuse a copy that doesn't declare encryption.
+///
+/// `pdf_protect` re-opens the copy with the password it should need, and an
+/// unencrypted file passes that too: `PDFium` ignores a password a file doesn't
+/// need, and an owner-only copy needs none. This is the check that would notice.
+fn refuse_unencrypted(out: &[u8]) -> Result<(), CommandError> {
+    if !declares_encryption(out) {
+        return Err(CommandError::PdfError(
+            "the protected copy came out unencrypted, so it was not written.".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -390,6 +421,19 @@ mod tests {
                 "{perms:?} cleared more than {bit:?}"
             );
         }
+    }
+
+    // The last check before a copy is returned: re-opening an unencrypted copy
+    // with its password succeeds, so nothing after this would notice.
+    #[test]
+    fn a_copy_that_came_out_unencrypted_is_refused() {
+        let plain = b"%PDF-1.7\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
+        let result = refuse_unencrypted(plain);
+        let Err(CommandError::PdfError(msg)) = &result else { panic!("got {result:?}") };
+        assert!(msg.contains("came out unencrypted"), "{msg}");
+
+        let encrypted = b"%PDF-1.7\ntrailer\n<< /Root 1 0 R /Encrypt 5 0 R >>\n%%EOF\n";
+        assert!(refuse_unencrypted(encrypted).is_ok());
     }
 
     // Bit 12 selects *faithful* printing; on its own it only means "degraded

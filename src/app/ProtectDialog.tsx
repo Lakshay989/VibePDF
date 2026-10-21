@@ -53,18 +53,21 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
   if (!open) return null;
 
   const mismatch = userPassword.length > 0 && confirmPassword !== userPassword;
-  // A user password is required: P6.C2 cannot unlock a document that has only
-  // an owner password, and writing files we cannot undo is worse than a missing
-  // option. See `security/encrypt.rs`.
-  const nothingSet = userPassword.length === 0;
-  const canProtect = !nothingSet && !mismatch && !busy;
+  const nothingSet = userPassword.length === 0 && ownerPassword.length === 0;
+  const restricted = PERMISSION_LABELS.some(([key]) => !permissions[key]);
+  // Only a permissions password: the copy opens for anyone, so the restrictions
+  // are all it has. With none of them set it would limit nothing while every
+  // reader treats it as protected, and `security/encrypt.rs` refuses it too.
+  // Written since 2026-10-21, when Unlock became able to remove it.
+  const ownerOnly = userPassword.length === 0 && ownerPassword.length > 0;
+  const restrictsNothing = ownerOnly && !restricted;
+  const canProtect = !nothingSet && !restrictsNothing && !mismatch && !busy;
 
   // Restrictions with no distinct owner password are close to meaningless: an
   // omitted one becomes the open password, so everyone who can read the file
   // can also change what it permits. Worth saying plainly at the moment the
   // boxes are unticked, rather than leaving the user with a false impression of
   // what they just set.
-  const restricted = PERMISSION_LABELS.some(([key]) => !permissions[key]);
   const restrictionsAreAdvisory = restricted && ownerPassword.length === 0;
 
   const reset = () => {
@@ -118,7 +121,7 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
         </p>
 
         <label className="mb-2 flex flex-col gap-0.5">
-          <span className="text-xs text-neutral-500">Password to open</span>
+          <span className="text-xs text-neutral-500">Password to open (optional)</span>
           <input
             type="password"
             aria-label="Password to open"
@@ -194,9 +197,19 @@ export function ProtectDialog({ open, documentId, documentName, onClose }: Props
         ) : null}
         {nothingSet ? (
           <p className="mb-2 text-xs text-amber-700 dark:text-amber-500">
-            Set a password to open the document. Protecting with only a permissions
-            password isn&rsquo;t supported yet — the protection could not be removed
-            afterwards.
+            Set a password to open the document, a password to change its permissions,
+            or both.
+          </p>
+        ) : null}
+        {ownerOnly ? (
+          <p className="mb-2 text-xs text-neutral-500">
+            Anyone can open this copy. The permissions password only controls what
+            readers may do, and readers aren&rsquo;t required to enforce it.
+          </p>
+        ) : null}
+        {restrictsNothing ? (
+          <p className="mb-2 text-xs text-amber-700 dark:text-amber-500">
+            Untick at least one permission, or set a password to open.
           </p>
         ) : null}
 

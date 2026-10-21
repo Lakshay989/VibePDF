@@ -2124,8 +2124,10 @@ pub async fn pdf_protect(
     std::fs::write(&out, &encrypted)
         .map_err(|e| CommandError::Internal(format!("could not write {path}: {e}")))?;
 
-    // The round-trip rule, with the password the file now needs. An owner-only
-    // document opens with none, so try that first and fall back.
+    // The round-trip rule, with the password the file now needs: none for an
+    // owner-only copy. A re-open can't tell an encrypted copy from a plain one
+    // (PDFium ignores a password a file doesn't need), so `encrypt_document`
+    // has already refused a copy that doesn't declare encryption.
     let open_with = opts_open_password(&opts);
     if let Err(e) = crate::pdf::document::open_pdf(&out, open_with) {
         let _ = std::fs::remove_file(&out);
