@@ -13,6 +13,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+use vibepdf_lib::pdf::document::open_pdf;
 use vibepdf_lib::security::sign::{sign_document, DocMdpLevel, SignatureSpec, SignatureTarget};
 use vibepdf_lib::security::verify::{verify_signatures, ChainStatus};
 
@@ -69,6 +70,63 @@ fn a_signature_we_made_verifies() {
     assert_eq!(r.field_name.as_deref(), Some("Signature1"));
     assert_eq!(r.reason.as_deref(), Some("I approve this document"));
     assert!(r.problems.is_empty(), "{:?}", r.problems);
+}
+
+const NON_ASCII_REASON: &str = "Freigabe für Druck ✓";
+
+/// The one signature's `/Reason` as PDFium reads it: an outside
+/// implementation's view of what was written.
+fn pdfium_reason(bytes: &[u8]) -> Option<String> {
+    let path = std::env::temp_dir().join(format!("vibepdf-reason-{}.pdf", uuid::Uuid::new_v4()));
+    std::fs::write(&path, bytes).expect("write temp pdf");
+    let reason = {
+        let (doc, _) = open_pdf(&path, None).expect("PDFium opens it");
+        let signatures = doc.signatures();
+        assert_eq!(signatures.len(), 1, "PDFium's signature count");
+        signatures.get(0).expect("the signature").reason()
+    };
+    let _ = std::fs::remove_file(&path);
+    reason
+}
+
+/// The raw bytes of the one signature's `/Reason`.
+fn raw_reason(bytes: &[u8]) -> Vec<u8> {
+    let doc = lopdf::Document::load_mem(bytes).expect("load");
+    doc.objects
+        .values()
+        .filter_map(|o| o.as_dict().ok())
+        .filter(|d| d.has(b"ByteRange"))
+        .find_map(|d| d.get(b"Reason").and_then(lopdf::Object::as_str).ok())
+        .expect("a /Reason")
+        .to_vec()
+}
+
+// SPEC: P6-SEC-005 — a PDF text string is PDFDocEncoding or UTF-16BE with a
+// byte-order mark, never bare UTF-8. Signing wrote bare UTF-8 and the verifier
+// read it back as UTF-8, so the two mistakes cancelled out in VibePDF while
+// other readers showed the reason garbled.
+#[test]
+fn a_non_ascii_reason_is_written_as_a_pdf_text_string() {
+    let mut spec = spec(None);
+    spec.reason = Some(NON_ASCII_REASON.into());
+    let signed = sign_document(&fixture("hello.pdf"), &spec, &cert("signer.pfx"), "test123").expect("sign");
+
+    assert!(raw_reason(&signed).starts_with(&[0xFE, 0xFF]), "not written as UTF-16BE");
+    assert_eq!(pdfium_reason(&signed).as_deref(), Some(NON_ASCII_REASON), "PDFium reads");
+    let reports = verify_signatures(&signed, while_valid()).expect("verify");
+    assert_eq!(reports[0].reason.as_deref(), Some(NON_ASCII_REASON), "VibePDF reads");
+    assert!(reports[0].is_intact(), "{:?}", reports[0].problems);
+}
+
+// SPEC: P6-SEC-006 — a reason another signer wrote as UTF-16BE (pyHanko,
+// generate-signed-unicode-reason.py) reads as written, and PDFium agrees.
+#[test]
+fn a_utf16_reason_from_another_signer_reads_as_written() {
+    let bytes = fixture("signed-unicode-reason.pdf");
+    assert!(raw_reason(&bytes).starts_with(&[0xFE, 0xFF]), "the fixture should be UTF-16BE");
+    assert_eq!(pdfium_reason(&bytes).as_deref(), Some(NON_ASCII_REASON), "PDFium reads");
+    let reports = verify_signatures(&bytes, while_valid()).expect("verify");
+    assert_eq!(reports[0].reason.as_deref(), Some(NON_ASCII_REASON), "VibePDF reads");
 }
 
 // Changing a byte of the document breaks the **digest** and leaves the

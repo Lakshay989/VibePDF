@@ -39,7 +39,7 @@ use cms::signed_data::{SignedData, SignerInfo};
 use const_oid::db::rfc5911::{ID_MESSAGE_DIGEST, ID_SIGNED_DATA};
 use const_oid::db::rfc5912::ID_SHA_256;
 use der::{Decode, Encode};
-use lopdf::{Document, Object, ObjectId};
+use lopdf::{Document, Object, ObjectId, StringFormat};
 use sha2::{Digest, Sha256};
 use std::time::SystemTime;
 use x509_cert::Certificate;
@@ -348,10 +348,33 @@ fn field_name_for(doc: &Document, sig: ObjectId) -> Option<String> {
 }
 
 fn text_of(dict: &lopdf::Dictionary, key: &[u8]) -> Option<String> {
-    dict.get(key)
-        .and_then(Object::as_str)
-        .ok()
-        .map(|s| String::from_utf8_lossy(s).into_owned())
+    dict.get(key).and_then(Object::as_str).ok().and_then(decode_text)
+}
+
+/// A PDF text string as text (ISO 32000-2 §7.9.2.2): UTF-16BE or UTF-8 when it
+/// starts with that encoding's byte-order mark, otherwise `PDFDocEncoding`.
+///
+/// One exception comes before `PDFDocEncoding`: bytes that are valid UTF-8 and
+/// not plain ASCII are read as UTF-8. That isn't a PDF text string, but it is
+/// what `VibePDF`'s own Sign wrote until 2026-10-21, and what other careless
+/// writers produce. `PDFDocEncoding` text that is also valid multi-byte UTF-8
+/// needs runs like `Ã©`, which real text doesn't contain.
+///
+/// `None` for bytes that are none of these, such as UTF-16 with a lone
+/// surrogate: nothing is better than garbage in a signature's details.
+fn decode_text(raw: &[u8]) -> Option<String> {
+    let marked = raw.starts_with(&[0xFE, 0xFF]) || raw.starts_with(&[0xEF, 0xBB, 0xBF]);
+    if !marked && !raw.is_ascii() {
+        if let Ok(text) = std::str::from_utf8(raw) {
+            return Some(text.to_owned());
+        }
+    }
+    let text = lopdf::decode_text_string(&Object::String(raw.to_vec(), StringFormat::Literal)).ok()?;
+    // lopdf keeps a UTF-8 byte-order mark as U+FEFF.
+    Some(match text.strip_prefix('\u{feff}') {
+        Some(rest) => rest.to_owned(),
+        None => text,
+    })
 }
 
 /// `/Reference` → the `DocMDP` `/P`, if this signature certifies.
@@ -696,7 +719,7 @@ fn certificate_signed_by(subject: &Certificate, issuer: &Certificate) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{blank_gap, contents_der, contents_from_gap, hex_gap, without_padding};
+    use super::{blank_gap, contents_der, contents_from_gap, decode_text, hex_gap, without_padding};
 
     /// SEQUENCE { INTEGER 0 }: a complete DER value whose last byte is 0x00.
     const ENDS_IN_ZERO: [u8; 5] = [0x30, 0x03, 0x02, 0x01, 0x00];
@@ -707,6 +730,24 @@ mod tests {
         let bytes = [prefix, gap, suffix].concat();
         let second = prefix.len() + gap.len();
         (bytes, vec![(0, prefix.len()), (second, suffix.len())])
+    }
+
+    // PDF text strings: UTF-16BE or UTF-8 with a byte-order mark, otherwise
+    // PDFDocEncoding. Bare UTF-8 isn't one, but VibePDF wrote it until
+    // 2026-10-21, so it is still read as UTF-8.
+    #[test]
+    fn text_strings_decode_by_their_encoding() {
+        assert_eq!(decode_text(b"plain").as_deref(), Some("plain"));
+        let utf16 = [0xFE, 0xFF, 0x00, b'F', 0x00, 0xFC, 0x27, 0x13];
+        assert_eq!(decode_text(&utf16).as_deref(), Some("F\u{fc}\u{2713}"));
+        let utf8_marked = [[0xEF, 0xBB, 0xBF].as_slice(), "f\u{fc}r".as_bytes()].concat();
+        assert_eq!(decode_text(&utf8_marked).as_deref(), Some("f\u{fc}r"));
+        assert_eq!(decode_text("f\u{fc}r \u{2713}".as_bytes()).as_deref(), Some("f\u{fc}r \u{2713}"));
+        // PDFDocEncoding, not Latin-1: 0xFC is u-umlaut in both, but 0x84 is an
+        // em dash in PDFDocEncoding and a control character in Latin-1.
+        assert_eq!(decode_text(b"f\xFCr \x84 x").as_deref(), Some("f\u{fc}r \u{2014} x"));
+        // A lone surrogate is not text.
+        assert_eq!(decode_text(&[0xFE, 0xFF, 0xD8, 0x00]), None);
     }
 
     // Only a gap that is exactly one hex string is `/Contents`: anything else

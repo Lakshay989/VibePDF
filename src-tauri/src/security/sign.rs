@@ -300,9 +300,14 @@ fn first_page_id(prev: &Document) -> Result<ObjectId, CommandError> {
         .ok_or_else(|| CommandError::InvalidInput("the document has no pages".into()))
 }
 
+/// A text entry as a PDF text string: a literal for ASCII, UTF-16BE with its
+/// byte-order mark otherwise (`lopdf::text_string`). This wrote bare UTF-8
+/// until 2026-10-21, which isn't a text string: other readers showed a
+/// non-ASCII reason garbled, and only our own verifier, reading it as UTF-8,
+/// agreed with it.
 fn text_entry(dict: &mut Dictionary, key: &str, value: Option<&String>) {
     if let Some(v) = value {
-        dict.set(key, Object::String(v.as_bytes().to_vec(), StringFormat::Literal));
+        dict.set(key, lopdf::text_string(v));
     }
 }
 
