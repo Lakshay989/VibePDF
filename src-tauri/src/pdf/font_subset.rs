@@ -25,10 +25,12 @@
 //!   subsetting and throws it away if a single pixel differs.
 //!
 //! **What is subset.** TrueType outlines (`FontFile2`, or `FontFile3` of subtype
-//! `OpenType` holding a `glyf` table) used by composite fonts with an `Identity`
-//! `CMap`, where a code *is* a CID. `subsetter` keeps glyph IDs, so only the
-//! font file's bytes change: encodings, widths and `ToUnicode` stay as they
-//! are. CFF, Type1, Type3 and other `CMap`s are left whole.
+//! `OpenType` holding a `glyf` table), used by composite fonts with an
+//! `Identity` `CMap`, where a code *is* a CID, and by simple TrueType fonts,
+//! where every lookup a reader might make is kept (see [`Lookup`]).
+//! `subsetter` keeps glyph IDs, so only the font file's bytes change:
+//! encodings, widths and `ToUnicode` stay as they are. CFF, Type1, Type3 and
+//! other `CMap`s are left whole.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -56,7 +58,7 @@ pub(crate) enum KeptWhole {
     /// Not TrueType outlines: CFF, Type1, or not a font `subsetter` can parse.
     NotTrueType,
     /// The font structure isn't the shape this models, or is used by a kind of
-    /// font this step doesn't handle (a simple font, a non-`Identity` `CMap`).
+    /// font this doesn't handle (a non-`Identity` `CMap`, a Type1 simple font).
     Unsupported,
     /// A form field may type new text in it (`/AcroForm /DR`).
     FormFieldFont,
@@ -564,6 +566,11 @@ impl Index<'_> {
     fn plan_file(&self, file: ObjectId) -> Result<Plan, KeptWhole> {
         let doc = self.doc;
         let stream = doc.get_object(file).and_then(Object::as_stream).map_err(|_| KeptWhole::Unsupported)?;
+        let program = stream.decompressed_content().map_err(|_| KeptWhole::NotTrueType)?;
+        let face = ttf_parser::Face::parse(&program, 0).map_err(|_| KeptWhole::NotTrueType)?;
+        if face.tables().glyf.is_none() {
+            return Err(KeptWhole::NotTrueType);
+        }
         let mut is_font_file2 = None;
         let mut glyphs = BTreeSet::from([0u16]);
         let mut names = Vec::new();
@@ -585,44 +592,35 @@ impl Index<'_> {
             }
             names.push((descriptor_id, &b"FontName"[..]));
 
-            for &cid_font_id in self.referrers_of(descriptor_id)? {
-                let cid_font = doc.get_dictionary(cid_font_id).map_err(|_| KeptWhole::Unsupported)?;
-                let points_here = cid_font
-                    .get(b"FontDescriptor")
-                    .and_then(Object::as_reference)
-                    .is_ok_and(|r| r == descriptor_id);
-                let is_cid_type2 =
-                    cid_font.get(b"Subtype").and_then(Object::as_name).is_ok_and(|s| s == b"CIDFontType2");
-                if !points_here || !is_cid_type2 {
+            for &font_id in self.referrers_of(descriptor_id)? {
+                let font = doc.get_dictionary(font_id).map_err(|_| KeptWhole::Unsupported)?;
+                let points_here =
+                    font.get(b"FontDescriptor").and_then(Object::as_reference).is_ok_and(|r| r == descriptor_id);
+                if !points_here {
                     return Err(KeptWhole::Unsupported);
                 }
-                let to_gid = cid_to_gid(doc, cid_font)?;
-                names.push((cid_font_id, &b"BaseFont"[..]));
-
-                for &type0_id in self.referrers_of(cid_font_id)? {
-                    let type0 = doc.get_dictionary(type0_id).map_err(|_| KeptWhole::Unsupported)?;
-                    if !is_identity_type0(type0, cid_font_id) {
-                        return Err(KeptWhole::Unsupported);
+                match font.get(b"Subtype").and_then(Object::as_name) {
+                    Ok(b"CIDFontType2") => self.composite(font_id, font, &mut glyphs)?,
+                    Ok(b"TrueType") => {
+                        self.only_known_uses(font_id)?;
+                        let lookups = SimpleLookups::new(doc, font);
+                        for shown in self.walk.shown.get(&font_id).into_iter().flatten() {
+                            for &code in shown {
+                                glyphs.extend(lookups.of(code).iter().filter_map(|l| l.find(&face)));
+                            }
+                        }
                     }
-                    if self.form_fonts.contains(&type0_id) {
-                        return Err(KeptWhole::FormFieldFont);
+                    _ => return Err(KeptWhole::Unsupported),
+                }
+                names.push((font_id, &b"BaseFont"[..]));
+                if font.get(b"Subtype").and_then(Object::as_name).is_ok_and(|s| s == b"CIDFontType2") {
+                    for &type0_id in self.referrers_of(font_id)? {
+                        names.push((type0_id, &b"BaseFont"[..]));
                     }
-                    if !self.only_from_the_walk(type0_id) {
-                        return Err(KeptWhole::OutsideTheWalk);
-                    }
-                    for shown in self.walk.shown.get(&type0_id).into_iter().flatten() {
-                        glyphs.extend(cids(shown).map(|cid| to_gid.glyph(cid)));
-                    }
-                    names.push((type0_id, &b"BaseFont"[..]));
                 }
             }
         }
 
-        let program = stream.decompressed_content().map_err(|_| KeptWhole::NotTrueType)?;
-        let face = ttf_parser::Face::parse(&program, 0).map_err(|_| KeptWhole::NotTrueType)?;
-        if face.tables().glyf.is_none() {
-            return Err(KeptWhole::NotTrueType);
-        }
         let list: Vec<u16> = glyphs.iter().copied().collect();
         let bytes = subsetter::subset(&program, 0, subsetter::Profile::pdf(&list)).map_err(|_| KeptWhole::SubsetFailed)?;
 
@@ -633,6 +631,35 @@ impl Index<'_> {
             return Err(KeptWhole::NotSmaller);
         }
         Ok(Plan { file, bytes, glyphs, is_font_file2: is_font_file2.unwrap_or(true), names })
+    }
+
+    /// The glyphs every Type0 font over `cid_font` draws. A code is a CID,
+    /// mapped through `/CIDToGIDMap`.
+    fn composite(&self, cid_font_id: ObjectId, cid_font: &Dictionary, glyphs: &mut BTreeSet<u16>) -> Result<(), KeptWhole> {
+        let to_gid = cid_to_gid(self.doc, cid_font)?;
+        for &type0_id in self.referrers_of(cid_font_id)? {
+            let type0 = self.doc.get_dictionary(type0_id).map_err(|_| KeptWhole::Unsupported)?;
+            if !is_identity_type0(type0, cid_font_id) {
+                return Err(KeptWhole::Unsupported);
+            }
+            self.only_known_uses(type0_id)?;
+            for shown in self.walk.shown.get(&type0_id).into_iter().flatten() {
+                glyphs.extend(cids(shown).map(|cid| to_gid.glyph(cid)));
+            }
+        }
+        Ok(())
+    }
+
+    /// A font that draws text (a Type0, or a simple font) may be subset only if
+    /// no form field types in it and every use of it was walked.
+    fn only_known_uses(&self, font: ObjectId) -> Result<(), KeptWhole> {
+        if self.form_fonts.contains(&font) {
+            return Err(KeptWhole::FormFieldFont);
+        }
+        if !self.only_from_the_walk(font) {
+            return Err(KeptWhole::OutsideTheWalk);
+        }
+        Ok(())
     }
 
     /// Whether every object referring to `id` is one the walk read, or leads
@@ -659,6 +686,170 @@ impl Index<'_> {
         }
         true
     }
+}
+
+/// One way a reader may find the glyph for a simple TrueType font's code.
+///
+/// ISO 32000-1 §9.6.6.4 describes several, and readers don't all choose the
+/// same one: by `cmap` subtable, by the encoding's character, by glyph name.
+/// So every way that applies is kept. An extra glyph costs bytes; a missing
+/// one costs the text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Lookup {
+    /// The (3,0) Microsoft Symbol `cmap`, at this code point.
+    Symbol(u32),
+    /// The (1,0) Macintosh `cmap`, at this byte.
+    Mac(u8),
+    /// A Unicode `cmap`: (3,1), (3,10) or platform 0.
+    Unicode(char),
+    /// The `post` table, by glyph name.
+    Name(String),
+}
+
+impl Lookup {
+    fn find(&self, face: &ttf_parser::Face<'_>) -> Option<u16> {
+        use ttf_parser::PlatformId::{Macintosh, Unicode, Windows};
+        let subtables = face.tables().cmap.map(|cmap| cmap.subtables);
+        let in_cmap = |wanted: &dyn Fn(ttf_parser::PlatformId, u16) -> bool, code: u32| {
+            subtables
+                .into_iter()
+                .flatten()
+                .filter(|t| wanted(t.platform_id, t.encoding_id))
+                .find_map(|t| t.glyph_index(code))
+                .map(|g| g.0)
+        };
+        match self {
+            Self::Symbol(code) => in_cmap(&|p, e| p == Windows && e == 0, *code),
+            Self::Mac(code) => in_cmap(&|p, e| p == Macintosh && e == 0, u32::from(*code)),
+            Self::Unicode(c) => in_cmap(&|p, e| p == Unicode || (p == Windows && (e == 1 || e == 10)), u32::from(*c)),
+            Self::Name(name) => face.glyph_index_by_name(name).map(|g| g.0),
+        }
+    }
+}
+
+/// What a simple TrueType font's encoding says about each code: the character
+/// (through `lopdf`'s reading of `/Encoding`, its base encoding and
+/// `/Differences`) and, from `/Differences`, the glyph name.
+struct SimpleLookups {
+    unicode: Vec<Option<String>>,
+    names: Vec<Option<String>>,
+    mac: Vec<Option<u8>>,
+}
+
+impl SimpleLookups {
+    fn new(doc: &Document, font: &Dictionary) -> Self {
+        let encoding = match font.get(b"Encoding") {
+            Ok(Object::Reference(id)) => doc.get_object(*id).ok(),
+            other => other.ok(),
+        };
+        let base = match encoding {
+            Some(Object::Name(name)) => Some(name.clone()),
+            Some(Object::Dictionary(dict)) => dict.get(b"BaseEncoding").and_then(Object::as_name).ok().map(<[u8]>::to_vec),
+            _ => None,
+        };
+        // The base encoding alone, through lopdf. Not the font's whole
+        // `/Encoding`: one `/Differences` name lopdf doesn't know makes it drop
+        // the lot for `StandardEncoding`, which would lose every other code's
+        // character too. Nor `/ToUnicode`, which lopdf falls back on: that says
+        // what text to copy, not which glyph is drawn.
+        let mut unicode = characters(doc, base.map(Object::Name));
+        let names = differences(doc, encoding);
+        for (slot, name) in unicode.iter_mut().zip(&names) {
+            if let Some(name) = name {
+                *slot = glyph_list(doc, name);
+            }
+        }
+        let mac = mac_roman_codes(doc, &unicode);
+        Self { unicode, names, mac }
+    }
+
+    /// Every lookup that applies to `code`.
+    fn of(&self, code: u8) -> Vec<Lookup> {
+        let i = usize::from(code);
+        let mut lookups = vec![Lookup::Mac(code)];
+        lookups.extend([0, 0xF000, 0xF100, 0xF200].map(|base| Lookup::Symbol(base | u32::from(code))));
+        if let Some(mac) = self.mac[i] {
+            lookups.push(Lookup::Mac(mac));
+        }
+        if let Some(c) = self.unicode[i].as_deref().and_then(|u| u.chars().next()) {
+            lookups.push(Lookup::Unicode(c));
+            lookups.push(Lookup::Name(format!("uni{:04X}", u32::from(c))));
+        }
+        if let Some(name) = &self.names[i] {
+            lookups.push(Lookup::Name(name.clone()));
+        }
+        lookups
+    }
+}
+
+/// A font dictionary holding only `/Encoding`, for lopdf to read.
+fn encoding_probe(encoding: Option<Object>) -> Dictionary {
+    let mut probe = Dictionary::new();
+    probe.set("Type", Object::Name(b"Font".to_vec()));
+    if let Some(encoding) = encoding {
+        probe.set("Encoding", encoding);
+    }
+    probe
+}
+
+/// The character lopdf reads for each code under `encoding`, given as
+/// `/Encoding` would be; `StandardEncoding` when it's `None`.
+fn characters(doc: &Document, encoding: Option<Object>) -> Vec<Option<String>> {
+    let probe = encoding_probe(encoding);
+    let encoding = probe.get_font_encoding(doc).ok();
+    (0..=255u8)
+        .map(|code| encoding.as_ref().and_then(|e| e.bytes_to_string(&[code]).ok()).filter(|s| !s.is_empty()))
+        .collect()
+}
+
+/// The Mac Roman code of each character, where it has exactly one.
+fn mac_roman_codes(doc: &Document, characters: &[Option<String>]) -> Vec<Option<u8>> {
+    let probe = encoding_probe(Some(Object::Name(b"MacRomanEncoding".to_vec())));
+    let encoding = probe.get_font_encoding(doc).ok();
+    characters
+        .iter()
+        .map(|c| {
+            let bytes = encoding.as_ref().zip(c.as_deref()).map(|(e, c)| e.string_to_bytes(c))?;
+            (bytes.len() == 1).then(|| bytes[0])
+        })
+        .collect()
+}
+
+/// The character the Adobe glyph list gives `name`, through lopdf: a
+/// one-entry `/Differences` at code 0, which `StandardEncoding` leaves empty,
+/// so an unknown name reads as nothing rather than as a fallback.
+fn glyph_list(doc: &Document, name: &str) -> Option<String> {
+    let mut encoding = Dictionary::new();
+    encoding.set("Type", Object::Name(b"Encoding".to_vec()));
+    encoding.set("Differences", vec![Object::Integer(0), Object::Name(name.as_bytes().to_vec())]);
+    characters(doc, Some(Object::Dictionary(encoding))).swap_remove(0)
+}
+
+/// The glyph name `/Differences` gives each code, if any.
+fn differences(doc: &Document, encoding: Option<&Object>) -> Vec<Option<String>> {
+    let mut names = vec![None; 256];
+    let encoding = match encoding {
+        Some(Object::Reference(id)) => doc.get_dictionary(*id).ok(),
+        Some(Object::Dictionary(d)) => Some(d),
+        _ => None,
+    };
+    let Some(Ok(items)) = encoding.map(|e| e.get(b"Differences").and_then(Object::as_array)) else {
+        return names;
+    };
+    let mut code = 0usize;
+    for item in items {
+        match item {
+            Object::Integer(at) => code = usize::try_from(*at).unwrap_or(usize::MAX),
+            Object::Name(name) => {
+                if let Some(slot) = names.get_mut(code) {
+                    *slot = Some(String::from_utf8_lossy(name).into_owned());
+                }
+                code = code.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    names
 }
 
 /// A Type0 font over `cid_font` whose codes are CIDs: an `Identity` `CMap`.
@@ -959,7 +1150,119 @@ mod tests {
         assert_eq!(plan(&doc).kept.get(&file), Some(&KeptWhole::NotSmaller));
     }
 
-    // Two Type0 fonts over one CIDFont share its file: the subset keeps both    // Two Type0 fonts over one CIDFont share its file: the subset keeps both
+    /// The Coptic font's own name for `ch`'s glyph, from its `post` table.
+    fn glyph_name(ch: char) -> String {
+        let font = coptic();
+        let face = ttf_parser::Face::parse(&font, 0).unwrap();
+        face.glyph_name(face.glyph_index(ch).unwrap()).expect("a post name").to_owned()
+    }
+
+    /// A simple TrueType font over the whole Coptic font, whose `/Differences`
+    /// give codes `a`, `b`, ... the glyph names of `chars`.
+    fn simple(doc: &mut Document, descriptor: Option<ObjectId>, chars: &str) -> (ObjectId, ObjectId) {
+        let descriptor = descriptor.unwrap_or_else(|| {
+            let font = coptic();
+            let file = doc.add_object(Stream::new(dictionary! { "Length1" => i64::try_from(font.len()).unwrap() }, font));
+            doc.add_object(dictionary! {
+                "Type" => "FontDescriptor", "FontName" => "NotoSansCoptic", "Flags" => 32,
+                "FontBBox" => vec![0.into(), 0.into(), 1000.into(), 1000.into()], "ItalicAngle" => 0,
+                "Ascent" => 1000, "Descent" => 0, "CapHeight" => 700, "StemV" => 80, "FontFile2" => file,
+            })
+        });
+        let mut differences = vec![Object::Integer(97)];
+        differences.extend(chars.chars().map(|c| Object::Name(glyph_name(c).into_bytes())));
+        let font = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "NotoSansCoptic", "FontDescriptor" => descriptor,
+            "FirstChar" => 97, "LastChar" => 122, "Widths" => vec![Object::Integer(600); 26],
+            "Encoding" => dictionary! { "Type" => "Encoding", "BaseEncoding" => "WinAnsiEncoding", "Differences" => differences },
+        });
+        let file = doc.get_dictionary(descriptor).unwrap().get(b"FontFile2").unwrap().as_reference().unwrap();
+        (font, file)
+    }
+
+    // Each way a reader may look up a simple font's code is kept: both cmap
+    // subtables at the code, the symbol range above it, the Unicode cmap at the
+    // encoding's character, the Mac Roman code of that character, and glyph
+    // names from /Differences and as uniXXXX.
+    #[test]
+    fn every_lookup_a_reader_might_make_is_kept() {
+        let mut doc = Document::with_version("1.7");
+        let font = dictionary! {
+            "Type" => "Font", "Subtype" => "TrueType",
+            // `alfa` isn't in the Adobe glyph list. Read whole by lopdf, one
+            // unknown name drops the base encoding for every other code too.
+            "Encoding" => dictionary! { "Type" => "Encoding", "BaseEncoding" => "WinAnsiEncoding",
+                "Differences" => vec![97.into(), Object::Name(b"alfa".to_vec()), Object::Name(b"Euro".to_vec())] },
+        };
+        let id = doc.add_object(font);
+        let lookups = SimpleLookups::new(&doc, doc.get_dictionary(id).unwrap());
+
+        let named = lookups.of(97);
+        for expected in [Lookup::Mac(97), Lookup::Symbol(0x61), Lookup::Symbol(0xF061), Lookup::Symbol(0xF161), Lookup::Symbol(0xF261), Lookup::Name("alfa".into())] {
+            assert!(named.contains(&expected), "{expected:?} missing from {named:?}");
+        }
+        // A name the glyph list knows gives its character.
+        let euro = lookups.of(98);
+        for expected in [Lookup::Unicode('\u{20AC}'), Lookup::Name("Euro".into())] {
+            assert!(euro.contains(&expected), "{expected:?} missing from {euro:?}");
+        }
+        // WinAnsi 0x91 is the left single quote, which Mac Roman puts at 0xD4.
+        // (Not the euro: PDF's Mac Roman predates it, and lopdf follows PDF.)
+        let quote = lookups.of(0x91);
+        for expected in [Lookup::Unicode('\u{2018}'), Lookup::Mac(0xD4), Lookup::Name("uni2018".into())] {
+            assert!(quote.contains(&expected), "{expected:?} missing from {quote:?}");
+        }
+    }
+
+    #[test]
+    fn a_simple_truetype_font_keeps_the_glyphs_it_draws() {
+        let mut doc = Document::with_version("1.7");
+        let (font, file) = simple(&mut doc, None, "ⲁⲃⲅ");
+        one_page(&mut doc, "BT /F1 12 Tf (ac) Tj ET", dictionary! { "Font" => dictionary! { "F1" => font } });
+        let glyphs = glyphs_of(&plan(&doc), file);
+        assert!(glyphs.is_superset(&with_notdef("ⲁⲅ")), "{glyphs:?}");
+        assert!(!glyphs.contains(&gid('ⲃ')), "a glyph nothing draws was kept: {glyphs:?}");
+    }
+
+    // Each lookup finds what the font itself holds, through ttf-parser.
+    #[test]
+    fn each_lookup_finds_the_glyph_the_font_holds() {
+        let font = coptic();
+        let face = ttf_parser::Face::parse(&font, 0).unwrap();
+        assert_eq!(Lookup::Unicode('ⲁ').find(&face), Some(gid('ⲁ')));
+        assert_eq!(Lookup::Name(glyph_name('ⲃ')).find(&face), Some(gid('ⲃ')));
+        assert_eq!(Lookup::Name("no-such-glyph".into()).find(&face), None);
+        // This font has no symbol cmap, so the symbol range finds nothing even
+        // where a Unicode cmap would.
+        assert_eq!(Lookup::Symbol(u32::from('ⲁ')).find(&face), None);
+    }
+
+    #[test]
+    fn a_simple_font_also_used_from_outside_the_walk_is_left_whole() {
+        let mut doc = Document::with_version("1.7");
+        let (font, file) = simple(&mut doc, None, "ⲁ");
+        one_page(&mut doc, "BT /F1 12 Tf (a) Tj ET", dictionary! { "Font" => dictionary! { "F1" => font } });
+        doc.add_object(Stream::new(
+            dictionary! { "Type" => "XObject", "Subtype" => "Form", "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } } },
+            b"BT /F1 12 Tf (b) Tj ET".to_vec(),
+        ));
+        assert_eq!(plan(&doc).kept.get(&file), Some(&KeptWhole::OutsideTheWalk));
+    }
+
+    // One descriptor, and so one file, under a composite and a simple font.
+    #[test]
+    fn a_file_shared_by_a_composite_and_a_simple_font_keeps_both() {
+        let mut doc = Document::with_version("1.7");
+        let (type0, cid, file) = composite(&mut doc, "Identity-H");
+        let descriptor = doc.get_dictionary(cid).unwrap().get(b"FontDescriptor").unwrap().as_reference().unwrap();
+        let (simple_font, _) = simple(&mut doc, Some(descriptor), "ⲉ");
+        let content = format!("BT /F1 12 Tf {} Tj /F2 12 Tf (a) Tj ET", shown("ⲁ"));
+        one_page(&mut doc, &content, dictionary! { "Font" => dictionary! { "F1" => type0, "F2" => simple_font } });
+        let glyphs = glyphs_of(&plan(&doc), file);
+        assert!(glyphs.is_superset(&with_notdef("ⲁⲉ")), "{glyphs:?}");
+    }
+
+    // Two Type0 fonts over one CIDFont share its file: the subset keeps both
     // fonts' glyphs.
     #[test]
     fn a_shared_font_file_keeps_every_fonts_glyphs() {

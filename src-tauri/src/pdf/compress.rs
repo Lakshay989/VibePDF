@@ -783,10 +783,10 @@ mod tests {
             plans
         }
         let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/basic/whole-font.pdf")).unwrap();
-        assert_eq!(font_subset::plan(&load_cos(&bytes, cos_err).unwrap()).subset.len(), 1, "the fixture has a font to subset");
+        assert_eq!(font_subset::plan(&load_cos(&bytes, cos_err).unwrap()).subset.len(), 2, "the fixture has two fonts to subset");
 
         let (_, report) = compress_with(&bytes, CompressLevel::Medium, breaks_the_page).unwrap();
-        assert_eq!((report.fonts_subset, report.fonts_kept), (0, 1), "{report:?}");
+        assert_eq!((report.fonts_subset, report.fonts_kept), (0, 2), "{report:?}");
     }
 
     #[test]
