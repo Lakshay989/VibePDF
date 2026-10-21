@@ -52,6 +52,48 @@ async fn a_signed_protected_document_verifies_with_its_password() {
     }
 }
 
+// What the signer claimed, exactly as pyHanko reads it back from these files.
+// lopdf decrypts a dictionary entry by entry and stops at the first failure;
+// a signature's /Contents is never encrypted, so under AES decrypting it fails,
+// and everything after it in the dictionary (here /M and /Reason) stayed
+// ciphertext. RC4 never fails to decrypt, so its file read correctly before.
+#[tokio::test]
+async fn a_signed_protected_documents_claims_read_as_written() {
+    for name in FIXTURES {
+        let reports = verify_as_the_app_does(name).await;
+        assert_eq!(reports.len(), 1, "{name}");
+        assert_eq!(reports[0].signed_at.as_deref(), Some("D:20261017182522+05'30'"), "{name}: /M");
+        assert_eq!(reports[0].reason.as_deref(), Some("Approved for release"), "{name}: /Reason");
+    }
+}
+
+// If /Contents can't be found where /ByteRange says (here the first range is
+// one byte too long), it can't be blanked, and lopdf may have left /M and
+// /Reason encrypted. They are reported as unknown, not as ciphertext.
+#[tokio::test]
+async fn claims_that_may_still_be_encrypted_are_reported_as_unknown() {
+    let path = fixture("signed-protected.pdf");
+    let mut file = std::fs::read(&path).expect("fixture");
+    let at = find(&file, b"/ByteRange").expect("/ByteRange");
+    let open = at + file[at..].iter().position(|b| *b == b'[').expect("[");
+    let close = open + file[open..].iter().position(|b| *b == b']').expect("]");
+    let numbers: Vec<&[u8]> = file[open + 1..close].split(|b| b.is_ascii_whitespace()).filter(|n| !n.is_empty()).collect();
+    let first_len = numbers[1];
+    let digit_at = open + 1 + find(&file[open + 1..close], first_len).expect("len") + first_len.len() - 1;
+    file[digit_at] = if file[digit_at] == b'9' { b'8' } else { file[digit_at] + 1 };
+
+    let handle =
+        DocumentActorHandle::spawn(None, uuid::Uuid::new_v4(), path, Some(OPEN_PASSWORD.into())).expect("opens");
+    let reports = handle.verify_signatures(file, SystemTime::now()).await.expect("verify");
+    assert_eq!(reports.len(), 1);
+    assert!(!reports[0].problems.is_empty(), "the moved gap should be reported");
+    assert_eq!((reports[0].signed_at.as_deref(), reports[0].reason.as_deref()), (None, None));
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 // Without the password lopdf finds no signatures, and an empty list would read
 // as "unsigned". It must be an error that says why instead.
 #[test]

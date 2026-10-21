@@ -147,24 +147,96 @@ pub fn verify_signatures(
 /// opened with, handed over by its actor for this call; it is not kept.
 ///
 /// For any protected file, `/Contents` is read from the file's bytes rather
-/// than from the parse — see [`contents_from_gap`].
+/// than from the parse — see [`contents_from_gap`] — and the rest of each
+/// signature dictionary from a second parse in which `/Contents` is blanked —
+/// see [`with_contents_blanked`].
 pub fn verify_signatures_opened_with(
     bytes: &[u8],
     password: Option<&str>,
     now: SystemTime,
 ) -> Result<Vec<SignatureReport>, CommandError> {
-    let read_err = |e| pdf_err("could not read the PDF", e);
-    let doc = match password {
-        Some(password) => load_cos_with_password(bytes, password, read_err)?,
-        None => load_cos(bytes, read_err)?,
+    let parse = |bytes: &[u8]| {
+        let read_err = |e| pdf_err("could not read the PDF", e);
+        match password {
+            Some(password) => load_cos_with_password(bytes, password, read_err),
+            None => load_cos(bytes, read_err),
+        }
     };
+    let doc = parse(bytes)?;
     let protected = declares_encryption(bytes);
+    let ids = signature_object_ids(&doc);
+
+    let clean = if protected {
+        with_contents_blanked(&doc, bytes, &ids)
+            .and_then(|(copy, blanked)| parse(&copy).ok().map(|clean| (clean, blanked)))
+    } else {
+        None
+    };
 
     let mut reports = Vec::new();
-    for id in signature_object_ids(&doc) {
-        reports.push(verify_one(&doc, bytes, id, now, protected));
+    for id in ids {
+        let (source, claims_known) = match &clean {
+            Some((clean, blanked)) if blanked.contains(&id) => (clean, true),
+            _ => (&doc, !protected),
+        };
+        let mut report = verify_one(source, bytes, id, now, protected);
+        if !claims_known {
+            // lopdf may have left them encrypted (see `with_contents_blanked`):
+            // unknown is better than garbled.
+            report.signed_at = None;
+            report.reason = None;
+        }
+        reports.push(report);
     }
     Ok(reports)
+}
+
+/// A protected file's bytes with each signature's `/Contents` replaced by `0`
+/// and spaces, every offset kept, and the signatures that was done for.
+///
+/// lopdf decrypts a dictionary entry by entry and stops at the first entry
+/// that fails, and a signature's `/Contents` is the one string ISO 32000 leaves
+/// unencrypted. Under AES its decryption fails, so every entry after it stays
+/// ciphertext: `/M` and `/Reason` in pyHanko's files, which put `/Contents`
+/// first. An integer needs no decryption, so in a parse of this copy the rest
+/// of the dictionary decrypts, whatever order its keys are in. Measured
+/// 2026-10-21 on `signed-protected.pdf` (RC4 never fails to decrypt, so
+/// `signed-protected-rc4.pdf` read correctly already).
+///
+/// Only a gap that is exactly one hex string is touched, and its length is
+/// kept, so the cross-reference offsets stay right and nothing outside the gap
+/// changes. What is *verified* never comes from this copy: the digest is over
+/// the original bytes, and `/Contents` is read from their gap.
+fn with_contents_blanked(
+    doc: &Document,
+    bytes: &[u8],
+    ids: &[ObjectId],
+) -> Option<(Vec<u8>, Vec<ObjectId>)> {
+    let mut copy: Option<Vec<u8>> = None;
+    let mut blanked = Vec::new();
+    for id in ids {
+        let gap = doc
+            .get_object(*id)
+            .and_then(Object::as_dict)
+            .ok()
+            .and_then(|dict| byte_ranges(dict).ok())
+            .and_then(|ranges| hex_gap(bytes, &ranges));
+        let Some(gap) = gap else { continue };
+        blank_gap(copy.get_or_insert_with(|| bytes.to_vec()), gap);
+        blanked.push(*id);
+    }
+    copy.map(|copy| (copy, blanked))
+}
+
+/// Overwrite `gap` with spaces and a final `0`. The `0` goes last because the
+/// byte before the gap may be the end of the `/Contents` key itself: a `0`
+/// there would turn the key into `/Contents0`.
+fn blank_gap(bytes: &mut [u8], gap: std::ops::Range<usize>) {
+    let Some(last) = gap.end.checked_sub(1).filter(|last| *last >= gap.start) else {
+        return;
+    };
+    bytes[gap.start..last].fill(b' ');
+    bytes[last] = b'0';
 }
 
 /// Every object that looks like a signature dictionary.
@@ -383,13 +455,8 @@ fn without_padding(raw: &[u8]) -> Option<&[u8]> {
 /// gap is where the value sits and exactly what the signed ranges leave out,
 /// so reading it there needs no decryption at all.
 fn contents_from_gap(bytes: &[u8], ranges: &[(usize, usize)]) -> Option<Vec<u8>> {
-    let [(first, len), (second, _)] = ranges else {
-        return None;
-    };
-    let gap = bytes.get(first.checked_add(*len)?..*second)?;
-    let hex: Vec<u8> = gap
-        .strip_prefix(b"<")?
-        .strip_suffix(b">")?
+    let gap = hex_gap(bytes, ranges)?;
+    let hex: Vec<u8> = bytes[gap.start + 1..gap.end - 1]
         .iter()
         .copied()
         .filter(|b| !b.is_ascii_whitespace())
@@ -402,6 +469,20 @@ fn contents_from_gap(bytes: &[u8], ranges: &[(usize, usize)]) -> Option<Vec<u8>>
         .map(|pair| Some(hex_digit(pair[0])? << 4 | hex_digit(pair[1])?))
         .collect::<Option<Vec<u8>>>()?;
     without_padding(&raw).map(<[u8]>::to_vec)
+}
+
+/// Where `/Contents` sits: the gap between the two signed ranges, when it is
+/// exactly one hex string, delimiters included.
+fn hex_gap(bytes: &[u8], ranges: &[(usize, usize)]) -> Option<std::ops::Range<usize>> {
+    let [(first, len), (second, _)] = ranges else {
+        return None;
+    };
+    let start = first.checked_add(*len)?;
+    let inner = bytes.get(start..*second)?.strip_prefix(b"<")?.strip_suffix(b">")?;
+    inner
+        .iter()
+        .all(|b| b.is_ascii_hexdigit() || b.is_ascii_whitespace())
+        .then_some(start..*second)
 }
 
 fn hex_digit(c: u8) -> Option<u8> {
@@ -615,7 +696,7 @@ fn certificate_signed_by(subject: &Certificate, issuer: &Certificate) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{contents_der, contents_from_gap, without_padding};
+    use super::{blank_gap, contents_der, contents_from_gap, hex_gap, without_padding};
 
     /// SEQUENCE { INTEGER 0 }: a complete DER value whose last byte is 0x00.
     const ENDS_IN_ZERO: [u8; 5] = [0x30, 0x03, 0x02, 0x01, 0x00];
@@ -626,6 +707,41 @@ mod tests {
         let bytes = [prefix, gap, suffix].concat();
         let second = prefix.len() + gap.len();
         (bytes, vec![(0, prefix.len()), (second, suffix.len())])
+    }
+
+    // Only a gap that is exactly one hex string is `/Contents`: anything else
+    // is left alone rather than blanked on a guess.
+    #[test]
+    fn the_gap_is_found_only_when_it_is_one_hex_string() {
+        let (bytes, ranges) = file(b"<3003 0201\n00 0000>");
+        let prefix = ranges[0].1;
+        assert_eq!(hex_gap(&bytes, &ranges), Some(prefix..ranges[1].0));
+
+        for not_hex in [&b"<30zz>"[..], b"(3003)", b"<3003", b"3003>"] {
+            let (bytes, ranges) = file(not_hex);
+            assert_eq!(hex_gap(&bytes, &ranges), None, "{}", String::from_utf8_lossy(not_hex));
+        }
+        // One byte off either way, as a shifted /ByteRange would put it.
+        let (bytes, mut ranges) = file(b"<3003>");
+        ranges[0].1 += 1;
+        assert_eq!(hex_gap(&bytes, &ranges), None);
+        // Not two ranges around one gap.
+        assert_eq!(hex_gap(&bytes, &[(0, 4)]), None);
+    }
+
+    // Spaces, then the `0`: the key before the gap may end right at it.
+    #[test]
+    fn blanking_rewrites_the_gap_and_nothing_else() {
+        let mut bytes = b"<</Contents<a1b2>/M(x)>>".to_vec();
+        let original = bytes.clone();
+        blank_gap(&mut bytes, 11..17);
+        assert_eq!(bytes, b"<</Contents     0/M(x)>>".to_vec());
+        assert_eq!(bytes.len(), original.len());
+        assert_eq!((&bytes[..11], &bytes[17..]), (&original[..11], &original[17..]));
+
+        let mut empty = b"/Contents<>>>".to_vec();
+        blank_gap(&mut empty, 9..11);
+        assert_eq!(empty, b"/Contents 0>>".to_vec());
     }
 
     #[test]
