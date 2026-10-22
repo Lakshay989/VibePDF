@@ -169,7 +169,7 @@ quick-xml = "0.39"
 # page's JavaScript. Default features off: no extra code, no extra crates.
 dom_query = { version = "=0.28.0", default-features = false }
 # P7.C1c: `data:` image URIs. Already in the app through Tauri's `plist`.
-base64 = "0.22"
+base64 = "0.23"
 ureq = { version = "3.2.1", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]
