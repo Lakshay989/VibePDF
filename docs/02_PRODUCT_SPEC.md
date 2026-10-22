@@ -285,8 +285,8 @@ WHEN the user creates a PDF from files (DOCX, images, TXT, HTML), THE system SHA
 ### P7-OCR-010 — Compress
 WHEN the user compresses a PDF, THE system SHALL offer three levels (low / medium / high) targeting image recompression, font subsetting, and stream deflation. The system SHALL show before/after size.
 
-### P7-OCR-011 — Linearize
-WHEN the user invokes "optimize for web," THE system SHALL linearize the PDF (web-optimized / fast-web-view).
+### P7-OCR-011 — Linearize *(deferred, decided 2026-10-22)*
+WHEN the user invokes "optimize for web," THE system SHALL linearize the PDF (web-optimized / fast-web-view). *Deferred out of Phase 7: neither PDF library can write a linearized file, and the benefit is limited to PDFs served by byte range to a browser. See `BACKLOG.md`.*
 
 ---
 
