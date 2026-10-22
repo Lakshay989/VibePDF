@@ -40,6 +40,23 @@ describe("pathHash", () => {
   });
 });
 
+// A delete (or a newer version) waits until every open connection closes.
+// The store keeps one open, so it has to close it when asked, or the delete
+// and every open after it hang. fake-indexeddb 6 models this; 5 didn't.
+describe("the open connection", () => {
+  it("doesn't block deleting the database", async () => {
+    await saveViewSettings("h", { zoom: 1.5, fitMode: null });
+    const outcome = await new Promise<string>((resolve) => {
+      const req = indexedDB.deleteDatabase("vibepdf");
+      req.onsuccess = () => resolve("deleted");
+      req.onblocked = () => resolve("blocked");
+      req.onerror = () => resolve("error");
+    });
+    expect(outcome).toBe("deleted");
+    expect(await loadViewSettings("h")).toBeNull();
+  });
+});
+
 describe("view-settings IDB round-trip", () => {
   it("returns null for an unknown hash", async () => {
     const r = await loadViewSettings("deadbeef".repeat(8));

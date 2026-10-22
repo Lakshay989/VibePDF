@@ -28,7 +28,26 @@ const key = (over: Partial<ThumbKey> = {}): ThumbKey => ({
   ...over,
 });
 
+/** Delete the database, and say whether it went ahead or was blocked. */
+const deleteOutcome = (name: string) =>
+  new Promise<string>((resolve) => {
+    const req = indexedDB.deleteDatabase(name);
+    req.onsuccess = () => resolve("deleted");
+    req.onblocked = () => resolve("blocked");
+    req.onerror = () => resolve("error");
+  });
+
 describe("thumbnail-cache IDB", () => {
+  // A delete (or a newer version) waits until every open connection closes.
+  // The cache keeps one open, so it has to close it when asked, or the delete
+  // and every open after it hang. fake-indexeddb 6 models this; 5 didn't.
+  it("an open connection doesn't block deleting the database", async () => {
+    await putThumb(key(), new Uint8Array([1, 2, 3]));
+    expect(await deleteOutcome("vibepdf-thumbnails")).toBe("deleted");
+    // The next call opens afresh, on the now-empty database.
+    expect(await getThumb(key())).toBeNull();
+  });
+
   it("returns null on a cache miss", async () => {
     expect(await getThumb(key())).toBeNull();
   });

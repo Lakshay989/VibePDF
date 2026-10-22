@@ -35,7 +35,17 @@ function openDb(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Deleting the database, or opening a newer version of it, waits until
+      // every open connection closes. Close ours when asked, rather than
+      // holding it, so that doesn't hang. The next call opens afresh.
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error ?? new Error("indexedDB open failed"));
   });
   return dbPromise;
