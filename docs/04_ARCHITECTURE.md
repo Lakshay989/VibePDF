@@ -635,6 +635,25 @@ every recursive walk over the tree at once. Measured in a debug build: the reade
 overflow at 1,024, so 256 leaves at least a factor of two. HTML import does not go through this
 parser; `html_read` has its own limit of 200 levels.
 
+**Bookmark walks (P7.HF2, `P1-VIEW-013`).** A bookmark tree is linked by the file's own pointers,
+`/First` to a first child and `/Next` to a next sibling, and a damaged file can aim them anywhere.
+Four walks trusted them. `cos::neutralize_dangling_descendants`, run on every Save by
+`prune_dangling_destinations`, called itself per level: an item whose `/First` was itself
+overflowed the actor thread's stack. `prune_outline`, `merge_outlines` and
+`read_top_level_outline_titles` followed `/Next` in a bare loop that never ended on a cycle and
+grew a list until memory ran out. `split::groups_by_bookmarks` did the same through PDFium's
+`next_sibling()`, holding the global PDFium lock; PDFium documents that circular bookmarks are the
+caller's problem. Now every lopdf walk goes through `cos::sibling_chain`, which stops at the first
+item already in a `seen` set, and the descendant walk is a worklist (`pending`) rather than
+recursion, so an honest chain 100,000 deep is fine too; a visited set alone would not have fixed
+that. The top-level walks start with the outline root already in `seen`, so a chain that runs
+into the root ends there and the root is never listed as a bookmark. The descendant walk starts
+with an empty set on purpose: in a damaged file an item dropped from the top level can also hang
+below a survivor, and it is read again there so its dead destination goes too. The split walk
+uses pdfium-render's `iter_siblings()`, which keeps its own visited set. On a looping outline the walk stops at the repeat: if something is pruned, the
+survivors are re-chained (which also removes a top-level loop from the file); if nothing dangles,
+the bytes are returned untouched.
+
 **Font embedding (P4.HF5, FABLE_REVIEW 3.2 stage-2).** True-Unicode text arrives through a second
 text-writing backend, chosen at the last moment: `cos::ensure_winansi` (the HF3 hard gate) split
 into a predicate `cos::winansi_fits`, and each rendered-text writer can now branch. WinAnsi-safe

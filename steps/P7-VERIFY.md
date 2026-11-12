@@ -200,6 +200,7 @@ them first; they land in `Sample PDFs/scratch/`:
 
 ```bash
 node scripts/cargo-test.mjs --test create_docx nesting_writes -- --ignored
+node scripts/cargo-test.mjs --test outline_cycles writes_the_verification -- --ignored
 ```
 
 Have another document open in a second tab while you do these. **Expect** it
@@ -214,6 +215,18 @@ to still be there afterwards: a crash here used to take every tab with it.
       word "Bottom" on it.
 - [ ] The same with `Sample PDFs/scratch/textutil-memo.docx`. **Expect** the
       memo as before: the limit must not have changed an ordinary document.
+- [ ] Open `Sample PDFs/scratch/outline-self-loop.pdf` (a bookmark that is
+      its own child). Delete page 3, then **Cmd-S**. **Expect** the save to
+      finish, the app still running, and the bookmarks panel showing
+      Chapter 1 and Chapter 3. Before the fix this closed the app.
+- [ ] Open `Sample PDFs/scratch/outline-next-loop.pdf` (the last bookmark
+      points back at the first) → **Split…** → by bookmarks. **Expect** three
+      two-page files. Before the fix this never finished and froze every tab.
+- [ ] **Merge…** that same file with `Sample PDFs/scratch/bookmarks.pdf`.
+      **Expect** a 12-page PDF whose bookmarks panel lists Chapter 1, 2, 3
+      twice.
+- [ ] Open `Sample PDFs/scratch/bookmarks.pdf` (the ordinary one). Delete
+      page 3, **Cmd-S**. **Expect** Chapter 1 and Chapter 3, as it always did.
 
 ---
 

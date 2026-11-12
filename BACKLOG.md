@@ -1184,6 +1184,18 @@ acceptable once understood.
   are reached when the outer content is read. One function, with a test that
   the innermost text appears once and a test that 60 levels returns promptly.
 
+- **Save is slow on a file with very many objects when something is pruned
+  (noticed 2026-11-13 while testing P7.HF2).** `cos::prune_inner` calls
+  lopdf's `prune_objects` after removing a dangling link or bookmark. lopdf
+  0.42's `traverse_objects` checks each reference with `Vec::contains`, so the
+  pass is quadratic in the number of objects. It terminates on any graph, and
+  it only runs when something was pruned. Seen once, not timed properly: a
+  mutant that sent the 100,000-item test in `tests/outline_cycles.rs` down
+  that path had not finished after 60 s in a debug build. The test itself
+  uses a 2,000-item chain for that path for this reason. Worth timing on a
+  real document with 100,000+ objects, in a release build, before deciding
+  whether it needs our own reachability pass.
+
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was
   **WKWebView dropping all HTML5 drag-and-drop drop-target events**
   (`dragenter`/`dragover`/`drop` never fire; only `dragstart`/`dragend`),

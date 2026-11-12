@@ -202,16 +202,23 @@ fn groups_by_bookmarks(
         let bookmarks = source.bookmarks();
         let mut starts: Vec<i32> = Vec::new();
         // `root()` is the *first* top-level bookmark (its parent is the
-        // synthetic outline root); walk siblings to visit them all.
-        let mut node = bookmarks.root();
-        while let Some(b) = node {
-            if let Some(idx) = b.destination().and_then(|d| d.page_index().ok()) {
-                if idx > 0 && idx < count {
-                    // Page 0 is the implicit first start; skip it as a boundary.
-                    starts.push(idx);
+        // synthetic outline root); its siblings are the rest of the level.
+        //
+        // SPEC: P1-VIEW-013. `PDFium` leaves circular bookmark chains to the
+        // caller ("the caller is responsible for handling circular bookmark
+        // references", `FPDFBookmark_GetNextSibling`), and a hand-written
+        // `next_sibling()` loop on one never ends, holding the `PDFium` lock
+        // every other document needs. The binding's sibling iterator keeps
+        // a visited set.
+        if let Some(first) = bookmarks.root() {
+            for b in std::iter::once(first.clone()).chain(first.iter_siblings()) {
+                if let Some(idx) = b.destination().and_then(|d| d.page_index().ok()) {
+                    if idx > 0 && idx < count {
+                        // Page 0 is the implicit first start; skip it as a boundary.
+                        starts.push(idx);
+                    }
                 }
             }
-            node = b.next_sibling();
         }
         starts.sort_unstable();
         starts.dedup();

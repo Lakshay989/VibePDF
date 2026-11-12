@@ -40,6 +40,33 @@ fn cos_err(e: lopdf::Error) -> CommandError {
     CommandError::PdfError(format!("lopdf: {e}"))
 }
 
+/// The object that `id`'s `/key` entry refers to, when `id` is a dictionary
+/// and the entry is a reference.
+fn reference_in(doc: &Document, id: ObjectId, key: &[u8]) -> Option<ObjectId> {
+    doc.get_dictionary(id).ok()?.get(key).ok()?.as_reference().ok()
+}
+
+/// One level of a bookmark tree: `first`, then the item each one's `/Next`
+/// names, in order.
+///
+/// SPEC: P1-VIEW-013. The chain is the file's own, and a damaged file can
+/// point an item back at one already listed. Followed blindly that is a loop
+/// that never ends, building a list until memory runs out. `seen` holds every
+/// item listed so far (on every level, when the caller passes the same set
+/// for each), and the walk stops at the first repeat.
+fn sibling_chain(first: Option<ObjectId>, seen: &mut HashSet<ObjectId>, next: impl Fn(ObjectId) -> Option<ObjectId>) -> Vec<ObjectId> {
+    let mut chain = Vec::new();
+    let mut cur = first;
+    while let Some(id) = cur {
+        if !seen.insert(id) {
+            break;
+        }
+        chain.push(id);
+        cur = next(id);
+    }
+    chain
+}
+
 /// Read the titles of the top-level bookmarks (direct children of the document
 /// `/Outlines`), in order. Empty when the document has no outline.
 pub fn read_top_level_outline_titles(bytes: &[u8]) -> Result<Vec<String>, CommandError> {
@@ -55,19 +82,19 @@ pub fn read_top_level_outline_titles(bytes: &[u8]) -> Result<Vec<String>, Comman
         return Ok(Vec::new());
     };
 
-    let mut titles = Vec::new();
-    let mut cur = doc
+    let first = doc
         .get_dictionary(outlines_id)
         .map_err(cos_err)?
         .get(b"First")
         .ok()
         .and_then(|o| o.as_reference().ok());
-    while let Some(id) = cur {
+    let mut seen = HashSet::from([outlines_id]);
+    let mut titles = Vec::new();
+    for id in sibling_chain(first, &mut seen, |id| reference_in(&doc, id, b"Next")) {
         let item = doc.get_dictionary(id).map_err(cos_err)?;
         if let Ok(t) = item.get(b"Title").and_then(Object::as_str) {
             titles.push(String::from_utf8_lossy(t).into_owned());
         }
-        cur = item.get(b"Next").ok().and_then(|o| o.as_reference().ok());
     }
     Ok(titles)
 }
@@ -570,21 +597,11 @@ fn prune_outline(doc: &mut Document, page_set: &HashSet<ObjectId>) -> Result<boo
         return Ok(false);
     };
 
-    // Collect top-level items (the outline root's direct children).
-    let mut top: Vec<ObjectId> = Vec::new();
-    let mut cur = doc
-        .get_dictionary(outlines_id)
-        .ok()
-        .and_then(|d| d.get(b"First").ok())
-        .and_then(|o| o.as_reference().ok());
-    while let Some(id) = cur {
-        top.push(id);
-        cur = doc
-            .get_dictionary(id)
-            .ok()
-            .and_then(|d| d.get(b"Next").ok())
-            .and_then(|o| o.as_reference().ok());
-    }
+    // Collect top-level items (the outline root's direct children). The root
+    // starts in `seen`: a chain that runs into it ends there, and the root is
+    // never listed as one of its own bookmarks.
+    let mut seen = HashSet::from([outlines_id]);
+    let top = sibling_chain(reference_in(doc, outlines_id, b"First"), &mut seen, |id| reference_in(doc, id, b"Next"));
     if top.is_empty() {
         return Ok(false);
     }
@@ -631,53 +648,47 @@ fn prune_outline(doc: &mut Document, page_set: &HashSet<ObjectId>) -> Result<boo
     }
 
     // Neutralize dangling destinations on nested descendants of the survivors.
-    for &s in &survivors {
-        if neutralize_dangling_descendants(doc, s, page_set) {
-            changed = true;
-        }
+    if neutralize_dangling_descendants(doc, &survivors, page_set) {
+        changed = true;
     }
     Ok(changed)
 }
 
-/// Recursively drop `/Dest`/`/A` from descendant outline items whose target
-/// page is gone. Returns whether anything changed.
-fn neutralize_dangling_descendants(
-    doc: &mut Document,
-    item_id: ObjectId,
-    page_set: &HashSet<ObjectId>,
-) -> bool {
-    let mut children: Vec<ObjectId> = Vec::new();
-    let mut cur = doc
-        .get_dictionary(item_id)
-        .ok()
-        .and_then(|d| d.get(b"First").ok())
-        .and_then(|o| o.as_reference().ok());
-    while let Some(id) = cur {
-        children.push(id);
-        cur = doc
-            .get_dictionary(id)
-            .ok()
-            .and_then(|d| d.get(b"Next").ok())
-            .and_then(|o| o.as_reference().ok());
-    }
-
+/// Drop `/Dest`/`/A` from every outline item below `roots` whose target page
+/// is gone. Returns whether anything changed.
+///
+/// SPEC: P1-VIEW-013. This used to call itself for each item's children. An
+/// item whose `/First` named itself, or an ancestor, recursed until the stack
+/// overflowed, and so would an honest chain nested deeply enough; a stack
+/// overflow closes the app, on every Save. It is a worklist now: `pending`
+/// holds the items whose children are still to read, so the call stack does
+/// not grow with the outline, and `seen` lets each item in once.
+///
+/// `seen` starts empty rather than with the top level in it. In a damaged
+/// file an item dropped from the top level can also hang below a survivor,
+/// where readers still show it; it is read again here, as a descendant, so
+/// its dead destination goes too.
+fn neutralize_dangling_descendants(doc: &mut Document, roots: &[ObjectId], page_set: &HashSet<ObjectId>) -> bool {
+    let mut seen = HashSet::new();
     let mut changed = false;
-    for child in children {
-        let dangling = doc
-            .get_dictionary(child)
-            .ok()
-            .and_then(nav_target_page)
-            .is_some_and(|t| !page_set.contains(&t));
-        if dangling {
-            if let Ok(d) = doc.get_dictionary_mut(child) {
-                d.remove(b"Dest");
-                d.remove(b"A");
+    let mut pending: Vec<ObjectId> = roots.to_vec();
+    while let Some(parent) = pending.pop() {
+        let children = sibling_chain(reference_in(doc, parent, b"First"), &mut seen, |id| reference_in(doc, id, b"Next"));
+        for &child in &children {
+            let dangling = doc
+                .get_dictionary(child)
+                .ok()
+                .and_then(nav_target_page)
+                .is_some_and(|t| !page_set.contains(&t));
+            if dangling {
+                if let Ok(d) = doc.get_dictionary_mut(child) {
+                    d.remove(b"Dest");
+                    d.remove(b"A");
+                }
+                changed = true;
             }
-            changed = true;
         }
-        if neutralize_dangling_descendants(doc, child, page_set) {
-            changed = true;
-        }
+        pending.extend(children);
     }
     changed
 }
@@ -790,29 +801,18 @@ fn merge_outlines(
     objects: &BTreeMap<ObjectId, Object>,
     catalog_ids: &[ObjectId],
 ) -> Result<Option<ObjectId>, CommandError> {
+    let reference = |id: ObjectId, key: &[u8]| -> Option<ObjectId> { objects.get(&id)?.as_dict().ok()?.get(key).ok()?.as_reference().ok() };
+    // SPEC: P1-VIEW-013 — a source whose top-level `/Next` chain loops back on
+    // itself is read once round, not for ever. The sources' ids are disjoint
+    // after renumbering, so one `seen` set serves them all.
+    let mut seen: HashSet<ObjectId> = HashSet::new();
     let mut top_items: Vec<ObjectId> = Vec::new();
     for &cat_id in catalog_ids {
-        let Some(outlines_id) = objects
-            .get(&cat_id)
-            .and_then(|o| o.as_dict().ok())
-            .and_then(|c| c.get(b"Outlines").ok())
-            .and_then(|o| o.as_reference().ok())
-        else {
+        let Some(outlines_id) = reference(cat_id, b"Outlines") else {
             continue;
         };
-        let mut cur = objects
-            .get(&outlines_id)
-            .and_then(|o| o.as_dict().ok())
-            .and_then(|d| d.get(b"First").ok())
-            .and_then(|o| o.as_reference().ok());
-        while let Some(item_id) = cur {
-            top_items.push(item_id);
-            cur = objects
-                .get(&item_id)
-                .and_then(|o| o.as_dict().ok())
-                .and_then(|d| d.get(b"Next").ok())
-                .and_then(|o| o.as_reference().ok());
-        }
+        seen.insert(outlines_id);
+        top_items.extend(sibling_chain(reference(outlines_id, b"First"), &mut seen, |id| reference(id, b"Next")));
     }
     if top_items.is_empty() {
         return Ok(None);
