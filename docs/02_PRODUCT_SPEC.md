@@ -54,6 +54,9 @@ THE system SHALL support multiple PDFs open simultaneously as tabs within a sing
 ### P1-VIEW-012 — Recents
 THE system SHALL remember the last 20 opened files and surface them on the start screen. The list SHALL be clearable by the user.
 
+### P1-VIEW-013 — Damaged structure
+IF a file the user opens, imports or converts contains a structure that refers back to itself or is nested deeper than the system supports, THEN THE system SHALL either complete the operation or refuse it with a message, and SHALL NOT crash, freeze, or alter the user's file.
+
 ---
 
 ## P2 — Page operations
