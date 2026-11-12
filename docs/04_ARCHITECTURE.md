@@ -624,6 +624,17 @@ unchanged. Testing surfaced a lopdf subtlety worth recording: `get_object` trans
 bare `M 0 R` indirection, so the genuine overflow shape is a chain of *containers*
 (`<< /Next n+1 0 R >>`), which the regression test uses.
 
+**XML nesting limit (P7.HF1, `P1-VIEW-013`).** `xml_tree::parse` builds a tree, and the tree is
+freed, searched (`descendant`, `descendants`, `text`) and read (`docx_read`'s `block` / `table` /
+`inline`) by recursion. A Word file a few kilobytes long, nested ten thousand levels deep, parsed
+and then overflowed the stack as the tree was dropped. `parse` now refuses anything nested deeper
+than `MAX_DEPTH` (256, libxml2's default for the same limit) with an `InvalidInput` the Create PDF
+dialog shows. The limit sits in the parser rather than in an iterative `Drop` because it bounds
+every recursive walk over the tree at once. Measured in a debug build: the reader's deepest paths
+(block wrappers, run wrappers, tables inside tables) still fit a 2 MiB stack at 512 levels and
+overflow at 1,024, so 256 leaves at least a factor of two. HTML import does not go through this
+parser; `html_read` has its own limit of 200 levels.
+
 **Font embedding (P4.HF5, FABLE_REVIEW 3.2 stage-2).** True-Unicode text arrives through a second
 text-writing backend, chosen at the last moment: `cos::ensure_winansi` (the HF3 hard gate) split
 into a predicate `cos::winansi_fits`, and each rendered-text writer can now branch. WinAnsi-safe

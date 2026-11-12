@@ -133,10 +133,39 @@ fn entity(name: &str) -> Option<char> {
     }
 }
 
+/// The deepest element nesting [`parse`] accepts; the root element is level 1.
+///
+/// The tree is freed, searched and read by recursion, one stack frame or more
+/// per level, on worker threads with a 2 MiB stack. Without a limit a file of
+/// a few kilobytes, nested ten thousand deep, parses and then overflows the
+/// stack when the tree is dropped, and a stack overflow closes the app: it is
+/// not a panic and nothing can catch it. Limiting the depth here bounds every
+/// one of those walks at once, where making `Drop` iterative would fix only
+/// the drop.
+///
+/// 256 is libxml2's default for the same safety limit (`xmlParserMaxDepth`,
+/// 2.12.0). The committed Word fixture peaks at 9 levels, and the app's own
+/// Word exports at 12.
+pub const MAX_DEPTH: usize = 256;
+
+/// Refuse an element that would sit deeper than [`MAX_DEPTH`]. `open` counts the
+/// synthetic document node plus every element still open, which is the level
+/// the new element would take.
+///
+/// On refusal the open elements are a flat list, each holding only subtrees
+/// that already closed within the limit, so dropping them is shallow too.
+fn refuse_too_deep(open: usize) -> Result<(), CommandError> {
+    if open > MAX_DEPTH {
+        return Err(CommandError::InvalidInput(format!("the document's XML is nested too deeply (more than {MAX_DEPTH} levels)")));
+    }
+    Ok(())
+}
+
 /// Parse `xml` into its root element.
 ///
 /// # Errors
-/// When the XML is malformed — unbalanced, or an undeclared prefix.
+/// When the XML is malformed — unbalanced, or an undeclared prefix — or
+/// nested deeper than [`MAX_DEPTH`].
 pub fn parse(xml: &str) -> Result<Element, CommandError> {
     let bad = |what: &dyn std::fmt::Display| CommandError::InvalidInput(format!("the document's XML is damaged: {what}"));
     let mut reader = Reader::from_str(xml);
@@ -195,10 +224,12 @@ pub fn parse(xml: &str) -> Result<Element, CommandError> {
     loop {
         match reader.read_event().map_err(|e| bad(&e))? {
             Event::Start(start) => {
+                refuse_too_deep(stack.len())?;
                 let element = open(&start, &mut scopes)?;
                 stack.push(element);
             }
             Event::Empty(start) => {
+                refuse_too_deep(stack.len())?;
                 let element = open(&start, &mut scopes)?;
                 scopes.pop();
                 if let Some(parent) = stack.last_mut() {
@@ -272,5 +303,60 @@ mod tests {
         assert!(parse("<a><b></a>").is_err());
         assert!(parse("<w:a/>").is_err(), "undeclared prefix");
         assert!(parse("<a>&nonsense;</a>").is_err());
+    }
+
+    /// `depth` elements, each inside the last, around `inside`.
+    fn nested(depth: usize, inside: &str) -> String {
+        format!("{}{inside}{}", "<a>".repeat(depth), "</a>".repeat(depth))
+    }
+
+    /// How many levels the tree really has, counted without recursion so the
+    /// count itself cannot be what overflows.
+    fn levels(root: &Element) -> usize {
+        let mut deepest = 0;
+        let mut pending = vec![(root, 1usize)];
+        while let Some((element, level)) = pending.pop() {
+            deepest = deepest.max(level);
+            pending.extend(element.elements().map(|child| (child, level + 1)));
+        }
+        deepest
+    }
+
+    fn refused_as_too_deep(xml: &str) -> bool {
+        matches!(parse(xml), Err(CommandError::InvalidInput(message)) if message.contains("nested too deeply"))
+    }
+
+    // SPEC: P1-VIEW-013.
+    #[test]
+    fn nesting_at_the_limit_parses_and_one_past_it_is_refused() {
+        let root = parse(&nested(MAX_DEPTH, "deepest")).expect("exactly the limit");
+        assert_eq!(levels(&root), MAX_DEPTH);
+        // The recursive readers reach the bottom of the deepest tree allowed.
+        assert_eq!(root.text(), "deepest");
+        assert_eq!(root.descendants("", "a").len(), MAX_DEPTH - 1);
+        assert!(refused_as_too_deep(&nested(MAX_DEPTH + 1, "")), "one level more");
+
+        // An empty element takes a level like any other.
+        let root = parse(&nested(MAX_DEPTH - 1, "<b/>")).expect("an empty element on the last level");
+        assert_eq!(levels(&root), MAX_DEPTH);
+        assert!(root.descendant("", "b").is_some());
+        assert!(refused_as_too_deep(&nested(MAX_DEPTH, "<b/>")), "an empty element one level too far");
+    }
+
+    // SPEC: P1-VIEW-013. Before the limit, the first of these parsed and then
+    // overflowed the stack when the tree was dropped: a crashed test binary.
+    #[test]
+    fn nesting_far_past_the_limit_is_refused_closed_or_unclosed() {
+        assert!(refused_as_too_deep(&nested(100_000, "")));
+        assert!(refused_as_too_deep(&"<a>".repeat(100_000)), "never closed");
+    }
+
+    // SPEC: P1-VIEW-013 — the limit is on depth, not on size.
+    #[test]
+    fn a_wide_document_is_not_mistaken_for_a_deep_one() {
+        let xml = format!("<r>{}</r>", "<a><b/></a>".repeat(100_000));
+        let root = parse(&xml).expect("wide, three levels deep");
+        assert_eq!(root.elements().count(), 100_000);
+        assert_eq!(levels(&root), 3);
     }
 }

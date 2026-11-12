@@ -1169,6 +1169,21 @@ acceptable once understood.
 
 ## Real bugs (fix soon — these aren't polish)
 
+- **Word import: a text box inside a text box is read more than once, and the
+  cost doubles per level (found 2026-11-12 while testing P7.HF1).**
+  `docx_read::drawing_or_text_box` collects *every* `w:txbxContent` below a
+  drawing, including one nested inside another, and queues their paragraphs.
+  When a queued paragraph is read, its own drawing queues the inner boxes
+  again. Content at nesting level *k* comes out 2^(k-1) times. Measured with a
+  throwaway probe (debug build, the reading step only): an 865-byte `.docx`
+  with 20 nested boxes produced 1,048,576 blocks in 5.3 s. Each further level
+  doubles that, and the XML depth limit still allows about 60 levels. So a
+  crafted file under 1 kB freezes Create PDF and exhausts memory (against
+  `P1-VIEW-013`), and an honest document with one box inside another shows the
+  inner text twice. **Fix:** queue only the outermost boxes; the inner ones
+  are reached when the outer content is read. One function, with a test that
+  the innermost text appears once and a test that 60 levels returns promptly.
+
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was
   **WKWebView dropping all HTML5 drag-and-drop drop-target events**
   (`dragenter`/`dragover`/`drop` never fire; only `dragstart`/`dragend`),

@@ -22,6 +22,7 @@ use vibepdf_lib::pdf::document::open_pdf;
 use vibepdf_lib::pdf::ooxml::{read_entry, ZipWriter};
 use vibepdf_lib::pdf::render::{render_page, ImageFormat};
 use vibepdf_lib::pdf::text_extract::{extract_text_runs, TextRun};
+use vibepdf_lib::pdf::xml_tree::MAX_DEPTH;
 
 const NAMESPACES: &str = concat!(
     r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" "#,
@@ -842,6 +843,127 @@ fn a_damaged_document_is_refused_by_name() {
         other => panic!("expected a refusal, got {other:?}"),
     }
     assert!(!dest.exists());
+}
+
+// --- nesting (P1-VIEW-013) -----------------------------------------------------
+
+/// `inside`, wrapped in `depth` levels of `<w:tag>`.
+fn wrapped(tag: &str, depth: usize, inside: &str) -> String {
+    format!("{}{inside}{}", format!("<w:{tag}>").repeat(depth), format!("</w:{tag}>").repeat(depth))
+}
+
+/// The deepest level `word/document.xml` reaches, counted from its text, so
+/// "exactly at the limit" below is measured rather than assumed. The root
+/// element is level 1, as the parser counts.
+fn document_levels(docx_bytes: &[u8]) -> usize {
+    let xml = String::from_utf8(read_entry(docx_bytes, "word/document.xml").expect("document.xml")).expect("utf-8");
+    let (mut level, mut deepest) = (0usize, 0usize);
+    for tag in xml.split('<').skip(1) {
+        let tag = &tag[..tag.find('>').expect("a closed tag")];
+        if tag.starts_with('?') {
+            continue;
+        }
+        if tag.starts_with('/') {
+            level -= 1;
+        } else if tag.ends_with('/') {
+            deepest = deepest.max(level + 1);
+        } else {
+            level += 1;
+            deepest = deepest.max(level);
+        }
+    }
+    deepest
+}
+
+fn letter_docx(body: &str) -> Vec<u8> {
+    docx(&[body, LETTER].concat(), None, None, &[])
+}
+
+/// A document whose deepest element sits exactly `levels` deep, made by
+/// wrapping `shape(0)`'s content in as many more wrappers as that takes.
+/// `shape(n)` must nest one level deeper for each unit of `n`.
+fn nested_to(levels: usize, shape: impl Fn(usize) -> String) -> Vec<u8> {
+    let flat = document_levels(&letter_docx(&shape(0)));
+    let bytes = letter_docx(&shape(levels - flat));
+    assert_eq!(document_levels(&bytes), levels, "the test document isn't as deep as it claims");
+    bytes
+}
+
+const BOTTOM_RUN: &str = r#"<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr><w:t>Bottom</w:t></w:r>"#;
+
+/// Wrappers the reader follows one call per level: around blocks, and around
+/// runs inside a paragraph.
+fn block_wrappers(extra: usize) -> String {
+    wrapped("customXml", extra, &para("Bottom", arial()))
+}
+
+fn run_wrappers(extra: usize) -> String {
+    format!("<w:p>{}</w:p>", wrapped("smartTag", extra, BOTTOM_RUN))
+}
+
+/// Tables inside tables, three levels each (`tbl`, `tr`, `tc`), with the
+/// levels left over spent on block wrappers in the innermost cell. Cells
+/// have no margins, so the innermost one is as wide as the outermost.
+fn table_nest(extra: usize) -> String {
+    let no_margins = r#"<w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>"#;
+    (0..extra / 3).fold(block_wrappers(extra % 3), |inside, _| table(&[9360], no_margins, &[row("", &[format!("<w:tc>{inside}</w:tc>")])]))
+}
+
+// SPEC: P1-VIEW-013, P7-OCR-009. Before the limit, the second of these parsed
+// and then overflowed the stack as its tree was dropped, which closed the app:
+// a regression fails as a crashed test binary rather than as an assertion.
+#[test]
+fn a_word_file_nested_past_the_limit_fails_with_a_message_and_writes_nothing() {
+    let scratch = Scratch::new("too-deep");
+    let one_past = nested_to(MAX_DEPTH + 1, block_wrappers);
+    let far_past = letter_docx(&block_wrappers(100_000));
+    for (name, bytes) in [("one-past.docx", one_past), ("far-past.docx", far_past)] {
+        let input = scratch.write(name, &bytes);
+        let dest = scratch.path("out.pdf");
+        match create_pdf_from_files(&[input], &dest, PageSize::A4) {
+            Err(CommandError::InvalidInput(m)) => assert!(m.contains("nested too deeply"), "{name}: {m}"),
+            other => panic!("{name}: expected a refusal, got {other:?}"),
+        }
+        assert!(!dest.exists(), "{name}: a refused document left a file behind");
+    }
+}
+
+// SPEC: P1-VIEW-013, P7-OCR-009. The limit only helps if the deepest document
+// it lets through fits the stack of the thread that converts it: a 2 MiB
+// worker, in the app. Each shape drives a different recursive path in the
+// reader, and the text at the very bottom has to come out the other end.
+#[test]
+fn a_word_file_nested_to_the_limit_converts_on_a_worker_sized_stack() {
+    let shapes = [
+        ("blocks", nested_to(MAX_DEPTH, block_wrappers)),
+        ("runs", nested_to(MAX_DEPTH, run_wrappers)),
+        ("tables", nested_to(MAX_DEPTH, table_nest)),
+    ];
+    for (name, bytes) in shapes {
+        let worker = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let scratch = Scratch::new("at-the-limit");
+                let (pdf, _) = convert(&scratch, &bytes);
+                text(&pdf)
+            })
+            .expect("spawn");
+        assert_eq!(worker.join().expect("the conversion ran to the end"), "Bottom", "{name}");
+    }
+}
+
+/// `Sample PDFs/scratch/` — the P1-VIEW-013 documents a person tries in the
+/// app (steps/P7-VERIFY.md §1.12): one nested far past the limit, one exactly
+/// at it, and a copy of the ordinary memo.
+/// `cargo test --test create_docx nesting_writes -- --ignored`
+#[test]
+#[ignore = "writes verification files for a human to open"]
+fn nesting_writes_the_verification_documents() {
+    let dir = PathBuf::from("../Sample PDFs/scratch");
+    std::fs::create_dir_all(&dir).expect("dir");
+    std::fs::write(dir.join("deep-nesting.docx"), letter_docx(&block_wrappers(100_000))).expect("write");
+    std::fs::write(dir.join("nested-to-the-limit.docx"), nested_to(MAX_DEPTH, table_nest)).expect("write");
+    std::fs::copy("../tests/fixtures/basic/textutil-memo.docx", dir.join("textutil-memo.docx")).expect("copy");
 }
 
 // --- documents we did not write ----------------------------------------------

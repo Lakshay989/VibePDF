@@ -66,6 +66,17 @@ The frontend error model mirrors this. We pattern-match on the typed `CommandErr
 
 ---
 
+## Files we did not write
+
+Every file the user opens, imports or converts is untrusted input (`P1-VIEW-013`). The failure to design against is the stack overflow: it is not a panic, nothing catches it, and it closes the app along with every open document.
+
+- **Do not recurse over a structure the file controls.** Walk object graphs and bookmark trees with an explicit worklist. `background.rs::collect_refs` is the pattern.
+- **Remember where you have been.** A loop that follows the file's own pointers (`/Next`, `/Parent`, `/Kids`) keeps a visited set or a step limit. A damaged file can point back at itself.
+- **Limit depth where a parser builds a tree.** `xml_tree::MAX_DEPTH` is the pattern: refuse past the limit with a message, and test that the deepest input still allowed fits a 2 MiB worker stack.
+- **Test with the hostile shape.** A regression shows up as a crashed or hung test binary rather than a failed assertion. Say so in the test's comment, so the next reader knows what a silent abort means.
+
+---
+
 ## Comments
 
 - Comments explain **why**, not what. If the code needs a comment to be understandable, it should be refactored.

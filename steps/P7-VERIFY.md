@@ -193,6 +193,28 @@ must not change.
 - [ ] Compress the same file at **Smaller**: no fonts are reduced (low keeps
       every font whole).
 
+### 1.12 Files built to break things (added with P7.HF, 2026-11-12)
+
+These files crashed or could freeze the app before the hardening steps. Make
+them first; they land in `Sample PDFs/scratch/`:
+
+```bash
+node scripts/cargo-test.mjs --test create_docx nesting_writes -- --ignored
+```
+
+Have another document open in a second tab while you do these. **Expect** it
+to still be there afterwards: a crash here used to take every tab with it.
+
+- [ ] Header → **Create PDF…** → add `Sample PDFs/scratch/deep-nesting.docx`
+      (one paragraph inside 100,000 wrappers) → **Create**. **Expect** a
+      message that the document's XML is nested too deeply, no PDF written,
+      and the app still running.
+- [ ] The same with `Sample PDFs/scratch/nested-to-the-limit.docx` (tables
+      inside tables, exactly at the limit). **Expect** a one-page PDF with the
+      word "Bottom" on it.
+- [ ] The same with `Sample PDFs/scratch/textutil-memo.docx`. **Expect** the
+      memo as before: the limit must not have changed an ordinary document.
+
 ---
 
 ## Part 2 — PDFs in Preview
