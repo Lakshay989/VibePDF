@@ -201,6 +201,7 @@ them first; they land in `Sample PDFs/scratch/`:
 ```bash
 node scripts/cargo-test.mjs --test create_docx nesting_writes -- --ignored
 node scripts/cargo-test.mjs --test outline_cycles writes_the_verification -- --ignored
+node scripts/cargo-test.mjs --test page_tree_cycles writes_the_verification -- --ignored
 ```
 
 Have another document open in a second tab while you do these. **Expect** it
@@ -227,6 +228,9 @@ to still be there afterwards: a crash here used to take every tab with it.
       twice.
 - [ ] Open `Sample PDFs/scratch/bookmarks.pdf` (the ordinary one). Delete
       page 3, **Cmd-S**. **Expect** Chapter 1 and Chapter 3, as it always did.
+- [ ] Open `Sample PDFs/scratch/page-own-parent.pdf` (page 1 names itself
+      as its parent) → **Watermark…** → text "DRAFT" → all pages → apply.
+      **Expect** DRAFT on all six pages. Before the fix the tab froze here.
 
 ---
 

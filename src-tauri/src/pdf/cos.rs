@@ -1997,20 +1997,41 @@ pub(crate) fn base14_font_dict(base: &str) -> Dictionary {
     font
 }
 
+/// How many ancestors up a page's `/Parent` chain an inherited attribute is
+/// looked for. `PDFium`, which opens every document here, gives up on a page
+/// tree past 1,024 levels (`kMaxPageLevel`), so no page the app can show has
+/// more ancestors than this, and a real document loses nothing to the limit.
+const MAX_PAGE_ANCESTORS: usize = 1024;
+
+/// `page_id`'s dictionary, then each ancestor's up the `/Parent` chain,
+/// nearest first: the order an inherited page attribute is resolved in.
+///
+/// SPEC: P1-VIEW-013. `/Parent` is the file's own pointer. A damaged file can
+/// make a page, or a node above it, its own ancestor, and a walk that climbs
+/// until the attribute turns up then never ends: the decoration being added
+/// hangs, on the document's actor thread. This walk gives up after
+/// [`MAX_PAGE_ANCESTORS`], and the caller falls back to its default.
+pub(crate) fn page_and_ancestors(doc: &Document, page_id: ObjectId) -> impl Iterator<Item = &Dictionary> {
+    let mut next = Some(page_id);
+    std::iter::from_fn(move || {
+        let dict = doc.get_dictionary(next?).ok()?;
+        next = dict.get(b"Parent").and_then(Object::as_reference).ok();
+        Some(dict)
+    })
+    .take(MAX_PAGE_ANCESTORS + 1)
+}
+
 /// A page's `/MediaBox` `[x0, y0, x1, y1]`, walking up the `/Parent` chain (it
 /// can be inherited), defaulting to US-Letter when absent. Shared by the page-
 /// decoration writers (watermark, background).
 pub(crate) fn page_media_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
-    let mut cur = Some(page_id);
-    while let Some(id) = cur {
-        let Ok(dict) = doc.get_dictionary(id) else { break };
+    for dict in page_and_ancestors(doc, page_id) {
         if let Ok(mb) = dict.get(b"MediaBox").and_then(Object::as_array) {
             if mb.len() == 4 {
                 let v: Vec<f32> = mb.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
                 return [v[0], v[1], v[2], v[3]];
             }
         }
-        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
     }
     [0.0, 0.0, 612.0, 792.0]
 }
@@ -2018,14 +2039,11 @@ pub(crate) fn page_media_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
 /// A page's `/Rotate` (inheritable, like `MediaBox`), normalized to
 /// {0, 90, 180, 270}. Anything unset or not a multiple of 90 → 0.
 pub(crate) fn page_rotation(doc: &Document, page_id: ObjectId) -> i64 {
-    let mut cur = Some(page_id);
-    while let Some(id) = cur {
-        let Ok(dict) = doc.get_dictionary(id) else { break };
+    for dict in page_and_ancestors(doc, page_id) {
         if let Ok(r) = dict.get(b"Rotate").and_then(Object::as_i64) {
             let norm = ((r % 360) + 360) % 360;
             return if norm % 90 == 0 { norm } else { 0 };
         }
-        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
     }
     0
 }
@@ -2035,9 +2053,7 @@ pub(crate) fn page_rotation(doc: &Document, page_id: ObjectId) -> i64 {
 /// Viewers display the `CropBox`, so decoration *placement* targets this.
 pub(crate) fn page_effective_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
     let [mx0, my0, mx1, my1] = page_media_box(doc, page_id);
-    let mut cur = Some(page_id);
-    while let Some(id) = cur {
-        let Ok(dict) = doc.get_dictionary(id) else { break };
+    for dict in page_and_ancestors(doc, page_id) {
         if let Ok(cb) = dict.get(b"CropBox").and_then(Object::as_array) {
             if cb.len() == 4 {
                 let v: Vec<f32> = cb.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
@@ -2049,7 +2065,6 @@ pub(crate) fn page_effective_box(doc: &Document, page_id: ObjectId) -> [f32; 4] 
             }
             break; // malformed CropBox → MediaBox
         }
-        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
     }
     [mx0, my0, mx1, my1]
 }
@@ -4721,6 +4736,86 @@ fn parse_pdf_date(raw: &[u8]) -> Option<i64> {
     let days = era * 146_097 + doe - 719_468;
 
     Some((days * 86_400 + hh * 3600 + mm * 60 + ss) * 1000)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::float_cmp)]
+mod page_ancestor_tests {
+    use lopdf::{dictionary, Document, Object, ObjectId};
+
+    use super::{page_effective_box, page_media_box, page_rotation, MAX_PAGE_ANCESTORS};
+
+    const LETTER: [f32; 4] = [0.0, 0.0, 612.0, 792.0];
+
+    fn numbers(values: [i64; 4]) -> Object {
+        Object::Array(values.iter().map(|&v| Object::Integer(v)).collect())
+    }
+
+    /// One page under `levels` nested `/Pages` nodes. Only the root carries
+    /// the inheritable attributes: a 300 x 400 `MediaBox`, a `CropBox` ten
+    /// points inside it, and a quarter turn.
+    fn page_under(levels: usize) -> (Document, ObjectId) {
+        let mut doc = Document::with_version("1.7");
+        let nodes: Vec<ObjectId> = (0..levels).map(|_| doc.new_object_id()).collect();
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => Object::Reference(nodes[levels - 1]) });
+        for (i, &id) in nodes.iter().enumerate() {
+            let kid = nodes.get(i + 1).copied().unwrap_or(page);
+            let mut node = dictionary! { "Type" => "Pages", "Kids" => vec![Object::Reference(kid)], "Count" => 1 };
+            if i == 0 {
+                node.set("MediaBox", numbers([0, 0, 300, 400]));
+                node.set("CropBox", numbers([10, 10, 290, 390]));
+                node.set("Rotate", 90);
+            } else {
+                node.set("Parent", Object::Reference(nodes[i - 1]));
+            }
+            doc.objects.insert(id, Object::Dictionary(node));
+        }
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => Object::Reference(nodes[0]) });
+        doc.trailer.set("Root", Object::Reference(catalog));
+        (doc, page)
+    }
+
+    // SPEC: P1-VIEW-013. Before the limit each of these calls climbed for
+    // ever: a regression is a test that never finishes, not a failed assert.
+    #[test]
+    fn a_page_that_is_its_own_parent_gets_the_defaults() {
+        let mut doc = Document::with_version("1.7");
+        let page = doc.new_object_id();
+        doc.objects.insert(page, Object::Dictionary(dictionary! { "Type" => "Page", "Parent" => Object::Reference(page) }));
+        assert_eq!(page_media_box(&doc, page), LETTER);
+        assert_eq!(page_rotation(&doc, page), 0);
+        assert_eq!(page_effective_box(&doc, page), LETTER);
+    }
+
+    // SPEC: P1-VIEW-013 — the loop need not go through the page itself.
+    #[test]
+    fn a_loop_above_the_page_ends_too() {
+        let mut doc = Document::with_version("1.7");
+        let (a, b) = (doc.new_object_id(), doc.new_object_id());
+        doc.objects.insert(a, Object::Dictionary(dictionary! { "Type" => "Pages", "Parent" => Object::Reference(b) }));
+        doc.objects.insert(b, Object::Dictionary(dictionary! { "Type" => "Pages", "Parent" => Object::Reference(a) }));
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => Object::Reference(a), "Rotate" => 180 });
+        assert_eq!(page_media_box(&doc, page), LETTER);
+        assert_eq!(page_rotation(&doc, page), 180, "the page's own value is still read");
+        assert_eq!(page_effective_box(&doc, page), LETTER);
+    }
+
+    // The limit must not cost a real document anything: a page as deep as
+    // `PDFium` will go still inherits from the root, 1,024 nodes above it.
+    // One level deeper is past what the app can show, and gets the defaults.
+    #[test]
+    fn a_page_at_the_depth_limit_still_inherits_from_the_root() {
+        let (doc, page) = page_under(MAX_PAGE_ANCESTORS);
+        assert_eq!(doc.get_pages().values().copied().collect::<Vec<_>>(), [page], "the test document is a real page tree");
+        assert_eq!(page_media_box(&doc, page), [0.0, 0.0, 300.0, 400.0]);
+        assert_eq!(page_rotation(&doc, page), 90);
+        assert_eq!(page_effective_box(&doc, page), [10.0, 10.0, 290.0, 390.0]);
+
+        let (doc, page) = page_under(MAX_PAGE_ANCESTORS + 1);
+        assert_eq!(page_media_box(&doc, page), LETTER);
+        assert_eq!(page_rotation(&doc, page), 0);
+        assert_eq!(page_effective_box(&doc, page), LETTER);
+    }
 }
 
 #[cfg(test)]

@@ -19,9 +19,9 @@ use pdfium_render::prelude::PdfDocument;
 
 use crate::error::CommandError;
 use crate::pdf::cos::{
-    page_effective_box, page_media_box, page_rotation, parse_hex_color, prepend_page_content,
-    register_page_resource, remove_decorations_on_page, visual_cm_line, visual_transform,
-    wrap_decoration,
+    page_and_ancestors, page_effective_box, page_media_box, page_rotation, parse_hex_color,
+    prepend_page_content, register_page_resource, remove_decorations_on_page, visual_cm_line,
+    visual_transform, wrap_decoration,
 };
 use crate::pdf::document::{bytes_for_cos_edit, load_cos, pdfium_lock, replace_with_edited_bytes};
 use crate::pdf::image_xobject::embed_image;
@@ -211,9 +211,8 @@ fn import_page_as_form(
 /// A page's effective `/Resources` as an owned dict, resolving a reference and
 /// walking the `/Parent` chain (resources can be inherited). Empty when absent.
 fn effective_resources(doc: &Document, page_id: ObjectId) -> Dictionary {
-    let mut cur = Some(page_id);
-    while let Some(id) = cur {
-        let Ok(dict) = doc.get_dictionary(id) else { break };
+    // `page_and_ancestors` ends on a `/Parent` chain that loops (P1-VIEW-013).
+    for dict in page_and_ancestors(doc, page_id) {
         match dict.get(b"Resources") {
             Ok(Object::Dictionary(d)) => return d.clone(),
             Ok(Object::Reference(rid)) => {
@@ -223,7 +222,6 @@ fn effective_resources(doc: &Document, page_id: ObjectId) -> Dictionary {
             }
             _ => {}
         }
-        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
     }
     Dictionary::new()
 }
@@ -351,8 +349,42 @@ fn background_apply<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_refs, Document, HashSet, Object};
+    use super::{collect_refs, effective_resources, Document, HashSet, Object};
     use lopdf::dictionary;
+
+    /// SPEC: P1-VIEW-013 — the source page of a PDF background is a file we
+    /// did not write. Resources are inherited up `/Parent`; a page that is
+    /// its own parent, with none of its own, used to be climbed for ever.
+    #[test]
+    fn resources_of_a_page_that_is_its_own_parent_are_empty_not_a_hang() {
+        let mut doc = Document::with_version("1.7");
+        let page = doc.new_object_id();
+        doc.objects.insert(page, Object::Dictionary(dictionary! { "Type" => "Page", "Parent" => Object::Reference(page) }));
+        assert!(effective_resources(&doc, page).is_empty());
+    }
+
+    /// The name a resources dictionary gives font `F1`, which says whose
+    /// dictionary it is.
+    fn f1(resources: &lopdf::Dictionary) -> Option<&[u8]> {
+        resources.get(b"Font").and_then(Object::as_dict).ok()?.get(b"F1").and_then(Object::as_name).ok()
+    }
+
+    /// And the inheritance the loop exists for still works: a page with no
+    /// resources takes its grandparent's, by reference or inline.
+    #[test]
+    fn resources_are_inherited_from_the_nearest_ancestor_that_has_them() {
+        let mut doc = Document::with_version("1.7");
+        let shared = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => "from-the-root" } });
+        let root = doc.add_object(dictionary! { "Type" => "Pages", "Resources" => Object::Reference(shared) });
+        let middle = doc.add_object(dictionary! { "Type" => "Pages", "Parent" => Object::Reference(root) });
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => Object::Reference(middle) });
+        assert_eq!(f1(&effective_resources(&doc, page)), Some(&b"from-the-root"[..]));
+
+        // A nearer, inline dictionary wins over the root's.
+        let nearer = dictionary! { "Type" => "Pages", "Parent" => Object::Reference(root), "Resources" => dictionary! { "Font" => dictionary! { "F1" => "from-the-middle" } } };
+        doc.objects.insert(middle, Object::Dictionary(nearer));
+        assert_eq!(f1(&effective_resources(&doc, page)), Some(&b"from-the-middle"[..]));
+    }
 
     /// `FABLE_REVIEW` 3.14 regression: the source PDF is untrusted, so a crafted
     /// deep reference chain must not overflow the actor thread's stack. Each

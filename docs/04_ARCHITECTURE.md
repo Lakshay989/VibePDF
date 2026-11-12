@@ -654,6 +654,21 @@ uses pdfium-render's `iter_siblings()`, which keeps its own visited set. On a lo
 survivors are re-chained (which also removes a top-level loop from the file); if nothing dangles,
 the bytes are returned untouched.
 
+**Page-tree walks (P7.HF3, `P1-VIEW-013`).** `MediaBox`, `CropBox`, `Rotate` and `Resources` are
+inheritable: a page without one takes its nearest ancestor's, found by climbing `/Parent`. Four
+walks climbed with no limit: `cos::page_media_box`, `page_rotation` and `page_effective_box`
+(shared by watermark, header/footer, page numbers, Bates, background and the OCR text layer) and
+`background.rs::effective_resources` (on the *source* PDF of a page background, a second
+user-picked file). A page that was its own parent, or a `/Pages` node that was, made them spin
+for ever on the actor thread. All four now iterate `cos::page_and_ancestors`, which yields the
+page and at most `MAX_PAGE_ANCESTORS` (1,024) ancestors. The number is PDFium's: it gives up on a
+page tree past 1,024 levels (`kMaxPageLevel`), so no page the app can show has more ancestors and
+a real document loses nothing. lopdf's own `PAGE_TREE_DEPTH_LIMIT` (256) was the first candidate
+and is the wrong one: it counts only levels that have further siblings waiting, so lopdf lists
+pages far deeper than 256 down a single-child chain. Not converted: `cos::effective_media_box`
+(resize), `font_subset`'s page scope and `form.rs`'s field walks, which already stop after 32
+steps.
+
 **Font embedding (P4.HF5, FABLE_REVIEW 3.2 stage-2).** True-Unicode text arrives through a second
 text-writing backend, chosen at the last moment: `cos::ensure_winansi` (the HF3 hard gate) split
 into a predicate `cos::winansi_fits`, and each rendered-text writer can now branch. WinAnsi-safe

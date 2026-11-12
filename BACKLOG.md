@@ -1196,6 +1196,15 @@ acceptable once understood.
   real document with 100,000+ objects, in a release build, before deciding
   whether it needs our own reachability pass.
 
+- **Three older walks still give up after 32 steps (noted 2026-11-13,
+  P7.HF3).** `cos::effective_media_box` (resize), `font_subset`'s page scope
+  and `form.rs`'s field walks stop after 32 `/Parent` steps. They end on any
+  file, so this is not a hang. But a page more than 32 levels down gets no
+  inherited `MediaBox` in resize, and its fonts are left whole by Compress,
+  where the decoration walks now look 1,024 levels up (PDFium's own limit).
+  No real document that deep has been seen. If one is, move the page walks
+  onto `cos::page_and_ancestors`.
+
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was
   **WKWebView dropping all HTML5 drag-and-drop drop-target events**
   (`dragenter`/`dragover`/`drop` never fire; only `dragstart`/`dragend`),
