@@ -909,6 +909,14 @@ fn table_nest(extra: usize) -> String {
     (0..extra / 3).fold(block_wrappers(extra % 3), |inside, _| table(&[9360], no_margins, &[row("", &[format!("<w:tc>{inside}</w:tc>")])]))
 }
 
+/// Text boxes inside text boxes, four levels each (`p`, `r`, `pict`,
+/// `txbxContent`), with the levels left over spent on block wrappers round
+/// the innermost paragraph. Before P7.HF4 each level doubled the work, and
+/// this many never finished.
+fn text_box_nest(extra: usize) -> String {
+    (0..extra / 4).fold(block_wrappers(extra % 4), |inside, _| format!("<w:p><w:r><w:pict><w:txbxContent>{inside}</w:txbxContent></w:pict></w:r></w:p>"))
+}
+
 // SPEC: P1-VIEW-013, P7-OCR-009. Before the limit, the second of these parsed
 // and then overflowed the stack as its tree was dropped, which closed the app:
 // a regression fails as a crashed test binary rather than as an assertion.
@@ -938,6 +946,7 @@ fn a_word_file_nested_to_the_limit_converts_on_a_worker_sized_stack() {
         ("blocks", nested_to(MAX_DEPTH, block_wrappers)),
         ("runs", nested_to(MAX_DEPTH, run_wrappers)),
         ("tables", nested_to(MAX_DEPTH, table_nest)),
+        ("text boxes", nested_to(MAX_DEPTH, text_box_nest)),
     ];
     for (name, bytes) in shapes {
         let worker = std::thread::Builder::new()
@@ -952,6 +961,94 @@ fn a_word_file_nested_to_the_limit_converts_on_a_worker_sized_stack() {
     }
 }
 
+// --- text boxes (P7.HF4) --------------------------------------------------------
+
+/// A run holding a text box around `content`, the way Word writes one: the
+/// modern drawing, and beside it a copy of the same content in the legacy
+/// form, for readers that don't know the modern one. A reader takes one.
+fn text_box(content: &str) -> String {
+    format!(
+        concat!(
+            r#"<w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">"#,
+            r#"<mc:Choice Requires="wps" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">"#,
+            r#"<w:drawing><wp:anchor><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">"#,
+            r#"<wps:wsp><wps:txbx><w:txbxContent>{content}</w:txbxContent></wps:txbx></wps:wsp>"#,
+            r#"</a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice>"#,
+            r#"<mc:Fallback><w:pict>{legacy}</w:pict></mc:Fallback>"#,
+            r#"</mc:AlternateContent></w:r>"#
+        ),
+        content = content,
+        legacy = legacy_shape(content)
+    )
+}
+
+/// One legacy (VML) shape holding a text box around `content`.
+fn legacy_shape(content: &str) -> String {
+    format!(r#"<v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent>{content}</w:txbxContent></v:textbox></v:shape>"#)
+}
+
+/// A paragraph saying `text`, with `anchored` (a run) anchored in it.
+fn anchor(text: &str, anchored: &str) -> String {
+    format!(r#"<w:p><w:r><w:rPr>{}</w:rPr><w:t>{text}</w:t></w:r>{anchored}</w:p>"#, arial())
+}
+
+fn arial_para(text: &str) -> String {
+    para(text, arial())
+}
+
+// SPEC: P7-OCR-009. What a text box has always done here, and had no test:
+// its paragraphs follow the one it is anchored in, once, and the dialog says so.
+#[test]
+fn a_text_box_comes_out_once_after_its_paragraph() {
+    let scratch = Scratch::new("text-box");
+    let body = [anchor("Before", &text_box(&arial_para("Inside"))), arial_para("After"), LETTER.into()].concat();
+    let (pdf, summary) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert_eq!(text(&pdf), "Before Inside After");
+    assert!(summary.warnings.iter().any(|w| w.contains("Text boxes are shown as ordinary paragraphs")), "{:?}", summary.warnings);
+}
+
+/// A box holding a paragraph that anchors a second box, then a closing line.
+fn box_in_a_box() -> String {
+    let inner = text_box(&arial_para("Inner"));
+    let outer = text_box(&[anchor("Outer", &inner), arial_para("Outer end")].concat());
+    [anchor("Before", &outer), arial_para("After"), LETTER.into()].concat()
+}
+
+// SPEC: P7-OCR-009, P1-VIEW-013. Before P7.HF4 "Inner" came out three times:
+// once where it belongs, and once for each of its two copies (modern and
+// legacy) found by searching the whole outer drawing.
+#[test]
+fn a_text_box_inside_a_text_box_comes_out_once() {
+    let scratch = Scratch::new("text-box-nested");
+    let (pdf, _) = convert(&scratch, &docx(&box_in_a_box(), None, None, &[]));
+    assert_eq!(text(&pdf), "Before Outer Inner Outer end After");
+}
+
+// SPEC: P7-OCR-009. Three boxes in one legacy drawing, one on its own and two
+// in a group: they come out in the order they were written.
+#[test]
+fn text_boxes_sharing_a_drawing_come_out_in_order() {
+    let scratch = Scratch::new("text-box-order");
+    let group = format!(r#"<v:group xmlns:v="urn:schemas-microsoft-com:vml">{}{}</v:group>"#, legacy_shape(&arial_para("Second")), legacy_shape(&arial_para("Third")));
+    let drawing = format!("<w:r><w:pict>{}{group}</w:pict></w:r>", legacy_shape(&arial_para("First")));
+    let body = [anchor("Before", &drawing), arial_para("After"), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert_eq!(text(&pdf), "Before First Second Third After");
+}
+
+// SPEC: P7-OCR-009. An inner box is no longer picked up by searching the
+// outer drawing; it has to be reached by reading the outer box's content.
+// Here that content is a table, and the inner box sits in a cell.
+#[test]
+fn a_text_box_inside_a_table_inside_a_text_box_is_still_found() {
+    let scratch = Scratch::new("text-box-table");
+    let cell_with_a_box = format!("<w:tc>{}</w:tc>", anchor("Cell", &text_box(&arial_para("Deep"))));
+    let outer = text_box(&[table(&[4000], "", &[row("", &[cell_with_a_box])]), arial_para("Outer end")].concat());
+    let body = [anchor("Before", &outer), arial_para("After"), LETTER.into()].concat();
+    let (pdf, _) = convert(&scratch, &docx(&body, None, None, &[]));
+    assert_eq!(text(&pdf), "Before Cell Deep Outer end After");
+}
+
 /// `Sample PDFs/scratch/` — the P1-VIEW-013 documents a person tries in the
 /// app (steps/P7-VERIFY.md §1.12): one nested far past the limit, one exactly
 /// at it, and a copy of the ordinary memo.
@@ -963,6 +1060,8 @@ fn nesting_writes_the_verification_documents() {
     std::fs::create_dir_all(&dir).expect("dir");
     std::fs::write(dir.join("deep-nesting.docx"), letter_docx(&block_wrappers(100_000))).expect("write");
     std::fs::write(dir.join("nested-to-the-limit.docx"), nested_to(MAX_DEPTH, table_nest)).expect("write");
+    std::fs::write(dir.join("text-box-in-text-box.docx"), docx(&box_in_a_box(), None, None, &[])).expect("write");
+    std::fs::write(dir.join("nested-text-boxes.docx"), nested_to(MAX_DEPTH, text_box_nest)).expect("write");
     std::fs::copy("../tests/fixtures/basic/textutil-memo.docx", dir.join("textutil-memo.docx")).expect("copy");
 }
 

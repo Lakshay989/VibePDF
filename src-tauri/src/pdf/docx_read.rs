@@ -339,6 +339,33 @@ fn through_controls<'e>(parent: &'e Element, name: &str) -> Vec<&'e Element> {
         .collect()
 }
 
+/// The text boxes of a drawing: each `w:txbxContent` below `drawing` that is
+/// not inside another one, in document order.
+///
+/// SPEC: P1-VIEW-013, P7-OCR-009. A box inside a box is left where it is: it
+/// is reached, once, when the outer box's own paragraphs are read. Taking
+/// every box at every depth instead, as this did before P7.HF4, read an inner
+/// box again each time a box around it was read, so its text came out twice
+/// for each level of nesting. A file of 865 bytes with twenty boxes inside
+/// each other became a million paragraphs.
+fn outermost_text_boxes(drawing: &Element) -> Vec<&Element> {
+    let mut found = Vec::new();
+    // Elements still to look at, the next one last. Each batch of children
+    // goes on reversed, which keeps the boxes in the order they were written.
+    let mut pending: Vec<&Element> = drawing.elements().collect();
+    pending.reverse();
+    while let Some(element) = pending.pop() {
+        if element.is(W, "txbxContent") {
+            found.push(element);
+            continue;
+        }
+        let from = pending.len();
+        pending.extend(element.elements());
+        pending[from..].reverse();
+    }
+    found
+}
+
 /// `w:tblCellMar` / `w:tcMar`, in twips.
 fn parse_margins(element: &Element) -> [Option<f32>; 4] {
     let mut out = [None; 4];
@@ -1007,7 +1034,7 @@ impl Reader<'_> {
 
     /// An image (drawn in place) or a text box (its paragraphs kept for later).
     fn drawing_or_text_box(&mut self, element: &Element, building: &mut Building) -> Result<(), CommandError> {
-        let boxes = element.descendants(W, "txbxContent");
+        let boxes = outermost_text_boxes(element);
         if !boxes.is_empty() {
             self.warn("Text boxes are shown as ordinary paragraphs after the paragraph they're anchored to.");
             for content in boxes {

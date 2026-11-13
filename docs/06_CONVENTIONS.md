@@ -73,6 +73,7 @@ Every file the user opens, imports or converts is untrusted input (`P1-VIEW-013`
 - **Do not recurse over a structure the file controls.** Walk object graphs and bookmark trees with an explicit worklist. `background.rs::collect_refs` is the pattern.
 - **Remember where you have been.** A loop that follows the file's own pointers (`/Next`, `/Parent`, `/Kids`) keeps a visited set or a step limit. A damaged file can point back at itself.
 - **Limit depth where a parser builds a tree.** `xml_tree::MAX_DEPTH` is the pattern: refuse past the limit with a message, and test that the deepest input still allowed fits a 2 MiB worker stack.
+- **Read each thing once.** A search that collects everything below a node, run again from each thing it found, multiplies the work by the depth of nesting; text boxes inside text boxes doubled it per level (P7.HF4). Collect the nearest level only, and let the walk reach the rest.
 - **Test with the hostile shape.** A regression shows up as a crashed or hung test binary rather than a failed assertion. Say so in the test's comment, so the next reader knows what a silent abort means.
 
 ---

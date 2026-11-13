@@ -216,6 +216,17 @@ to still be there afterwards: a crash here used to take every tab with it.
       word "Bottom" on it.
 - [ ] The same with `Sample PDFs/scratch/textutil-memo.docx`. **Expect** the
       memo as before: the limit must not have changed an ordinary document.
+- [ ] The same with `Sample PDFs/scratch/text-box-in-text-box.docx`.
+      **Expect** the lines Before, Outer, Inner, Outer end, After, each
+      once, and a note that text boxes are shown as ordinary paragraphs.
+      Before the fix "Inner" appeared three times.
+- [ ] The same with `Sample PDFs/scratch/nested-text-boxes.docx` (about 60
+      text boxes inside each other). **Expect** a PDF with the word "Bottom",
+      at once. Before the fix this never finished.
+- [ ] In **Pages**, make a document with a line of text and one text box,
+      **File → Export To → Word…**, then Create PDF from it. **Expect** the
+      box's text once, after the line it sits beside. This is the only text
+      box here that a program other than ours has written.
 - [ ] Open `Sample PDFs/scratch/outline-self-loop.pdf` (a bookmark that is
       its own child). Delete page 3, then **Cmd-S**. **Expect** the save to
       finish, the app still running, and the bookmarks panel showing

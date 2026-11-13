@@ -669,6 +669,13 @@ pages far deeper than 256 down a single-child chain. Not converted: `cos::effect
 (resize), `font_subset`'s page scope and `form.rs`'s field walks, which already stop after 32
 steps.
 
+**Nested text boxes (P7.HF4, `P1-VIEW-013`).** Not a loop and not recursion, but the same result.
+`docx_read::drawing_or_text_box` used to take every `w:txbxContent` below a drawing, at any depth,
+and queue their paragraphs; reading a queued paragraph then queued the boxes inside it again. The
+work doubled with each level of nesting, so a file under 1 kB froze Create PDF, and an honest box
+inside a box showed its text three times. `outermost_text_boxes` now takes a box and does not
+look inside it: the inner box is reached once, when the outer box's paragraphs are read.
+
 **Font embedding (P4.HF5, FABLE_REVIEW 3.2 stage-2).** True-Unicode text arrives through a second
 text-writing backend, chosen at the last moment: `cos::ensure_winansi` (the HF3 hard gate) split
 into a predicate `cos::winansi_fits`, and each rendered-text writer can now branch. WinAnsi-safe
