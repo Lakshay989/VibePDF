@@ -357,3 +357,6 @@ THE system SHALL NOT make any network request as part of opening, editing, or sa
 
 ### NFR-PRIVACY-003 — Update checks
 WHERE update checking is enabled, THE system SHALL only fetch a version manifest, never the document content.
+
+### NFR-PKG-001 — Self-contained install
+THE system SHALL run from an installed copy with no development tools, environment variables or further downloads on the machine. THE system SHALL load its PDF engine only from its own installation folder. IF the PDF engine or a bundled OCR language is missing, THEN THE system SHALL say what is missing and where it looked, and SHALL NOT load a substitute from elsewhere.
