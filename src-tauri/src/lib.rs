@@ -6,6 +6,7 @@
     clippy::missing_panics_doc
 )]
 
+pub mod bundled;
 pub mod commands;
 pub mod error;
 pub mod ocr;
@@ -14,6 +15,7 @@ pub mod security;
 pub mod settings;
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -70,6 +72,23 @@ pub fn run() {
         .with_target(false)
         .json()
         .try_init();
+
+    let context = tauri::generate_context!();
+    // SPEC: NFR-PKG-001 — record where the application keeps the files it
+    // ships with, before anything can ask for one. This is the function behind
+    // `app.path().resource_dir()`, called here so the self-check below needs
+    // no window.
+    match tauri::utils::platform::resource_dir(context.package_info(), &tauri::Env::default()) {
+        Ok(dir) => bundled::set_root(dir),
+        Err(e) => tracing::error!(error = %e, "could not find the application's resource folder"),
+    }
+    if commands::cli::self_check_requested(std::env::args()) {
+        let check = commands::cli::self_check();
+        // Not `println!`: it panics when stdout is closed, and the exit code
+        // is the answer either way.
+        let _ = writeln!(std::io::stdout(), "{}", check.report);
+        std::process::exit(i32::from(!check.passed));
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -222,6 +241,6 @@ pub fn run() {
             commands::session::session_save,
             commands::cli::cli_take_pending_opens,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }

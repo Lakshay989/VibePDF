@@ -124,6 +124,20 @@ npm run build
 npm run tauri build
 ```
 
+The bundle carries its own PDFium and OCR language data and loads them from
+inside itself, so it needs nothing installed and no environment variables. To
+check a built app, run it with `--self-check`: it opens no window, prints where
+each of those files was found, and exits non-zero unless all of them are inside
+the app.
+
+```bash
+src-tauri/target/release/bundle/macos/VibePDF.app/Contents/MacOS/vibepdf --self-check
+```
+
+CI does this on every push for a debug `.app` on macOS and an installed `.deb`
+on Linux. Windows packaging is not wired up yet: no `pdfium.dll` is fetched.
+Builds are not signed.
+
 ## Development
 
 | Command | What it does |

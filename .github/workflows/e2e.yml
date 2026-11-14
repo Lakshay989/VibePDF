@@ -2,9 +2,10 @@ name: E2E
 
 # End-to-end tests run on a SEPARATE Linux job (the main ci.yml is
 # macOS, to match the E2 render golden). tauri-driver has no macOS
-# support, so E2E can only run on Linux. Runs on PRs and on every push to
-# main; until 2026-10-18 it shared ci.yml's every-third-push gate, removed for
-# the reasons given there.
+# support, so E2E can only run on Linux. Since P7.HF5 the app under test is
+# the installed .deb, not the unbundled binary (SPEC: NFR-PKG-001). Runs on
+# PRs and on every push to main; until 2026-10-18 it shared ci.yml's
+# every-third-push gate, removed for the reasons given there.
 
 on:
   pull_request:
@@ -63,13 +64,41 @@ jobs:
       - name: Fetch PDFium (Linux)
         run: npm run fetch-pdfium
 
+      # The self-check below wants all twelve shipped languages in the package.
+      - name: Fetch OCR language data
+        run: npm run fetch-tessdata
+
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
-      - name: Build the app (debug, unbundled)
-        run: npx tauri build --debug --no-bundle
+      # SPEC: NFR-PKG-001 — test the app the way a user gets it: built into a
+      # package, installed, and started with no library path set. Until
+      # 2026-11-14 this job ran the unbundled binary with LD_LIBRARY_PATH
+      # pointing at the checkout, which is the one arrangement in which the old
+      # bare-name PDFium lookup worked.
+      - name: Build and package the app (debug .deb)
+        run: npx tauri build --debug --bundles deb
 
-      - name: Run E2E
+      # The file list is printed because a failure below is most likely a file
+      # that is not where we expect, and this is the only place that shows it.
+      - name: Install the package
         run: |
-          export LD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium:$LD_LIBRARY_PATH"
-          xvfb-run -a npm run test:e2e
+          deb="$(ls src-tauri/target/debug/bundle/deb/*.deb)"
+          echo "package: $deb"
+          dpkg-deb -c "$deb" | awk '{print $6}' | grep -v '/$' | grep -v 'licenses/'
+          sudo apt-get install -y "./$deb"
+          bin="$(dpkg-deb -c "$deb" | awk '{print $6}' | grep -E '(^|\./)usr/bin/[^/]+$' | sed -E 's|^\./||; s|^|/|' | sed -n 1p)"
+          test -x "$bin"
+          echo "VIBEPDF_BIN=$bin" >> "$GITHUB_ENV"
+
+      # Opens no window, so no xvfb. Fails unless the PDF engine and every
+      # shipped OCR language were found inside the installed app.
+      - name: Self-check the installed app
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$VIBEPDF_BIN" --self-check
+
+      # wdio.conf.ts starts $VIBEPDF_BIN. No LD_LIBRARY_PATH: the smoke test
+      # opens a PDF, which needs PDFium, which the app now has to find itself.
+      - name: Run E2E against the installed app
+        run: xvfb-run -a npm run test:e2e

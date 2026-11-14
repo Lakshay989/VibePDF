@@ -78,6 +78,17 @@ Every file the user opens, imports or converts is untrusted input (`P1-VIEW-013`
 
 ---
 
+## Files the app ships with
+
+The PDFium library and the OCR language data are not compiled in; they sit in the application's resource folder (`NFR-PKG-001`, docs/04 "Files the app ships with").
+
+- **Ask `bundled` where they are.** `bundled::folders("pdfium")` and `bundled::folders("tessdata")` are the only lookups. Do not derive a path from `current_exe()`: the layout differs on every platform, and Tauri already knows it.
+- **Load native code by full path.** Never hand the system loader a bare library name. It searches, and on macOS the current folder comes first. `clippy.toml` forbids `bind_to_system_library` for this reason.
+- **No source paths in shipped code.** `env!("CARGO_MANIFEST_DIR")` belongs in tests, or behind `#[cfg(debug_assertions)]`. A path that exists only on the build machine makes a packaged app work there and fail everywhere else.
+- **A test of the lookup is not a test of the bundle.** It compares our code with our own idea of the layout. `vibepdf --self-check` on a built bundle is the check; CI runs it, and any change to `tauri.conf.json`'s `resources` or to `bundled.rs` should be followed by it locally.
+
+---
+
 ## Comments
 
 - Comments explain **why**, not what. If the code needs a comment to be understandable, it should be refactored.

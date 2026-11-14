@@ -2,19 +2,21 @@
 //!
 //! The data is fetched by `scripts/fetch-tessdata.sh` into
 //! `src-tauri/resources/tessdata/` and bundled by `tauri.conf.json`, the same
-//! shape as `PDFium`'s binary: too big to commit, pinned by checksum, and copied
-//! next to the executable at build time.
+//! shape as `PDFium`'s binary: too big to commit, pinned by checksum, and
+//! shipped inside the application.
 //!
 //! Resolution order, first hit wins:
 //! 1. `VIBEPDF_TESSDATA` — an explicit override, used by the test suite.
-//! 2. The bundled `resources/tessdata` beside the executable (a real install).
-//! 3. `src-tauri/resources/tessdata` relative to the crate (a dev build).
+//! 2. The packs the user added, in the application's data folder.
+//! 3. The shipped data, wherever [`crate::bundled`] says the application keeps
+//!    it (SPEC: NFR-PKG-001). In a debug build that also covers this checkout,
+//!    which is how a test binary finds it.
 //!
 //! There is deliberately no fallback to a system-wide Tesseract installation:
 //! what a build ships is then the same everywhere, and a developer machine
 //! can't pass a test that a user's machine would fail.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::error::CommandError;
@@ -48,9 +50,15 @@ pub fn directory_for(language: &str) -> Result<PathBuf, CommandError> {
         }
         tried.push(candidate.display().to_string());
     }
+    // The fetch script is a developer's fix, and only a debug build is a
+    // developer's build.
+    let fix = if cfg!(debug_assertions) {
+        " Run `npm run fetch-tessdata` to download it."
+    } else {
+        ""
+    };
     Err(CommandError::NotFound(format!(
-        "no OCR language data for \"{language}\". Run `npm run fetch-tessdata` to download it. \
-         Looked in: {}",
+        "no OCR language data for \"{language}\".{fix} Looked in: {}",
         tried.join(", ")
     )))
 }
@@ -81,19 +89,6 @@ fn candidates() -> Vec<PathBuf> {
     if let Some(dir) = USER_DIR.get() {
         out.push(dir.clone());
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            out.push(dir.join("resources").join("tessdata"));
-            // macOS app bundle: Contents/MacOS/<exe> → Contents/Resources.
-            if let Some(contents) = dir.parent() {
-                out.push(contents.join("Resources").join("tessdata"));
-            }
-        }
-    }
-    out.push(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("tessdata"),
-    );
+    out.extend(crate::bundled::folders("tessdata"));
     out
 }

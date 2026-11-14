@@ -36,10 +36,18 @@ npm run fetch-pdfium   # drops libpdfium.so into src-tauri/resources/pdfium/
 # 4. Build the app (debug, unbundled)
 npx tauri build --debug --no-bundle
 
-# 5. Run (xvfb for a headless display; pdfium on the loader path)
-export LD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium:$LD_LIBRARY_PATH"
+# 5. Run (xvfb for a headless display)
 xvfb-run -a npm run test:e2e
 ```
+
+No `LD_LIBRARY_PATH` is needed: the app loads PDFium by full path from its
+own resource folder, which for an unbundled build is `src-tauri/target/debug/`
+(the build script copies `resources/` there).
+
+CI goes one step further (`.github/workflows/e2e.yml`): it builds a `.deb`,
+installs it, runs `vibepdf --self-check`, and points this suite at the
+installed binary with `VIBEPDF_BIN`. That is the app as a user gets it
+(SPEC: NFR-PKG-001).
 
 Overrides: `VIBEPDF_BIN` (path to the built binary) and
 `TAURI_DRIVER_BIN` (path to tauri-driver) if they aren't in the default

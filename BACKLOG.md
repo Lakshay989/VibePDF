@@ -1190,6 +1190,37 @@ acceptable once understood.
   No real document that deep has been seen. If one is, move the page walks
   onto `cos::page_and_ancestors`.
 
+- **Packaging: what P7.HF5 left open (2026-11-14).** The packaged macOS app
+  now finds its PDF engine and OCR data, and CI checks a debug `.app` and an
+  installed `.deb`. Still open, roughly in the order they would bite:
+  - **Windows.** `scripts/fetch-pdfium.sh` fetches no `pdfium.dll`, so a
+    Windows build ships without a PDF engine. The lookup code is the same on
+    Windows (`<exe folder>/resources/pdfium/pdfium.dll`) but nothing has run
+    it there. Needs the Windows asset's SHA-256 from the upstream attestation
+    (a download), the Windows Rust tests, and a self-check of an installed
+    build in `check-windows`. See also the P4.HF15 note above.
+  - **A release build has never been made or checked.** Every bundle so far
+    is `--debug`: no optimisation, not stripped, `panic = "unwind"`, and with
+    the checkout fallback compiled in. That a release build has no fallback
+    follows from `#[cfg(debug_assertions)]`, not from a test. A release build
+    is a second cargo tree, which this machine has no disk for; CI could do it.
+  - **Signing and notarisation.** An unsigned `.app` downloaded from the
+    internet is blocked by Gatekeeper. Signing also wants the library in
+    `Contents/Frameworks` rather than `Contents/Resources`
+    (`bundle.macOS.frameworks`), which moves the path `bundled.rs` looks in.
+    The hardened runtime that comes with it is what stops a
+    `DYLD_LIBRARY_PATH` set by whoever starts the app from replacing the
+    PDF engine; today that still works.
+  - **Minimum macOS and Intel.** The pinned PDFium needs macOS 12.0;
+    `tauri.conf.json` sets no minimum, so the bundle claims an older one.
+    The build is arm64 only.
+  - **The development Mac has `~/lib/libpdfium.dylib`.** Not the pinned
+    build, and nothing in this project put it there. Until P7.HF5 it was the
+    library `npm run dev` and plain `cargo test` loaded, so in-app checks
+    before 2026-11-14 ran against it. Nothing reads it now. Worth comparing
+    its checksum with `src-tauri/resources/pdfium/libpdfium.dylib` once, to
+    know whether those checks saw the same PDFium the tests did.
+
 - ✅ **DONE 2026-06-13 — C1 reorder no longer dead in the GUI.** Root cause was
   **WKWebView dropping all HTML5 drag-and-drop drop-target events**
   (`dragenter`/`dragover`/`drop` never fire; only `dragstart`/`dragend`),

@@ -22,8 +22,9 @@ import os from "node:os";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
-// The built app binary (debug, unbundled — see e2e.yml). Override with
-// VIBEPDF_BIN if you build a release binary or a different target.
+// The app binary. CI sets VIBEPDF_BIN to the binary of the installed .deb
+// (see e2e.yml); without it this is the unbundled debug build, which finds
+// its resources in target/debug/resources/ where the build script copies them.
 const appBinary =
   process.env.VIBEPDF_BIN ??
   resolve(repoRoot, "src-tauri", "target", "debug", "vibepdf");

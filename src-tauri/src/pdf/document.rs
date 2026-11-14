@@ -66,7 +66,7 @@ pub struct SaveOutcome {
 /// `PDFium` is single-threaded per *document*, but the library itself is
 /// safe to share read-only across threads once bound. We bind once via
 /// `LazyLock` — `OnceLock` is not enough here because the fallible
-/// initializer races: two callers can both call `bind_to_system_library`
+/// initializer races: two callers can both call `bind_to_library`
 /// before either `set`s, and `PDFium`'s global `FPDF_InitLibrary` is not
 /// re-entrant (the loser's `Drop` will tear down the library while the
 /// winner is still using it → SIGTRAP under `cargo test`'s default
@@ -76,13 +76,21 @@ pub struct SaveOutcome {
 /// `PdfiumError` isn't `Clone`. Per-call we re-wrap the cached string
 /// into a fresh `CommandError`.
 static PDFIUM: LazyLock<Result<Pdfium, String>> = LazyLock::new(|| {
-    // pdfium-render 0.9 exposes `bind_to_system_library`; the static
-    // binding option lives behind a non-default cargo feature we don't
-    // depend on. `bind_to_system_library` walks the standard search
-    // path (incl. src-tauri/resources/pdfium/ at dev time).
+    // SPEC: NFR-PKG-001 — by full path, from the application's own folder.
+    // Never `bind_to_system_library`: that hands the system loader a bare
+    // file name, and the loader then searches. On macOS it tries the current
+    // folder first, so a file of that name next to a PDF opened from a
+    // terminal would be run as our PDF engine; and a developer machine passed
+    // for months on a copy in `~/lib` that the project never pinned.
+    // `clippy.toml` forbids the call.
+    let library = library_in(&crate::bundled::folders("pdfium"))?;
     let bind = || {
-        Pdfium::bind_to_system_library()
-            .map_err(|e| format!("could not load PDFium: {e}. Run `npm run fetch-pdfium`."))
+        Pdfium::bind_to_library(&library).map_err(|e| {
+            format!(
+                "could not load the PDF engine at {}: {e}",
+                library.display()
+            )
+        })
     };
     // The spare handle has to be taken *first*: once `Pdfium::new` has run,
     // pdfium-render refuses every further bind with
@@ -103,8 +111,49 @@ static PDFIUM: LazyLock<Result<Pdfium, String>> = LazyLock::new(|| {
     if let Err(unused) = RAW_BINDINGS.set(spare) {
         std::mem::forget(unused); // unreachable: this initialiser runs once
     }
+    let _ = LIBRARY_PATH.set(library);
     Ok(pdfium)
 });
+
+/// The file the PDF engine was loaded from.
+static LIBRARY_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Where the PDF engine was loaded from. `None` until [`pdfium`] has
+/// succeeded. The self-check reports it (SPEC: NFR-PKG-001).
+#[must_use]
+pub fn pdfium_library_path() -> Option<&'static Path> {
+    LIBRARY_PATH.get().map(PathBuf::as_path)
+}
+
+/// The engine's library file, in the first of `folders` that has it.
+///
+/// The error names every folder tried: a missing engine is otherwise a report
+/// of "nothing opens" with no way to tell why.
+fn library_in(folders: &[PathBuf]) -> Result<PathBuf, String> {
+    let name = Pdfium::pdfium_platform_library_name();
+    crate::bundled::first_holding(folders, &name).ok_or_else(|| {
+        let tried = if folders.is_empty() {
+            "nowhere, because the application could not find its own folder".to_owned()
+        } else {
+            folders
+                .iter()
+                .map(|folder| folder.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        // The fetch script is a developer's fix, and only a debug build is a
+        // developer's build.
+        let fix = if cfg!(debug_assertions) {
+            "Run `npm run fetch-pdfium`."
+        } else {
+            "Reinstall VibePDF."
+        };
+        format!(
+            "the PDF engine ({}) is missing from the application. Looked in: {tried}. {fix}",
+            name.to_string_lossy()
+        )
+    })
+}
 
 pub fn pdfium() -> Result<&'static Pdfium, CommandError> {
     PDFIUM.as_ref().map_err(|e| CommandError::Internal(e.clone()))
@@ -333,7 +382,7 @@ pub(crate) fn bytes_for_cos_read(
 /// pdfium-render 0.9.1 hard-codes `flags = 0` in `save_to_writer` (its own
 /// TODO names `FPDF_REMOVE_SECURITY`) and keeps the document handle and its
 /// bindings `pub(crate)`. The only public way to reach the raw functions is a
-/// fresh `bind_to_system_library`, which it permits only before the library is
+/// fresh `bind_to_library`, which it permits only before the library is
 /// initialised — so `PDFIUM` takes this one first. Both bindings resolve the
 /// same loaded library and share its one initialisation. It lives in a static
 /// and is never dropped, because dropping a binding destroys the library.
@@ -612,6 +661,62 @@ pub fn pdfium_version_string() -> String {
     match pdfium() {
         Ok(_) => "pdfium: loaded".to_string(),
         Err(e) => format!("pdfium: failed — {e}"),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod library_lookup_tests {
+    use super::{library_in, Pdfium};
+
+    fn folder(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("vibepdf-engine-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // SPEC: NFR-PKG-001 — "say what is missing and where it looked".
+    #[test]
+    fn a_folder_without_the_library_is_refused_and_every_folder_tried_is_named() {
+        let (first, second) = (folder("a"), folder("b"));
+        let message = library_in(&[first.clone(), second.clone()]).unwrap_err();
+        let name = Pdfium::pdfium_platform_library_name();
+        assert!(message.contains(&*name.to_string_lossy()), "{message}");
+        assert!(message.contains(&first.display().to_string()), "{message}");
+        assert!(message.contains(&second.display().to_string()), "{message}");
+        assert!(message.contains("missing from the application"), "{message}");
+        // A test binary is a debug build, so the fix offered is the developer's.
+        assert!(message.ends_with("Run `npm run fetch-pdfium`."), "{message}");
+        for dir in [first, second] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    // Reached in a release build whose resource folder Tauri could not name.
+    #[test]
+    fn with_nowhere_to_look_the_message_says_so() {
+        let message = library_in(&[]).unwrap_err();
+        assert!(
+            message.contains("Looked in: nowhere, because the application could not find its own folder."),
+            "{message}"
+        );
+    }
+
+    // SPEC: NFR-PKG-001 — the application's folder is listed first, so its
+    // copy must be the one taken even when a later folder has one too.
+    #[test]
+    fn the_library_is_taken_from_the_first_folder_that_has_it() {
+        let (empty, first, second) = (folder("empty"), folder("first"), folder("second"));
+        let name = Pdfium::pdfium_platform_library_name();
+        std::fs::write(first.join(&name), b"").unwrap();
+        std::fs::write(second.join(&name), b"").unwrap();
+        assert_eq!(
+            library_in(&[empty.clone(), first.clone(), second.clone()]).unwrap(),
+            first.join(&name)
+        );
+        for dir in [empty, first, second] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
     }
 }
 

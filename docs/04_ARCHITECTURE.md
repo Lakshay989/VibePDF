@@ -23,6 +23,7 @@ vibepdf/
 ├── src-tauri/                    # Rust backend
 │   ├── src/
 │   │   ├── main.rs               # Tauri setup, capability config
+│   │   ├── bundled.rs            # Where the files the app ships with are: PDFium, OCR data (NFR-PKG-001)
 │   │   ├── commands/             # Tauri commands (the IPC surface)
 │   │   ├── pdf/                  # Core PDF engine (PDFium wrapper)
 │   │   │   ├── document.rs       # Open, save, metadata
@@ -1116,6 +1117,57 @@ stores file paths. That is a deliberate accepted risk: encrypting it would need
 a key with nowhere to live in an offline, account-less app.
 
 ---
+
+## Files the app ships with
+
+Two things are not compiled into the binary: the PDFium library and Tesseract's
+language data. `tauri.conf.json` bundles both from `src-tauri/resources/`, and
+`bundled.rs` is the one place that knows where they end up (SPEC: NFR-PKG-001).
+
+**Where.** Tauri keeps the path under the resource folder, so the files are at
+`<resource folder>/resources/pdfium/` and `<resource folder>/resources/tessdata/`.
+The resource folder differs by platform:
+
+| How the app was started | Resource folder |
+|---|---|
+| macOS `.app` | `VibePDF.app/Contents/Resources` |
+| Linux `.deb`, `.rpm`, AppImage | `/usr/lib/<name>` (under `$APPDIR` in an AppImage) |
+| Windows installer | the folder holding the `.exe` |
+| `npm run dev`, or an unbundled build | `src-tauri/target/<profile>` (the build script copies `resources/` there) |
+
+We do not work this out ourselves. `run()` asks Tauri
+(`tauri::utils::platform::resource_dir`, the function behind
+`app.path().resource_dir()`) and records the answer with `bundled::set_root`
+before anything else runs. `bundled::folders("pdfium")` then gives the folders
+to look in.
+
+**Tests have no resource folder.** A test binary is not started by Tauri, so in
+debug builds `folders` also offers `src-tauri/resources/<name>`, after the
+recorded folder. That path is behind `#[cfg(debug_assertions)]`: a release build
+does not contain it, so a shipped app has exactly one place to look and no
+source path from the build machine inside it.
+
+**PDFium is loaded by full path, never by name.** `Pdfium::bind_to_library`
+with the path from `bundled`, not `bind_to_system_library`. Asked for
+`libpdfium.dylib` by bare name, the system loader searches: on macOS it tries
+the current folder first, so starting the app from a folder that holds a file of
+that name would run that file's code. It is also how a developer machine came to
+pass with a library the project never pinned (a copy in `~/lib`, which cargo
+adds to the search path). `src-tauri/clippy.toml` forbids
+`bind_to_system_library`, so `npm run check` fails if it comes back. One gap
+stays: on macOS a `DYLD_LIBRARY_PATH` set by whoever starts the app still wins;
+closing that needs a signed build with the hardened runtime.
+
+**OCR data.** `ocr/tessdata.rs` looks in, in order: `VIBEPDF_TESSDATA` (tests),
+the user's added packs in the app data folder, then `bundled::folders("tessdata")`.
+
+**`vibepdf --self-check`.** Prints where the PDF engine was loaded from and where
+each of the twelve shipped languages was found, starts the OCR engine once, and
+exits non-zero unless all of it is inside the resource folder. It runs before
+any window exists, so it needs no display. CI runs it against a built macOS
+`.app` copied outside the repository and against an installed Linux `.deb`; that
+is the only check that sees the real layout, because a unit test can only
+compare our code with our own idea of the layout.
 
 ## Logging
 

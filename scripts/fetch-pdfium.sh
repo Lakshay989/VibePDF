@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Fetches a prebuilt PDFium binary from bblanchon/pdfium-binaries and
-# drops it into src-tauri/resources/pdfium/. The Rust side's
-# `Pdfium::bind_to_system_library` walks the standard search path, which
-# on macOS includes `@executable_path` — Tauri places bundled resources
-# there at install time. For `tauri dev`, you may need to additionally
-# `export DYLD_LIBRARY_PATH="$PWD/src-tauri/resources/pdfium:$DYLD_LIBRARY_PATH"`.
+# drops it into src-tauri/resources/pdfium/. tauri.conf.json bundles that
+# folder, and the Rust side loads the library from it by full path
+# (src-tauri/src/bundled.rs, SPEC: NFR-PKG-001). No environment variable is
+# needed, for `npm run dev`, the tests or a packaged app.
+#
+# This comment used to say the system loader finds the library next to the
+# executable. It does not: asked for a bare name, macOS tries the current
+# folder and /usr/lib, and a packaged app found nothing (P7.HF5, 2026-11-14).
 #
 # macOS (Intel + Apple Silicon) and Linux (x64 + arm64). No Windows branch
 # yet — see the note in .github/workflows/ci.yml on the check-windows job.

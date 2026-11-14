@@ -243,6 +243,45 @@ to still be there afterwards: a crash here used to take every tab with it.
       as its parent) → **Watermark…** → text "DRAFT" → all pages → apply.
       **Expect** DRAFT on all six pages. Before the fix the tab froze here.
 
+### 1.13 The packaged app (added with P7.HF5, 2026-11-14)
+
+Everything above runs the app with `npm run dev`. This section runs it the way
+a user gets it: as a `.app`, started from Finder. Until this step a packaged
+app could not load its PDF engine at all, and nobody had built one to see.
+
+Build it and put a copy where the other test files are. Quit `npm run dev`
+first; the two cannot build at the same time.
+
+```bash
+npx tauri build --debug --bundles app
+rm -rf "Sample PDFs/scratch/VibePDF.app"
+cp -R src-tauri/target/debug/bundle/macos/VibePDF.app "Sample PDFs/scratch/"
+cp tests/fixtures/basic/hello.pdf tests/fixtures/basic/scan.pdf "Sample PDFs/scratch/"
+```
+
+Do the first row first. On this Mac a debug build can fall back to the
+checkout, so the app opening a PDF does not by itself show that it found its
+own files. The self-check says where each one came from.
+
+- [ ] In a terminal, from the repository folder:
+      `(cd / && "$OLDPWD/Sample PDFs/scratch/VibePDF.app/Contents/MacOS/vibepdf" --self-check)`.
+      **Expect** fifteen lines starting `ok`, every path inside
+      `Sample PDFs/scratch/VibePDF.app`, and a last line `result: PASS`.
+      A path under `src-tauri/` is a failure, and the line says so.
+- [ ] In Finder, double-click `Sample PDFs/scratch/VibePDF.app`. **Expect**
+      the VibePDF window. Open `Sample PDFs/scratch/hello.pdf`. **Expect**
+      "Hello" on one page. Before the fix this showed an error instead.
+- [ ] Rotate the page, **Cmd-S**, then open the file in Preview. **Expect**
+      the page rotated: the packaged app wrote the file with its own PDFium.
+- [ ] Open `Sample PDFs/scratch/scan.pdf` → **Read text…** → **Read text**.
+      **Expect** the dialog to list twelve languages with English first, and
+      to finish with about 27 words. "No OCR language data" here means the
+      packaged app did not find its language files.
+
+*Not checked here:* a release build, a signed build, another Mac, Windows or
+Linux. Linux is covered by CI, which installs the `.deb` and runs the same
+self-check; the other four are open.
+
 ---
 
 ## Part 2 — PDFs in Preview

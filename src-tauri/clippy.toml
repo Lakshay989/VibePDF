@@ -1,0 +1,12 @@
+# SPEC: NFR-PKG-001 — the PDF engine is loaded by full path from the
+# application's own folder (`pdf/document.rs`, `bundled.rs`).
+#
+# `bind_to_system_library` hands the system loader a bare file name instead, and
+# the loader then searches for it. On macOS the current folder is tried first,
+# so a file called `libpdfium.dylib` next to a PDF opened from a terminal would
+# be run as our PDF engine. It is also how one machine ran for months on a copy
+# in `~/lib` that this project never pinned: cargo adds that folder to the
+# search path, so nothing looked wrong.
+disallowed-methods = [
+    { path = "pdfium_render::pdfium::Pdfium::bind_to_system_library", reason = "loads PDFium by bare name, which searches the current folder; use vibepdf_lib::pdf::document::pdfium()" },
+]

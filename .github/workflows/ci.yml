@@ -143,6 +143,29 @@ jobs:
           VIBEPDF_REQUIRE_VERAPDF: "1"
         run: npm run test:rust -- --no-fail-fast
 
+      # SPEC: NFR-PKG-001 — the only check that sees a real bundle. Until
+      # 2026-11-14 nothing built one, and a packaged app could not load PDFium
+      # at all: it asked the system loader for the library by bare name, which
+      # works under cargo and on a developer's machine and nowhere else. The
+      # tests above cannot see that. They also cannot see a wrong layout, since
+      # a test of the lookup compares our code with our own idea of where a
+      # bundle puts things.
+      #
+      # `--debug` reuses the build the steps above already made. `--self-check`
+      # opens no window: it loads the PDF engine, finds the twelve OCR languages
+      # and starts the OCR engine, and fails unless every one of them came from
+      # inside the app. The copy and the `cd /` take the checkout out of the
+      # picture; a debug build can fall back to it, and the self-check reports
+      # that as a failure rather than a pass.
+      - name: Package the app (debug .app)
+        run: npx tauri build --debug --bundles app
+
+      - name: Self-check the packaged app, outside the repository
+        run: |
+          cp -R src-tauri/target/debug/bundle/macos/VibePDF.app "$RUNNER_TEMP/"
+          cd /
+          "$RUNNER_TEMP/VibePDF.app/Contents/MacOS/vibepdf" --self-check
+
   # Windows is a shipped target (docs/01_VISION) but was never built or tested
   # — FABLE_REVIEW §3.9. This leg compiles ALL Rust on Windows via
   # `cargo clippy --all-targets` (the deepest class of Windows-specific issues:
